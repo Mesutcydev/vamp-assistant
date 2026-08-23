@@ -1463,17 +1463,16 @@ struct FinishBanner: View {
     }
 
     private var completionCard: some View {
-        let shape = RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
 
-        return HStack(alignment: .center, spacing: Spacing.md) {
+        return HStack(alignment: .center, spacing: Spacing.sm) {
             Image(systemName: summary.artifact == nil ? "checkmark.seal.fill" : "shippingbox.fill")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Theme.success)
-                .frame(width: 34, height: 34)
+                .frame(width: 30, height: 30)
                 .background(Theme.wash(Theme.success), in: Circle())
-                .overlay(Circle().strokeBorder(Theme.success.opacity(0.18), lineWidth: 0.75))
 
-            VStack(alignment: .leading, spacing: Spacing.xs) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(completionTitle)
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
@@ -1510,17 +1509,23 @@ struct FinishBanner: View {
             Button(action: onNewChat) {
                 Label("New chat", systemImage: "square.and.pencil")
             }
-            .buttonStyle(LFCapsuleButtonStyle())
-            .lfHoverLift()
+            .buttonStyle(.plain)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(Theme.textSecondary)
+            .padding(.horizontal, Spacing.md)
+            .frame(height: 30)
+            .background(Theme.surfaceInset.opacity(0.72), in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.hairline.opacity(0.42), lineWidth: 0.75))
             .accessibilityHint("Clears this conversation and starts a new chat")
         }
-        .padding(.horizontal, Spacing.lg)
-        .padding(.vertical, Spacing.md)
+        .padding(.leading, Spacing.sm)
+        .padding(.trailing, Spacing.md)
+        .padding(.vertical, Spacing.sm)
         .frame(maxWidth: 680, alignment: .leading)
-        .background(Theme.surface, in: shape)
+        .background(Theme.surfaceInset.opacity(0.64), in: shape)
         .overlay {
             LinearGradient(
-                colors: [Theme.success.opacity(0.075), .clear],
+                colors: [Theme.success.opacity(0.055), .clear],
                 startPoint: .leading,
                 endPoint: .trailing)
                 .clipShape(shape)
@@ -1528,10 +1533,15 @@ struct FinishBanner: View {
         }
         .overlay {
             shape
-                .strokeBorder(Theme.success.opacity(0.18), lineWidth: 0.75)
+                .strokeBorder(Theme.hairline.opacity(0.46), lineWidth: 0.75)
                 .allowsHitTesting(false)
         }
-        .shadow(color: Theme.cardShadow.opacity(0.55), radius: 6, y: 2)
+        .overlay(alignment: .leading) {
+            Capsule()
+                .fill(Theme.success.opacity(0.82))
+                .frame(width: 3)
+                .padding(.vertical, 8)
+        }
     }
 
     @ViewBuilder

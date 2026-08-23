@@ -275,30 +275,12 @@ struct ChatView: View {
                 .padding(.top, 9)
 
             if controller.workspaceURL == nil {
-                HStack(spacing: 10) {
-                    if !hasRunnableModel {
-                        Button {
-                            NotificationCenter.default.post(name: .openModelManager, object: nil)
-                        } label: {
-                            Label("Choose a Model", systemImage: "cpu")
-                        }
-                        .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
-                    }
-                    Button {
-                        NotificationCenter.default.post(name: .openWorkspace, object: nil)
-                    } label: {
-                        Label("Open Project Folder", systemImage: "folder.badge.plus")
-                    }
-                    .buttonStyle(LFCapsuleButtonStyle())
-                }
-                .padding(.top, 16)
-            } else if !hasRunnableModel {
                 Button {
-                    NotificationCenter.default.post(name: .openModelManager, object: nil)
+                    NotificationCenter.default.post(name: .openWorkspace, object: nil)
                 } label: {
-                    Label("Choose a Coding Model", systemImage: "cpu")
+                    Label("Open Project Folder", systemImage: "folder.badge.plus")
                 }
-                .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
+                .buttonStyle(LFCapsuleButtonStyle())
                 .padding(.top, 16)
             }
 

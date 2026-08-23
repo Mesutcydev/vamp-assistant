@@ -93,63 +93,20 @@ struct MainWindowView: View {
         responsiveLayout
             .navigationTitle(sessions.workspaceURL?.lastPathComponent ?? "Beet Code")
             .toolbar {
-                ToolbarItem(placement: .automatic) {
-                    HStack(spacing: 2) {
-                        workspaceModeButton(
-                            "Chat",
-                            icon: "bubble.left.and.bubble.right",
-                            selected: sessions.workspaceURL == nil
-                        ) {
-                            Task { await sessions.switchToChatOnly() }
-                        }
-                        workspaceModeButton(
-                            "Code",
-                            icon: "chevron.left.forwardslash.chevron.right",
-                            selected: sessions.workspaceURL != nil
-                        ) {
-                            if sessions.workspaceURL == nil { chooseWorkspace() }
-                        }
+                if #available(macOS 26.0, *) {
+                    ToolbarItem(placement: .automatic) { workspaceModeSwitcher }
+                        .sharedBackgroundVisibility(.hidden)
+                    ToolbarItemGroup(placement: .primaryAction) {
+                        topToolCluster
+                        moreActionsMenu
                     }
-                    .padding(2)
-                    .background(Theme.surfaceInset.opacity(0.38),
-                                in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .strokeBorder(Theme.hairline.opacity(0.58), lineWidth: 1))
-                }
-                ToolbarItemGroup(placement: .primaryAction) {
-                    HStack(spacing: 2) {
-                        topToolButton("Browser", icon: "safari", active: showBrowser) {
-                            toggleToolPanel(.browser)
-                        }
-                        topToolButton("Simulator", icon: "iphone", active: showSimulator) {
-                            toggleToolPanel(.simulator)
-                        }
-                        topToolButton("Diagnostics", icon: "waveform.path.ecg", active: showDiagnostics) {
-                            toggleToolPanel(.diagnostics)
-                        }
+                    .sharedBackgroundVisibility(.hidden)
+                } else {
+                    ToolbarItem(placement: .automatic) { workspaceModeSwitcher }
+                    ToolbarItemGroup(placement: .primaryAction) {
+                        topToolCluster
+                        moreActionsMenu
                     }
-                    .padding(2)
-                    .background(Theme.surfaceInset.opacity(0.40),
-                                in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(Theme.hairline.opacity(0.7), lineWidth: 1))
-
-                    Menu {
-                        Button("Remote sessions…") { showRemoteAccess = true }
-                        Button("Model manager…") { showModelManager = true }
-                        Divider()
-                        Button("Export current chat as Markdown…") {
-                            exportCurrentChat(format: .markdown)
-                        }
-                        Button("Export current chat as JSON…") {
-                            exportCurrentChat(format: .json)
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .frame(width: 30, height: 28)
-                    }
-                    .menuStyle(.borderlessButton)
-                    .help("More app actions")
                 }
             }
             .onChange(of: appState.enginePhase) { _, phase in
@@ -176,6 +133,74 @@ struct MainWindowView: View {
                     appState.isSimulatorPanelOpen = false
                 }
             }
+    }
+
+    private var workspaceModeSwitcher: some View {
+        HStack(spacing: 2) {
+            workspaceModeButton(
+                "Chat",
+                icon: "bubble.left.and.bubble.right",
+                selected: sessions.workspaceURL == nil
+            ) {
+                Task { await sessions.switchToChatOnly() }
+            }
+            workspaceModeButton(
+                "Code",
+                icon: "chevron.left.forwardslash.chevron.right",
+                selected: sessions.workspaceURL != nil
+            ) {
+                if sessions.workspaceURL == nil { chooseWorkspace() }
+            }
+        }
+        .padding(2)
+        .background(Theme.surfaceInset.opacity(0.42),
+                    in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+            .strokeBorder(Theme.hairline.opacity(0.42), lineWidth: 0.75))
+    }
+
+    private var topToolCluster: some View {
+        HStack(spacing: 2) {
+            topToolButton("Browser", icon: "safari", active: showBrowser) {
+                toggleToolPanel(.browser)
+            }
+            topToolButton("Simulator", icon: "iphone", active: showSimulator) {
+                toggleToolPanel(.simulator)
+            }
+            topToolButton("Diagnostics", icon: "waveform.path.ecg", active: showDiagnostics) {
+                toggleToolPanel(.diagnostics)
+            }
+        }
+        .padding(2)
+        .background(Theme.surfaceInset.opacity(0.42),
+                    in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+            .strokeBorder(Theme.hairline.opacity(0.42), lineWidth: 0.75))
+    }
+
+    private var moreActionsMenu: some View {
+        Menu {
+            Button("Remote sessions…") { showRemoteAccess = true }
+            Button("Model manager…") { showModelManager = true }
+            Divider()
+            Button("Export current chat as Markdown…") {
+                exportCurrentChat(format: .markdown)
+            }
+            Button("Export current chat as JSON…") {
+                exportCurrentChat(format: .json)
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 32, height: 32)
+                .background(Theme.surfaceInset.opacity(0.42),
+                            in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(Theme.hairline.opacity(0.42), lineWidth: 0.75))
+        }
+        .menuStyle(.borderlessButton)
+        .help("More app actions")
     }
 
     private func topToolButton(
