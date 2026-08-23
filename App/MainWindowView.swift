@@ -37,11 +37,13 @@ enum SidebarHistoryTab {
 struct MainWindowView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var sessions: AgentSessionController
+    @ObservedObject private var settings = SettingsStore.shared
     @State private var showModelManager = false
     @State private var showSimulator = false
     @State private var showBrowser = false
     @State private var showDiagnostics = false
     @State private var showRemoteAccess = false
+    @State private var showRemoteAccessConsent = false
     @State private var showCompactSidebar = false
     @State private var showChangedFilesReview = false
     @State private var showReadiness = false
@@ -142,6 +144,9 @@ struct MainWindowView: View {
                 icon: "bubble.left.and.bubble.right",
                 selected: sessions.workspaceURL == nil
             ) {
+                // Clicking the already-selected tab is selection, not a
+                // destructive "new chat" shortcut.
+                guard sessions.workspaceURL != nil else { return }
                 Task { await sessions.switchToChatOnly() }
             }
             workspaceModeButton(
@@ -180,7 +185,7 @@ struct MainWindowView: View {
 
     private var moreActionsMenu: some View {
         Menu {
-            Button("Remote sessions…") { showRemoteAccess = true }
+            Button("Remote sessions…") { requestRemoteAccess() }
             Button("Model manager…") { showModelManager = true }
             Divider()
             Button("Export current chat as Markdown…") {
@@ -259,6 +264,18 @@ struct MainWindowView: View {
                 RemoteAccessView()
                     .environmentObject(appState)
             }
+            .sheet(isPresented: $showRemoteAccessConsent) {
+                RemoteAccessConsentView(
+                    onCancel: { showRemoteAccessConsent = false },
+                    onAllow: { clipboard, files in
+                        settings.remoteAccessConsentCompleted = true
+                        settings.remoteClipboardSharingEnabled = clipboard
+                        settings.remoteFileSharingEnabled = files
+                        settings.remoteSessionEnabled = true
+                        showRemoteAccessConsent = false
+                        DispatchQueue.main.async { showRemoteAccess = true }
+                    })
+            }
             .sheet(isPresented: $showChangedFilesReview) {
                 if let workspace = sessions.workspaceURL {
                     ChangedFilesReviewView(workspace: workspace)
@@ -299,7 +316,7 @@ struct MainWindowView: View {
                 showReadiness = true
             }
             .onReceive(NotificationCenter.default.publisher(for: .openRemoteAccess)) { _ in
-                showRemoteAccess = true
+                requestRemoteAccess()
             }
             .onReceive(NotificationCenter.default.publisher(for: .openBrowserPanel)) { _ in
                 presentToolPanel(.browser)
@@ -337,6 +354,14 @@ struct MainWindowView: View {
             .onReceive(NotificationCenter.default.publisher(for: .stopAgent)) { _ in
                 sessions.stop()
             }
+    }
+
+    private func requestRemoteAccess() {
+        if settings.remoteAccessConsentCompleted {
+            showRemoteAccess = true
+        } else {
+            showRemoteAccessConsent = true
+        }
     }
 
     /// Export the active conversation even when the sidebar is collapsed. The

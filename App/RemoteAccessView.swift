@@ -157,6 +157,20 @@ struct RemoteAccessView: View {
             }
 
             Divider().overlay(Theme.hairline)
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Sharing permissions")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.textTertiary)
+                Toggle(isOn: $settings.remoteClipboardSharingEnabled) {
+                    Label("Clipboard exchange", systemImage: "doc.on.clipboard")
+                }
+                Toggle(isOn: $settings.remoteFileSharingEnabled) {
+                    Label("File transfer", systemImage: "folder.badge.plus")
+                }
+            }
+            .font(.callout)
+
+            Divider().overlay(Theme.hairline)
             HStack(spacing: Spacing.sm) {
                 Button {
                     copyPairingURL()
@@ -232,6 +246,111 @@ struct RemoteAccessView: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
         return formatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+/// One-time capability consent shown before the remote listener is enabled.
+/// The user can keep session control while independently declining clipboard
+/// or file access; the host enforces both choices on every request.
+struct RemoteAccessConsentView: View {
+    let onCancel: () -> Void
+    let onAllow: (_ clipboard: Bool, _ files: Bool) -> Void
+
+    @State private var allowClipboard = true
+    @State private var allowFiles = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: "lock.shield.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 46, height: 46)
+                    .background(Theme.wash(Theme.accent), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Allow Remote Sessions?")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text("Paired devices can continue your Beet Code sessions while this Mac and the remote host are on.")
+                        .font(.callout)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            VStack(spacing: 0) {
+                capabilityRow(
+                    icon: "bubble.left.and.bubble.right.fill",
+                    title: "Control sessions",
+                    detail: "Read chats, send prompts, and approve agent actions.",
+                    trailing: AnyView(Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Theme.success)))
+                Divider().padding(.leading, 50)
+                capabilityRow(
+                    icon: "doc.on.clipboard",
+                    title: "Clipboard exchange",
+                    detail: "Copy text between this Mac and a paired device.",
+                    trailing: AnyView(Toggle("", isOn: $allowClipboard).labelsHidden()))
+                Divider().padding(.leading, 50)
+                capabilityRow(
+                    icon: "folder.badge.plus",
+                    title: "File transfer",
+                    detail: "Share files up to 20 MB through BeetCode Remote Downloads.",
+                    trailing: AnyView(Toggle("", isOn: $allowFiles).labelsHidden()))
+            }
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Theme.hairline, lineWidth: 0.75))
+
+            Label("Only paired devices on your Tailscale network are accepted. You can change or revoke access later.", systemImage: "network.badge.shield.half.filled")
+                .font(.caption)
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Button("Not now", action: onCancel)
+                    .buttonStyle(LFCapsuleButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button {
+                    onAllow(allowClipboard, allowFiles)
+                } label: {
+                    Label("Allow Remote Sessions", systemImage: "checkmark")
+                }
+                .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 520)
+        .background(Theme.bg)
+    }
+
+    private func capabilityRow(
+        icon: String,
+        title: String,
+        detail: String,
+        trailing: AnyView
+    ) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 36, height: 36)
+                .background(Theme.wash(Theme.accent), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            Spacer(minLength: 12)
+            trailing
+        }
+        .padding(14)
     }
 }
 

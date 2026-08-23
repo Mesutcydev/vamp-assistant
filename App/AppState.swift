@@ -130,6 +130,12 @@ final class AppState: ObservableObject {
         remoteSessionHost.modelOptionsHandler = { [weak self] in
             self?.remoteStartModels() ?? []
         }
+        remoteSessionHost.clipboardSharingAllowedHandler = {
+            SettingsStore.shared.remoteClipboardSharingEnabled
+        }
+        remoteSessionHost.fileSharingAllowedHandler = {
+            SettingsStore.shared.remoteFileSharingEnabled
+        }
         remoteSessionHost.startSessionHandler = { [weak self] modelID, message in
             guard let self else { return "Beet Code is no longer available." }
             return await self.startRemoteSession(modelID: modelID, message: message)

@@ -311,49 +311,15 @@ struct ChatView: View {
                 }
             }
         }
+        .overlay(alignment: .bottomTrailing) {
+            remoteSessionsCornerButton
+                .padding(.trailing, 22)
+                .padding(.bottom, 22)
+        }
     }
 
     private var homeActions: some View {
         HStack(spacing: 10) {
-            Button {
-                NotificationCenter.default.post(name: .openRemoteAccess, object: nil)
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "antenna.radiowaves.left.and.right")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 30, height: 30)
-                        .background(.white.opacity(0.14), in: Circle())
-
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Remote Sessions")
-                            .font(.system(size: 13, weight: .semibold))
-                        Text("Connect from another device")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.72))
-                    }
-
-                    Spacer(minLength: 8)
-
-                    Image(systemName: "arrow.up.right")
-                        .font(.system(size: 10.5, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.78))
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 12)
-                .frame(height: 48)
-                .frame(maxWidth: controller.workspaceURL == nil ? 250 : 300)
-                .background(Theme.accentGradient,
-                            in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .strokeBorder(.white.opacity(0.14), lineWidth: 0.75))
-                .shadow(color: Theme.accent.opacity(0.18), radius: 8, y: 3)
-                .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .lfHoverLift()
-            .help("Open Remote Sessions")
-
             if controller.workspaceURL == nil {
                 Button {
                     NotificationCenter.default.post(name: .openWorkspace, object: nil)
@@ -379,6 +345,35 @@ struct ChatView: View {
             }
         }
         .frame(maxWidth: 460)
+    }
+
+    private var remoteSessionsCornerButton: some View {
+        Button {
+            NotificationCenter.default.post(name: .openRemoteAccess, object: nil)
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 54, height: 54)
+                    .background(Theme.accentGradient,
+                                in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous)
+                        .strokeBorder(.white.opacity(0.18), lineWidth: 0.75))
+                    .shadow(color: Theme.accent.opacity(0.24), radius: 12, y: 5)
+
+                Circle()
+                    .fill(appState.remoteSessionRunning ? Theme.success : Theme.textTertiary)
+                    .frame(width: 8, height: 8)
+                    .overlay(Circle().stroke(Theme.bg, lineWidth: 2))
+                    .padding(5)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+        }
+        .buttonStyle(LFPlainPressButtonStyle())
+        .lfHoverLift()
+        .help("Remote Sessions")
+        .accessibilityLabel("Open Remote Sessions")
     }
 
     private var homeHeadline: LocalizedStringKey {

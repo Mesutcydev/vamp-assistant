@@ -220,6 +220,37 @@ textarea {
 .stop { background: var(--danger); color: #241014; }
 .send.hidden, .stop.hidden { display: none; }
 .hint { padding: 7px 3px 0; color: var(--muted); font-size: 11px; }
+.share-overlay {
+  position: fixed; inset: 0; z-index: 8; display: grid; place-items: center;
+  padding: 22px; background: var(--overlay);
+}
+.share-overlay.hidden { display: none; }
+.share-card {
+  width: min(520px, 100%); max-height: min(720px, calc(100dvh - 32px)); overflow: auto;
+  padding: 20px; border: 1px solid var(--line); border-radius: 20px;
+  background: var(--panel); box-shadow: 0 24px 80px var(--panel-shadow);
+}
+.share-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
+.share-head-copy { flex: 1; min-width: 0; }
+.share-head h2 { margin: 0; font-size: 21px; letter-spacing: -.03em; }
+.share-head p { margin: 5px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.share-section + .share-section { margin-top: 20px; }
+.share-label { margin-bottom: 9px; color: var(--muted); font-size: 11px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
+.share-clipboard {
+  width: 100%; min-height: 92px; max-height: 180px; padding: 12px;
+  border: 1px solid var(--line); border-radius: 13px; resize: vertical;
+  background: var(--input); color: var(--text); line-height: 1.45;
+}
+.share-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
+.shared-files { margin-top: 10px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.shared-file { display: flex; width: 100%; align-items: center; gap: 10px; min-height: 50px; padding: 8px 11px; text-align: left; background: transparent; }
+.shared-file + .shared-file { border-top: 1px solid var(--line); }
+.shared-file:hover { background: var(--panel-strong); }
+.shared-file-icon { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; background: var(--panel-strong); color: var(--accent-bright); }
+.shared-file-copy { flex: 1; min-width: 0; }
+.shared-file-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 650; }
+.shared-file-meta { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+.shared-empty { padding: 16px; color: var(--muted); font-size: 13px; line-height: 1.45; }
 .overlay {
   position: fixed; inset: 0; z-index: 4; display: grid; place-items: center;
   padding: 22px; background: rgba(0,0,0,.74);
@@ -261,6 +292,8 @@ textarea {
   .interaction, .notice { width: calc(100% - 24px); }
   .composer-wrap { padding: 10px 12px; }
   .hint { padding-top: 6px; }
+  .share-overlay { place-items: end center; padding: 0; }
+  .share-card { width: 100%; max-height: 84dvh; padding: 18px 16px calc(18px + env(safe-area-inset-bottom, 0px)); border-radius: 22px 22px 0 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0ms !important; }
@@ -699,6 +732,29 @@ textarea {
   </div>
 </div>
 
+<div id="share-panel" class="share-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="share-title">
+  <div class="share-card">
+    <div class="share-head">
+      <div class="share-head-copy"><h2 id="share-title">Share with your Mac</h2><p>Clipboard text and files move directly over your private connection.</p></div>
+      <button id="share-close" class="icon-button" type="button" aria-label="Close sharing">×</button>
+    </div>
+    <section class="share-section">
+      <div class="share-label">Clipboard</div>
+      <textarea id="share-clipboard" class="share-clipboard" placeholder="Paste text here, or pull the current clipboard from your Mac" aria-label="Shared clipboard text"></textarea>
+      <div class="share-actions">
+        <button id="clipboard-pull" class="button" type="button">Copy from Mac</button>
+        <button id="clipboard-push" class="button primary" type="button">Send to Mac</button>
+      </div>
+    </section>
+    <section class="share-section">
+      <div class="share-label">Shared files</div>
+      <input id="file-picker" type="file" hidden>
+      <button id="file-choose" class="button" type="button">Choose a file to send</button>
+      <div id="shared-files" class="shared-files" aria-live="polite"></div>
+    </section>
+  </div>
+</div>
+
 <div class="shell">
   <button id="session-scrim" class="session-scrim" type="button" aria-label="Close sessions"></button>
   <aside class="sidebar" aria-label="Saved sessions">
@@ -733,6 +789,7 @@ textarea {
       </div>
       <div class="top-actions">
         <button id="refresh-mobile" class="icon-button" type="button" aria-label="Refresh sessions" title="Refresh sessions">↻</button>
+        <button id="share-open" class="icon-button" type="button" aria-label="Share clipboard or files" title="Share clipboard or files">⇄</button>
         <div class="appearance-switcher" role="group" aria-label="Appearance">
           <button class="appearance-option" type="button" data-theme-choice="light" aria-label="Light appearance" aria-pressed="false"><span class="appearance-glyph" aria-hidden="true">☼</span><span class="appearance-label">Light</span></button>
           <button class="appearance-option" type="button" data-theme-choice="dark" aria-label="Dark appearance" aria-pressed="false"><span class="appearance-glyph" aria-hidden="true">☾</span><span class="appearance-label">Dark</span></button>
@@ -911,6 +968,127 @@ async function api(path, options = {}) {
   }
   if (!response.ok) throw new Error(body.error || 'Request failed. Try again.');
   return body;
+}
+
+async function apiRaw(path, options = {}) {
+  const headers = Object.assign({}, options.headers || {});
+  if (state.token) headers.Authorization = 'Bearer ' + state.token;
+  const response = await fetch(path, Object.assign({}, options, { headers, cache: 'no-store' }));
+  if (!response.ok) {
+    let message = 'Transfer failed. Try again.';
+    try { message = (await response.json()).error || message; } catch {}
+    throw new Error(message);
+  }
+  return response;
+}
+
+function setSharePanel(open) {
+  $('share-panel').classList.toggle('hidden', !open);
+  if (open) {
+    void loadSharedFiles();
+    setTimeout(() => $('share-clipboard').focus(), 0);
+  }
+}
+
+function fileSizeLabel(bytes) {
+  const value = Number(bytes) || 0;
+  if (value < 1024) return value + ' B';
+  if (value < 1024 * 1024) return (value / 1024).toFixed(1) + ' KB';
+  return (value / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function renderSharedFiles(files) {
+  const root = $('shared-files');
+  root.replaceChildren();
+  if (!files.length) {
+    const empty = document.createElement('div');
+    empty.className = 'shared-empty';
+    empty.textContent = 'Files appear in Downloads › BeetCode Remote on your Mac.';
+    root.append(empty);
+    return;
+  }
+  for (const file of files) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'shared-file';
+    const icon = document.createElement('span');
+    icon.className = 'shared-file-icon';
+    icon.textContent = '↓';
+    const copy = document.createElement('span');
+    copy.className = 'shared-file-copy';
+    const name = document.createElement('span');
+    name.className = 'shared-file-name';
+    name.textContent = text(file.name);
+    const meta = document.createElement('span');
+    meta.className = 'shared-file-meta';
+    meta.textContent = fileSizeLabel(file.size) + ' · tap to download';
+    copy.append(name, meta);
+    button.append(icon, copy);
+    button.onclick = () => downloadSharedFile(file.name);
+    root.append(button);
+  }
+}
+
+async function loadSharedFiles() {
+  try {
+    const body = await api('/api/files');
+    renderSharedFiles(Array.isArray(body.files) ? body.files : []);
+  } catch (error) { showNotice(error.message, 'error'); }
+}
+
+async function pullClipboard() {
+  try {
+    const body = await api('/api/clipboard');
+    $('share-clipboard').value = text(body.text);
+    if (navigator.clipboard && body.text) {
+      try { await navigator.clipboard.writeText(body.text); } catch {}
+    }
+    showNotice(body.text ? 'Mac clipboard copied here.' : 'The Mac clipboard is empty.');
+  } catch (error) { showNotice(error.message, 'error'); }
+}
+
+async function pushClipboard() {
+  let value = $('share-clipboard').value;
+  if (!value && navigator.clipboard) {
+    try { value = await navigator.clipboard.readText(); } catch {}
+  }
+  if (!value) { showNotice('Paste some text into the clipboard box first.', 'error'); return; }
+  try {
+    await api('/api/clipboard', { method: 'PUT', body: JSON.stringify({ text: value }) });
+    showNotice('Clipboard sent to your Mac.');
+  } catch (error) { showNotice(error.message, 'error'); }
+}
+
+async function uploadSharedFile(file) {
+  if (!file) return;
+  if (file.size <= 0 || file.size > 20 * 1024 * 1024) {
+    showNotice('Choose a non-empty file smaller than 20 MB.', 'error');
+    return;
+  }
+  $('file-choose').disabled = true;
+  try {
+    await apiRaw('/api/files?name=' + encodeURIComponent(file.name), {
+      method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file
+    });
+    showNotice('File sent to your Mac.');
+    await loadSharedFiles();
+  } catch (error) { showNotice(error.message, 'error'); }
+  finally { $('file-choose').disabled = false; $('file-picker').value = ''; }
+}
+
+async function downloadSharedFile(name) {
+  try {
+    const response = await apiRaw('/api/files/' + encodeURIComponent(name));
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (error) { showNotice(error.message, 'error'); }
 }
 
 async function pair(rawCode) {
@@ -1343,6 +1521,13 @@ $('send').onclick = send;
 $('stop').onclick = stop;
 $('refresh').onclick = () => refreshNow(false);
 $('refresh-mobile').onclick = () => refreshNow(false);
+$('share-open').onclick = () => setSharePanel(true);
+$('share-close').onclick = () => setSharePanel(false);
+$('share-panel').onclick = event => { if (event.target === $('share-panel')) setSharePanel(false); };
+$('clipboard-pull').onclick = pullClipboard;
+$('clipboard-push').onclick = pushClipboard;
+$('file-choose').onclick = () => $('file-picker').click();
+$('file-picker').onchange = event => uploadSharedFile(event.target.files && event.target.files[0]);
 $('sessions-toggle').onclick = () => {
   if (!state.current) return;
   state.sessionsExpanded = !state.sessionsExpanded;

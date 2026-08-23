@@ -12,6 +12,7 @@
 		01BA8CBF915A9DC895D16894 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74B649F2AFDA0B380E6AF22 /* Theme.swift */; };
 		02CB2A897F1D963EE7DBF9F4 /* MemoryTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5575D39B3E7548A54465A455 /* MemoryTools.swift */; };
 		02E754A40B564249A127230D /* ParserCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 818D6E4E940E77343F2ABECA /* ParserCoreTests.swift */; };
+		03D80BE24424BC5CD1FA7C84 /* RemoteSharingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7085EB2E7C9588FCF1F29FEF /* RemoteSharingStore.swift */; };
 		044B1CA06AFF3DF94C204A5C /* MemoryAdvisor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C74EE3952423C1F4762C4D8 /* MemoryAdvisor.swift */; };
 		056CBCBB03F6D315EB18D840 /* OpenAIRoutes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 314F800229989B3B8A84268E /* OpenAIRoutes.swift */; };
 		0573A55D405ED0EB6A31DDBA /* VisionTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C4C085A3FEFE2149E2C7765 /* VisionTool.swift */; };
@@ -536,6 +537,7 @@
 		6E6A19148546EC9040037545 /* RemoteLLMClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteLLMClient.swift; sourceTree = "<group>"; };
 		6E7F75EB02711A4C82B1DC59 /* DeviceProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceProfile.swift; sourceTree = "<group>"; };
 		701B4E307D6B1365E364BEFD /* TaskQueueStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskQueueStore.swift; sourceTree = "<group>"; };
+		7085EB2E7C9588FCF1F29FEF /* RemoteSharingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSharingStore.swift; sourceTree = "<group>"; };
 		710F471744080C4B0F4DBDCB /* AgentSessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionController.swift; sourceTree = "<group>"; };
 		7351121C38357A60E881308D /* SlashCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlashCommandTests.swift; sourceTree = "<group>"; };
 		769B04291F6F7D98A81435C4 /* AgentLoopTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentLoopTests.swift; sourceTree = "<group>"; };
@@ -958,6 +960,7 @@
 				2267CB799451C9A2BD48E00A /* ModelPillView.swift */,
 				0637C865816D8CA837CCD962 /* RemoteAccessView.swift */,
 				996AFBD8FCFEF69C1FC7743E /* RemoteSessionHost.swift */,
+				7085EB2E7C9588FCF1F29FEF /* RemoteSharingStore.swift */,
 				D63B14F1DBA58B6844FD220F /* SettingsAgentTab.swift */,
 				940AE069FC933F9881DDC253 /* SettingsChrome.swift */,
 				FC1788366F68C3DFC8B7FE1F /* SettingsGeneralTab.swift */,
@@ -1665,6 +1668,7 @@
 				3623B61C7865C34FD0F33E86 /* RemoteProtocol.swift in Sources */,
 				20BD8212C4F81A80F77A8D61 /* RemoteSessionHost.swift in Sources */,
 				8CE72378080C500E37CCCD22 /* RemoteSessionPage.swift in Sources */,
+				03D80BE24424BC5CD1FA7C84 /* RemoteSharingStore.swift in Sources */,
 				B004244CE0FE34D0288BE482 /* RepoIndex.swift in Sources */,
 				670BB7E4529048B72C7ACDD4 /* RepoSummaryCache.swift in Sources */,
 				F54D90C1BD156816B3A19260 /* RunCommandTool.swift in Sources */,
@@ -2038,7 +2042,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = iOSApp/Info.plist;
@@ -2047,7 +2051,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.4;
+				MARKETING_VERSION = 0.1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.beetcode.remote.ios;
 				PRODUCT_NAME = "BeetCode Remote";
 				SDKROOT = iphoneos;
@@ -2065,7 +2069,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = iOSApp/Info.plist;
@@ -2074,7 +2078,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.4;
+				MARKETING_VERSION = 0.1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.beetcode.remote.ios;
 				PRODUCT_NAME = "BeetCode Remote";
 				SDKROOT = iphoneos;

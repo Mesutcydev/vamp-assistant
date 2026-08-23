@@ -2,7 +2,7 @@
 
 A lightweight, native, **Apple Silicon-only macOS coding agent**. Beet Code runs MLX models in-process through Metal, downloads them directly from Hugging Face with pause/resume, and gives a local coding agent safe, reviewable tools.
 
-[![Download Beet Code 0.10.4](https://img.shields.io/badge/Download-Beet%20Code%200.10.4%20ZIP-7A1F3D?style=for-the-badge)](https://github.com/Mesutcydev/beet-code/releases/latest/download/BeetCode-0.10.4.zip)
+[![Download Beet Code 0.10.5](https://img.shields.io/badge/Download-Beet%20Code%200.10.5%20ZIP-7A1F3D?style=for-the-badge)](https://github.com/Mesutcydev/beet-code/releases/latest/download/BeetCode-0.10.5.zip)
 [![Open source](https://img.shields.io/badge/Open%20source-7A1F3D?style=for-the-badge)](LICENSE)
 
 <p align="center">
@@ -34,7 +34,9 @@ The [GitHub Pages site](https://mesutcydev.github.io/beet-code/) has the full pr
 
 ## BeetCode Remote for iPhone and iPad
 
-The repository includes a native SwiftUI companion app that connects to the Mac app's existing private Remote Sessions endpoint. It supports camera QR pairing, manual one-time pairing, secure token storage, automatic reconnection, session browsing, live responses, prompts, stop controls, and agent approvals/questions.
+The repository includes a native SwiftUI companion app that connects to the Mac app's existing private Remote Sessions endpoint. It supports camera QR pairing, one-tap reconnection, secure token storage, session browsing, new local/API sessions, live responses, prompts, stop controls, approvals/questions, and permission-gated clipboard and file exchange.
+
+[Download the latest unsigned iPhone/iPad IPA](https://github.com/Mesutcydev/beet-code/releases/latest/download/BeetCode-Remote-iOS-0.1.5-build-6-unsigned.ipa)
 
 Build an unsigned sideloadable IPA:
 
@@ -44,7 +46,7 @@ Build an unsigned sideloadable IPA:
 
 The resulting `BeetCode-Remote-iOS-*-unsigned.ipa` can be re-signed with AltStore, SideStore, Sideloadly, or a personal Apple development profile. Keep both devices on the same Tailscale network, then paste the address or QR URL shown by **Beet Code → Remote Sessions**.
 
-**Install:** download the [ZIP](https://github.com/Mesutcydev/beet-code/releases/latest/download/BeetCode-0.10.4.zip), extract it, and move **Beet Code.app** to Applications. Apple Silicon + macOS 15+.
+**Install:** download the [ZIP](https://github.com/Mesutcydev/beet-code/releases/latest/download/BeetCode-0.10.5.zip), extract it, and move **Beet Code.app** to Applications. Apple Silicon + macOS 15+.
 
 > Gatekeeper will warn — this build is Apple Development–signed, **not notarized** (Developer ID certs are revoked). Right-click → Open, or `xattr -dr com.apple.quarantine "/path/to/Beet Code.app"`.
 
@@ -314,6 +316,13 @@ Docs: [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) ·
   and `api_key=…` without storing the wrapper.
 
 Project policy reference: [`docs/PROJECT-POLICY.md`](docs/PROJECT-POLICY.md).
+
+## v0.10.5 — Persistent remote control and sharing
+
+- Added a premium native iPhone session/conversation interface, new local/API session creation, and a compact appearance menu.
+- Paired clients reconnect with one tap after the host returns; paired trust survives normal Mac app restarts and remains revocable.
+- Added explicit clipboard and 20 MB file exchange for the browser and iOS client, protected by a first-use Mac permission sheet and route-level enforcement.
+- Fixed the desktop Chat tab so reselecting it cannot clear the current chat, and moved Remote Sessions into a compact lower-right home action.
 
 ## v0.10.4 — Mobile remote conversation layout
 

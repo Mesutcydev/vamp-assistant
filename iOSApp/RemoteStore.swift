@@ -7,14 +7,18 @@ final class RemoteStore {
     var sessions: [RemoteSessionSummary] = []
     var selectedSession: RemoteSessionDetail?
     var startModels: [RemoteStartModelOption] = []
+    var sharedFiles: [RemoteSharedFileItem] = []
     var isConnecting = false
     var isRefreshing = false
+    var isSharing = false
     var errorMessage: String?
     var connectionLabel = "Disconnected"
 
     private(set) var baseURL: URL?
     private var token: String?
     private var pollingTask: Task<Void, Never>?
+    private var connectionAvailable = false
+    private var consecutivePollingFailures = 0
 
     init() {
 #if DEBUG
@@ -34,16 +38,30 @@ final class RemoteStore {
         }
     }
 
-    var isConnected: Bool { baseURL != nil && token != nil }
+    var hasSavedConnection: Bool { baseURL != nil && token != nil }
+    var isConnected: Bool { hasSavedConnection && connectionAvailable }
+    var savedMacAddress: String? { baseURL?.absoluteString }
 
     func restore() async {
-        guard isConnected else { return }
+        guard hasSavedConnection else { return }
+        await connectSaved(showFailure: false)
+    }
+
+    func connectSaved(showFailure: Bool = true) async {
+        guard hasSavedConnection else { return }
+        isConnecting = true
+        if showFailure { errorMessage = nil }
+        defer { isConnecting = false }
         do {
             try await refresh()
+            connectionAvailable = true
+            connectionLabel = "Connected"
+            consecutivePollingFailures = 0
             startPolling()
         } catch {
-            disconnect(clearAddress: false)
-            errorMessage = error.localizedDescription
+            connectionAvailable = false
+            connectionLabel = "Mac unavailable"
+            if showFailure { errorMessage = "Your saved Mac is not reachable yet. Make sure Beet Code Remote Sessions and Tailscale are on, then try again." }
         }
     }
 
@@ -59,6 +77,8 @@ final class RemoteStore {
             token = response.token
             UserDefaults.standard.set(parsed.url.absoluteString, forKey: "remoteBaseURL")
             try await refresh()
+            connectionAvailable = true
+            connectionLabel = "Connected"
             startPolling()
         } catch {
             errorMessage = error.localizedDescription
@@ -72,6 +92,8 @@ final class RemoteStore {
         async let status = client.status()
         async let list = client.sessions()
         let (nextStatus, nextList) = try await (status, list)
+        connectionAvailable = true
+        consecutivePollingFailures = 0
         sessions = nextList.sessions
         connectionLabel = nextStatus.isRunning ? nextStatus.phase.capitalized : "Connected"
         if let id = selectedSession?.id,
@@ -145,22 +167,79 @@ final class RemoteStore {
 
     func revoke() async {
         if let client { try? await client.revoke() }
-        disconnect(clearAddress: true)
+        forgetSavedMac()
     }
 
-    func disconnect(clearAddress: Bool = false) {
+    func forgetSavedMac() {
         pollingTask?.cancel()
         pollingTask = nil
+        connectionAvailable = false
         token = nil
         RemoteTokenStore.clear()
         sessions = []
         startModels = []
+        sharedFiles = []
         selectedSession = nil
         connectionLabel = "Disconnected"
-        if clearAddress {
-            baseURL = nil
-            UserDefaults.standard.removeObject(forKey: "remoteBaseURL")
-        }
+        baseURL = nil
+        UserDefaults.standard.removeObject(forKey: "remoteBaseURL")
+    }
+
+    func loadSharing() async {
+        guard let client else { return }
+        isSharing = true
+        defer { isSharing = false }
+        do { sharedFiles = try await client.sharedFiles().files }
+        catch { errorMessage = error.localizedDescription }
+    }
+
+    func copyMacClipboard() async -> String? {
+        guard let client else { return nil }
+        isSharing = true
+        defer { isSharing = false }
+        do { return try await client.clipboard().text }
+        catch { errorMessage = error.localizedDescription; return nil }
+    }
+
+    func sendClipboardToMac(_ text: String) async -> Bool {
+        guard let client, !text.isEmpty else { return false }
+        isSharing = true
+        defer { isSharing = false }
+        do { _ = try await client.setClipboard(text); return true }
+        catch { errorMessage = error.localizedDescription; return false }
+    }
+
+    func uploadFile(_ url: URL) async -> Bool {
+        guard let client else { return false }
+        isSharing = true
+        defer { isSharing = false }
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let values = try url.resourceValues(forKeys: [.fileSizeKey])
+            guard let size = values.fileSize, size > 0, size <= 20 * 1024 * 1024 else {
+                throw RemoteClientError.server("Choose a non-empty file smaller than 20 MB.")
+            }
+            let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+            _ = try await client.uploadFile(data: data, name: url.lastPathComponent)
+            sharedFiles = try await client.sharedFiles().files
+            return true
+        } catch { errorMessage = error.localizedDescription; return false }
+    }
+
+    func downloadFile(_ file: RemoteSharedFileItem) async -> URL? {
+        guard let client else { return nil }
+        isSharing = true
+        defer { isSharing = false }
+        do {
+            let data = try await client.downloadFile(named: file.name)
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("BeetCode Remote", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let destination = directory.appendingPathComponent(file.name, isDirectory: false)
+            try data.write(to: destination, options: [.atomic])
+            return destination
+        } catch { errorMessage = error.localizedDescription; return nil }
     }
 
     private var client: RemoteAPIClient? {
@@ -174,7 +253,15 @@ final class RemoteStore {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(2))
                 guard !Task.isCancelled else { return }
-                try? await self?.refresh()
+                do { try await self?.refresh() }
+                catch {
+                    guard let self else { return }
+                    self.consecutivePollingFailures += 1
+                    if self.consecutivePollingFailures >= 3 {
+                        self.connectionAvailable = false
+                        self.connectionLabel = "Reconnecting…"
+                    }
+                }
             }
         }
     }

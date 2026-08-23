@@ -57,6 +57,8 @@ final class RemoteSessionTests: XCTestCase {
         XCTAssertTrue(RemoteSessionPage.html.contains("translateY(calc(-100% - 24px))"))
         XCTAssertTrue(RemoteSessionPage.html.contains("100dvh"))
         XCTAssertTrue(RemoteSessionPage.html.contains("loadSession(quiet, false)"))
+        XCTAssertTrue(RemoteSessionPage.html.contains("/api/clipboard"))
+        XCTAssertTrue(RemoteSessionPage.html.contains("/api/files"))
         XCTAssertFalse(RemoteSessionPage.html.contains("innerHTML"))
         XCTAssertFalse(RemoteSessionPage.html.contains("terminalOutput"))
     }
@@ -78,6 +80,20 @@ final class RemoteSessionTests: XCTestCase {
         XCTAssertEqual(remoteConfig.maxBodyBytes, RemoteSessionHost.maxRemoteBodyBytes)
         XCTAssertFalse(remoteConfig.allowCORS)
         XCTAssertEqual(RemoteSessionHost.tokenLifetime, 30 * 24 * 60 * 60)
+        XCTAssertEqual(RemoteSessionHost.maxRemoteFileBytes, 20 * 1024 * 1024)
+    }
+
+    func testRemoteSharingSanitizesAndKeepsFilesInsideExchangeFolder() throws {
+        let directory = TempWorkspace()
+        let sharing = RemoteSharingStore(directoryURL: directory.url)
+
+        let saved = try sharing.save(Data("hello".utf8), suggestedName: "../../report?.txt")
+        XCTAssertEqual(saved.name, "report_.txt")
+        XCTAssertEqual(try sharing.files().map(\.name), ["report_.txt"])
+
+        let result = try sharing.data(for: saved.name)
+        XCTAssertEqual(String(data: result.data, encoding: .utf8), "hello")
+        XCTAssertThrowsError(try sharing.data(for: "../report_.txt"))
     }
 
     func testControllerPublishesReasoningIntoTranscriptBeforeAnswer() async throws {
@@ -222,7 +238,17 @@ final class RemoteSessionTests: XCTestCase {
         SessionStore.shared.save(record)
         SessionStore.shared.invalidateCache()
 
-        let host = RemoteSessionHost(engine: engine, sessions: controller)
+        let exchangeDirectory = TempWorkspace()
+        let sharing = RemoteSharingStore(directoryURL: exchangeDirectory.url)
+        var allowClipboard = false
+        var allowFiles = false
+        let host = RemoteSessionHost(
+            engine: engine,
+            sessions: controller,
+            sharing: sharing,
+            persistsPairedClients: false)
+        host.clipboardSharingAllowedHandler = { allowClipboard }
+        host.fileSharingAllowedHandler = { allowFiles }
         // A locked/unavailable encrypted queue must not turn a successfully
         // paired idle remote session into a read-only surface.
         host.enqueueTaskHandler = { _, _ in nil }
@@ -278,6 +304,32 @@ final class RemoteSessionTests: XCTestCase {
         XCTAssertEqual(status.json.objectValue?["networkKind"]?.stringValue, "tailscale")
         XCTAssertNotNil(status.json.objectValue?["tokenExpiresAt"]?.numberValue)
         XCTAssertNotNil(status.json.objectValue?["phase"]?.stringValue)
+
+        let deniedClipboard = try await request(baseURL, path: "/api/clipboard", token: token)
+        XCTAssertEqual(deniedClipboard.status, 403)
+        allowClipboard = true
+        let clipboard = try await request(baseURL, path: "/api/clipboard", token: token)
+        XCTAssertEqual(clipboard.status, 200)
+        XCTAssertNotNil(clipboard.json.objectValue?["text"]?.stringValue)
+
+        let deniedFiles = try await request(baseURL, path: "/api/files", token: token)
+        XCTAssertEqual(deniedFiles.status, 403)
+        allowFiles = true
+        let uploaded = try await request(
+            baseURL,
+            path: "/api/files?name=phone-note.txt",
+            method: "POST",
+            token: token,
+            body: Data("from iPhone".utf8),
+            headers: ["Content-Type": "application/octet-stream"])
+        XCTAssertEqual(uploaded.status, 201)
+        XCTAssertEqual(uploaded.json.objectValue?["name"]?.stringValue, "phone-note.txt")
+        let files = try await request(baseURL, path: "/api/files", token: token)
+        XCTAssertEqual(files.status, 200)
+        XCTAssertTrue(files.body.contains("phone-note.txt"))
+        let downloaded = try await request(baseURL, path: "/api/files/phone-note.txt", token: token)
+        XCTAssertEqual(downloaded.status, 200)
+        XCTAssertEqual(downloaded.body, "from iPhone")
 
         // The remote listener is a session-control surface, never the local
         // OpenAI-compatible inference API.
@@ -335,7 +387,12 @@ final class RemoteSessionTests: XCTestCase {
         body: Data? = nil,
         headers: [String: String] = [:]
     ) async throws -> HTTPResult {
-        var request = URLRequest(url: baseURL.appendingPathComponent(String(path.dropFirst())))
+        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+        let pathComponents = path.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+        components?.path = String(pathComponents[0])
+        components?.percentEncodedQuery = pathComponents.count > 1 ? String(pathComponents[1]) : nil
+        let url = try XCTUnwrap(components?.url)
+        var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = 5
         for (key, value) in headers {
@@ -346,7 +403,9 @@ final class RemoteSessionTests: XCTestCase {
         }
         if let body {
             request.httpBody = body
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            if !headers.keys.contains(where: { $0.caseInsensitiveCompare("Content-Type") == .orderedSame }) {
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            }
         }
         let (data, response) = try await URLSession.shared.data(for: request)
         let http = try XCTUnwrap(response as? HTTPURLResponse)

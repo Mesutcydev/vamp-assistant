@@ -19,6 +19,27 @@ struct RemoteSessionEnvelope: Decodable {
 
 struct RemoteModelEnvelope: Decodable { let models: [RemoteStartModelOption] }
 
+struct RemoteClipboardSnapshot: Decodable {
+    let text: String
+    let updatedAt: Double
+}
+
+struct RemoteSharedFileEnvelope: Decodable { let files: [RemoteSharedFileItem] }
+
+struct RemoteSharedFileItem: Decodable, Identifiable, Hashable {
+    let name: String
+    let size: Int
+    let modifiedAt: Double
+
+    var id: String { name }
+}
+
+struct RemoteFileAcceptedResponse: Decodable {
+    let accepted: Bool
+    let name: String
+    let size: Int
+}
+
 struct RemoteStartModelOption: Decodable, Identifiable, Hashable {
     let id: String
     let name: String

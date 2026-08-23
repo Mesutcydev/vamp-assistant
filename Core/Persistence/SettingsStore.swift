@@ -214,6 +214,9 @@ final class SettingsStore: ObservableObject {
             DefaultsKeys.remoteSessionEnabled: false,
             DefaultsKeys.remoteSessionPort: 9475,
             DefaultsKeys.remoteSessionAllowLAN: false,
+            DefaultsKeys.remoteAccessConsentCompleted: false,
+            DefaultsKeys.remoteClipboardSharingEnabled: false,
+            DefaultsKeys.remoteFileSharingEnabled: false,
             DefaultsKeys.computerControlEnabled: false,
             DefaultsKeys.intelligenceInspectorEnabled: false,
             DefaultsKeys.enterSends: true,
@@ -512,6 +515,33 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    /// The first Remote Sessions launch explains the network listener and
+    /// asks separately for clipboard and file exchange. These choices are
+    /// enforced by the host routes, not just hidden in the interface.
+    var remoteAccessConsentCompleted: Bool {
+        get { defaults.bool(forKey: DefaultsKeys.remoteAccessConsentCompleted) }
+        set {
+            defaults.set(newValue, forKey: DefaultsKeys.remoteAccessConsentCompleted)
+            objectWillChange.send()
+        }
+    }
+
+    var remoteClipboardSharingEnabled: Bool {
+        get { defaults.bool(forKey: DefaultsKeys.remoteClipboardSharingEnabled) }
+        set {
+            defaults.set(newValue, forKey: DefaultsKeys.remoteClipboardSharingEnabled)
+            objectWillChange.send()
+        }
+    }
+
+    var remoteFileSharingEnabled: Bool {
+        get { defaults.bool(forKey: DefaultsKeys.remoteFileSharingEnabled) }
+        set {
+            defaults.set(newValue, forKey: DefaultsKeys.remoteFileSharingEnabled)
+            objectWillChange.send()
+        }
+    }
+
     /// When true, Enter sends and Shift+Enter inserts a newline.
     /// When false, Enter inserts a newline and only ⌘↩ sends.
     var enterSends: Bool {
@@ -630,6 +660,9 @@ final class SettingsStore: ObservableObject {
         static let remoteSessionEnabled = "remoteSessionEnabled"
         static let remoteSessionPort = "remoteSessionPort"
         static let remoteSessionAllowLAN = "remoteSessionAllowLAN"
+        static let remoteAccessConsentCompleted = "remoteAccessConsentCompleted.v1"
+        static let remoteClipboardSharingEnabled = "remoteClipboardSharingEnabled"
+        static let remoteFileSharingEnabled = "remoteFileSharingEnabled"
         static let computerControlEnabled = "computerControlEnabled"
         static let intelligenceInspectorEnabled = "intelligenceInspectorEnabled"
         static let enterSends = "enterSends"

@@ -33,7 +33,9 @@ final class RemoteSessionHost {
     static let tokenLifetime: TimeInterval = 30 * 24 * 60 * 60
     static let maxMessageBytes = 20_000
     static let maxPairBodyBytes = 4 * 1024
-    static let maxRemoteBodyBytes = 64 * 1024
+    static let maxRemoteFileBytes = 20 * 1024 * 1024
+    static let maxRemoteBodyBytes = maxRemoteFileBytes
+    static let maxClipboardCharacters = 200_000
     static let maxPairedClients = 8
     static let maxPairFailuresPerWindow = 8
     static let pairFailureWindow: TimeInterval = 60
@@ -54,12 +56,16 @@ final class RemoteSessionHost {
 
     private let engine: any LLMEngine
     private let sessions: AgentSessionController
+    private let sharing: RemoteSharingStore
+    private let persistsPairedClients: Bool
     /// AppState installs these handlers so remote messages become durable
     /// queued tasks. Tests and lightweight hosts may leave them nil and keep
     /// the direct continuation behavior.
     var enqueueTaskHandler: ((UUID, String) -> QueuedAgentTask?)?
     var taskLookupHandler: ((UUID) -> QueuedAgentTask?)?
     var modelOptionsHandler: (() -> [RemoteStartModel])?
+    var clipboardSharingAllowedHandler: (() -> Bool)?
+    var fileSharingAllowedHandler: (() -> Bool)?
     /// Returns nil on success, or a user-facing error string.
     var startSessionHandler: ((String, String) async -> String?)?
     private var server: LocalAPIServer?
@@ -79,9 +85,17 @@ final class RemoteSessionHost {
     private(set) var networkHost: String?
     private(set) var networkKind: RemoteNetworkKind?
 
-    init(engine: any LLMEngine, sessions: AgentSessionController) {
+    init(
+        engine: any LLMEngine,
+        sessions: AgentSessionController,
+        sharing: RemoteSharingStore? = nil,
+        persistsPairedClients: Bool = true
+    ) {
         self.engine = engine
         self.sessions = sessions
+        self.sharing = sharing ?? RemoteSharingStore()
+        self.persistsPairedClients = persistsPairedClients
+        self.tokens = persistsPairedClients ? RemotePairedClientStore.load() : [:]
     }
 
     var isRunning: Bool { server != nil }
@@ -176,7 +190,6 @@ final class RemoteSessionHost {
         await server?.stop()
         server = nil
         boundPort = nil
-        tokens.removeAll()
         networkHost = nil
         networkKind = nil
         pairFailuresByAddress.removeAll()
@@ -198,6 +211,7 @@ final class RemoteSessionHost {
 
     func revokeAllClients() {
         tokens.removeAll()
+        persistPairedClients()
         rotatePairingCode()
     }
 
@@ -246,6 +260,61 @@ final class RemoteSessionHost {
                 ])
             }
             return .response(json(["models": .array(models)]))
+        case ("GET", "/api/clipboard"):
+            guard authorized(request) else { return unauthorized() }
+            guard clipboardSharingAllowedHandler?() ?? false else {
+                return sharingPermissionDenied("Clipboard sharing")
+            }
+            return .response(json([
+                "text": .string(sharing.clipboardText()),
+                "updatedAt": .number(Date().timeIntervalSince1970),
+            ]))
+        case ("PUT", "/api/clipboard"):
+            guard authorized(request) else { return unauthorized() }
+            guard clipboardSharingAllowedHandler?() ?? false else {
+                return sharingPermissionDenied("Clipboard sharing")
+            }
+            guard let text = request.bodyJSON?.objectValue?["text"]?.stringValue,
+                  text.count <= Self.maxClipboardCharacters else {
+                return .response(json(["error": .string("Clipboard text must be under 200,000 characters.")], status: 400))
+            }
+            sharing.setClipboardText(text)
+            return .response(json(["accepted": .bool(true)]))
+        case ("GET", "/api/files"):
+            guard authorized(request) else { return unauthorized() }
+            guard fileSharingAllowedHandler?() ?? false else {
+                return sharingPermissionDenied("File transfer")
+            }
+            do {
+                let files = try sharing.files().map { file in
+                    LFJSONValue.object([
+                        "name": .string(file.name),
+                        "size": .number(Double(file.size)),
+                        "modifiedAt": .number(file.modifiedAt.timeIntervalSince1970),
+                    ])
+                }
+                return .response(json(["files": .array(files)]))
+            } catch {
+                return .response(json(["error": .string("The Mac could not open its BeetCode Remote Downloads folder.")], status: 500))
+            }
+        case ("POST", "/api/files"):
+            guard authorized(request) else { return unauthorized() }
+            guard fileSharingAllowedHandler?() ?? false else {
+                return sharingPermissionDenied("File transfer")
+            }
+            guard let rawName = request.query["name"], !rawName.isEmpty else {
+                return .response(json(["error": .string("A file name is required.")], status: 400))
+            }
+            do {
+                let file = try sharing.save(request.body, suggestedName: rawName)
+                return .response(json([
+                    "accepted": .bool(true),
+                    "name": .string(file.name),
+                    "size": .number(Double(file.size)),
+                ], status: 201))
+            } catch {
+                return .response(json(["error": .string(error.localizedDescription)], status: 400))
+            }
         case ("POST", "/api/sessions"):
             guard authorized(request) else { return unauthorized() }
             guard let modelID = request.bodyJSON?.objectValue?["modelID"]?.stringValue,
@@ -264,11 +333,24 @@ final class RemoteSessionHost {
             guard authorized(request) else { return unauthorized() }
             guard let digest = tokenDigest(from: request) else { return unauthorized() }
             tokens.removeValue(forKey: digest)
+            persistPairedClients()
             return .response(json(["ok": .bool(true), "revoked": .bool(true)]))
         default:
             guard authorized(request) else { return unauthorized() }
+            if request.method == "GET", request.path.hasPrefix("/api/files/") {
+                guard fileSharingAllowedHandler?() ?? false else {
+                    return sharingPermissionDenied("File transfer")
+                }
+                return .response(sharedFileResponse(request))
+            }
             return sessionRoute(request)
         }
+    }
+
+    private func sharingPermissionDenied(_ capability: String) -> LocalAPIServer.RouteResult {
+        .response(json([
+            "error": .string("\(capability) is off on this Mac. Enable it in Remote Sessions."),
+        ], status: 403))
     }
 
     private func pair(_ request: LocalAPIServer.Request) -> LocalAPIServer.RouteResult {
@@ -297,6 +379,7 @@ final class RemoteSessionHost {
             tokens.removeValue(forKey: oldest)
         }
         tokens[Self.tokenDigest(token)] = tokenExpiresAt
+        persistPairedClients()
         // Pairing codes are approvals, not reusable passwords.
         rotatePairingCode()
         return .response(json([
@@ -528,7 +611,41 @@ final class RemoteSessionHost {
 
     private func pruneExpiredTokens() {
         let now = Date()
-        tokens = tokens.filter { $0.value > now }
+        let next = tokens.filter { $0.value > now }
+        guard next.count != tokens.count else { return }
+        tokens = next
+        persistPairedClients()
+    }
+
+    private func persistPairedClients() {
+        guard persistsPairedClients else { return }
+        RemotePairedClientStore.save(tokens)
+    }
+
+    private func sharedFileResponse(_ request: LocalAPIServer.Request) -> LocalAPIServer.Response {
+        let prefix = "/api/files/"
+        let encodedName = String(request.path.dropFirst(prefix.count))
+        guard !encodedName.isEmpty else {
+            return json(["error": .string("A shared file name is required.")], status: 400)
+        }
+        do {
+            let result = try sharing.data(for: encodedName.removingPercentEncoding ?? encodedName)
+            return LocalAPIServer.Response(
+                status: 200,
+                contentType: result.contentType,
+                body: result.data,
+                headers: Self.securityHeaders + [
+                    ("Content-Disposition", "attachment; filename=\"\(Self.safeHeaderFileName(result.file.name))\""),
+                ])
+        } catch {
+            return json(["error": .string(error.localizedDescription)], status: 404)
+        }
+    }
+
+    private static func safeHeaderFileName(_ name: String) -> String {
+        name.replacingOccurrences(of: "\"", with: "_")
+            .replacingOccurrences(of: "\r", with: "_")
+            .replacingOccurrences(of: "\n", with: "_")
     }
 
     private func unauthorized() -> LocalAPIServer.RouteResult {
@@ -797,5 +914,48 @@ enum RemoteNetworkEndpointDiscovery {
         guard parts.count == 4, parts.allSatisfy({ (0...255).contains($0) }) else { return false }
         if parts[0] == 10 || parts[0] == 192 && parts[1] == 168 { return true }
         return parts[0] == 172 && (16...31).contains(parts[1])
+    }
+}
+
+/// Stores only SHA-256 token digests and expiry dates. The bearer token stays
+/// on the paired device, while the Mac can still recognize it after the host
+/// is restarted. Revoking paired devices removes this record immediately.
+private enum RemotePairedClientStore {
+    private static let service = "com.beetcode.remote.host"
+    private static let account = "paired-client-digests"
+
+    static func load() -> [String: Date] {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data,
+              let values = try? JSONDecoder().decode([String: Double].self, from: data) else { return [:] }
+        let now = Date()
+        return values.reduce(into: [:]) { result, item in
+            let expiration = Date(timeIntervalSince1970: item.value)
+            if expiration > now { result[item.key] = expiration }
+        }
+    }
+
+    static func save(_ tokens: [String: Date]) {
+        let values = tokens.mapValues(\.timeIntervalSince1970)
+        guard let data = try? JSONEncoder().encode(values) else { return }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+        SecItemDelete(query as CFDictionary)
+        guard !tokens.isEmpty else { return }
+        var insert = query
+        insert[kSecValueData as String] = data
+        insert[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        SecItemAdd(insert as CFDictionary, nil)
     }
 }
