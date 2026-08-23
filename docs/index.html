@@ -22,6 +22,7 @@
       --accent-strong: #5e1630;
       --accent-soft: #f9e8ee;
       --accent-ink: #7a1f3d;
+      --promo-bg: #7a1f3d;
       --success: #1a7f37;
       --shadow: 0 12px 30px rgba(31, 35, 40, .10);
       --radius: 10px;
@@ -42,6 +43,7 @@
       --accent-strong: #f08caf;
       --accent-soft: #351522;
       --accent-ink: #ffb3ca;
+      --promo-bg: #7a1f3d;
       --success: #3fb950;
       --shadow: 0 18px 42px rgba(0, 0, 0, .32);
     }
@@ -118,6 +120,27 @@
     .preview-shell img { width: 100%; border-radius: 8px; }
     .preview-caption { display: flex; justify-content: space-between; gap: 12px; padding: 10px 5px 2px; color: var(--subtle); font-size: 12px; }
 
+    .promo-section {
+      padding: 72px 0 78px;
+      background: var(--promo-bg);
+      color: #fff;
+      border-top: 1px solid rgba(255, 255, 255, .16);
+      border-bottom: 1px solid rgba(255, 255, 255, .16);
+    }
+    .promo-heading { display: flex; align-items: end; justify-content: space-between; gap: 28px; margin-bottom: 28px; }
+    .promo-kicker { margin-bottom: 10px; color: #f08caf; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .promo-heading h2 { margin-bottom: 8px; color: #fff; }
+    .promo-intro { max-width: 680px; margin-bottom: 0; color: rgba(255, 255, 255, .76); }
+    .promo-meta { padding-bottom: 4px; color: rgba(255, 255, 255, .64); font: 700 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .07em; text-align: right; white-space: nowrap; }
+    .promo-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+    .promo-card { margin: 0; padding: 8px; overflow: hidden; border: 1px solid rgba(255, 255, 255, .2); border-radius: 14px; background: rgba(42, 5, 20, .2); box-shadow: 0 18px 45px rgba(42, 5, 20, .22); }
+    .promo-image-link { display: block; overflow: hidden; border-radius: 8px; background: var(--promo-bg); }
+    .promo-card img { width: 100%; height: auto; border-radius: 8px; transition: transform .2s ease; }
+    .promo-image-link:hover img { transform: scale(1.015); }
+    .promo-card figcaption { display: flex; align-items: start; justify-content: space-between; gap: 14px; padding: 14px 8px 8px; }
+    .promo-card figcaption strong { color: #fff; font-size: 15px; }
+    .promo-card figcaption span { color: rgba(255, 255, 255, .62); font-size: 11px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+
     .section { padding: 72px 0; border-top: 1px solid var(--border); }
     .section-heading { display: flex; justify-content: space-between; align-items: end; gap: 28px; margin-bottom: 28px; }
     h2 { margin-bottom: 6px; font-size: 30px; line-height: 1.2; letter-spacing: -.025em; }
@@ -176,6 +199,9 @@
       .hero-grid, .split { grid-template-columns: 1fr; gap: 34px; }
       .feature-grid { grid-template-columns: 1fr; }
       .view-grid { grid-template-columns: 1fr; }
+      .promo-heading { align-items: start; flex-direction: column; gap: 14px; }
+      .promo-meta { padding-bottom: 0; text-align: left; }
+      .promo-grid { grid-template-columns: 1fr; }
     }
     @media (max-width: 560px) {
       .wrap { width: min(var(--max), calc(100% - 28px)); }
@@ -184,6 +210,7 @@
       h1 { font-size: 42px; }
       .hero-copy { font-size: 16px; }
       .preview-grid { grid-template-columns: 1fr; }
+      .promo-section { padding: 50px 0 56px; }
       .section { padding: 50px 0; }
       .section-heading, .footer-row { align-items: start; flex-direction: column; }
       .specs th, .specs td { display: block; width: 100%; padding: 10px 13px; }
@@ -200,6 +227,7 @@
         <span>Beet Code</span>
       </a>
       <nav class="nav-links" aria-label="Primary navigation">
+        <a href="#story">Story</a>
         <a href="#features">Features</a>
         <a href="#previews">Screens</a>
         <a href="#specs">Details</a>
@@ -227,7 +255,7 @@
           <p class="hero-copy">Chat without a project, or open a folder for the complete coding workflow, using local models, ChatGPT account access, or your own API keys.</p>
           <div class="hero-actions">
             <a class="button primary" href="https://github.com/Mesutcydev/beet-code/releases/download/v0.10.4/BeetCode-0.10.4.zip">Download for Mac</a>
-            <a class="button subtle" href="https://github.com/Mesutcydev/beet-code/releases/download/ios-v0.1.5/BeetCode-Remote-iOS-0.1.5-build-6-unsigned.ipa">iPhone Remote IPA</a>
+          <a class="button subtle" href="https://github.com/Mesutcydev/beet-code/releases/download/ios-v0.1.6/BeetCode-Remote-iOS-0.1.6-build-19-unsigned.ipa">iPhone Remote IPA</a>
             <a class="button subtle" href="https://github.com/Mesutcydev/beet-code">View on GitHub</a>
           </div>
           <div class="hero-note">Apple Silicon · macOS 15+ · SwiftUI · MLX and remote providers</div>
@@ -236,6 +264,33 @@
           <img src="previews/homepage.jpg" alt="Beet Code homepage with chats, model composer, and Beet Red theme">
           <figcaption class="preview-caption"><span>App preview</span><span class="mono">Beet Red</span></figcaption>
         </figure>
+      </div>
+    </section>
+
+    <section class="promo-section" id="story" aria-labelledby="story-title">
+      <div class="wrap">
+        <div class="promo-heading">
+          <div>
+            <div class="promo-kicker">Built for the full loop</div>
+            <h2 id="story-title">From local inference to remote pairing.</h2>
+            <p class="promo-intro">A closer look at the capabilities behind Beet Code — and the companion experience that keeps your Mac within reach.</p>
+          </div>
+          <div class="promo-meta">LOCAL FIRST · REMOTE READY</div>
+        </div>
+        <div class="promo-grid">
+          <figure class="promo-card">
+            <a class="promo-image-link" href="previews/beetcode-features.png">
+              <img src="previews/beetcode-features.png" alt="Beet Code feature matrix showing local inference, remote providers, agent tools, safety, build, and connected workflows" loading="lazy">
+            </a>
+            <figcaption><span>Capability map</span><strong>One workspace, end to end.</strong></figcaption>
+          </figure>
+          <figure class="promo-card">
+            <a class="promo-image-link" href="previews/beetcode-remote.png">
+              <img src="previews/beetcode-remote.png" alt="Beet Code Remote promo showing iPhone pairing and a live browser view" loading="lazy">
+            </a>
+            <figcaption><span>Beet Code Remote</span><strong>Your Mac, in your pocket.</strong></figcaption>
+          </figure>
+        </div>
       </div>
     </section>
 
@@ -356,7 +411,7 @@
           <h3>Ready to try it?</h3>
           <p>Download Beet Code and start a chat, with or without a project.</p>
           <a class="button primary" href="https://github.com/Mesutcydev/beet-code/releases/download/v0.10.4/BeetCode-0.10.4.zip">Download Beet Code</a>
-          <a class="button subtle" href="https://github.com/Mesutcydev/beet-code/releases/download/ios-v0.1.5/BeetCode-Remote-iOS-0.1.5-build-6-unsigned.ipa">Download iPhone Remote</a>
+          <a class="button subtle" href="https://github.com/Mesutcydev/beet-code/releases/download/ios-v0.1.6/BeetCode-Remote-iOS-0.1.6-build-19-unsigned.ipa">Download iPhone Remote</a>
         </div>
         <div class="callout">
           <h3>Open source</h3>

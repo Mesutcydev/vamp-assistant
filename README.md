@@ -36,7 +36,7 @@ The [GitHub Pages site](https://mesutcydev.github.io/beet-code/) has the full pr
 
 The repository includes a native SwiftUI companion app that connects to the Mac app's existing private Remote Sessions endpoint. It supports camera QR pairing, one-tap reconnection, secure token storage, session browsing, new local/API sessions, live responses, prompts, stop controls, approvals/questions, and permission-gated clipboard and file exchange.
 
-[Download the latest unsigned iPhone/iPad IPA](https://github.com/Mesutcydev/beet-code/releases/download/ios-v0.1.5/BeetCode-Remote-iOS-0.1.5-build-6-unsigned.ipa)
+[Download the latest unsigned iPhone/iPad IPA](https://github.com/Mesutcydev/beet-code/releases/download/ios-v0.1.6/BeetCode-Remote-iOS-0.1.6-build-19-unsigned.ipa)
 
 Build an unsigned sideloadable IPA:
 
