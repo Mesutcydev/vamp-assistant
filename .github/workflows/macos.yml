@@ -27,6 +27,9 @@ jobs:
       - name: Check formatting hygiene
         run: git diff --check
 
+      # macOS UI tests require an interactive WindowServer session and can hang on
+      # GitHub's headless hosted runners. Keep CI deterministic here; UI flows are
+      # exercised on a real signed build before release.
       - name: Build and test
         run: >-
           xcodebuild
@@ -37,4 +40,5 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
           CODE_SIGNING_REQUIRED=NO
           ONLY_ACTIVE_ARCH=YES
+          -only-testing:BeetCodeTests
           test
