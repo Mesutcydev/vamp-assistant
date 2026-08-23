@@ -16,6 +16,16 @@ final class RemoteStore {
     private var pollingTask: Task<Void, Never>?
 
     init() {
+#if DEBUG
+        let environment = ProcessInfo.processInfo.environment
+        if let address = environment["BEETCODE_REMOTE_TEST_URL"],
+           let url = URL(string: address),
+           let testToken = environment["BEETCODE_REMOTE_TEST_TOKEN"] {
+            baseURL = url
+            token = testToken
+            return
+        }
+#endif
         token = RemoteTokenStore.load()
         if let saved = UserDefaults.standard.string(forKey: "remoteBaseURL"),
            let url = URL(string: saved) {
@@ -63,15 +73,22 @@ final class RemoteStore {
         let (nextStatus, nextList) = try await (status, list)
         sessions = nextList.sessions
         connectionLabel = nextStatus.isRunning ? nextStatus.phase.capitalized : "Connected"
-        if let id = selectedSession?.id ?? sessions.first?.id {
+        if let id = selectedSession?.id,
+           sessions.contains(where: { $0.id == id }) {
             selectedSession = try await client.session(id)
+        } else if selectedSession != nil {
+            selectedSession = nil
         }
         errorMessage = nil
     }
 
     func select(_ session: RemoteSessionSummary) async {
+        await select(sessionID: session.id)
+    }
+
+    func select(sessionID: UUID) async {
         guard let client else { return }
-        do { selectedSession = try await client.session(session.id) }
+        do { selectedSession = try await client.session(sessionID) }
         catch { errorMessage = error.localizedDescription }
     }
 
