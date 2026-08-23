@@ -219,6 +219,9 @@ final class RemoteSessionTests: XCTestCase {
         SessionStore.shared.invalidateCache()
 
         let host = RemoteSessionHost(engine: engine, sessions: controller)
+        // A locked/unavailable encrypted queue must not turn a successfully
+        // paired idle remote session into a read-only surface.
+        host.enqueueTaskHandler = { _, _ in nil }
         addTeardownBlock {
             await host.stop()
         }
@@ -289,6 +292,8 @@ final class RemoteSessionTests: XCTestCase {
             token: token,
             body: Data("{\"message\":\"Continue from the phone\"}".utf8))
         XCTAssertEqual(continuation.status, 202)
+        XCTAssertEqual(continuation.json.objectValue?["queued"]?.boolValue, false)
+        XCTAssertEqual(continuation.json.objectValue?["fallback"]?.boolValue, true)
 
         let inFlightDetail = try await request(baseURL, path: "/api/sessions/\(sessionID.uuidString)", token: token)
         XCTAssertEqual(inFlightDetail.status, 200)

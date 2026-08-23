@@ -274,15 +274,8 @@ struct ChatView: View {
                 .frame(maxWidth: 420)
                 .padding(.top, 9)
 
-            if controller.workspaceURL == nil {
-                Button {
-                    NotificationCenter.default.post(name: .openWorkspace, object: nil)
-                } label: {
-                    Label("Open Project Folder", systemImage: "folder.badge.plus")
-                }
-                .buttonStyle(LFCapsuleButtonStyle())
-                .padding(.top, 16)
-            }
+            homeActions
+                .padding(.top, 18)
 
             ComposerView(store: composerStore, placement: .home)
                 .environmentObject(controller)
@@ -318,6 +311,74 @@ struct ChatView: View {
                 }
             }
         }
+    }
+
+    private var homeActions: some View {
+        HStack(spacing: 10) {
+            Button {
+                NotificationCenter.default.post(name: .openRemoteAccess, object: nil)
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "antenna.radiowaves.left.and.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 30, height: 30)
+                        .background(.white.opacity(0.14), in: Circle())
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Remote Sessions")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("Connect from another device")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.72))
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 10.5, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.78))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .frame(height: 48)
+                .frame(maxWidth: controller.workspaceURL == nil ? 250 : 300)
+                .background(Theme.accentGradient,
+                            in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .strokeBorder(.white.opacity(0.14), lineWidth: 0.75))
+                .shadow(color: Theme.accent.opacity(0.18), radius: 8, y: 3)
+                .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .lfHoverLift()
+            .help("Open Remote Sessions")
+
+            if controller.workspaceURL == nil {
+                Button {
+                    NotificationCenter.default.post(name: .openWorkspace, object: nil)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "folder.badge.plus")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("Open Project")
+                            .font(.system(size: 12.5, weight: .semibold))
+                    }
+                    .foregroundStyle(Theme.textSecondary)
+                    .padding(.horizontal, 15)
+                    .frame(height: 48)
+                    .background(Theme.surfaceInset.opacity(0.64),
+                                in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .strokeBorder(Theme.hairline.opacity(0.46), lineWidth: 0.75))
+                    .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .lfHoverLift()
+                .help("Open a project folder for coding tools")
+            }
+        }
+        .frame(maxWidth: 460)
     }
 
     private var homeHeadline: LocalizedStringKey {

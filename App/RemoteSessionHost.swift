@@ -299,14 +299,32 @@ final class RemoteSessionHost {
                 return .response(json(["error": .string("Session not found.")], status: 404))
             }
             if let enqueueTaskHandler {
-                guard let task = enqueueTaskHandler(record.id, message) else {
-                    return .response(json(["error": .string("The task could not be queued. Check the workspace and queue capacity.")], status: 409))
+                if let task = enqueueTaskHandler(record.id, message) {
+                    return .response(json([
+                        "accepted": .bool(true),
+                        "queued": .bool(true),
+                        "taskID": .string(task.id.uuidString),
+                        "state": .string(task.state.rawValue),
+                        "sessionID": .string(record.id.uuidString),
+                    ], status: 202))
+                }
+
+                // Queue persistence can be temporarily unavailable when the
+                // user's Keychain is locked or needs approval. Pairing and
+                // transcript reads do not use that store, so rejecting here
+                // made the remote surface look connected but unable to send.
+                // An idle session can safely continue directly; only an
+                // already-busy agent still requires the durable queue.
+                guard !sessions.isRunning else {
+                    return .response(json(["error": .string("Beet Code is already working and the task queue is unavailable. Try again when the current task finishes.")], status: 409))
+                }
+                guard sessions.continuePersistedSession(id: record.id, message: message) else {
+                    return .response(json(["error": .string("That session could not be resumed. Check that its workspace and model are available.")], status: 409))
                 }
                 return .response(json([
                     "accepted": .bool(true),
-                    "queued": .bool(true),
-                    "taskID": .string(task.id.uuidString),
-                    "state": .string(task.state.rawValue),
+                    "queued": .bool(false),
+                    "fallback": .bool(true),
                     "sessionID": .string(record.id.uuidString),
                 ], status: 202))
             }
