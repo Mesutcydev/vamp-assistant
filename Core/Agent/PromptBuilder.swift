@@ -24,6 +24,7 @@ enum PromptBuilder {
     ) -> String {
         if chatOnly {
             return chatOnlyPrompt(
+                tools: tools.filter { isChatOnlyTool($0.name) },
                 outputStyle: outputStyle,
                 contextWindowTokens: contextWindowTokens,
                 responseReserveTokens: responseReserveTokens)
@@ -115,6 +116,18 @@ enum PromptBuilder {
         - Keep each tool call small enough to finish valid JSON. For a large new \
         file, use `apply_patch` with an empty SEARCH block to create the first \
         chunk, then append focused chunks in later calls.
+        - Commands run without an interactive terminal. Never start `sudo` or an \
+        installer that waits for a password. Check `/usr/local/bin` and \
+        `/opt/homebrew/bin` before concluding a tool is missing; if administrator \
+        authorization is genuinely required, report the blocker instead of \
+        claiming completion.
+        - For a GitHub repository install request, do the complete workflow: \
+        validate the URL, clone it into the workspace (or use the existing checkout), \
+        read its README and package metadata, run the documented non-interactive \
+        install/build command after approval, and verify the resulting command or \
+        app. Do not stop after opening the repository or merely describe the steps. \
+        If the README asks for a password, sudo, or interactive prompt, stop at that \
+        exact blocker and explain it clearly.
         - When the task is fully complete, call `attempt_completion` with a short \
         summary of what changed.
         - If you need information only the user can provide, call `ask_user`.
@@ -198,24 +211,66 @@ enum PromptBuilder {
         return fitPrompt(sections, maxCharacters: promptBudget)
     }
 
-    /// A project-free conversation has no workspace context or callable
-    /// tools. Keep that boundary explicit in the prompt so the model answers
-    /// directly instead of inventing file access, command output, or edits.
+    /// Chat-only can still operate app-owned browser and opt-in computer-use
+    /// surfaces. Project, file, command, memory, MCP, and hook capabilities
+    /// remain unavailable because there is no workspace confinement boundary.
+    static func isChatOnlyTool(_ name: String) -> Bool {
+        name.hasPrefix("browser_") || name.hasPrefix("computer_")
+            || name == "tailscale_status" || name == "disk_space_status"
+            || name == "mac_system_status"
+    }
+
     private static func chatOnlyPrompt(
+        tools: [any AgentTool],
         outputStyle: ProjectPolicy.OutputStyle,
         contextWindowTokens: Int?,
         responseReserveTokens: Int
     ) -> String {
-        let sections = [
+        var sections = [
             """
             You are Beet Code in chat-only mode. Have a helpful, direct
-            conversation with the user. No project folder is connected and no
-            tools are available. Do not claim to inspect files, run commands,
-            change code, browse, or perform actions. If the user asks for
+            conversation with the user. No project folder is connected. You
+            cannot inspect or change project files, run shell commands, use
+            project memory, or claim workspace access. If the user asks for
             project work, explain that they need to open a project folder.
             """,
             outputStylePrompt(outputStyle),
         ]
+        if tools.isEmpty {
+            sections.append("No tools are available in this chat.")
+        } else {
+            if let guidance = capabilityGuidance(tools: tools) {
+                sections.append(guidance)
+            }
+            sections.append("""
+                # Tool protocol
+
+                To call an available tool, emit exactly one fenced block:
+
+                ```tool
+                {"name": "<tool>", "arguments": { … }}
+                ```
+
+                Use one tool per reply. After any browser or computer action,
+                observe the result again before claiming success. Only the
+                tools listed below are available in chat-only mode.
+                """)
+            if tools.contains(where: { $0.name == "disk_space_status" }) {
+                sections.append("""
+                    # Direct Mac status checks
+
+                    For disk/free-space questions call `disk_space_status`.
+                    For Tailscale state call `tailscale_status`. For macOS,
+                    installed memory, processors, uptime, or thermal state call
+                    `mac_system_status`. Never use `computer_status`, System
+                    Settings, screenshots, or UI navigation for these facts.
+                    """)
+            }
+            let toolDocs = tools.sorted(by: { $0.name < $1.name }).map {
+                "## \($0.name) — \($0.summary)\n\($0.schemaText)"
+            }
+            sections.append("# Tool argument schemas\n\n" + toolDocs.joined(separator: "\n\n"))
+        }
         let prompt = sections.joined(separator: "\n\n")
         guard let contextWindowTokens else { return prompt }
         let promptBudget = max(
@@ -347,7 +402,7 @@ enum PromptBuilder {
         add("In-app browser",
             tools: ["browser_navigate", "browser_read", "browser_click", "browser_type", "browser_eval", "browser_screenshot"],
             guidance: names.contains("browser_navigate") && names.contains("browser_read")
-                ? "For web UI, navigate → observe → act → re-observe; after changes, verify the rendered page rather than trusting code alone."
+                ? "For web UI, navigate → browser_read what=elements → act with a fresh ref. Actions capture a bounded fresh observation by default; never reuse a ref after it changes."
                 : "Use only the listed browser operations and observe again after any interaction.")
         add("Built-in iOS Simulator",
             tools: ["sim_build_run", "sim_list_devices", "sim_boot_device", "sim_launch_app", "sim_tap", "sim_swipe", "sim_type", "sim_describe", "sim_screenshot"],
@@ -357,8 +412,8 @@ enum PromptBuilder {
         add("Mac computer control",
             tools: ["computer_status", "computer_ui_tree", "computer_screenshot", "computer_click", "computer_type", "computer_key", "computer_scroll"],
             guidance: names.contains("computer_status")
-                ? "Always observe → act → re-observe. Check permissions first with `computer_status`; coordinates go stale after UI changes."
-                : "Always observe → act → re-observe; coordinates go stale after UI changes.")
+                ? "Check permissions first, then observe with `computer_ui_tree` and prefer its fresh refs for clicks, typing, and scrolling. `computer_screenshot` automatically inspects pixels with an installed local SmolVLM sidecar. Actions capture a new bounded tree by default, invalidating older refs."
+                : "Always observe → act → re-observe; prefer fresh element refs because coordinates and old refs go stale after UI changes.")
         add("Vision",
             tools: ["describe_image"],
             guidance: "Use for screenshots and visual assets when pixel appearance matters.")
@@ -807,8 +862,13 @@ enum ToolRouter {
 
     static func select(
         from tools: [any AgentTool],
-        for task: String
+        for task: String,
+        preserveFullRegistry: Bool = false
     ) -> [any AgentTool] {
+        // Chat-only already has a deliberately tiny, permission-filtered
+        // registry. Keep both browser and computer families available so a
+        // mixed control request cannot be narrowed to only one family.
+        if preserveFullRegistry { return tools }
         let trimmed = task.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !tools.isEmpty else { return tools }
 
@@ -996,7 +1056,8 @@ enum ToolRouter {
         "browser_type", "browser_eval", "computer_status", "computer_ui_tree",
         "computer_screenshot", "computer_click", "computer_type", "computer_key",
         "computer_scroll", "task", "memory_add", "memory_delete", "ask_user",
-        "attempt_completion",
+        "attempt_completion", "tailscale_status", "disk_space_status",
+        "mac_system_status",
     ]
 
     private static let mutationWords: Set<String> = [

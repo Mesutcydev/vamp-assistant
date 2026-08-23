@@ -109,7 +109,7 @@ enum AgentMode: String, CaseIterable, Codable, Identifiable, Sendable {
 
     var help: String {
         switch self {
-        case .auto: "Run the task directly while keeping normal approval gates."
+        case .auto: "Run the task directly without approval interruptions."
         case .goal: "Make a plan first, then continue through the goal until it is complete."
         }
     }
@@ -212,7 +212,7 @@ final class SettingsStore: ObservableObject {
             DefaultsKeys.apiServerEnabled: false,
             DefaultsKeys.apiServerPort: 1234,
             DefaultsKeys.remoteSessionEnabled: false,
-            DefaultsKeys.remoteSessionPort: 9475,
+            DefaultsKeys.remoteSessionPort: RemoteSessionPorts.defaultPort,
             DefaultsKeys.remoteSessionAllowLAN: false,
             DefaultsKeys.remoteAccessConsentCompleted: false,
             DefaultsKeys.remoteClipboardSharingEnabled: false,
@@ -246,6 +246,16 @@ final class SettingsStore: ObservableObject {
                 defaults.set(AppAppearance.dark.rawValue, forKey: DefaultsKeys.appearance)
             }
             defaults.set(true, forKey: DefaultsKeys.appearanceDefaultMigration)
+        }
+
+        // Vamp Host owns 9471–9473 and 9475. Existing Beet installs that
+        // inherited 9475 would fail to start Remote Sessions beside Vamp.
+        if defaults.object(forKey: DefaultsKeys.remoteSessionPortVampMigration) == nil {
+            let stored = defaults.object(forKey: DefaultsKeys.remoteSessionPort) as? Int
+            if stored == nil || RemoteSessionPorts.reservedForeignPorts.contains(stored ?? 0) {
+                defaults.set(RemoteSessionPorts.defaultPort, forKey: DefaultsKeys.remoteSessionPort)
+            }
+            defaults.set(true, forKey: DefaultsKeys.remoteSessionPortVampMigration)
         }
     }
 
@@ -299,6 +309,17 @@ final class SettingsStore: ObservableObject {
         get { defaults.bool(forKey: DefaultsKeys.autoApproveCommands) }
         set {
             defaults.set(newValue, forKey: DefaultsKeys.autoApproveCommands)
+            objectWillChange.send()
+        }
+    }
+
+    /// Explicit remote-session authority. Unlike the safe-command preference,
+    /// this is the user's deliberate “Full Access” choice for remote runs.
+    /// Workspace confinement and hard imported denies still apply.
+    var remoteFullAccessEnabled: Bool {
+        get { defaults.bool(forKey: DefaultsKeys.remoteFullAccessEnabled) }
+        set {
+            defaults.set(newValue, forKey: DefaultsKeys.remoteFullAccessEnabled)
             objectWillChange.send()
         }
     }
@@ -474,11 +495,11 @@ final class SettingsStore: ObservableObject {
     var remoteSessionPort: Int {
         get {
             let value = defaults.integer(forKey: DefaultsKeys.remoteSessionPort)
-            return value == 0 ? 9475 : value
+            return RemoteSessionPorts.resolved(value)
         }
         set {
             let clamped = min(max(newValue, 1024), 65_535)
-            defaults.set(clamped, forKey: DefaultsKeys.remoteSessionPort)
+            defaults.set(RemoteSessionPorts.resolved(clamped), forKey: DefaultsKeys.remoteSessionPort)
             objectWillChange.send()
         }
     }
@@ -637,6 +658,7 @@ final class SettingsStore: ObservableObject {
     private enum DefaultsKeys {
         static let autoApproveEdits = "autoApproveEdits"
         static let autoApproveCommands = "autoApproveCommands"
+        static let remoteFullAccessEnabled = "remoteFullAccessEnabled"
         static let maxTurns = "maxTurns"
         static let maxTokensPerTurn = "maxTokensPerTurn"
         static let temperature = "temperature"
@@ -659,6 +681,7 @@ final class SettingsStore: ObservableObject {
         static let apiServerToken = "apiServerToken"
         static let remoteSessionEnabled = "remoteSessionEnabled"
         static let remoteSessionPort = "remoteSessionPort"
+        static let remoteSessionPortVampMigration = "remoteSessionPortVampMigration.v1"
         static let remoteSessionAllowLAN = "remoteSessionAllowLAN"
         static let remoteAccessConsentCompleted = "remoteAccessConsentCompleted.v1"
         static let remoteClipboardSharingEnabled = "remoteClipboardSharingEnabled"

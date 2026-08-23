@@ -112,6 +112,39 @@ final class PromptCapabilityGuidanceTests: XCTestCase {
         XCTAssertTrue(names.contains("computer_ui_tree"))
         XCTAssertTrue(names.contains("computer_click"))
         XCTAssertTrue(names.contains("sim_build_run"))
+
+        let chatOnlyNames = Set(
+            AgentSessionController.sessionTools(
+                computerControlEnabled: true,
+                chatOnly: true).map(\.name))
+        XCTAssertTrue(chatOnlyNames.contains("computer_ui_tree"))
+        XCTAssertTrue(chatOnlyNames.contains("browser_navigate"))
+        XCTAssertTrue(chatOnlyNames.contains("tailscale_status"))
+        XCTAssertTrue(chatOnlyNames.contains("disk_space_status"))
+        XCTAssertTrue(chatOnlyNames.contains("mac_system_status"))
+        XCTAssertFalse(chatOnlyNames.contains("read_file"))
+        XCTAssertFalse(chatOnlyNames.contains("run_command"))
+    }
+
+    func testDedicatedStatusToolsSurviveChatOnlyFiltering() {
+        XCTAssertTrue(PromptBuilder.isChatOnlyTool("tailscale_status"))
+        XCTAssertTrue(PromptBuilder.isChatOnlyTool("disk_space_status"))
+        XCTAssertTrue(PromptBuilder.isChatOnlyTool("mac_system_status"))
+        XCTAssertFalse(PromptBuilder.isChatOnlyTool("run_command"))
+    }
+
+    func testChatOnlyPromptPrefersDirectStatusToolsOverComputerUI() {
+        let text = PromptBuilder.systemPrompt(
+            tools: [
+                StubTool(name: "disk_space_status"),
+                StubTool(name: "tailscale_status"),
+                StubTool(name: "mac_system_status"),
+                StubTool(name: "computer_status"),
+            ],
+            workspace: Workspace(root: tempRoot),
+            chatOnly: true)
+        XCTAssertTrue(text.contains("Never use `computer_status`"))
+        XCTAssertTrue(text.contains("For disk/free-space questions call `disk_space_status`"))
     }
 
     func testAppBuildGuidanceAppearsWithScaffoldTools() {
@@ -243,6 +276,23 @@ final class PromptCapabilityGuidanceTests: XCTestCase {
         XCTAssertTrue(text.contains("each item on its own bullet"))
     }
 
+    func testChatOnlyPromptAllowsOnlyBrowserAndComputerTools() {
+        let text = PromptBuilder.systemPrompt(
+            tools: [
+                StubTool(name: "read_file"),
+                StubTool(name: "browser_navigate"),
+                StubTool(name: "computer_status"),
+            ],
+            workspace: Workspace(root: tempRoot),
+            chatOnly: true)
+
+        XCTAssertTrue(text.contains("browser_navigate"))
+        XCTAssertTrue(text.contains("computer_status"))
+        XCTAssertTrue(text.contains("# Tool protocol"))
+        XCTAssertFalse(text.contains("read_file"))
+        XCTAssertFalse(text.contains(tempRoot.path))
+    }
+
     func testToolRouterKeepsCodingRouteCompactAndVerifiable() {
         let tools: [any AgentTool] = [
             StubTool(name: "read_file"), StubTool(name: "list_directory"),
@@ -266,6 +316,22 @@ final class PromptCapabilityGuidanceTests: XCTestCase {
         XCTAssertFalse(names.contains("sim_build_run"))
         XCTAssertFalse(names.contains("task"))
         XCTAssertLessThan(names.count, tools.count)
+    }
+
+    func testChatOnlyRoutingPreservesBrowserAndComputerTools() {
+        let tools: [any AgentTool] = [
+            StubTool(name: "browser_read"),
+            StubTool(name: "browser_click"),
+            StubTool(name: "computer_status"),
+            StubTool(name: "computer_ui_tree"),
+        ]
+
+        let names = Set(ToolRouter.select(
+            from: tools,
+            for: "Read the browser page and report computer permissions",
+            preserveFullRegistry: true).map(\.name))
+
+        XCTAssertEqual(names, Set(tools.map(\.name)))
     }
 
     func testToolRouterSelectsVisualBrowserSurfaceWithoutSimulator() {

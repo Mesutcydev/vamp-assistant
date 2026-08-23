@@ -19,6 +19,26 @@ struct RemoteSessionEnvelope: Decodable {
 
 struct RemoteModelEnvelope: Decodable { let models: [RemoteStartModelOption] }
 
+struct RemoteBotComputerEnvelope: Decodable { let computers: [RemoteBotComputer]; let capabilities: RemoteBotCapabilities? }
+struct RemoteBotComputer: Decodable, Identifiable, Hashable {
+    let id: UUID
+    let profileID: String
+    let name: String
+    let backend: String
+    let state: String
+    let workspacePath: String
+    let browserProfilePath: String
+    let containerName: String?
+    let updatedAt: Double
+}
+struct RemoteBotCapabilities: Decodable, Hashable {
+    let architecture: String
+    let macOSVersion: String
+    let appleContainerExecutable: String?
+    let appleContainerServiceRunning: Bool
+    let supportsAppleContainers: Bool
+}
+
 struct RemoteClipboardSnapshot: Decodable {
     let text: String
     let updatedAt: Double
@@ -45,6 +65,18 @@ struct RemoteStartModelOption: Decodable, Identifiable, Hashable {
     let name: String
     let source: String
     let detail: String
+    let reasoningEfforts: [String]?
+    let defaultReasoningEffort: String?
+}
+
+extension Array where Element == RemoteStartModelOption {
+    func matching(sessionModelID: String) -> RemoteStartModelOption? {
+        if let exact = first(where: { $0.id == sessionModelID }) { return exact }
+        let short = sessionModelID.hasPrefix("openai-codex:")
+            ? String(sessionModelID.dropFirst("openai-codex:".count))
+            : sessionModelID
+        return first { $0.id.hasSuffix("|" + short) || $0.id == short || $0.name == short }
+    }
 }
 
 struct RemoteSessionSummary: Decodable, Identifiable, Hashable {
@@ -68,6 +100,14 @@ struct RemoteSessionDetail: Decodable, Identifiable {
     let phase: String
     let streamingText: String
     let pending: RemotePendingInteraction?
+    let error: RemoteErrorPresentation?
+    let agentMode: String?
+    let fullAccess: Bool?
+}
+
+struct RemoteErrorPresentation: Decodable {
+    let title: String
+    let message: String
 }
 
 struct RemoteMessage: Decodable, Identifiable {
@@ -91,6 +131,7 @@ struct RemoteAcceptedResponse: Decodable {
     let accepted: Bool
     let queued: Bool?
     let fallback: Bool?
+    let sessionID: UUID?
 }
 
 struct RemoteErrorBody: Decodable {

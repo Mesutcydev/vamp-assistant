@@ -3,8 +3,7 @@ import SwiftUI
 
 // MARK: - Settings window
 
-/// Tabbed, card-based settings. Four native tabs (General / Agent /
-/// Providers / Plugins); every section is a Theme-styled card with an icon
+/// Tabbed, card-based settings. Every section is a Theme-styled card with an icon
 /// header, consistent padding, and a short footer.
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
@@ -13,6 +12,7 @@ struct SettingsView: View {
     enum Tab: String, CaseIterable, Identifiable {
         case general = "General"
         case agent = "Agent"
+        case bots = "Bots"
         case providers = "Providers"
         case plugins = "Plugins"
         var id: String { rawValue }
@@ -21,6 +21,7 @@ struct SettingsView: View {
             switch self {
             case .general: "gearshape"
             case .agent: "cpu"
+            case .bots: "square.stack.3d.up"
             case .providers: "key"
             case .plugins: "puzzlepiece"
             }
@@ -37,6 +38,9 @@ struct SettingsView: View {
             AgentTab()
                 .tabItem { Label("Agent", systemImage: "cpu") }
                 .tag(Tab.agent)
+            BotsTab()
+                .tabItem { Label("Bots", systemImage: "square.stack.3d.up") }
+                .tag(Tab.bots)
             ProvidersTab()
                 .tabItem { Label("Providers", systemImage: "key") }
                 .tag(Tab.providers)

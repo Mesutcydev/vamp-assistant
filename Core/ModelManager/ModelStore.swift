@@ -117,6 +117,7 @@ final class ModelStore: ObservableObject {
     /// Two layouts:
     /// - **MLX**: `config.json` + ≥1 `.safetensors` (the historical layout)
     /// - **GGUF**: ≥1 `.gguf` file (llama.cpp; no config.json in the repo)
+    /// - **Core AI**: `metadata.json` + ≥1 `.aimodel`/`.aimodelc` resource
     /// A leftover `.incomplete` file always means the download never finished.
     func hasConfiguration(_ model: InstalledModel) -> Bool {
         let dir = directory(for: model)
@@ -124,6 +125,7 @@ final class ModelStore: ObservableObject {
             return false
         }
         return Self.isCompleteSnapshot(dirNames: names)
+            || Self.isCompleteCoreAIPack(at: dir)
     }
 
     /// Shared completeness check for `hasConfiguration` and `scanFromDisk` —
@@ -146,8 +148,31 @@ final class ModelStore: ObservableObject {
         })
     }
 
+    /// Core AI bundles commonly nest their resources below a platform or
+    /// quantization directory, so the shallow MLX/GGUF check is insufficient.
+    /// Enumeration is bounded and skips hidden/package descendants.
+    nonisolated static func isCompleteCoreAIPack(at directory: URL) -> Bool {
+        guard let enumerator = FileManager.default.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants])
+        else { return false }
+        var sawMetadata = false
+        var sawAsset = false
+        var visited = 0
+        for case let url as URL in enumerator {
+            visited += 1
+            if visited > 20_000 { return false }
+            let name = url.lastPathComponent.lowercased()
+            if name.hasSuffix(".incomplete") { return false }
+            if name == "metadata.json" { sawMetadata = true }
+            if name.hasSuffix(".aimodel") || name.hasSuffix(".aimodelc") { sawAsset = true }
+            if sawMetadata && sawAsset { return true }
+        }
+        return false
+    }
+
     /// Detects the weights format present on disk for an installed model.
-    /// GGUF directories carry a `.gguf` file; everything else is MLX.
     func detectedFormat(_ model: InstalledModel) -> CatalogModel.Format {
         let dir = directory(for: model)
         guard let names = try? fileManager.contentsOfDirectory(atPath: dir.path) else {
@@ -156,6 +181,7 @@ final class ModelStore: ObservableObject {
         if names.contains(where: { $0.lowercased().hasSuffix(".gguf") }) {
             return .gguf
         }
+        if Self.isCompleteCoreAIPack(at: dir) { return .coreAI }
         return .mlx
     }
 
@@ -224,7 +250,7 @@ final class ModelStore: ObservableObject {
             guard let catalog = ModelCatalog.all.first(where: { $0.id == name }) else { return nil }
             let dir = baseURL.appendingPathComponent(name, isDirectory: true)
             guard let dirNames = try? FileManager.default.contentsOfDirectory(atPath: dir.path),
-                  isCompleteSnapshot(dirNames: dirNames)
+                  (isCompleteSnapshot(dirNames: dirNames) || isCompleteCoreAIPack(at: dir))
             else { return nil }
             let size = (try? sizeOfDirectory(dir)) ?? catalog.diskBytes
             return InstalledModel(

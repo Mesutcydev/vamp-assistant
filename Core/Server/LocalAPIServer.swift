@@ -641,7 +641,10 @@ public actor LocalAPIServer {
                 let written = bytes.withUnsafeBufferPointer { raw -> Int in
                     var n = -1
                     repeat {
-                        n = write(fd, raw.baseAddress! + offset, bytes.count - offset)
+                        // A browser or remote client may close an SSE connection
+                        // between chunks. Suppress SIGPIPE so that normal disconnect
+                        // is reported as a failed write instead of terminating BeetCode.
+                        n = send(fd, raw.baseAddress! + offset, bytes.count - offset, MSG_NOSIGNAL)
                     } while n < 0 && errno == EINTR
                     return n
                 }

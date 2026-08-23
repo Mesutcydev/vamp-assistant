@@ -146,6 +146,7 @@ button:not(:disabled):active { transform: scale(.98); }
   scroll-behavior: smooth;
 }
 .empty { height: 100%; display: grid; place-items: center; color: var(--muted); text-align: center; }
+.empty.home-empty { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 22px; padding: 8px 0 18px; }
 .empty-card { max-width: 420px; line-height: 1.5; }
 .empty-card h3 { margin: 0 0 8px; color: var(--text); font-size: 24px; letter-spacing: -.03em; }
 .bubble {
@@ -220,11 +221,34 @@ textarea {
 .stop { background: var(--danger); color: #241014; }
 .send.hidden, .stop.hidden { display: none; }
 .hint { padding: 7px 3px 0; color: var(--muted); font-size: 11px; }
+.run-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 8px 3px 0; }
+.run-control { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+.run-control input { accent-color: var(--accent); }
+.chat-model {
+  max-width: 180px; min-height: 30px; padding: 4px 8px;
+  border: 1px solid var(--line); border-radius: 9px;
+  background: var(--panel); color: var(--text); font-size: 12px;
+}
+.bubble.error { border-color: rgba(255,95,110,.36); background: rgba(255,95,110,.09); }
+.bubble.error .role { color: var(--danger); }
 .share-overlay {
   position: fixed; inset: 0; z-index: 8; display: grid; place-items: center;
   padding: 22px; background: var(--overlay);
 }
 .share-overlay.hidden { display: none; }
+.bots-overlay {
+  position: fixed; inset: 0; z-index: 9; display: grid; place-items: center;
+  padding: 22px; background: var(--overlay);
+}
+.bots-overlay.hidden { display: none; }
+.bot-rail { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; width: min(720px, 100%); }
+.bot-tile { flex: 0 0 108px; display: flex; flex-direction: column; align-items: center; gap: 7px; min-height: 132px; padding: 12px 10px 14px; border: 1px solid var(--line); border-radius: 18px; background: linear-gradient(145deg,var(--panel),var(--panel-strong)); transition: transform 160ms var(--ease-out),border-color 160ms var(--ease-out),box-shadow 160ms var(--ease-out); }
+.bot-tile:hover { transform: translateY(-1px); border-color: color-mix(in srgb,var(--accent-bright) 48%,var(--line)); box-shadow: 0 10px 26px var(--panel-shadow); }
+.bot-tile[aria-pressed="true"] { border-color: var(--accent-bright); box-shadow: inset 0 0 0 1px color-mix(in srgb,var(--accent-bright) 42%,transparent),0 10px 28px var(--panel-shadow); }
+.bot-thumb { width: 64px; height: 64px; border-radius: 16px; object-fit: cover; background: #000; }
+.bot-tile strong { display: block; font-size: 13px; }
+.bot-tile .bot-detail { color: var(--muted); font-size: 11px; line-height: 1.35; }
+.bot-field { width: 100%; min-height: 42px; margin-top: 10px; padding: 10px 11px; border: 1px solid var(--line); border-radius: 11px; background: var(--bg); color: var(--text); }
 .share-card {
   width: min(520px, 100%); max-height: min(720px, calc(100dvh - 32px)); overflow: auto;
   padding: 20px; border: 1px solid var(--line); border-radius: 20px;
@@ -294,6 +318,8 @@ textarea {
   .hint { padding-top: 6px; }
   .share-overlay { place-items: end center; padding: 0; }
   .share-card { width: 100%; max-height: 84dvh; padding: 18px 16px calc(18px + env(safe-area-inset-bottom, 0px)); border-radius: 22px 22px 0 0; }
+  .bot-rail { width: 100%; }
+  .bot-tile { flex: 1 1 calc(50% - 10px); }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0ms !important; }
@@ -732,6 +758,18 @@ textarea {
   </div>
 </div>
 
+<div id="bots-panel" class="bots-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="bots-title">
+  <div class="share-card">
+    <div class="share-head">
+      <div class="share-head-copy"><h2 id="bots-title">New session</h2><p id="bots-sub">Choose a model and first task.</p></div>
+      <button id="bots-close" class="icon-button" type="button" aria-label="Close bots">×</button>
+    </div>
+    <select id="bot-model" class="bot-field" aria-label="Bot model"><option value="">Loading models…</option></select>
+    <textarea id="bot-prompt" class="bot-field" rows="4" placeholder="What should this bot work on?" aria-label="First bot task"></textarea>
+    <div class="share-actions"><button id="bot-start" class="button primary" type="button">Start session</button></div>
+  </div>
+</div>
+
 <div id="share-panel" class="share-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="share-title">
   <div class="share-card">
     <div class="share-head">
@@ -788,6 +826,7 @@ textarea {
         <div id="session-sub" class="sub">Your saved Beetcode sessions appear here.</div>
       </div>
       <div class="top-actions">
+        <button id="bots-open" class="button ghost" type="button" aria-label="Start a new session">New</button>
         <button id="refresh-mobile" class="icon-button" type="button" aria-label="Refresh sessions" title="Refresh sessions">↻</button>
         <button id="share-open" class="icon-button" type="button" aria-label="Share clipboard or files" title="Share clipboard or files">⇄</button>
         <div class="appearance-switcher" role="group" aria-label="Appearance">
@@ -800,7 +839,10 @@ textarea {
     </header>
     <div id="notice" class="notice" role="status" aria-live="polite"></div>
     <section id="messages" class="messages" aria-live="polite" aria-label="Session transcript">
-      <div class="empty"><div class="empty-card"><h3>Pick up where you left off.</h3><div>Select a session to see its transcript and send the next prompt.</div></div></div>
+      <div class="empty home-empty">
+        <div class="empty-card"><h3>Start a chat, or pick a bot.</h3><div>Bots are optional specialists. New sessions stay focused on the model and first task.</div></div>
+        <div id="bot-choice" class="bot-rail" role="listbox" aria-label="Optional bots"></div>
+      </div>
     </section>
     <section id="interaction" class="interaction hidden" aria-live="assertive"></section>
     <div class="composer-wrap">
@@ -808,6 +850,11 @@ textarea {
         <textarea id="composer" rows="1" placeholder="Continue this coding task…" disabled aria-label="Next prompt"></textarea>
         <button id="send" class="send" type="button" disabled aria-label="Send prompt">↑</button>
         <button id="stop" class="stop hidden" type="button" aria-label="Stop Beetcode">■</button>
+      </div>
+      <div class="run-controls" role="group" aria-label="Run controls">
+        <select id="chat-model" class="chat-model" aria-label="Model" disabled><option value="">Model</option></select>
+        <label class="run-control"><input id="auto-mode" type="checkbox" checked>Auto mode</label>
+        <label class="run-control"><input id="full-access" type="checkbox">Full Access</label>
       </div>
       <div class="hint">Enter sends · Shift+Enter adds a line · approvals stay under your control</div>
     </div>
@@ -818,6 +865,15 @@ textarea {
 const TOKEN_KEY = 'beetcode.remote.token';
 const THEME_KEY = 'beetcode.remote.appearance';
 const CURRENT_SESSION_KEY = 'beetcode.remote.currentSession';
+const AUTO_MODE_KEY = 'beetcode.remote.autoMode';
+const FULL_ACCESS_KEY = 'beetcode.remote.fullAccess';
+const BOTS = [
+  { id: 'general', name: 'Beet', detail: 'Balanced assistant', image: '/assets/beetlogo.png', instruction: '' },
+  { id: 'builder', name: 'Builder', detail: 'Build and fix', image: '/assets/bot-builder.png', instruction: 'Work as a focused software builder. Inspect the existing project, implement the request completely, preserve unrelated work, and verify the result.' },
+  { id: 'reviewer', name: 'Reviewer', detail: 'Diff and risks', image: '/assets/bot-reviewer.png', instruction: 'Work as a careful code reviewer. Identify concrete bugs and regressions first. Do not edit unless asked.' },
+  { id: 'navigator', name: 'Navigator', detail: 'Browser control', image: '/assets/bot-navigator.png', instruction: 'Work as a browser navigator. Use the available browser tools directly and keep actions scoped to the request.' },
+  { id: 'researcher', name: 'Researcher', detail: 'Sources and synthesis', image: '/assets/bot-researcher.png', instruction: 'Work as a technical researcher. Prefer primary sources and distinguish facts from inference.' }
+];
 const THEMES = new Set(['light', 'dark', 'beet']);
 const POLL_DELAY_MS = 1800;
 const HIDDEN_POLL_DELAY_MS = 5000;
@@ -835,11 +891,18 @@ const state = {
   retryDelay: POLL_DELAY_MS,
   consecutiveFailures: 0,
   reconnecting: false,
-  sessionsExpanded: false
+  sessionsExpanded: false,
+  autoMode: localStorage.getItem(AUTO_MODE_KEY) !== 'false',
+  fullAccess: localStorage.getItem(FULL_ACCESS_KEY) === 'true',
+  streamController: null,
+  streamSessionID: null
+  ,selectedBot: ''
 };
 const $ = id => document.getElementById(id);
 const text = value => String(value ?? '');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+$('auto-mode').checked = state.autoMode;
+$('full-access').checked = state.fullAccess;
 
 function applyAppearance(theme, persist = true) {
   const value = THEMES.has(theme) ? theme : 'beet';
@@ -988,6 +1051,101 @@ function setSharePanel(open) {
     void loadSharedFiles();
     setTimeout(() => $('share-clipboard').focus(), 0);
   }
+}
+
+function selectedBot() {
+  if (!state.selectedBot || state.selectedBot === 'general') return null;
+  return BOTS.find(item => item.id === state.selectedBot) || null;
+}
+
+function renderBots() {
+  const root = $('bot-choice');
+  if (!root) return;
+  root.replaceChildren();
+  for (const bot of BOTS) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'bot-tile';
+    button.dataset.bot = bot.id;
+    button.setAttribute('role', 'option');
+    button.setAttribute('aria-label', bot.name + ', ' + bot.detail);
+    const image = document.createElement('img');
+    image.className = 'bot-thumb';
+    image.src = bot.image;
+    image.alt = '';
+    const name = document.createElement('strong');
+    name.textContent = bot.name;
+    const detail = document.createElement('span');
+    detail.className = 'bot-detail';
+    detail.textContent = bot.id === 'general' ? 'Plain chat' : bot.detail;
+    button.append(image, name, detail);
+    button.onclick = () => {
+      state.selectedBot = bot.id === 'general' ? '' : bot.id;
+      void setBotsPanel(true);
+    };
+    root.append(button);
+  }
+}
+
+function renderHome() {
+  const root = $('messages');
+  root.replaceChildren();
+  const empty = document.createElement('div');
+  empty.className = 'empty home-empty';
+  const card = document.createElement('div');
+  card.className = 'empty-card';
+  const heading = document.createElement('h3');
+  heading.textContent = 'Start a chat, or pick a bot.';
+  const copy = document.createElement('div');
+  copy.textContent = 'Bots are optional specialists. New sessions stay focused on the model and first task.';
+  card.append(heading, copy);
+  const choice = document.createElement('div');
+  choice.id = 'bot-choice';
+  choice.className = 'bot-rail';
+  choice.setAttribute('role', 'listbox');
+  choice.setAttribute('aria-label', 'Choose a bot');
+  empty.append(card, choice);
+  root.append(empty);
+  renderBots();
+}
+
+async function setBotsPanel(open) {
+  $('bots-panel').classList.toggle('hidden', !open);
+  if (!open) return;
+  const bot = selectedBot();
+  $('bots-title').textContent = bot ? 'Start with ' + bot.name : 'New session';
+  $('bots-sub').textContent = bot
+    ? bot.detail + '. Choose a model and first task.'
+    : 'Plain chat — no specialist bot. Choose a model and first task.';
+  try {
+    const body = await api('/api/models');
+    const select = $('bot-model'); select.replaceChildren();
+    for (const model of (body.models || [])) {
+      const option = document.createElement('option'); option.value = model.id;
+      option.textContent = model.name + ' · ' + model.detail; select.append(option);
+    }
+    if (!select.options.length) {
+      const option = document.createElement('option'); option.value = ''; option.textContent = 'No models available'; select.append(option);
+    }
+  } catch (error) { showNotice(error.message, 'error'); }
+  setTimeout(() => $('bot-prompt').focus(), 0);
+}
+
+async function startBotSession() {
+  const modelID = $('bot-model').value;
+  const prompt = $('bot-prompt').value.trim();
+  const bot = selectedBot();
+  if (!modelID || !prompt) { showNotice('Choose a model and enter a task.', 'error'); return; }
+  const message = prompt;
+  $('bot-start').disabled = true;
+  try {
+    const payload = { modelID, message, autoMode: state.autoMode, fullAccess: state.fullAccess };
+    if (bot) payload.botProfileID = bot.id;
+    const body = await api('/api/sessions', { method: 'POST', body: JSON.stringify(payload) });
+    $('bot-prompt').value = ''; await setBotsPanel(false); await loadSessions();
+    if (body.sessionID) await selectSession(body.sessionID);
+  } catch (error) { showNotice(error.message, 'error'); }
+  finally { $('bot-start').disabled = false; }
 }
 
 function fileSizeLabel(bytes) {
@@ -1180,6 +1338,9 @@ async function loadSessions() {
   const sessions = body.sessions || [];
   renderSessions(sessions);
   if (state.current && !sessions.some(item => item.id === state.current)) {
+    if (state.streamController) state.streamController.abort();
+    state.streamController = null;
+    state.streamSessionID = null;
     state.current = null;
     state.sessionsExpanded = false;
     localStorage.removeItem(CURRENT_SESSION_KEY);
@@ -1190,7 +1351,7 @@ async function loadSessions() {
     updateComposer();
     $('session-title').textContent = 'Choose a session';
     $('session-sub').textContent = 'Your saved Beetcode sessions appear here.';
-    renderEmptyTranscript('Pick up where you left off.', 'Select a session to see its transcript and send the next prompt.');
+    renderHome();
   }
   if (!state.current && sessions.length === 1) await selectSession(sessions[0].id);
 }
@@ -1212,11 +1373,26 @@ function renderEmptyTranscript(title, body) {
 }
 
 function roleLabel(message) {
-  if (message.role === 'toolResult') return message.toolName || 'tool result';
-  if (message.role === 'toolCall') return message.toolName || 'tool call';
+  const tool = text(message.toolName).replace(/^dynamic:/, '').replaceAll('_', ' ');
+  if (message.role === 'toolResult') return tool || 'tool result';
+  if (message.role === 'toolCall') return tool || 'tool call';
   if (message.role === 'assistant') return 'Beet Code';
   if (message.role === 'user') return 'You';
   return message.role || 'message';
+}
+
+function readableToolContent(message) {
+  const raw = text(message.content).trim();
+  if (raw === '{}') return '';
+  if (message.role !== 'toolResult' || !raw.startsWith('[')) return text(message.content);
+  try {
+    const items = JSON.parse(raw);
+    if (Array.isArray(items)) {
+      const values = items.map(item => item && typeof item.text === 'string' ? item.text : '').filter(Boolean);
+      if (values.length) return values.join('\n');
+    }
+  } catch {}
+  return text(message.content);
 }
 
 function renderMessages(record) {
@@ -1231,12 +1407,12 @@ function renderMessages(record) {
   root.replaceChildren();
   for (const message of messages) {
     const bubble = document.createElement('article');
-    bubble.className = 'bubble ' + (message.role === 'user' ? 'user' : (message.role === 'toolCall' || message.role === 'toolResult' ? 'tool' : ''));
+    bubble.className = 'bubble ' + (message.role === 'user' ? 'user' : (message.role === 'toolCall' || message.role === 'toolResult' ? 'tool' : (message.role === 'error' ? 'error' : '')));
     const role = document.createElement('div');
     role.className = 'role';
     role.textContent = roleLabel(message);
     const content = document.createElement('div');
-    content.textContent = text(message.content);
+    content.textContent = readableToolContent(message);
     bubble.append(role, content);
     root.append(bubble);
   }
@@ -1249,6 +1425,17 @@ function renderMessages(record) {
     role.textContent = 'Beet Code · ' + phaseLabel(record.phase);
     const content = document.createElement('div');
     content.textContent = liveText;
+    bubble.append(role, content);
+    root.append(bubble);
+  }
+  if (record.error && !messages.some(message => message.role === 'error')) {
+    const bubble = document.createElement('article');
+    bubble.className = 'bubble error';
+    const role = document.createElement('div');
+    role.className = 'role';
+    role.textContent = text(record.error.title || 'Chat failed');
+    const content = document.createElement('div');
+    content.textContent = text(record.error.message);
     bubble.append(role, content);
     root.append(bubble);
   }
@@ -1278,6 +1465,7 @@ function updateComposer() {
   $('send').disabled = unavailable;
   $('send').classList.toggle('hidden', state.busy);
   $('stop').classList.toggle('hidden', !hasSession || !state.busy);
+  $('chat-model').disabled = unavailable;
 }
 
 async function loadSession(quiet = false, lockComposer = true) {
@@ -1288,14 +1476,8 @@ async function loadSession(quiet = false, lockComposer = true) {
   }
   try {
     const record = await api('/api/sessions/' + encodeURIComponent(state.current));
-    $('session-title').textContent = record.title || 'Session';
-    $('session-sub').textContent = text(record.workspace) + ' · ' + (record.modelID || 'Beet Code');
-    state.busy = Boolean(record.isRunning);
-    state.phase = text(record.phase || (state.busy ? 'working' : 'idle'));
-    updateComposer();
-    setStatus(state.busy ? 'Beet Code · ' + phaseLabel(state.phase) : 'Connected', state.busy ? 'busy' : 'live');
-    renderMessages(record);
-    renderInteraction(record.pending);
+    applySessionRecord(record);
+    if (state.streamSessionID !== state.current) startSessionStream(state.current);
     return record;
   } catch (error) {
     if (!quiet) showNotice(error.message, 'error');
@@ -1304,6 +1486,96 @@ async function loadSession(quiet = false, lockComposer = true) {
     if (lockComposer) {
       state.loadingSession = false;
       updateComposer();
+    }
+  }
+}
+
+async function loadChatModels() {
+  const select = $('chat-model');
+  if (!select || select.dataset.loaded === '1') return;
+  try {
+    const body = await api('/api/models');
+    select.replaceChildren();
+    for (const model of (body.models || [])) {
+      const option = document.createElement('option');
+      option.value = model.id;
+      option.textContent = model.name + ' · ' + model.detail;
+      select.append(option);
+    }
+    if (!select.options.length) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'Model';
+      select.append(option);
+    }
+    select.dataset.loaded = '1';
+  } catch {}
+}
+
+function matchChatModel(modelID) {
+  const select = $('chat-model');
+  if (!select || !modelID) return;
+  const short = String(modelID).replace(/^openai-codex:/, '');
+  const match = Array.from(select.options).find(option =>
+    option.value === modelID || option.value.endsWith('|' + short) || option.textContent.indexOf(short) === 0);
+  if (match) select.value = match.value;
+}
+
+function applySessionRecord(record) {
+  if (!record || record.id !== state.current) return;
+  $('session-title').textContent = record.title || 'Session';
+  $('session-sub').textContent = text(record.workspace) + ' · ' + (record.modelID || 'Beet Code');
+  const select = $('chat-model');
+  if (select && select.dataset.session !== record.id) {
+    void loadChatModels().then(() => {
+      matchChatModel(record.modelID);
+      select.dataset.session = record.id;
+    });
+  }
+  state.busy = Boolean(record.isRunning);
+  state.phase = text(record.phase || (state.busy ? 'working' : 'idle'));
+  updateComposer();
+  setStatus(state.busy ? 'Beet Code · ' + phaseLabel(state.phase) : 'Connected', state.busy ? 'busy' : 'live');
+  renderMessages(record);
+  renderInteraction(record.pending);
+}
+
+async function startSessionStream(id) {
+  if (state.streamController) state.streamController.abort();
+  const controller = new AbortController();
+  state.streamController = controller;
+  state.streamSessionID = id;
+  try {
+    const response = await fetch('/api/sessions/' + encodeURIComponent(id) + '/events', {
+      headers: { 'Authorization': 'Bearer ' + state.token, 'Accept': 'text/event-stream' },
+      cache: 'no-store',
+      signal: controller.signal
+    });
+    if (!response.ok || !response.body) throw new Error('Live stream unavailable.');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (state.current === id && !controller.signal.aborted) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      let frameEnd;
+      while ((frameEnd = buffer.indexOf('\n\n')) >= 0) {
+        const frame = buffer.slice(0, frameEnd);
+        buffer = buffer.slice(frameEnd + 2);
+        const line = frame.split('\n').find(value => value.startsWith('data:'));
+        if (line) applySessionRecord(JSON.parse(line.slice(5).trim()));
+      }
+    }
+  } catch (error) {
+    if (!controller.signal.aborted && state.current === id) {
+      await sleep(800);
+      if (state.current === id) startSessionStream(id);
+    }
+  } finally {
+    if (state.streamController === controller) {
+      state.streamController = null;
+      state.streamSessionID = null;
     }
   }
 }
@@ -1455,9 +1727,12 @@ async function send() {
   updateComposer();
   setStatus('Sending…', 'busy');
   try {
+    const payload = { message, autoMode: state.autoMode, fullAccess: state.fullAccess };
+    const modelID = $('chat-model').value;
+    if (modelID) payload.modelID = modelID;
     await api('/api/sessions/' + encodeURIComponent(state.current) + '/messages', {
       method: 'POST',
-      body: JSON.stringify({ message })
+      body: JSON.stringify(payload)
     });
     input.value = '';
     await loadSession();
@@ -1518,6 +1793,20 @@ $('pair-button').onclick = () => pair($('pair-code').value);
 $('pair-code').oninput = event => { event.target.value = event.target.value.replace(/[^0-9]/g, '').slice(0, 6); };
 $('pair-code').onkeydown = event => { if (event.key === 'Enter') pair(event.target.value); };
 $('send').onclick = send;
+$('bots-open').onclick = () => {
+  state.selectedBot = '';
+  void setBotsPanel(true);
+};
+$('bots-close').onclick = () => void setBotsPanel(false);
+$('bot-start').onclick = startBotSession;
+$('auto-mode').onchange = event => {
+  state.autoMode = Boolean(event.target.checked);
+  localStorage.setItem(AUTO_MODE_KEY, String(state.autoMode));
+};
+$('full-access').onchange = event => {
+  state.fullAccess = Boolean(event.target.checked);
+  localStorage.setItem(FULL_ACCESS_KEY, String(state.fullAccess));
+};
 $('stop').onclick = stop;
 $('refresh').onclick = () => refreshNow(false);
 $('refresh-mobile').onclick = () => refreshNow(false);
@@ -1585,8 +1874,11 @@ window.addEventListener('offline', () => {
   showNotice('No network connection. We’ll reconnect when you’re back online.', 'error');
 });
 
+$('bots-panel').onclick = event => { if (event.target === $('bots-panel')) void setBotsPanel(false); };
+
 (async () => {
   applyAppearance(localStorage.getItem(THEME_KEY), false);
+  renderBots();
   const pairCode = new URLSearchParams(location.search).get('pair');
   // Scanning a new QR must replace an existing browser token for this host.
   if (pairCode) {

@@ -208,6 +208,19 @@ final class PermissionGateTests: XCTestCase {
         }
     }
 
+    func testExplicitFullAccessAllowsCommandsAndComputerActions() {
+        let workspace = Workspace(root: FileManager.default.temporaryDirectory)
+        let gate = PermissionGate(fullAccess: true, workspace: workspace)
+        XCTAssertEqual(
+            gate.decision(
+                for: call(name: "run_command", command: "custom-tool --inspect"),
+                risk: .execute),
+            .auto)
+        XCTAssertEqual(
+            gate.decision(for: call(name: "computer_click"), risk: .execute),
+            .auto)
+    }
+
     func testUnknownToolRiskNeedsApproval() {
         let gate = PermissionGate()
         XCTAssertEqual(gate.decision(for: call(name: "mystery"), risk: nil), .needsApproval)
@@ -673,6 +686,8 @@ final class CommandPolicyTests: XCTestCase {
         XCTAssertNil(env["GIT_WORK_TREE"])
         XCTAssertNil(env["GIT_INDEX_FILE"])
         XCTAssertNotNil(env["PATH"])
+        XCTAssertTrue(env["PATH", default: ""].split(separator: ":").contains("/usr/local/bin"))
+        XCTAssertTrue(env["PATH", default: ""].split(separator: ":").contains("/opt/homebrew/bin"))
         XCTAssertFalse(env["USER", default: ""].isEmpty)
     }
 }

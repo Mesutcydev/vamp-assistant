@@ -142,6 +142,25 @@ final class BrowserController: ObservableObject {
         var href: String
     }
 
+    /// A compact, model-facing accessibility-style description of an
+    /// interactive DOM node. `ref` is scoped to the current document and is
+    /// stable across repeated observations while that node remains mounted.
+    struct InteractiveElement: Codable, Sendable, Equatable {
+        var ref: String
+        var role: String
+        var name: String
+        var tag: String
+        var type: String
+        var value: String
+        var href: String
+        var disabled: Bool
+        var checked: Bool?
+        var x: Double
+        var y: Double
+        var width: Double
+        var height: Double
+    }
+
     /// All links on the page: visible text + resolved URL. Capped so a
     /// link-farm page cannot blow up the tool output.
     func extractLinks(limit: Int = 60) async throws -> [PageLink] {
@@ -167,6 +186,89 @@ final class BrowserController: ObservableObject {
     private struct LinkWire: Codable {
         var text: String
         var href: String
+    }
+
+    /// Returns visible interactive elements with document-scoped references,
+    /// similar to the indexed accessibility snapshots used by browser-use and
+    /// Hermes. References fail closed after a navigation instead of silently
+    /// resolving to a different element on the new page.
+    func extractInteractiveElements(limit: Int = 80) async throws -> [InteractiveElement] {
+        let boundedLimit = min(max(limit, 1), 200)
+        let js = """
+        (() => {
+          \(Self.referenceRegistryPrelude)
+          const selector = 'a[href],button,input:not([type="hidden"]),textarea,select,[role],[contenteditable="true"],[tabindex]';
+          const candidates = Array.from(document.querySelectorAll(selector));
+          const out = [];
+          const roleFor = (el) => {
+            const explicit = (el.getAttribute('role') || '').trim();
+            if (explicit) return explicit;
+            const tag = el.tagName.toLowerCase();
+            if (tag === 'a') return 'link';
+            if (tag === 'button') return 'button';
+            if (tag === 'textarea') return 'textbox';
+            if (tag === 'select') return 'combobox';
+            if (tag === 'input') {
+              const type = (el.type || 'text').toLowerCase();
+              if (type === 'checkbox') return 'checkbox';
+              if (type === 'radio') return 'radio';
+              if (type === 'submit' || type === 'button') return 'button';
+              return 'textbox';
+            }
+            return 'interactive';
+          };
+          const nameFor = (el) => {
+            const labelledBy = (el.getAttribute('aria-labelledby') || '').trim();
+            const labelled = labelledBy.split(/\\s+/).filter(Boolean)
+              .map(id => document.getElementById(id)?.innerText || '')
+              .join(' ').trim();
+            return (el.getAttribute('aria-label') || labelled || el.innerText ||
+              el.getAttribute('title') || el.getAttribute('placeholder') ||
+              el.getAttribute('name') || el.value || '').replace(/\\s+/g, ' ').trim().slice(0, 160);
+          };
+          for (const el of candidates) {
+            if (out.length >= \(boundedLimit)) break;
+            const rect = el.getBoundingClientRect();
+            const style = getComputedStyle(el);
+            if (rect.width < 1 || rect.height < 1 || style.display === 'none' ||
+                style.visibility === 'hidden' || Number(style.opacity) === 0) continue;
+            const ref = assignBeetRef(el);
+            const type = (el.getAttribute('type') || '').toLowerCase();
+            let value = '';
+            if ('value' in el) value = type === 'password' ? '(redacted)' : String(el.value || '').slice(0, 120);
+            out.push({
+              ref, role: roleFor(el), name: nameFor(el), tag: el.tagName.toLowerCase(), type,
+              value, href: el.href || '', disabled: Boolean(el.disabled || el.getAttribute('aria-disabled') === 'true'),
+              checked: ('checked' in el) ? Boolean(el.checked) : null,
+              x: Math.round(rect.x), y: Math.round(rect.y),
+              width: Math.round(rect.width), height: Math.round(rect.height)
+            });
+          }
+          return out;
+        })()
+        """
+        let raw = try await evaluate(js)
+        guard let data = raw.data(using: .utf8),
+              let elements = try? JSONDecoder().decode([InteractiveElement].self, from: data)
+        else { return [] }
+        return elements
+    }
+
+    nonisolated static func renderInteractiveElements(_ elements: [InteractiveElement]) -> String {
+        guard !elements.isEmpty else { return "(no visible interactive elements found)" }
+        return elements.map { element in
+            let cleanName = element.name.replacingOccurrences(of: "\n", with: " ")
+            var parts = ["[\(element.ref)]", element.role]
+            if !cleanName.isEmpty { parts.append("\"\(cleanName)\"") }
+            if !element.value.isEmpty, element.value != cleanName {
+                parts.append("value \"\(element.value)\"")
+            }
+            if !element.href.isEmpty { parts.append("→ \(element.href)") }
+            parts.append("at (\(Int(element.x + element.width / 2)),\(Int(element.y + element.height / 2)))")
+            if element.disabled { parts.append("[disabled]") }
+            if element.checked == true { parts.append("[checked]") }
+            return parts.joined(separator: " ")
+        }.joined(separator: "\n")
     }
 
     /// True when a page is loaded or loading.
@@ -200,6 +302,28 @@ final class BrowserController: ObservableObject {
             return "clicked element matching \(selector)"
         }
         throw BrowserError.noSuchElement(selector)
+    }
+
+    /// Clicks a node from the latest `browser_read {what:"elements"}`
+    /// observation. A reference from another document is rejected as stale.
+    func click(ref: String) async throws -> String {
+        let js = """
+        (() => {
+          \(Self.referenceRegistryPrelude)
+          const requested = \(Self.jsLiteral(ref));
+          if (!requested.startsWith(beetState.token + ':')) return { clicked: false, stale: true };
+          const el = Array.from(document.querySelectorAll('*')).find(node => node[beetRefKey] === requested);
+          if (!el || !el.isConnected) return { clicked: false, stale: true };
+          if (el.disabled || el.getAttribute('aria-disabled') === 'true') return { clicked: false, disabled: true };
+          el.scrollIntoView({ block: 'center', inline: 'nearest' });
+          el.click();
+          return { clicked: true, tag: el.tagName.toLowerCase() };
+        })()
+        """
+        let raw = try await evaluate(js)
+        if raw.contains("\"clicked\":true") { return "clicked [\(ref)]" }
+        if raw.contains("\"disabled\":true") { throw BrowserError.disabledElement(ref) }
+        throw BrowserError.staleReference(ref)
     }
 
     /// Clicks the first clickable element whose visible text contains the
@@ -245,6 +369,41 @@ final class BrowserController: ObservableObject {
             return "typed into \(selector)"
         }
         throw BrowserError.noSuchElement(selector)
+    }
+
+    /// Types into a document-scoped element reference. Uses the native value
+    /// setter when available so controlled React-style inputs receive the same
+    /// input/change events as selector-based typing.
+    func type(text: String, intoRef ref: String) async throws -> String {
+        let js = """
+        (() => {
+          \(Self.referenceRegistryPrelude)
+          const requested = \(Self.jsLiteral(ref));
+          if (!requested.startsWith(beetState.token + ':')) return { typed: false, stale: true };
+          const el = Array.from(document.querySelectorAll('*')).find(node => node[beetRefKey] === requested);
+          if (!el || !el.isConnected) return { typed: false, stale: true };
+          if (el.disabled || el.getAttribute('aria-disabled') === 'true') return { typed: false, disabled: true };
+          el.focus();
+          const nextValue = \(Self.jsLiteral(text));
+          if (el.isContentEditable) {
+            el.textContent = nextValue;
+          } else if ('value' in el) {
+            const prototype = Object.getPrototypeOf(el);
+            const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+            if (setter) setter.call(el, nextValue); else el.value = nextValue;
+          } else {
+            return { typed: false, unsupported: true };
+          }
+          el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: nextValue }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return { typed: true };
+        })()
+        """
+        let raw = try await evaluate(js)
+        if raw.contains("\"typed\":true") { return "typed into [\(ref)]" }
+        if raw.contains("\"disabled\":true") { throw BrowserError.disabledElement(ref) }
+        if raw.contains("\"unsupported\":true") { throw BrowserError.unsupportedElement(ref) }
+        throw BrowserError.staleReference(ref)
     }
 
     /// Snapshot of the visible page, saved as PNG.
@@ -301,12 +460,39 @@ final class BrowserController: ObservableObject {
         return out
     }
 
+    /// Shared by element observation and reference actions. The token is born
+    /// inside the page's JavaScript world, so a full navigation necessarily
+    /// creates a new scope and makes every prior ref stale.
+    private nonisolated static let referenceRegistryPrelude = """
+        const beetStateKey = '__beetcodeAgentRefsV1';
+        const beetRefKey = '__beetcodeAgentRefV1';
+        let beetState = window[beetStateKey];
+        if (!beetState || beetState.document !== document) {
+          beetState = {
+            document,
+            token: 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+            counter: 0
+          };
+          Object.defineProperty(window, beetStateKey, { value: beetState, configurable: true });
+        }
+        const assignBeetRef = (el) => {
+          if (!el[beetRefKey]) {
+            const value = beetState.token + ':e' + (++beetState.counter);
+            Object.defineProperty(el, beetRefKey, { value, configurable: true });
+          }
+          return el[beetRefKey];
+        };
+        """
+
     enum BrowserError: Error, LocalizedError {
         case emptyURL
         case invalidURL(String)
         case fileOutsideWorkspace(String)
         case scriptFailed(String)
         case noSuchElement(String)
+        case staleReference(String)
+        case disabledElement(String)
+        case unsupportedElement(String)
         case snapshotFailed
 
         var errorDescription: String? {
@@ -316,6 +502,9 @@ final class BrowserController: ObservableObject {
             case .fileOutsideWorkspace(let path): "Refused to open '\(path)' — file URLs must stay inside the open workspace."
             case .scriptFailed(let detail): "Page script failed: \(detail)"
             case .noSuchElement(let query): "No element found for: \(query)"
+            case .staleReference(let ref): "Element reference '\(ref)' is stale. Call browser_read with what=elements and retry with a fresh ref."
+            case .disabledElement(let ref): "Element '\(ref)' is disabled."
+            case .unsupportedElement(let ref): "Element '\(ref)' does not accept text input."
             case .snapshotFailed: "Could not capture the page snapshot."
             }
         }

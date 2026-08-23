@@ -14,6 +14,37 @@ struct RemoteStartModel: Sendable, Equatable {
     let name: String
     let source: String
     let detail: String
+    let reasoningEfforts: [String]
+    let defaultReasoningEffort: String?
+
+    init(
+        id: String, name: String, source: String, detail: String,
+        reasoningEfforts: [String] = [], defaultReasoningEffort: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.source = source
+        self.detail = detail
+        self.reasoningEfforts = reasoningEfforts
+        self.defaultReasoningEffort = defaultReasoningEffort
+    }
+}
+
+struct RemoteRunOptions: Sendable, Equatable {
+    let autoMode: Bool
+    let fullAccess: Bool
+    let reasoningEffort: String?
+    let botProfileID: String?
+    let botComputerID: UUID?
+    let botWorkspacePath: String?
+
+    static let standard = RemoteRunOptions(
+        autoMode: true, fullAccess: false, reasoningEffort: nil, botProfileID: nil, botComputerID: nil, botWorkspacePath: nil)
+}
+
+enum RemoteSessionStartOutcome: Sendable, Equatable {
+    case accepted(UUID)
+    case rejected(String)
 }
 
 /// Owns the network-facing Beetcode browser surface.
@@ -25,7 +56,7 @@ struct RemoteStartModel: Sendable, Equatable {
 @MainActor
 final class RemoteSessionHost {
 
-    nonisolated static let defaultPort = 9475
+    nonisolated static let defaultPort = RemoteSessionPorts.defaultPort
     static let pairingLifetime: TimeInterval = 10 * 60
     /// Browser access survives normal phone/laptop use, while the QR itself
     /// remains a short-lived, one-time approval. Revocation still takes
@@ -43,6 +74,7 @@ final class RemoteSessionHost {
     enum HostError: Error, LocalizedError, Equatable {
         case tailscaleUnavailable
         case noReachableAddress
+        case portUnavailable
 
         var errorDescription: String? {
             switch self {
@@ -50,6 +82,8 @@ final class RemoteSessionHost {
                 return "Tailscale is not connected. Connect Tailscale, or enable the trusted local-network fallback in Settings."
             case .noReachableAddress:
                 return "No reachable network address was found for remote sessions."
+            case .portUnavailable:
+                return "Remote Sessions could not bind a free port. Vamp Host uses 9475; Beet Code uses \(RemoteSessionPorts.defaultPort)."
             }
         }
     }
@@ -57,6 +91,7 @@ final class RemoteSessionHost {
     private let engine: any LLMEngine
     private let sessions: AgentSessionController
     private let sharing: RemoteSharingStore
+    private let botComputers: BotComputerService
     private let persistsPairedClients: Bool
     /// AppState installs these handlers so remote messages become durable
     /// queued tasks. Tests and lightweight hosts may leave them nil and keep
@@ -67,7 +102,10 @@ final class RemoteSessionHost {
     var clipboardSharingAllowedHandler: (() -> Bool)?
     var fileSharingAllowedHandler: (() -> Bool)?
     /// Returns nil on success, or a user-facing error string.
-    var startSessionHandler: ((String, String) async -> String?)?
+    var startSessionHandler: ((String, String, RemoteRunOptions) async -> RemoteSessionStartOutcome)?
+    /// Activates a start-model id for the next remote turn. Returns an error string, or nil.
+    var applyModelHandler: ((String, String?) async -> String?)?
+    var configureRunHandler: ((RemoteRunOptions) -> Void)?
     private var server: LocalAPIServer?
     private var tokens: [String: Date] = [:]
     /// Invalidates an in-flight bind when Settings changes or the host is
@@ -89,11 +127,13 @@ final class RemoteSessionHost {
         engine: any LLMEngine,
         sessions: AgentSessionController,
         sharing: RemoteSharingStore? = nil,
+        botComputers: BotComputerService? = nil,
         persistsPairedClients: Bool = true
     ) {
         self.engine = engine
         self.sessions = sessions
         self.sharing = sharing ?? RemoteSharingStore()
+        self.botComputers = botComputers ?? BotComputerService()
         self.persistsPairedClients = persistsPairedClients
         self.tokens = persistsPairedClients ? RemotePairedClientStore.load() : [:]
     }
@@ -124,7 +164,7 @@ final class RemoteSessionHost {
             if await server.isRunning {
                 let currentPort = await server.actualPort
                 if let endpoint,
-                   (port == 0 || currentPort == port),
+                   (port == 0 || currentPort == port || currentPort == RemoteSessionPorts.resolved(port)),
                    networkHost == endpoint.host,
                    networkKind == endpoint.kind { return }
                 await server.stop()
@@ -145,35 +185,46 @@ final class RemoteSessionHost {
         networkHost = endpoint.host
         networkKind = endpoint.kind
         rotatePairingCode()
-        let nextServer = LocalAPIServer(engine: engine)
         let resolver: LocalAPIServer.RouteResolver = { [weak self] request in
             guard let self else { return nil }
             return await self.route(request)
         }
-        do {
-            try await nextServer.start(
-                .init(
-                    port: port,
-                    bindIPv6: false,
-                    bindHost: "0.0.0.0",
-                    modelIDOverride: nil,
-                    bearerToken: nil,
-                    idleTTLSeconds: nil,
-                    exposeStandardRoutes: false,
-                    maxBodyBytes: Self.maxRemoteBodyBytes,
-                    allowCORS: false),
-                routeResolver: resolver)
-            guard !Task.isCancelled, generation == startGeneration else {
-                await nextServer.stop()
-                throw CancellationError()
+        var nextServer: LocalAPIServer?
+        var lastError: Error?
+        for candidate in RemoteSessionPorts.candidates(preferred: port) {
+            let attempt = LocalAPIServer(engine: engine)
+            do {
+                try await attempt.start(
+                    .init(
+                        port: candidate,
+                        bindIPv6: false,
+                        bindHost: "0.0.0.0",
+                        modelIDOverride: nil,
+                        bearerToken: nil,
+                        idleTTLSeconds: nil,
+                        exposeStandardRoutes: false,
+                        maxBodyBytes: Self.maxRemoteBodyBytes,
+                        allowCORS: false),
+                    routeResolver: resolver)
+                nextServer = attempt
+                lastError = nil
+                break
+            } catch {
+                lastError = error
+                await attempt.stop()
             }
-        } catch {
+        }
+        guard let nextServer else {
             if generation == startGeneration {
                 networkHost = nil
                 networkKind = nil
                 boundPort = nil
             }
-            throw error
+            throw lastError ?? HostError.portUnavailable
+        }
+        guard !Task.isCancelled, generation == startGeneration else {
+            await nextServer.stop()
+            throw CancellationError()
         }
         let actualPort = await nextServer.actualPort
         guard !Task.isCancelled, generation == startGeneration else {
@@ -231,8 +282,8 @@ final class RemoteSessionHost {
             return .response(securityResponse(status: 204, contentType: "text/plain"))
         case ("GET", "/"), ("GET", "/index.html"):
             return .response(htmlPage())
-        case ("GET", "/assets/beetlogo.png"):
-            return .response(logoResponse())
+        case ("GET", let path) where Self.publicImages[path] != nil:
+            return .response(imageResponse(named: Self.publicImages[path]!))
         case ("POST", "/api/pair"):
             return pair(request)
         case ("GET", "/api/status"):
@@ -257,9 +308,46 @@ final class RemoteSessionHost {
                 LFJSONValue.object([
                     "id": .string(model.id), "name": .string(model.name),
                     "source": .string(model.source), "detail": .string(model.detail),
+                    "reasoningEfforts": .array(model.reasoningEfforts.map { .string($0) }),
+                    "defaultReasoningEffort": model.defaultReasoningEffort.map { .string($0) } ?? .null,
                 ])
             }
             return .response(json(["models": .array(models)]))
+        case ("POST", "/api/providers/key"):
+            guard authorized(request) else { return unauthorized() }
+            guard let object = request.bodyJSON?.objectValue,
+                  let providerID = object["providerID"]?.stringValue,
+                  let provider = LLMProvider(rawValue: providerID),
+                  let key = object["key"]?.stringValue,
+                  key.utf8.count <= 8_192 else {
+                return .response(json(["error": .string("Choose a supported provider and enter a valid API key.")], status: 400))
+            }
+            guard APIKeyStore.shared.save(key: key, for: provider) else {
+                return .response(json(["error": .string("The API key could not be saved to the Mac Keychain.")], status: 500))
+            }
+            if let profiles = try? await RemoteLLMClient.fetchModelProfiles(provider: provider, apiKey: key),
+               !profiles.isEmpty {
+                AppPreferencesStore.shared.saveRemoteModelProfiles(profiles)
+            }
+            return .response(json(["accepted": .bool(true), "providerID": .string(provider.rawValue)]))
+        case ("GET", "/api/bot-computers"):
+            guard authorized(request) else { return unauthorized() }
+            do {
+                let records = try await botComputers.refresh()
+                return .response(json([
+                    "computers": .array(records.map(Self.botComputerJSON)),
+                    "capabilities": Self.botCapabilitiesJSON(await botComputers.capabilities()),
+                ]))
+            } catch {
+                return .response(json(["error": .string(error.localizedDescription)], status: 500))
+            }
+        case ("POST", "/api/bot-computers/refresh"):
+            guard authorized(request) else { return unauthorized() }
+            do {
+                return .response(json(["computers": .array(try await botComputers.refresh().map(Self.botComputerJSON))]))
+            } catch {
+                return .response(json(["error": .string(error.localizedDescription)], status: 500))
+            }
         case ("GET", "/api/clipboard"):
             guard authorized(request) else { return unauthorized() }
             guard clipboardSharingAllowedHandler?() ?? false else {
@@ -324,10 +412,29 @@ final class RemoteSessionHost {
                   let startSessionHandler else {
                 return .response(json(["error": .string("Choose a model and enter a first prompt.")], status: 400))
             }
-            if let error = await startSessionHandler(modelID, message) {
+            var options = runOptions(from: request)
+            if let botID = options.botComputerID {
+                do {
+                    let record = try await botComputers.load().first(where: { $0.id == botID })
+                    guard let record, record.state == .running else {
+                        return .response(json(["error": .string("Start the selected Bot Computer before creating a session.")], status: 409))
+                    }
+                    options = RemoteRunOptions(autoMode: options.autoMode, fullAccess: options.fullAccess,
+                                               reasoningEffort: options.reasoningEffort, botProfileID: options.botProfileID,
+                                               botComputerID: botID, botWorkspacePath: record.workspacePath)
+                } catch {
+                    return .response(json(["error": .string("The selected Bot Computer could not be loaded.")], status: 409))
+                }
+            }
+            configureRunHandler?(options)
+            switch await startSessionHandler(modelID, message, options) {
+            case .accepted(let sessionID):
+                return .response(json([
+                    "accepted": .bool(true),
+                    "sessionID": .string(sessionID.uuidString),
+                ], status: 202))
+            case .rejected(let error):
                 return .response(json(["error": .string(error)], status: 409))
-            } else {
-                return .response(json(["accepted": .bool(true)], status: 202))
             }
         case ("POST", "/api/revoke"):
             guard authorized(request) else { return unauthorized() }
@@ -343,8 +450,56 @@ final class RemoteSessionHost {
                 }
                 return .response(sharedFileResponse(request))
             }
-            return sessionRoute(request)
+            if request.path.hasPrefix("/api/bot-computers/") {
+                return await botComputerRoute(request)
+            }
+            return await sessionRoute(request)
         }
+    }
+
+    private func botComputerRoute(_ request: LocalAPIServer.Request) async -> LocalAPIServer.RouteResult {
+        let parts = request.path.split(separator: "/")
+        guard parts.count == 4, let id = UUID(uuidString: String(parts[2])) else {
+            return .response(json(["error": .string("Unknown bot computer endpoint.")], status: 404))
+        }
+        do {
+            let record: BotComputerRecord
+            switch (request.method, String(parts[3])) {
+            case ("POST", "start"):
+                record = try await botComputers.start(id: id)
+            case ("POST", "stop"):
+                record = try await botComputers.stop(id: id)
+            default:
+                return .response(json(["error": .string("Use POST start or stop.")], status: 405))
+            }
+            return .response(json(["accepted": .bool(true), "computer": Self.botComputerJSON(record)]))
+        } catch {
+            return .response(json(["error": .string(error.localizedDescription)], status: 409))
+        }
+    }
+
+    private static func botComputerJSON(_ record: BotComputerRecord) -> LFJSONValue {
+        .object([
+            "id": .string(record.id.uuidString),
+            "profileID": .string(record.profileID),
+            "name": .string(record.name),
+            "backend": .string(record.backend.rawValue),
+            "state": .string(record.state.rawValue),
+            "workspacePath": .string(record.workspacePath),
+            "browserProfilePath": .string(record.browserProfilePath),
+            "containerName": record.containerName.map { .string($0) } ?? .null,
+            "updatedAt": .number(record.updatedAt.timeIntervalSince1970),
+        ])
+    }
+
+    private static func botCapabilitiesJSON(_ capabilities: BotHostCapabilities) -> LFJSONValue {
+        .object([
+            "architecture": .string(capabilities.architecture),
+            "macOSVersion": .string(capabilities.macOSVersion),
+            "appleContainerExecutable": capabilities.appleContainerExecutable.map { .string($0) } ?? .null,
+            "appleContainerServiceRunning": .bool(capabilities.appleContainerServiceRunning),
+            "supportsAppleContainers": .bool(capabilities.supportsAppleContainers),
+        ])
     }
 
     private func sharingPermissionDenied(_ capability: String) -> LocalAPIServer.RouteResult {
@@ -389,7 +544,7 @@ final class RemoteSessionHost {
         ]))
     }
 
-    private func sessionRoute(_ request: LocalAPIServer.Request) -> LocalAPIServer.RouteResult {
+    private func sessionRoute(_ request: LocalAPIServer.Request) async -> LocalAPIServer.RouteResult {
         let components = request.path.split(separator: "/")
         guard components.count >= 3,
               components[0] == "api",
@@ -405,6 +560,13 @@ final class RemoteSessionHost {
             return .response(json(sessionDetail(record)))
         }
 
+        if components.count == 4, components[3] == "events", request.method == "GET" {
+            guard ownedRecord(id) != nil else {
+                return .response(json(["error": .string("Session not found.")], status: 404))
+            }
+            return sessionEventStream(id: id)
+        }
+
         if components.count == 4, components[3] == "messages", request.method == "POST" {
             guard let message = request.bodyJSON?.objectValue?["message"]?.stringValue,
                   !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -413,6 +575,18 @@ final class RemoteSessionHost {
             }
             guard let record = ownedRecord(id) else {
                 return .response(json(["error": .string("Session not found.")], status: 404))
+            }
+            let options = runOptions(from: request)
+            configureRunHandler?(options)
+            if let modelID = request.bodyJSON?.objectValue?["modelID"]?.stringValue,
+               !modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if let error = await applyContinueModel(
+                    sessionID: record.id,
+                    modelID: modelID,
+                    reasoningEffort: options.reasoningEffort
+                ) {
+                    return .response(json(["error": .string(error)], status: 409))
+                }
             }
             if let enqueueTaskHandler {
                 if let task = enqueueTaskHandler(record.id, message) {
@@ -544,18 +718,11 @@ final class RemoteSessionHost {
 
     private func sessionDetail(_ record: SessionRecord) -> [String: LFJSONValue] {
         let activeID = sessions.activeSessionID
-        let messages = record.messages.suffix(120).compactMap { message -> LFJSONValue? in
-            guard message.role != .system else { return nil }
-            let content = SessionStore.redact(message.content)
-            return .object([
-                "role": .string(message.role.rawValue),
-                "content": .string(String(content.prefix(16_000))),
-                "toolName": message.toolName.map { .string($0) } ?? .null,
-                "timestamp": .number(message.timestamp.timeIntervalSince1970),
-            ])
-        }
         let isCurrent = activeID == record.id
         let isRunning = isCurrent && sessions.isRunning
+        let messages = isCurrent
+            ? liveMessages(record: record)
+            : persistedMessages(record)
         let liveText = isRunning
             ? String(SessionStore.redact(sessions.streamingText).prefix(16_000))
             : ""
@@ -570,8 +737,13 @@ final class RemoteSessionHost {
             "isRunning": .bool(isRunning),
             "phase": .string(isCurrent ? sessions.currentPhase.rawValue : AgentPhase.idle.rawValue),
             "streamingText": .string(liveText),
+            "agentMode": .string(SettingsStore.shared.agentMode.rawValue),
+            "fullAccess": .bool(
+                SettingsStore.shared.autoApproveEdits
+                    && SettingsStore.shared.autoApproveCommands),
         ]
         detail["pending"] = pendingInteraction(for: record.id)
+        detail["error"] = errorPresentation(for: record, messages: messages)
         if let task = taskLookupHandler?(record.id) {
             detail["queue"] = .object([
                 "id": .string(task.id.uuidString),
@@ -581,6 +753,143 @@ final class RemoteSessionHost {
             ])
         }
         return detail
+    }
+
+    private func persistedMessages(_ record: SessionRecord) -> [LFJSONValue] {
+        record.messages.suffix(120).compactMap { message -> LFJSONValue? in
+            guard message.role != .system else { return nil }
+            let content = String(SessionStore.redact(message.content).prefix(16_000))
+            let role = message.role == .assistant && content.lowercased().hasPrefix("error:")
+                ? "error"
+                : message.role.rawValue
+            return .object([
+                "role": .string(role),
+                "content": .string(content),
+                "toolName": message.toolName.map { .string($0) } ?? .null,
+                "timestamp": .number(message.timestamp.timeIntervalSince1970),
+            ])
+        }
+    }
+
+    private func liveMessages(record: SessionRecord) -> [LFJSONValue] {
+        let items = sessions.transcript.suffix(120)
+        guard !items.isEmpty else { return persistedMessages(record) }
+        let baseTimestamp = record.createdAt.timeIntervalSince1970
+        return items.enumerated().map { offset, item in
+            let role: String
+            let content: String
+            let toolName: String?
+            switch item.kind {
+            case .user(let text):
+                role = "user"; content = text; toolName = nil
+            case .assistant(let text):
+                role = text.lowercased().hasPrefix("error:") ? "error" : "assistant"
+                content = text; toolName = nil
+            case .toolCall(let invocation):
+                role = "toolCall"; content = invocation.argumentsJSON; toolName = invocation.name
+            case .toolResult(_, let output, _, let name):
+                role = "toolResult"; content = output; toolName = name
+            case .reasoning(let text):
+                role = "reasoning"; content = text; toolName = nil
+            case .checkpoint(let checkpoint):
+                role = "notice"; content = "Checkpoint: \(checkpoint.summary)"; toolName = nil
+            case .notice(let text):
+                role = text.lowercased().hasPrefix("error:") ? "error" : "notice"
+                content = text; toolName = nil
+            }
+            return .object([
+                "role": .string(role),
+                "content": .string(String(SessionStore.redact(content).prefix(16_000))),
+                "toolName": toolName.map { .string($0) } ?? .null,
+                "timestamp": .number(baseTimestamp + Double(offset) / 1_000),
+            ])
+        }
+    }
+
+    private func errorPresentation(
+        for record: SessionRecord,
+        messages: [LFJSONValue]
+    ) -> LFJSONValue {
+        if sessions.activeSessionID == record.id,
+           case .engineError(let message)? = sessions.finishReason {
+            return .object([
+                "title": .string("API or model error"),
+                "message": .string(String(SessionStore.redact(message).prefix(16_000))),
+            ])
+        }
+        if let errorMessage = messages.reversed().compactMap({ value -> String? in
+            guard let object = value.objectValue,
+                  object["role"]?.stringValue == "error" else { return nil }
+            return object["content"]?.stringValue
+        }).first {
+            return .object([
+                "title": .string("Chat failed"),
+                "message": .string(errorMessage.replacingOccurrences(
+                    of: "error:", with: "", options: [.caseInsensitive, .anchored])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)),
+            ])
+        }
+        return .null
+    }
+
+    private func sessionEventStream(id: UUID) -> LocalAPIServer.RouteResult {
+        let lines = AsyncStream<Data>(bufferingPolicy: .bufferingNewest(8)) { continuation in
+            let task = Task { @MainActor [weak self] in
+                var previousSnapshot = ""
+                var heartbeatTick = 0
+                while !Task.isCancelled {
+                    guard let self, let record = self.ownedRecord(id) else { break }
+                    let snapshot = LFJSONValue.object(self.sessionDetail(record)).encoded()
+                    if snapshot != previousSnapshot {
+                        continuation.yield(Data("event: session\ndata: \(snapshot)\n\n".utf8))
+                        previousSnapshot = snapshot
+                    } else if heartbeatTick >= 100 {
+                        continuation.yield(Data(": keep-alive\n\n".utf8))
+                        heartbeatTick = 0
+                    }
+                    heartbeatTick += 1
+                    try? await Task.sleep(for: .milliseconds(150))
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+        var response = LocalAPIServer.Response(
+            status: 200,
+            contentType: "text/event-stream; charset=utf-8")
+        response.headers = Self.securityHeaders
+        return .stream(response, lines: lines)
+    }
+
+    private func applyContinueModel(sessionID: UUID, modelID: String, reasoningEffort: String?) async -> String? {
+        if let error = await applyModelHandler?(modelID, reasoningEffort) {
+            return error
+        }
+        guard var record = SessionStore.shared.load(id: sessionID) else { return nil }
+        let parts = modelID.split(separator: "|", maxSplits: 2).map(String.init)
+        if parts.first == "chatgpt", parts.count >= 2 {
+            record.modelID = "openai-codex:\(parts[1])"
+        } else {
+            record.modelID = parts.last ?? modelID
+        }
+        _ = SessionStore.shared.save(record)
+        SessionStore.shared.invalidateCache()
+        return nil
+    }
+
+    private func runOptions(from request: LocalAPIServer.Request) -> RemoteRunOptions {
+        let object = request.bodyJSON?.objectValue
+        return RemoteRunOptions(
+            autoMode: object?["autoMode"]?.boolValue ?? true,
+            fullAccess: object?["fullAccess"]?.boolValue ?? false,
+            reasoningEffort: object?["reasoningEffort"]?.stringValue,
+            botProfileID: {
+                let raw = object?["botProfileID"]?.stringValue
+                guard let raw, !raw.isEmpty, raw != "general" else { return nil }
+                return raw
+            }(),
+            botComputerID: object?["botComputerID"]?.stringValue.flatMap(UUID.init),
+            botWorkspacePath: nil)
     }
 
     private var taskQueueCount: Int {
@@ -667,8 +976,16 @@ final class RemoteSessionHost {
         return response
     }
 
-    private func logoResponse() -> LocalAPIServer.Response {
-        guard let image = NSImage(named: NSImage.Name("BeetLogo")),
+    private static let publicImages: [String: String] = [
+        "/assets/beetlogo.png": "BeetLogo",
+        "/assets/bot-builder.png": "BotBuilder",
+        "/assets/bot-reviewer.png": "BotReviewer",
+        "/assets/bot-navigator.png": "BotNavigator",
+        "/assets/bot-researcher.png": "BotResearcher",
+    ]
+
+    private func imageResponse(named name: String) -> LocalAPIServer.Response {
+        guard let image = NSImage(named: NSImage.Name(name)),
               let tiff = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiff),
               let png = bitmap.representation(using: .png, properties: [:]) else {
@@ -878,15 +1195,88 @@ enum RemoteNetworkEndpointDiscovery {
         let kind: RemoteNetworkKind
     }
 
+    enum TailscaleCLIStatus: Equatable, Sendable {
+        case running(String)
+        case stopped
+        case unavailable
+    }
+
     static func preferredHost() -> String? {
         preferredEndpoint(allowLAN: true)?.host
     }
 
     static func preferredEndpoint(allowLAN: Bool) -> Endpoint? {
-        var tailscale: String?
-        var lan: String?
+        selectEndpoint(
+            addresses: interfaceIPv4Addresses(),
+            allowLAN: allowLAN,
+            tailscaleStatus: tailscaleCLIStatus())
+    }
+
+    static func selectEndpoint(
+        addresses: [String],
+        allowLAN: Bool,
+        tailscaleStatus: TailscaleCLIStatus
+    ) -> Endpoint? {
+        if case .running(let host) = tailscaleStatus, isTailscale(host) {
+            return Endpoint(host: host, kind: .tailscale)
+        }
+        let lan = addresses.first { isPrivateIPv4($0) }
+        if tailscaleStatus == .unavailable,
+           let host = addresses.first(where: isTailscale) {
+            return Endpoint(host: host, kind: .tailscale)
+        }
+        guard allowLAN, let lan else { return nil }
+        return Endpoint(host: lan, kind: .localNetwork)
+    }
+
+    static func tailscaleCLIStatus() -> TailscaleCLIStatus {
+        let candidates = [
+            "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+            "/opt/homebrew/bin/tailscale",
+            "/usr/local/bin/tailscale",
+        ]
+        var foundExecutable = false
+        for executable in candidates where FileManager.default.isExecutableFile(atPath: executable) {
+            foundExecutable = true
+            do {
+                let result = try ShellRunner.runProcess(
+                    executable: executable,
+                    arguments: ["status", "--json"],
+                    workingDirectory: URL(fileURLWithPath: "/", isDirectory: true),
+                    timeout: 3,
+                    maxOutputBytes: 512 * 1024)
+                // Some Tailscale app bundles expose a GUI executable at the
+                // expected path but not the CLI protocol. Keep looking for a
+                // working CLI instead of treating that candidate as offline.
+                guard !result.failed else { continue }
+                return parseTailscaleStatusJSON(result.output)
+            } catch {
+                continue
+            }
+        }
+        return foundExecutable ? .stopped : .unavailable
+    }
+
+    static func parseTailscaleStatusJSON(_ text: String) -> TailscaleCLIStatus {
+        guard let data = text.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return .stopped }
+        guard (json["BackendState"] as? String)?.lowercased() == "running" else {
+            return .stopped
+        }
+        if let selfStatus = json["Self"] as? [String: Any],
+           selfStatus["Online"] as? Bool == false {
+            return .stopped
+        }
+        let addresses = json["TailscaleIPs"] as? [String] ?? []
+        guard let host = addresses.first(where: isTailscale) else { return .stopped }
+        return .running(host)
+    }
+
+    private static func interfaceIPv4Addresses() -> [String] {
+        var values: [String] = []
         var interfacePointer: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&interfacePointer) == 0, let first = interfacePointer else { return nil }
+        guard getifaddrs(&interfacePointer) == 0, let first = interfacePointer else { return [] }
         defer { freeifaddrs(interfacePointer) }
 
         for pointer in sequence(first: first, next: { $0.pointee.ifa_next }) {
@@ -896,12 +1286,9 @@ enum RemoteNetworkEndpointDiscovery {
             guard getnameinfo(address, socklen_t(address.pointee.sa_len), &buffer, socklen_t(buffer.count), nil, 0, NI_NUMERICHOST) == 0 else { continue }
             let value = String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
             guard value != "127.0.0.1" else { continue }
-            if isTailscale(value) { tailscale = value }
-            else if isPrivateIPv4(value), lan == nil { lan = value }
+            values.append(value)
         }
-        if let tailscale { return Endpoint(host: tailscale, kind: .tailscale) }
-        guard allowLAN, let lan else { return nil }
-        return Endpoint(host: lan, kind: .localNetwork)
+        return values
     }
 
     static func isTailscale(_ value: String) -> Bool {

@@ -77,6 +77,45 @@ final class ComputerToolsTests: XCTestCase {
         XCTAssertEqual(AXTreeWalker.render([]), "(no accessible elements found)")
     }
 
+    func testRenderIncludesFreshElementReferencesWhenProvided() {
+        let node = AXNodeInfo(
+            depth: 0,
+            role: "AXButton",
+            label: "Continue",
+            value: "",
+            frame: CGRect(x: 20, y: 30, width: 80, height: 40),
+            enabled: true)
+        let text = AXTreeWalker.render([node], references: [0: "c3:e1"])
+        XCTAssertTrue(text.contains("[ref=c3:e1]"))
+    }
+
+    func testNewComputerObservationInvalidatesOlderRefs() throws {
+        let first = AXNodeInfo(
+            depth: 0,
+            role: "AXButton",
+            label: "First",
+            value: "",
+            frame: CGRect(x: 10, y: 20, width: 40, height: 20),
+            enabled: true)
+        let firstRefs = AXReferenceStore.capture([first])
+        let firstRef = try XCTUnwrap(firstRefs[0])
+        XCTAssertNotNil(AXReferenceStore.resolve(firstRef))
+
+        let second = AXNodeInfo(
+            depth: 0,
+            role: "AXButton",
+            label: "Second",
+            value: "",
+            frame: CGRect(x: 100, y: 200, width: 60, height: 30),
+            enabled: true)
+        let secondRefs = AXReferenceStore.capture([second])
+        let secondRef = try XCTUnwrap(secondRefs[0])
+        XCTAssertNil(AXReferenceStore.resolve(firstRef))
+        let resolved = try XCTUnwrap(AXReferenceStore.resolve(secondRef))
+        XCTAssertEqual(resolved.x, 130, accuracy: 0.5)
+        XCTAssertEqual(resolved.y, 215, accuracy: 0.5)
+    }
+
     // MARK: strings accessor
 
     func testStringsAccessorReadsArraysAndSingleStrings() {
@@ -109,6 +148,18 @@ final class ComputerToolsTests: XCTestCase {
         XCTAssertEqual(tools["computer_type"], .execute)
         XCTAssertEqual(tools["computer_key"], .execute)
         XCTAssertEqual(tools["computer_scroll"], .execute)
+    }
+
+    func testComputerActionSchemasExposeFreshRefsAndCapture() throws {
+        for schema in [
+            ComputerClickTool().schemaText,
+            ComputerTypeTool().schemaText,
+            ComputerScrollTool().schemaText,
+        ] {
+            XCTAssertTrue(schema.contains("\"ref\""))
+            XCTAssertTrue(schema.contains("capture_after"))
+            XCTAssertNoThrow(try JSONSerialization.jsonObject(with: Data(schema.utf8)))
+        }
     }
 
     @MainActor

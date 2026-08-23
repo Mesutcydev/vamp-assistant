@@ -29,6 +29,7 @@ final class AppState: ObservableObject {
     /// OpenAI account authentication and model discovery are delegated to the
     /// user's installed Codex CLI. No ChatGPT refresh token is held here.
     let codexAccount = CodexAccountStore.shared
+    let botComputers = BotComputerManager()
 
     /// Downloads run through here — the UI never touches the network layer.
     private(set) var downloadManager: ModelDownloadManager!
@@ -68,6 +69,7 @@ final class AppState: ObservableObject {
     private var statsTask: Task<Void, Never>?
     private var thermalTask: Task<Void, Never>?
     private var remoteSessionSyncTask: Task<Void, Never>?
+    private var remoteNetworkMonitorTask: Task<Void, Never>?
     private var cancellables: Set<AnyCancellable> = []
 
     /// Local OpenAI-compatible API server (loopback-only). Lazily created when
@@ -136,9 +138,20 @@ final class AppState: ObservableObject {
         remoteSessionHost.fileSharingAllowedHandler = {
             SettingsStore.shared.remoteFileSharingEnabled
         }
-        remoteSessionHost.startSessionHandler = { [weak self] modelID, message in
-            guard let self else { return "Beet Code is no longer available." }
-            return await self.startRemoteSession(modelID: modelID, message: message)
+        remoteSessionHost.configureRunHandler = { [weak self] options in
+            SettingsStore.shared.agentMode = options.autoMode ? .auto : .goal
+            SettingsStore.shared.planMode = !options.autoMode
+            SettingsStore.shared.autoApproveEdits = options.fullAccess
+            SettingsStore.shared.autoApproveCommands = options.fullAccess
+            SettingsStore.shared.remoteFullAccessEnabled = options.fullAccess
+            self?.applyRemoteReasoningEffort(options.reasoningEffort)
+        }
+        remoteSessionHost.startSessionHandler = { [weak self] modelID, message, options in
+            guard let self else { return .rejected("Beet Code is no longer available.") }
+            return await self.startRemoteSession(modelID: modelID, message: message, options: options)
+        }
+        remoteSessionHost.applyModelHandler = { [weak self] modelID, effort in
+            await self?.activateRemoteStartModel(modelID: modelID, reasoningEffort: effort)
         }
         sessions.activeModelIDHandler = { [weak self] in
             if let self, self.isCodexActive, let codex = self.activeCodexModelID {
@@ -254,23 +267,59 @@ final class AppState: ObservableObject {
         refreshOpenCodeCatalog(workspace: sessions.workspaceURL)
         // Honor a persisted "server enabled" across launches.
         syncServers()
+        startRemoteNetworkMonitoring()
     }
 
     private func remoteStartModels() -> [RemoteStartModel] {
         let local = ModelCatalog.all
             .filter { $0.role == .chat && modelStore.isInstalled(catalogModel: $0) }
             .map { RemoteStartModel(id: "local|\($0.id)", name: $0.displayName, source: "local", detail: "\($0.parameters) · \($0.quantization)") }
-        let api = APIKeyStore.shared.configuredProviders.flatMap { provider -> [RemoteStartModel] in
-            let saved = preferences.current.remoteModel[provider.rawValue]
-            let models = [saved, provider.defaultModel].compactMap { $0 }.filter { !$0.isEmpty }
-            return Array(Set(models)).sorted().map { model in
-                RemoteStartModel(id: "api|\(provider.rawValue)|\(model)", name: model, source: "api", detail: provider.displayName)
-            }
+        let api = remoteAPIProfiles().map { profile in
+            RemoteStartModel(
+                id: RemoteAPIModelCatalog.startModelID(for: profile),
+                name: profile.displayName ?? profile.model,
+                source: "api",
+                detail: profile.displayProviderName,
+                reasoningEfforts: profile.effectiveReasoningEfforts.map(\.rawValue),
+                defaultReasoningEffort: profile.effectiveDefaultReasoningEffort)
         }
-        return local + api
+        let chatGPT = codexAccount.isSignedIn ? codexAccount.models.map { model in
+            RemoteStartModel(
+                id: "chatgpt|\(model.id)",
+                name: model.displayName,
+                source: "chatgpt",
+                detail: model.description.isEmpty ? "ChatGPT account" : model.description,
+                reasoningEfforts: model.supportedReasoningEfforts,
+                defaultReasoningEffort: model.defaultReasoningEffort)
+        } : []
+        return local + chatGPT + api
     }
 
-    private func startRemoteSession(modelID: String, message: String) async -> String? {
+    private func remoteAPIProfiles() -> [RemoteModelProfile] {
+        RemoteAPIModelCatalog.profiles(
+            configuredProviders: APIKeyStore.shared.configuredProviders,
+            selectedModelByProvider: preferences.current.remoteModel,
+            savedProfiles: Array(preferences.current.remoteModelProfiles.values),
+            hasKeyForProviderID: { APIKeyStore.shared.hasKey(forProviderID: $0) },
+            openCodeProfiles: openCodeCatalog.models.map { $0.remoteProfile() }
+        )
+        .map { $0.applying(preferences.remoteModelOverride(endpoint: $0.endpoint())) }
+    }
+
+    private func applyRemoteReasoningEffort(_ effort: String?) {
+        if let modelID = activeCodexModelID {
+            preferences.saveCodexReasoningEffort(effort, modelID: modelID)
+        } else if let endpoint = engine.activeRemoteEndpoint {
+            var override = preferences.remoteModelOverride(endpoint: endpoint) ?? RemoteModelOverride()
+            override.reasoningEffort = effort
+            preferences.saveRemoteModelOverride(override, endpoint: endpoint)
+            activeRemoteProfile = activeRemoteProfile?.applying(override)
+        }
+    }
+
+    /// Activates a remote start-model id (`local|…`, `api|…`, `chatgpt|…`).
+    /// Returns a user-facing error, or nil on success.
+    private func activateRemoteStartModel(modelID: String, reasoningEffort: String?) async -> String? {
         let parts = modelID.split(separator: "|", maxSplits: 2).map(String.init)
         guard parts.count >= 2 else { return "That model selection is invalid." }
         switch parts[0] {
@@ -279,20 +328,129 @@ final class AppState: ObservableObject {
                 return "That local model is no longer installed."
             }
             await activate(model: model)
-            guard activeModelID == model.id else { return enginePhase.errorMessage ?? "The local model could not be loaded." }
+            guard activeModelID == model.id else {
+                return enginePhase.errorMessage ?? "The local model could not be loaded."
+            }
+            return nil
         case "api":
-            guard parts.count == 3, let provider = LLMProvider(rawValue: parts[1]) else {
+            let profiles = remoteAPIProfiles()
+            let profile = RemoteAPIModelCatalog.profile(matchingStartModelID: modelID, in: profiles)
+            let endpoint: RemoteEndpoint
+            if let profile {
+                endpoint = profile.endpoint()
+            } else if parts.count == 3, let provider = LLMProvider(rawValue: parts[1]) {
+                endpoint = RemoteEndpoint(provider: provider, model: parts[2])
+            } else {
                 return "That API model is no longer configured."
             }
-            guard await activateRemote(endpoint: RemoteEndpoint(provider: provider, model: parts[2])) else {
+            guard await activateRemote(endpoint: endpoint) else {
                 return enginePhase.errorMessage ?? "The API model could not be activated."
             }
+            if let effort = reasoningEffort {
+                var override = preferences.remoteModelOverride(endpoint: endpoint)
+                    ?? RemoteModelOverride()
+                override.reasoningEffort = effort
+                preferences.saveRemoteModelOverride(override, endpoint: endpoint)
+            }
+            return nil
+        case "chatgpt":
+            guard let model = codexAccount.models.first(where: { $0.id == parts[1] }) else {
+                return "That ChatGPT model is no longer available."
+            }
+            guard await activateCodex(model: model) else {
+                return enginePhase.errorMessage ?? "The ChatGPT model could not be activated."
+            }
+            preferences.saveCodexReasoningEffort(reasoningEffort, modelID: model.id)
+            return nil
         default:
             return "That model source is not supported."
         }
+    }
+
+    private func startRemoteSession(
+        modelID: String,
+        message: String,
+        options: RemoteRunOptions
+    ) async -> RemoteSessionStartOutcome {
+        let sessionID = UUID()
+        if let error = await activateRemoteStartModel(modelID: modelID, reasoningEffort: options.reasoningEffort) {
+            return failedRemoteSession(id: sessionID, modelID: modelID, message: message, error: error)
+        }
         await sessions.switchToChatOnly()
-        sessions.send(message)
-        return nil
+        let now = Date()
+        let record = SessionRecord(
+            id: sessionID,
+            title: remoteSessionTitle(from: message),
+            createdAt: now,
+            updatedAt: now,
+            workspacePath: options.botWorkspacePath ?? "",
+            modelID: Self.persistedRemoteModelID(from: modelID),
+            messages: [],
+            checkpoints: [],
+            source: .app,
+            schemaVersion: SessionRecord.currentSchemaVersion)
+        _ = SessionStore.shared.save(record)
+        SessionStore.shared.invalidateCache()
+        sessions.send(
+            message,
+            seed: record,
+            modelInstruction: Self.remoteBotInstruction(id: options.botProfileID))
+        return .accepted(sessionID)
+    }
+
+    private static func persistedRemoteModelID(from startModelID: String) -> String {
+        let parts = startModelID.split(separator: "|", maxSplits: 2).map(String.init)
+        if parts.first == "chatgpt", parts.count >= 2 {
+            return "openai-codex:\(parts[1])"
+        }
+        return parts.last ?? startModelID
+    }
+
+    private static func remoteBotInstruction(id: String?) -> String? {
+        switch id {
+        case "builder":
+            "Work as a focused software builder. Inspect the existing project, implement the request completely, preserve unrelated work, and verify the result."
+        case "reviewer":
+            "Work as a careful code reviewer. Inspect the current changes, identify concrete bugs and regressions first, and give evidence-backed recommendations. Do not edit unless asked."
+        case "navigator":
+            "Work as a browser navigator. Use the available browser tools directly, keep actions scoped to the request, and summarize what changed or what you found."
+        case "researcher":
+            "Work as a technical researcher. Prefer primary sources, compare evidence, distinguish facts from inference, and return concise actionable findings."
+        default:
+            nil
+        }
+    }
+
+    private func failedRemoteSession(
+        id: UUID,
+        modelID: String,
+        message: String,
+        error: String
+    ) -> RemoteSessionStartOutcome {
+        let now = Date()
+        let record = SessionRecord(
+            id: id,
+            title: remoteSessionTitle(from: message),
+            createdAt: now,
+            updatedAt: now,
+            workspacePath: "",
+            modelID: modelID,
+            messages: [
+                SessionMessage(role: .user, content: message, toolName: nil, timestamp: now),
+                SessionMessage(role: .assistant, content: "error: \(error)", toolName: nil, timestamp: now),
+            ],
+            checkpoints: [],
+            source: .app,
+            schemaVersion: SessionRecord.currentSchemaVersion)
+        _ = SessionStore.shared.save(record)
+        SessionStore.shared.invalidateCache()
+        return .accepted(id)
+    }
+
+    private func remoteSessionTitle(from message: String) -> String {
+        let marker = "\n\nUser request:\n"
+        let visible = message.range(of: marker).map { String(message[$0.upperBound...]) } ?? message
+        return String(visible.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
     }
 
     // MARK: Durable task queue
@@ -800,6 +958,22 @@ final class AppState: ObservableObject {
         syncRemoteSessionHost()
     }
 
+    /// Tailscale may connect after BeetCode launches or change interfaces
+    /// while the app stays open. Reconcile the listener periodically so a
+    /// previous "not connected" state heals without toggling Settings.
+    private func startRemoteNetworkMonitoring() {
+        remoteNetworkMonitorTask?.cancel()
+        remoteNetworkMonitorTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                guard let self, !Task.isCancelled else { return }
+                if self.settings.remoteSessionEnabled {
+                    self.syncRemoteSessionHost()
+                }
+            }
+        }
+    }
+
     /// Reconciles the running server with the Settings toggle + port. Called
     /// whenever either changes; idempotent otherwise.
     private func syncAPIServer() {
@@ -876,6 +1050,9 @@ final class AppState: ObservableObject {
                 port: port,
                 allowLAN: allowLAN ?? settings.remoteSessionAllowLAN)
             guard !Task.isCancelled else { return }
+            if codexAccount.models.isEmpty {
+                await codexAccount.refresh()
+            }
             remoteSessionRunning = remoteSessionHost.isRunning
             remoteSessionError = nil
             refreshRemoteSessionSnapshot()

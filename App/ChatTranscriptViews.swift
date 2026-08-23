@@ -8,6 +8,8 @@ struct ChatHeaderView: View {
     let phaseLabel: String
     let phaseTint: Color
     let canReview: Bool
+    let onHome: () -> Void
+    let onNewChat: () -> Void
 
     var body: some View {
         HStack(spacing: 9) {
@@ -26,6 +28,26 @@ struct ChatHeaderView: View {
                 .truncationMode(.middle)
 
             Spacer(minLength: 8)
+            HStack(spacing: 5) {
+                Button(action: onHome) {
+                    Image(systemName: "house")
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.textSecondary)
+                .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .lfHoverLift()
+                .help("Back to home")
+                .accessibilityLabel("Back to home")
+
+                Button(action: onNewChat) {
+                    Label("New chat", systemImage: "square.and.pencil")
+                }
+                .buttonStyle(LFCapsuleButtonStyle())
+                .lfHoverLift()
+                .help("Start a new chat")
+            }
             ChatHeaderActions(canReview: canReview)
             ChatPhaseBadge(label: phaseLabel, tint: phaseTint)
         }
@@ -45,13 +67,34 @@ struct ChatHeaderActions: View {
     var body: some View {
         HStack(spacing: 7) {
             Button {
+                post(.openRemoteAccess)
+            } label: {
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Theme.textSecondary)
+            .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .fixedSize()
+            .lfHoverLift()
+            .help("Control this chat from iPhone or iPad")
+            .accessibilityLabel("Start remote control for this chat")
+
+            Button {
                 post(.gitDiff)
             } label: {
-                Label("Review", systemImage: "doc.text.magnifyingglass")
+                Image(systemName: "doc.text.magnifyingglass")
+                    .frame(width: 28, height: 28)
             }
-            .buttonStyle(LFCapsuleButtonStyle())
+            .buttonStyle(.plain)
+            .foregroundStyle(Theme.textSecondary)
+            .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .fixedSize()
             .lfHoverLift()
             .help("Review changed files")
+            .accessibilityLabel("Review changed files")
             .disabled(!canReview)
 
             Menu {
@@ -1163,8 +1206,10 @@ struct ApprovalCard: View {
             }
         }
         .padding(Spacing.lg)
-        .padding(.leading, Spacing.sm)
-        .lfTranscriptCard(Theme.warning)
+        .background(
+            Theme.surface.opacity(0.96),
+            in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+        .shadow(color: Color.black.opacity(0.09), radius: 18, y: 7)
     }
 
     private var approvalButtonRow: some View {
@@ -1211,9 +1256,12 @@ struct ApprovalCard: View {
     }
 
     private var declineButton: some View {
-        // Destructive stays separated from the approval cluster.
         Button("Decline", role: .destructive) { onDecision(false, false) }
-            .buttonStyle(LFCapsuleButtonStyle(tone: .destructive))
+            .buttonStyle(.plain)
+            .font(.callout.weight(.semibold))
+            .foregroundStyle(Theme.danger)
+            .padding(.horizontal, Spacing.sm)
+            .frame(minHeight: 34)
     }
 }
 
@@ -1463,9 +1511,7 @@ struct FinishBanner: View {
     }
 
     private var completionCard: some View {
-        let shape = RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-
-        return HStack(alignment: .center, spacing: Spacing.sm) {
+        HStack(alignment: .center, spacing: Spacing.sm) {
             Image(systemName: summary.artifact == nil ? "checkmark.seal.fill" : "shippingbox.fill")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Theme.success)
@@ -1512,36 +1558,13 @@ struct FinishBanner: View {
             .buttonStyle(.plain)
             .font(.caption.weight(.semibold))
             .foregroundStyle(Theme.textSecondary)
-            .padding(.horizontal, Spacing.md)
-            .frame(height: 30)
-            .background(Theme.surfaceInset.opacity(0.72), in: Capsule())
-            .overlay(Capsule().strokeBorder(Theme.hairline.opacity(0.42), lineWidth: 0.75))
+            .padding(.horizontal, Spacing.xs)
+            .frame(height: 28)
             .accessibilityHint("Clears this conversation and starts a new chat")
         }
-        .padding(.leading, Spacing.sm)
-        .padding(.trailing, Spacing.md)
-        .padding(.vertical, Spacing.sm)
-        .frame(maxWidth: 680, alignment: .leading)
-        .background(Theme.surfaceInset.opacity(0.64), in: shape)
-        .overlay {
-            LinearGradient(
-                colors: [Theme.success.opacity(0.055), .clear],
-                startPoint: .leading,
-                endPoint: .trailing)
-                .clipShape(shape)
-                .allowsHitTesting(false)
-        }
-        .overlay {
-            shape
-                .strokeBorder(Theme.hairline.opacity(0.46), lineWidth: 0.75)
-                .allowsHitTesting(false)
-        }
-        .overlay(alignment: .leading) {
-            Capsule()
-                .fill(Theme.success.opacity(0.82))
-                .frame(width: 3)
-                .padding(.vertical, 8)
-        }
+        .padding(.horizontal, Spacing.xs)
+        .padding(.vertical, 4)
+        .frame(maxWidth: 560, alignment: .leading)
     }
 
     @ViewBuilder

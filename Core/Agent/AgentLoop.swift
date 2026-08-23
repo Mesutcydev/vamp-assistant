@@ -149,12 +149,14 @@ actor AgentLoop {
         }
         // Control tools are part of the prompt and the executor's registry,
         // but the loop intercepts them before execution ever happens.
-        var availableTools = effectiveConfiguration.chatOnly ? [] : tools
+        var availableTools = effectiveConfiguration.chatOnly
+            ? tools.filter { PromptBuilder.isChatOnlyTool($0.name) }
+            : tools
         if let projectPolicy, projectPolicy.hasToolFilter {
             availableTools = availableTools.filter { projectPolicy.includesTool($0.name) }
         }
         var allTools = effectiveConfiguration.chatOnly
-            ? []
+            ? availableTools
             : availableTools + [ControlTools.askUser, ControlTools.attemptCompletion]
         if effectiveConfiguration.allowSubagents,
            projectPolicy?.includesTool(ControlTools.task.name) ?? true {
@@ -171,7 +173,10 @@ actor AgentLoop {
         let context = ToolContext(workspace: workspace)
         context.memory = memory
         self.executor = ToolExecutor(tools: allTools, context: context)
-        let advertisedTools = ToolRouter.select(from: allTools, for: taskHint)
+        let advertisedTools = ToolRouter.select(
+            from: allTools,
+            for: taskHint,
+            preserveFullRegistry: effectiveConfiguration.chatOnly)
         self.advertisedToolNames = Set(advertisedTools.map(\.name))
         var effectivePermissions = permissions
         effectivePermissions.openCodePermissions = permissions.openCodePermissions.merged(
@@ -221,7 +226,8 @@ actor AgentLoop {
                 checkpoints: seed.checkpoints,
                 source: seed.source,
                 schemaVersion: seed.schemaVersion,
-                codexThreadID: seed.codexThreadID)
+                codexThreadID: seed.codexThreadID,
+                codexDynamicToolNames: seed.codexDynamicToolNames)
         } else {
             self.record = SessionRecord(
                 id: sessionID,

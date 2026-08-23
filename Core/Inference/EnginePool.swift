@@ -150,6 +150,8 @@ actor EnginePool {
                         ExperimentalInferencePreferences.dflashEnabledForNewEngine,
                     experimentalNGramEnabled:
                         ExperimentalInferencePreferences.ngramEnabledForNewEngine)
+            case .coreAI:
+                return CoreAIEngine()
             }
         }
     }

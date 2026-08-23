@@ -1,6 +1,18 @@
 import Foundation
 import Observation
 
+struct PairedBeetCodeComputer: Codable, Identifiable, Equatable {
+    let id: UUID
+    var name: String
+    var baseURL: URL
+
+    init(id: UUID = UUID(), name: String? = nil, baseURL: URL) {
+        self.id = id
+        self.name = name ?? baseURL.host ?? "BeetCode Mac"
+        self.baseURL = baseURL
+    }
+}
+
 @MainActor
 @Observable
 final class RemoteStore {
@@ -13,10 +25,16 @@ final class RemoteStore {
     var isSharing = false
     var errorMessage: String?
     var connectionLabel = "Disconnected"
+    var autoMode = true
+    var fullAccess = false
+    var reasoningEffort: String?
+    private(set) var pairedComputers: [PairedBeetCodeComputer] = []
+    private(set) var activeComputerID: UUID?
 
     private(set) var baseURL: URL?
     private var token: String?
     private var pollingTask: Task<Void, Never>?
+    private var sessionStreamTask: Task<Void, Never>?
     private var connectionAvailable = false
     private var consecutivePollingFailures = 0
 
@@ -31,16 +49,16 @@ final class RemoteStore {
             return
         }
 #endif
-        token = RemoteTokenStore.load()
-        if let saved = UserDefaults.standard.string(forKey: "remoteBaseURL"),
-           let url = URL(string: saved) {
-            baseURL = url
-        }
+        restoreComputerProfiles()
     }
 
     var hasSavedConnection: Bool { baseURL != nil && token != nil }
     var isConnected: Bool { hasSavedConnection && connectionAvailable }
     var savedMacAddress: String? { baseURL?.absoluteString }
+    var activeComputer: PairedBeetCodeComputer? {
+        pairedComputers.first { $0.id == activeComputerID }
+    }
+    var activeComputerName: String { activeComputer?.name ?? "Mac" }
 
     func restore() async {
         guard hasSavedConnection else { return }
@@ -72,10 +90,18 @@ final class RemoteStore {
         do {
             let parsed = try Self.parse(address: address, explicitCode: code)
             let response = try await RemoteAPIClient(baseURL: parsed.url).pair(code: parsed.code)
-            try RemoteTokenStore.save(response.token)
+            let computer = pairedComputers.first { $0.baseURL == parsed.url }
+                ?? PairedBeetCodeComputer(baseURL: parsed.url)
+            try RemoteTokenStore.save(response.token, computerID: computer.id)
+            if let index = pairedComputers.firstIndex(where: { $0.id == computer.id }) {
+                pairedComputers[index] = computer
+            } else {
+                pairedComputers.append(computer)
+            }
+            activeComputerID = computer.id
             baseURL = parsed.url
             token = response.token
-            UserDefaults.standard.set(parsed.url.absoluteString, forKey: "remoteBaseURL")
+            saveComputerProfiles()
             try await refresh()
             connectionAvailable = true
             connectionLabel = "Connected"
@@ -95,11 +121,19 @@ final class RemoteStore {
         connectionAvailable = true
         consecutivePollingFailures = 0
         sessions = nextList.sessions
+        RemoteNotificationCenter.shared.observeSessions(
+            nextList.sessions,
+            computerName: activeComputerName)
         connectionLabel = nextStatus.isRunning ? nextStatus.phase.capitalized : "Connected"
         if let id = selectedSession?.id,
            sessions.contains(where: { $0.id == id }) {
-            selectedSession = try await client.session(id)
+            if sessionStreamTask == nil {
+                selectedSession = try await client.session(id)
+                startSessionStream(id: id)
+            }
         } else if selectedSession != nil {
+            sessionStreamTask?.cancel()
+            sessionStreamTask = nil
             selectedSession = nil
         }
         errorMessage = nil
@@ -111,7 +145,17 @@ final class RemoteStore {
 
     func select(sessionID: UUID) async {
         guard let client else { return }
-        do { selectedSession = try await client.session(sessionID) }
+        sessionStreamTask?.cancel()
+        sessionStreamTask = nil
+        selectedSession = nil
+        do {
+            let detail = try await client.session(sessionID)
+            selectedSession = detail
+            RemoteNotificationCenter.shared.observeDetail(detail, computerName: activeComputerName)
+            autoMode = detail.agentMode != "goal"
+            fullAccess = detail.fullAccess ?? false
+            startSessionStream(id: sessionID)
+        }
         catch { errorMessage = error.localizedDescription }
     }
 
@@ -121,29 +165,75 @@ final class RemoteStore {
         catch { errorMessage = error.localizedDescription }
     }
 
-    func startSession(modelID: String, message: String) async -> UUID? {
+    func botComputers() async -> RemoteBotComputerEnvelope? {
+        guard let client else { return nil }
+        do { return try await client.botComputers() }
+        catch let error as RemoteClientError {
+            // Older BeetCode hosts predate bot-computer endpoints. The bot
+            // gallery is still useful on those hosts; leave the workspace
+            // section empty instead of presenting a blocking "Unknown
+            // endpoint" alert as soon as the Bots button is tapped.
+            if case .server(let message) = error,
+               message.localizedCaseInsensitiveContains("unknown endpoint") ||
+               message.localizedCaseInsensitiveContains("bot computer endpoint") {
+                return nil
+            }
+            errorMessage = error.localizedDescription
+            return nil
+        }
+        catch { errorMessage = error.localizedDescription; return nil }
+    }
+
+    func saveAPIKey(providerID: String, key: String) async -> Bool {
+        guard let client else { return false }
+        do { _ = try await client.saveAPIKey(providerID: providerID, key: key); return true }
+        catch { errorMessage = error.localizedDescription; return false }
+    }
+
+    func startBotComputer(_ id: UUID) async -> Bool {
+        guard let client else { return false }
+        do { _ = try await client.startBotComputer(id); return true }
+        catch { errorMessage = error.localizedDescription; return false }
+    }
+
+    func stopBotComputer(_ id: UUID) async -> Bool {
+        guard let client else { return false }
+        do { _ = try await client.stopBotComputer(id); return true }
+        catch { errorMessage = error.localizedDescription; return false }
+    }
+
+    func startSession(modelID: String, message: String, botProfileID: String? = nil, botComputerID: UUID? = nil) async -> UUID? {
         guard let client else { return nil }
         do {
-            _ = try await client.startSession(modelID: modelID, message: message) as RemoteAcceptedResponse
-            for _ in 0..<20 {
-                try await Task.sleep(for: .milliseconds(350))
-                try await refresh()
-                if let session = sessions.first(where: { $0.isRunning }) ?? sessions.first {
-                    await select(sessionID: session.id)
-                    return session.id
-                }
+            let response = try await client.startSession(
+                modelID: modelID,
+                message: message,
+                autoMode: autoMode,
+                fullAccess: fullAccess,
+                reasoningEffort: reasoningEffort,
+                botProfileID: botProfileID,
+                botComputerID: botComputerID)
+            guard let sessionID = response.sessionID else {
+                throw RemoteClientError.invalidResponse
             }
-            errorMessage = "The session started, but has not appeared yet. Pull down to refresh."
+            try await refresh()
+            await select(sessionID: sessionID)
+            return sessionID
         } catch { errorMessage = error.localizedDescription }
         return nil
     }
 
-    func send(_ text: String) async -> Bool {
+    func send(_ text: String, modelID: String? = nil) async -> Bool {
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty, let client, let id = selectedSession?.id else { return false }
         do {
-            _ = try await client.send(message, to: id)
-            selectedSession = try await client.session(id)
+            _ = try await client.send(
+                message,
+                to: id,
+                autoMode: autoMode,
+                fullAccess: fullAccess,
+                reasoningEffort: reasoningEffort,
+                modelID: modelID)
             return true
         } catch {
             errorMessage = error.localizedDescription
@@ -171,18 +261,58 @@ final class RemoteStore {
     }
 
     func forgetSavedMac() {
+        guard let activeComputerID else {
+            clearActiveConnection()
+            return
+        }
+        RemoteTokenStore.clear(computerID: activeComputerID)
+        pairedComputers.removeAll { $0.id == activeComputerID }
+        self.activeComputerID = pairedComputers.first?.id
+        saveComputerProfiles()
+        clearActiveConnection()
+        if let nextID = self.activeComputerID {
+            activateComputer(nextID, connect: false)
+            Task { await connectSaved(showFailure: false) }
+        }
+    }
+
+    func switchComputer(to id: UUID) async {
+        guard pairedComputers.contains(where: { $0.id == id }) else { return }
+        activateComputer(id, connect: false)
+        await connectSaved()
+    }
+
+    func renameComputer(_ id: UUID, name: String) {
+        let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty,
+              let index = pairedComputers.firstIndex(where: { $0.id == id }) else { return }
+        pairedComputers[index].name = cleaned
+        saveComputerProfiles()
+    }
+
+    func removeComputer(_ id: UUID) {
+        if id == activeComputerID {
+            forgetSavedMac()
+            return
+        }
+        RemoteTokenStore.clear(computerID: id)
+        pairedComputers.removeAll { $0.id == id }
+        saveComputerProfiles()
+    }
+
+    private func clearActiveConnection() {
         pollingTask?.cancel()
         pollingTask = nil
+        sessionStreamTask?.cancel()
+        sessionStreamTask = nil
         connectionAvailable = false
         token = nil
-        RemoteTokenStore.clear()
         sessions = []
         startModels = []
         sharedFiles = []
         selectedSession = nil
         connectionLabel = "Disconnected"
         baseURL = nil
-        UserDefaults.standard.removeObject(forKey: "remoteBaseURL")
     }
 
     func loadSharing() async {
@@ -247,6 +377,58 @@ final class RemoteStore {
         return RemoteAPIClient(baseURL: baseURL, token: token)
     }
 
+    private func activateComputer(_ id: UUID, connect: Bool) {
+        guard let computer = pairedComputers.first(where: { $0.id == id }) else { return }
+        pollingTask?.cancel()
+        sessionStreamTask?.cancel()
+        sessions = []
+        selectedSession = nil
+        startModels = []
+        sharedFiles = []
+        connectionAvailable = false
+        connectionLabel = connect ? "Connecting…" : "Disconnected"
+        activeComputerID = id
+        baseURL = computer.baseURL
+        token = RemoteTokenStore.load(computerID: id)
+        saveComputerProfiles()
+    }
+
+    private func restoreComputerProfiles() {
+        let defaults = UserDefaults.standard
+        if let data = defaults.data(forKey: "pairedBeetCodeComputers"),
+           let computers = try? JSONDecoder().decode([PairedBeetCodeComputer].self, from: data),
+           !computers.isEmpty {
+            pairedComputers = computers
+            let savedID = defaults.string(forKey: "activeBeetCodeComputerID").flatMap(UUID.init(uuidString:))
+            let selectedID = computers.contains(where: { $0.id == savedID }) ? savedID : computers.first?.id
+            if let selectedID { activateComputer(selectedID, connect: false) }
+            return
+        }
+
+        // One-time migration from the original single-Mac storage.
+        if let address = defaults.string(forKey: "remoteBaseURL"),
+           let url = URL(string: address),
+           let legacyToken = RemoteTokenStore.loadLegacy() {
+            let computer = PairedBeetCodeComputer(baseURL: url)
+            try? RemoteTokenStore.save(legacyToken, computerID: computer.id)
+            pairedComputers = [computer]
+            activeComputerID = computer.id
+            baseURL = url
+            token = legacyToken
+            saveComputerProfiles()
+            RemoteTokenStore.clearLegacy()
+            defaults.removeObject(forKey: "remoteBaseURL")
+        }
+    }
+
+    private func saveComputerProfiles() {
+        let defaults = UserDefaults.standard
+        if let data = try? JSONEncoder().encode(pairedComputers) {
+            defaults.set(data, forKey: "pairedBeetCodeComputers")
+        }
+        defaults.set(activeComputerID?.uuidString, forKey: "activeBeetCodeComputerID")
+    }
+
     private func startPolling() {
         pollingTask?.cancel()
         pollingTask = Task { [weak self] in
@@ -262,6 +444,31 @@ final class RemoteStore {
                         self.connectionLabel = "Reconnecting…"
                     }
                 }
+            }
+        }
+    }
+
+    private func startSessionStream(id: UUID) {
+        guard let client else { return }
+        sessionStreamTask?.cancel()
+        sessionStreamTask = Task { [weak self] in
+            var retryDelay = Duration.milliseconds(300)
+            while !Task.isCancelled {
+                guard let self, self.selectedSession?.id == id else { return }
+                do {
+                    for try await detail in client.sessionEvents(id) {
+                        guard !Task.isCancelled, self.selectedSession?.id == id else { return }
+                        self.selectedSession = detail
+                        RemoteNotificationCenter.shared.observeDetail(
+                            detail,
+                            computerName: self.activeComputerName)
+                        retryDelay = .milliseconds(300)
+                    }
+                } catch {
+                    guard !Task.isCancelled else { return }
+                }
+                try? await Task.sleep(for: retryDelay)
+                retryDelay = .seconds(2)
             }
         }
     }

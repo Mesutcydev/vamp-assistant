@@ -70,6 +70,16 @@ enum VisionProvider {
         }
     }
 
+    /// Runs only the installed local sidecar. Computer screenshots use this
+    /// path so a capture is never uploaded to a BYOK provider implicitly.
+    static func describeLocallyIfAvailable(
+        imageAt fileURL: URL,
+        prompt: String
+    ) async throws -> String? {
+        guard let resolution = await localResolver() else { return nil }
+        return try await localDescribe(resolution, fileURL, prompt)
+    }
+
     private static var byokAvailable: Bool {
         for provider in LLMProvider.allCases where provider.supportsVision {
             if APIKeyStore.key(provider: provider) != nil { return true }

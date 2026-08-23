@@ -36,7 +36,9 @@ struct ChatView: View {
                     title: sessionTitle,
                     phaseLabel: phaseLabel,
                     phaseTint: phaseTint,
-                    canReview: controller.workspaceURL != nil)
+                    canReview: controller.workspaceURL != nil,
+                    onHome: controller.newSession,
+                    onNewChat: controller.newSession)
                 if controller.workspaceTrustNeeded {
                     workspaceTrustBanner
                 }
@@ -565,34 +567,36 @@ struct ChatView: View {
     /// Approval, plan, and question cards stay above the composer so a long
     /// transcript cannot hide the gate the user has to act on.
     private var pendingGate: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                if let approval = controller.pendingApproval {
-                    ApprovalCard(request: approval) { approved, always in
-                        controller.approve(approved, always: always)
-                    }
+        // This is intentionally not a nested ScrollView. Nested scrolling made
+        // approval cards compete with the transcript for wheel/trackpad events,
+        // causing the chat to jump up and down while the agent streamed. Long
+        // previews can still scroll naturally with the transcript, while the
+        // action row remains visible in the fixed gate above the composer.
+        VStack(alignment: .leading, spacing: 12) {
+            if let approval = controller.pendingApproval {
+                ApprovalCard(request: approval) { approved, always in
+                    controller.approve(approved, always: always)
                 }
-                if let question = controller.pendingQuestion {
-                    QuestionCard(question: question) { answer in
-                        controller.answerQuestion(answer)
-                    }
+            }
+            if let question = controller.pendingQuestion {
+                QuestionCard(question: question) { answer in
+                    controller.answerQuestion(answer)
                 }
-                if let plan = controller.pendingPlan {
-                    PlanCard(plan: plan) { feedback in
-                        if let feedback {
-                            controller.revisePlan(feedback)
-                        } else {
-                            controller.approvePlan()
-                        }
+            }
+            if let plan = controller.pendingPlan {
+                PlanCard(plan: plan) { feedback in
+                    if let feedback {
+                        controller.revisePlan(feedback)
+                    } else {
+                        controller.approvePlan()
                     }
                 }
             }
-            .frame(maxWidth: ContentColumn.maxWidth, alignment: .leading)
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
         }
-        .frame(maxHeight: 280)
+        .frame(maxWidth: ContentColumn.maxWidth, alignment: .leading)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Pending approval")
     }

@@ -9,6 +9,7 @@ final class AgentSessionController: ObservableObject {
     private enum CodexApprovalKind {
         case commandOrFile
         case permissions(LFJSONValue)
+        case dynamicTool(ParsedToolCall)
     }
 
     struct TranscriptItem: Identifiable, Equatable {
@@ -100,6 +101,7 @@ final class AgentSessionController: ObservableObject {
     private var codexApprovalRequestID: Int?
     private var codexApprovalInvocation: ToolInvocation?
     private var codexApprovalKind: CodexApprovalKind?
+    private var codexDynamicExecutor: ToolExecutor?
     private var codexQuestionRequestID: Int?
     private var codexQuestionID: String?
     private var codexItemInvocations: [String: ToolInvocation] = [:]
@@ -146,8 +148,21 @@ final class AgentSessionController: ObservableObject {
 
     // MARK: Task lifecycle
 
-    func send(_ message: String, attachments: [ComposerAttachment] = [], seed: SessionRecord? = nil) {
+    func send(
+        _ message: String,
+        attachments: [ComposerAttachment] = [],
+        seed: SessionRecord? = nil,
+        modelInstruction: String? = nil
+    ) {
         guard !isRunning else { return }
+
+        // Reserve identity before asynchronous model/MCP preparation so a
+        // remote client can subscribe to the exact chat immediately.
+        if let seed {
+            activeSessionID = seed.id
+        } else if activeSessionID == nil {
+            activeSessionID = UUID()
+        }
 
         // Reserve the run synchronously. Without this reservation two remote
         // HTTP requests can both pass the guard before the async MCP/model
@@ -160,6 +175,7 @@ final class AgentSessionController: ObservableObject {
         codexApprovalRequestID = nil
         codexApprovalInvocation = nil
         codexApprovalKind = nil
+        codexDynamicExecutor = nil
         codexQuestionRequestID = nil
         codexQuestionID = nil
         codexItemInvocations.removeAll()
@@ -176,14 +192,23 @@ final class AgentSessionController: ObservableObject {
 
         startTask = Task { [weak self] in
             guard let self else { return }
-            await self.startRun(message: message, attachments: attachments, seed: seed)
+            await self.startRun(
+                message: message,
+                attachments: attachments,
+                seed: seed,
+                modelInstruction: modelInstruction)
             self.startTask = nil
         }
     }
 
     /// The async half of `send`: connects MCP servers (bounded, best-effort)
     /// and then starts the loop with built-in + MCP tools merged.
-    private func startRun(message: String, attachments: [ComposerAttachment], seed: SessionRecord?) async {
+    private func startRun(
+        message: String,
+        attachments: [ComposerAttachment],
+        seed: SessionRecord?,
+        modelInstruction: String?
+    ) async {
         guard isRunning, !Task.isCancelled else {
             isRunning = false
             return
@@ -194,16 +219,22 @@ final class AgentSessionController: ObservableObject {
         do {
             workspace = try projectWorkspace ?? Self.chatRuntimeDirectory()
         } catch {
+            let failure = "Could not prepare chat storage: \(error.localizedDescription)"
             isRunning = false
             currentPhase = .finished
-            finishReason = .engineError("Could not prepare chat storage: \(error.localizedDescription)")
+            finishReason = .engineError(failure)
+            transcript.append(TranscriptItem(id: UUID(), kind: .user(message)))
+            publishFailure(failure)
             return
         }
         let workspaceScope = Workspace(root: workspace)
 
         // Prepared turn: the transcript shows the user's clean message; the
         // MODEL receives bounded attachment context. The two never mix.
-        let modelText = await Self.expand(attachments: attachments, message: message)
+        let expandedMessage = await Self.expand(attachments: attachments, message: message)
+        let modelText = modelInstruction.map {
+            "Specialist instruction: \($0)\n\nUser request:\n\(expandedMessage)"
+        } ?? expandedMessage
         let displayText = attachments.isEmpty ? message : message + "  ·  " + Self.attachmentSummary(attachments)
         transcript.append(TranscriptItem(id: UUID(), kind: .user(displayText)))
 
@@ -264,7 +295,9 @@ final class AgentSessionController: ObservableObject {
             mcpTools = mcpResult.tools
         }
         let tools: [any AgentTool] = chatOnly
-            ? []
+            ? Self.sessionTools(
+                computerControlEnabled: settings.computerControlEnabled,
+                chatOnly: true)
             : constrainedLocalModel
             ? Self.constrainedLocalTools
             : Self.sessionTools(computerControlEnabled: settings.computerControlEnabled)
@@ -275,8 +308,8 @@ final class AgentSessionController: ObservableObject {
                 "Memory-safe local mode: using a compact prompt and core coding tools so this model can answer without exhausting RAM.")))
         }
 
-        let autoApproveEdits = settings.autoApproveEdits
-        let autoApproveCommands = settings.autoApproveCommands
+        let autoApproveEdits = settings.autoApproveEdits || settings.agentMode == .auto
+        let autoApproveCommands = settings.autoApproveCommands || settings.agentMode == .auto
         let maxTurns = settings.maxTurns
         let configuredMaxTokensPerTurn = min(
             settings.maxTokensPerTurn,
@@ -315,6 +348,7 @@ final class AgentSessionController: ObservableObject {
         var permissions = PermissionGate(
             autoApproveEdits: autoApproveEdits,
             autoApproveCommands: autoApproveCommands,
+            fullAccess: settings.remoteFullAccessEnabled || settings.agentMode == .auto,
             workspace: workspaceScope,
             overrides: runOverrides)
         permissions.openCodePermissions = compatibilityPermissions
@@ -415,6 +449,22 @@ final class AgentSessionController: ObservableObject {
         record.workspacePath = chatOnly ? "" : workspace.path
         record.modelID = "openai-codex:\(modelID)"
         record.source = .app
+        let dynamicTools = Self.sessionTools(
+            computerControlEnabled: settings.computerControlEnabled,
+            chatOnly: true)
+        let dynamicToolNames = dynamicTools.map(\.name).sorted()
+        var promptSeed = seed
+        if (record.codexDynamicToolNames ?? []) != dynamicToolNames {
+            // Dynamic tools are fixed at thread/start. Start a fresh Codex
+            // thread when the opt-in set changes, while replaying the bounded
+            // visible conversation into that thread below.
+            record.codexThreadID = nil
+            promptSeed?.codexThreadID = nil
+        }
+        record.codexDynamicToolNames = dynamicToolNames
+        codexDynamicExecutor = ToolExecutor(
+            tools: dynamicTools,
+            context: ToolContext(workspace: Workspace(root: workspace)))
         record.messages.append(SessionMessage(
             role: .user,
             content: displayText,
@@ -426,8 +476,9 @@ final class AgentSessionController: ObservableObject {
         SessionStore.shared.currentSessionID = record.id
         persistSessionRecord(record)
 
-        let threadInput = Self.codexPrompt(seed: seed, current: modelText)
+        let threadInput = Self.codexPrompt(seed: promptSeed, current: modelText)
         let stream = await codexAccount.client.events()
+        let autonomous = !chatOnly && (settings.agentMode == .auto || settings.remoteFullAccessEnabled)
 
         do {
             let threadID: String
@@ -436,12 +487,15 @@ final class AgentSessionController: ObservableObject {
                     threadID: savedThreadID,
                     modelID: modelID,
                     workspace: workspace,
-                    chatOnly: chatOnly)
+                    chatOnly: chatOnly,
+                    autonomous: autonomous)
             } else {
                 threadID = try await codexAccount.client.startThread(
                     modelID: modelID,
                     workspace: workspace,
-                    chatOnly: chatOnly)
+                    chatOnly: chatOnly,
+                    autonomous: autonomous,
+                    dynamicTools: CodexAppServerClient.dynamicToolSpecs(for: dynamicTools))
             }
             guard isRunning, !Task.isCancelled else { return }
             record.codexThreadID = threadID
@@ -452,9 +506,14 @@ final class AgentSessionController: ObservableObject {
                 threadID: threadID,
                 modelID: modelID,
                 workspace: workspace,
-                text: chatOnly ? Self.chatOnlyCodexPrompt(threadInput) : threadInput,
+                text: chatOnly
+                    ? Self.chatOnlyCodexPrompt(
+                        threadInput,
+                        computerControlEnabled: settings.computerControlEnabled)
+                    : threadInput,
                 reasoningEffort: activeCodexReasoningEffortHandler(),
-                chatOnly: chatOnly)
+                chatOnly: chatOnly,
+                autonomous: autonomous)
             guard isRunning, !Task.isCancelled else {
                 try? await codexAccount.client.interrupt(
                     threadID: threadID,
@@ -601,6 +660,18 @@ final class AgentSessionController: ObservableObject {
 
         switch method {
         case "item/commandExecution/requestApproval", "item/fileChange/requestApproval":
+            if settings.remoteFullAccessEnabled {
+                Task {
+                    try? await codexAccount.client.respondToApproval(
+                        requestID: requestID,
+                        decision: "acceptForSession")
+                }
+                DiagnosticsCenter.shared.record(
+                    .approval,
+                    "Full Access auto-approved Codex request",
+                    detail: method)
+                return
+            }
             let itemID = Self.codexID(params["itemId"])
             let invocation = itemID.flatMap { codexItemInvocations[$0] }
                 ?? codexInvocation(for: method, params: params)
@@ -619,6 +690,16 @@ final class AgentSessionController: ObservableObject {
                 level: .warning)
 
         case "item/permissions/requestApproval":
+            if settings.remoteFullAccessEnabled {
+                let requested = params["permissions"] ?? .object([:])
+                Task {
+                    try? await codexAccount.client.respondToPermissions(
+                        requestID: requestID,
+                        permissions: requested,
+                        scope: "session")
+                }
+                return
+            }
             let invocation = codexInvocation(for: method, params: params)
             codexApprovalRequestID = requestID
             codexApprovalInvocation = invocation
@@ -645,10 +726,7 @@ final class AgentSessionController: ObservableObject {
             currentPhase = .awaitingQuestion
 
         case "item/tool/call":
-            // Beet Code currently does not register arbitrary dynamic tools
-            // with app-server. Declining explicitly is safer than leaving the
-            // turn suspended behind an unanswered JSON-RPC request.
-            Task { try? await codexAccount.client.declineDynamicTool(requestID: requestID) }
+            handleCodexDynamicTool(requestID: requestID, params: params)
 
         case "mcpServer/elicitation/request":
             Task { try? await codexAccount.client.declineElicitation(requestID: requestID) }
@@ -662,6 +740,48 @@ final class AgentSessionController: ObservableObject {
                     decision: "decline") }
             }
         }
+    }
+
+    private func handleCodexDynamicTool(
+        requestID: Int,
+        params: [String: LFJSONValue]
+    ) {
+        guard let toolName = params["tool"]?.stringValue,
+              let executor = codexDynamicExecutor,
+              let tool = executor.tool(named: toolName)
+        else {
+            Task { try? await codexAccount.client.declineDynamicTool(requestID: requestID) }
+            return
+        }
+        let arguments = params["arguments"] ?? .object([:])
+        let call = ParsedToolCall(name: toolName, arguments: arguments, index: 0)
+        let invocation = ToolInvocation(call: call, summary: tool.summary)
+
+        if settings.remoteFullAccessEnabled || !tool.risk.requiresApprovalByDefault {
+            let client = codexAccount.client
+            Task {
+                let outcome = await executor.execute(call)
+                try? await client.respondToDynamicTool(
+                    requestID: requestID,
+                    output: outcome.output,
+                    success: !outcome.failed)
+            }
+            return
+        }
+
+        codexApprovalRequestID = requestID
+        codexApprovalInvocation = invocation
+        codexApprovalKind = .dynamicTool(call)
+        pendingApproval = ApprovalRequest(
+            id: UUID(),
+            invocation: invocation,
+            preview: tool.preview(call, in: executor.context))
+        currentPhase = .awaitingApproval
+        DiagnosticsCenter.shared.record(
+            .approval,
+            "Codex dynamic tool approval requested: " + toolName,
+            detail: invocation.argumentsJSON,
+            level: .warning)
     }
 
     private func handleCodexItem(_ item: [String: LFJSONValue], completed: Bool) {
@@ -741,6 +861,9 @@ final class AgentSessionController: ObservableObject {
            }) {
             transcript.append(TranscriptItem(id: UUID(), kind: .reasoning(codexReasoningText)))
             appendCodexMessage(role: .reasoning, content: codexReasoningText)
+        }
+        if case .engineError(let message) = reason {
+            publishFailure(message)
         }
         codexRecord?.updatedAt = Date()
         if let record = codexRecord { persistSessionRecord(record) }
@@ -909,12 +1032,20 @@ final class AgentSessionController: ObservableObject {
         return "Previous Beet Code conversation context:\n\(history.joined(separator: "\n\n"))\n\nCurrent request:\n\(current)"
     }
 
-    private static func chatOnlyCodexPrompt(_ current: String) -> String {
-        """
+    private static func chatOnlyCodexPrompt(
+        _ current: String,
+        computerControlEnabled: Bool
+    ) -> String {
+        let computerBoundary = computerControlEnabled
+            ? "The opt-in computer_* tools are also available for Mac UI tasks."
+            : "Mac computer control is off; do not attempt computer_* actions."
+        return """
         You are in Beet Code's chat-only mode. Answer the user directly. No
         project is connected. Do not inspect files, run commands, change code,
-        call tools, or claim to have performed actions. If project access is
-        needed, tell the user to open a project folder.
+        or claim workspace access. The in-app browser_* tools are available.
+        \(computerBoundary) Use only those app-owned tools in chat-only mode.
+        After any action, observe again before claiming success. If project
+        access is needed, tell the user to open a project folder.
 
         User message:
         \(current)
@@ -1474,6 +1605,50 @@ final class AgentSessionController: ObservableObject {
         transcript.append(TranscriptItem(id: UUID(), kind: .notice(text)))
     }
 
+    /// Makes model/API failures durable and visible to remote clients. A
+    /// failure can happen before an assistant message exists, so relying on
+    /// the ordinary final-message persistence path loses the only useful UI.
+    private func publishFailure(_ message: String) {
+        let clean = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        let persistedText = "error: \(clean)"
+        if !transcript.contains(where: {
+            if case .notice(let text) = $0.kind { return text == persistedText }
+            return false
+        }) {
+            notice(persistedText)
+        }
+
+        if codexRecord != nil {
+            if codexRecord?.messages.last?.content != persistedText {
+                appendCodexMessage(role: .assistant, content: persistedText)
+            }
+            return
+        }
+        guard let id = activeSessionID else { return }
+        var record = SessionStore.shared.load(id: id) ?? SessionRecord(
+            id: id,
+            title: "Failed chat",
+            createdAt: Date(),
+            updatedAt: Date(),
+            workspacePath: workspaceURL?.path ?? "",
+            modelID: activeModelIDHandler(),
+            messages: [],
+            checkpoints: [],
+            source: .app,
+            schemaVersion: SessionRecord.currentSchemaVersion)
+        if record.messages.last?.content != persistedText {
+            record.messages.append(SessionMessage(
+                role: .assistant,
+                content: persistedText,
+                toolName: nil,
+                timestamp: Date()))
+        }
+        record.updatedAt = Date()
+        _ = persistSessionRecord(record)
+        SessionStore.shared.invalidateCache()
+    }
+
     @discardableResult
     private func persistSessionRecord(_ record: SessionRecord) -> Bool {
         switch SessionStore.shared.save(record) {
@@ -1588,11 +1763,33 @@ final class AgentSessionController: ObservableObject {
                         permissions: granted,
                         scope: approved && always ? "session" : "turn")
                 }
-            case .commandOrFile, .none:
+            case .dynamicTool(let call):
+                let executor = codexDynamicExecutor
+                Task {
+                    guard approved, let executor else {
+                        try? await client.respondToDynamicTool(
+                            requestID: codexRequestID,
+                            output: "Tool call declined by the user.",
+                            success: false)
+                        return
+                    }
+                    let outcome = await executor.execute(call)
+                    try? await client.respondToDynamicTool(
+                        requestID: codexRequestID,
+                        output: outcome.output,
+                        success: !outcome.failed)
+                }
+            case .commandOrFile:
                 Task {
                     try? await client.respondToApproval(
                         requestID: codexRequestID,
                         decision: approved ? (always ? "acceptForSession" : "accept") : "decline")
+                }
+            case .none:
+                Task {
+                    try? await client.respondToApproval(
+                        requestID: codexRequestID,
+                        decision: approved ? "accept" : "decline")
                 }
             }
             codexApprovalRequestID = nil
@@ -1775,6 +1972,9 @@ final class AgentSessionController: ObservableObject {
             liveReasoningText = ""
             isRunning = false
             finishReason = reason
+            if case .engineError(let message) = reason {
+                publishFailure(message)
+            }
             attachMetricsToLastAnswer()
             clearPending()
             loop = nil
@@ -1897,8 +2097,33 @@ final class AgentSessionController: ObservableObject {
         ComputerScrollTool(),
     ]
 
-    static func sessionTools(computerControlEnabled: Bool) -> [any AgentTool] {
-        computerControlEnabled
+    /// Browser control is safe to offer without a project because it is
+    /// app-owned and every mutation still uses the approval card. Computer
+    /// control joins it only after the explicit Settings opt-in.
+    static let browserControlTools: [any AgentTool] = [
+        BrowserTools.ReadTool(),
+        BrowserTools.ScreenshotTool(),
+        BrowserTools.NavigateTool(),
+        BrowserTools.ClickTool(),
+        BrowserTools.TypeTool(),
+        BrowserTools.EvalTool(),
+    ]
+
+    static func sessionTools(
+        computerControlEnabled: Bool,
+        chatOnly: Bool = false
+    ) -> [any AgentTool] {
+        if chatOnly {
+            let statusTools: [any AgentTool] = [
+                TailscaleStatusTool(),
+                DiskSpaceStatusTool(),
+                MacSystemStatusTool(),
+            ]
+            return computerControlEnabled
+                ? statusTools + browserControlTools + computerControlTools
+                : statusTools + browserControlTools
+        }
+        return computerControlEnabled
             ? defaultTools + computerControlTools
             : defaultTools
     }

@@ -107,15 +107,20 @@ struct SessionRecord: Codable, Identifiable, Sendable, Equatable {
     /// It is intentionally just an opaque server id; authentication remains
     /// owned by the local Codex process.
     var codexThreadID: String?
+    /// Native dynamic tools registered when the Codex thread was created.
+    /// App-server tool registration is thread-scoped, so a changed set forces
+    /// a fresh thread while preserving the visible Beet Code conversation.
+    var codexDynamicToolNames: [String]?
 
-    static let currentSchemaVersion = 3
+    static let currentSchemaVersion = 4
 
     init(
         id: UUID, title: String, createdAt: Date, updatedAt: Date,
         workspacePath: String, modelID: String, messages: [SessionMessage],
         checkpoints: [SessionCheckpoint], source: SessionSource = .app,
         schemaVersion: Int? = nil,
-        codexThreadID: String? = nil
+        codexThreadID: String? = nil,
+        codexDynamicToolNames: [String]? = nil
     ) {
         self.id = id
         self.title = title
@@ -128,6 +133,7 @@ struct SessionRecord: Codable, Identifiable, Sendable, Equatable {
         self.source = source
         self.schemaVersion = schemaVersion
         self.codexThreadID = codexThreadID
+        self.codexDynamicToolNames = codexDynamicToolNames
     }
 
     init(from decoder: any Decoder) throws {
@@ -143,6 +149,8 @@ struct SessionRecord: Codable, Identifiable, Sendable, Equatable {
         source = try container.decodeIfPresent(SessionSource.self, forKey: .source) ?? .app
         schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion)
         codexThreadID = try container.decodeIfPresent(String.self, forKey: .codexThreadID)
+        codexDynamicToolNames = try container.decodeIfPresent(
+            [String].self, forKey: .codexDynamicToolNames)
     }
 }
 

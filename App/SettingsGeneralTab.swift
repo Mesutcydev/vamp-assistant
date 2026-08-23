@@ -194,10 +194,10 @@ struct GeneralTab: View {
                 }
             }
 
-            SettingsCard(title: "Remote Beetcode Sessions", icon: "iphone", footer: "Off by default. Tailscale is preferred; the QR is a one-time pairing code.") {
+            SettingsCard(title: "Remote Beetcode Sessions", icon: "iphone", footer: "Off by default. Uses port \(RemoteSessionPorts.defaultPort) so it can run beside Vamp Host (9475). Tailscale is preferred; the QR is a one-time pairing code.") {
                 SettingToggle(label: "Enable remote session access", isOn: $settings.remoteSessionEnabled)
                 SettingRow(label: "Port") {
-                    TextField("9475", value: $settings.remoteSessionPort, format: .number)
+                    TextField("\(RemoteSessionPorts.defaultPort)", value: $settings.remoteSessionPort, format: .number)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 90)
                         .monospacedDigit()

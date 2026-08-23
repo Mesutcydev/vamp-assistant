@@ -16,6 +16,7 @@ struct PermissionGate: Sendable {
 
     var autoApproveEdits: Bool
     var autoApproveCommands: Bool
+    var fullAccess: Bool
     var commandPolicy: CommandPolicy
     var workspace: Workspace
     /// Live mid-run overrides ("Always approve" tapped on an approval card).
@@ -28,6 +29,7 @@ struct PermissionGate: Sendable {
     init(
         autoApproveEdits: Bool = false,
         autoApproveCommands: Bool = false,
+        fullAccess: Bool = false,
         commandPolicy: CommandPolicy = CommandPolicy(),
         workspace: Workspace = Workspace(root: URL(fileURLWithPath: "/")),
         overrides: ApprovalOverrides? = nil,
@@ -35,6 +37,7 @@ struct PermissionGate: Sendable {
     ) {
         self.autoApproveEdits = autoApproveEdits
         self.autoApproveCommands = autoApproveCommands
+        self.fullAccess = fullAccess
         self.commandPolicy = commandPolicy
         self.workspace = workspace
         self.overrides = overrides
@@ -44,6 +47,11 @@ struct PermissionGate: Sendable {
     func decision(for call: ParsedToolCall, risk: ToolRisk?) -> Decision {
         let compatibility = compatibilityDecision(for: call, risk: risk)
         if case .denied = compatibility { return compatibility }
+
+        // Full Access is an explicit user choice from Remote controls. It is
+        // broader than the ordinary safe-command toggle, but never overrides
+        // a hard OpenCode deny or workspace/path validation in the tools.
+        if fullAccess, risk != nil { return .auto }
         if case .needsApproval = compatibility { return compatibility }
 
         switch risk {

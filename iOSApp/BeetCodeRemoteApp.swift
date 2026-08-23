@@ -11,7 +11,10 @@ struct BeetCodeRemoteApp: App {
                 .tint(BeetTheme.accent)
                 .environment(\.remoteAppearance, appearance)
                 .preferredColorScheme(appearance.colorScheme)
-                .task { await store.restore() }
+                .task {
+                    await RemoteNotificationCenter.shared.requestPermission()
+                    await store.restore()
+                }
         }
     }
 }
@@ -51,7 +54,7 @@ enum BeetTheme {
         switch appearance {
         case .light: Color(red: 0.965, green: 0.969, blue: 0.976)
         case .dark: Color(red: 0.047, green: 0.055, blue: 0.078)
-        case .beet: Color(red: 0.478, green: 0.122, blue: 0.239)
+        case .beet: Color(red: 0.105, green: 0.035, blue: 0.067)
         }
     }
 
@@ -59,7 +62,7 @@ enum BeetTheme {
         switch appearance {
         case .light: .white
         case .dark: Color(red: 0.094, green: 0.110, blue: 0.149)
-        case .beet: Color(red: 0.565, green: 0.188, blue: 0.306)
+        case .beet: Color(red: 0.176, green: 0.067, blue: 0.110)
         }
     }
 
@@ -67,7 +70,7 @@ enum BeetTheme {
         switch appearance {
         case .light: Color(red: 0.890, green: 0.902, blue: 0.922)
         case .dark: Color(red: 0.137, green: 0.157, blue: 0.216)
-        case .beet: Color(red: 0.369, green: 0.086, blue: 0.188)
+        case .beet: Color(red: 0.245, green: 0.090, blue: 0.145)
         }
     }
 
@@ -75,7 +78,7 @@ enum BeetTheme {
         switch appearance {
         case .light: Color(red: 0.882, green: 0.894, blue: 0.918)
         case .dark: Color(red: 0.204, green: 0.231, blue: 0.306)
-        case .beet: Color(red: 0.659, green: 0.275, blue: 0.408)
+        case .beet: Color(red: 0.330, green: 0.130, blue: 0.200)
         }
     }
 
@@ -83,7 +86,7 @@ enum BeetTheme {
         switch appearance {
         case .light: Color(red: 0.357, green: 0.380, blue: 0.431)
         case .dark: Color(red: 0.639, green: 0.667, blue: 0.733)
-        case .beet: Color(red: 0.906, green: 0.722, blue: 0.784)
+        case .beet: Color(red: 0.760, green: 0.650, blue: 0.690)
         }
     }
 }

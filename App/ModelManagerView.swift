@@ -40,8 +40,7 @@ struct ModelManagerView: View {
         .onAppear { appState.modelStore.rescanFromDisk() }
     }
 
-    /// Pick a local model — an MLX folder (config.json + .safetensors) or a
-    /// GGUF model (a single .gguf file, or a folder containing one) — and
+    /// Pick a local model — MLX, GGUF, or an Apple Core AI resource pack — and
     /// register it as a user-catalog model.
     private func importModel() {
         let panel = NSOpenPanel()
@@ -51,7 +50,7 @@ struct ModelManagerView: View {
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [.folder, UTType(filenameExtension: "gguf") ?? .data]
-        panel.message = "Select an MLX folder (config.json + .safetensors) or a .gguf model file."
+        panel.message = "Select an MLX folder, a .gguf model, or a Core AI pack (metadata.json + .aimodel)."
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
         let base = appState.modelStore.modelsBaseURL
@@ -85,11 +84,11 @@ struct ModelManagerView: View {
         var errorDescription: String? {
             switch self {
             case .notAModel:
-                "Choose an MLX model folder or a .gguf model file."
+                "Choose an MLX model folder, a .gguf model, or a Core AI pack."
             case .missingConfig:
                 "No config.json found in the selected folder."
             case .missingWeights:
-                "No .safetensors or .gguf weight files found in the selected folder."
+                "No MLX, GGUF, or Core AI model resources were found in the selected folder."
             case .incompleteDownloads:
                 "The folder contains incomplete downloads (.incomplete files). Finish the download first."
             case .copyFailed(let detail):
@@ -147,16 +146,18 @@ struct ModelManagerView: View {
                 lanes: [])
         }
 
-        // Folder import: MLX (config.json + .safetensors) or GGUF (a .gguf
-        // file inside).
+        // Folder import: MLX, GGUF, or a recursively nested Core AI pack.
         let contents = (try? fm.contentsOfDirectory(atPath: url.path)) ?? []
         if contents.contains(where: { $0.hasSuffix(".incomplete") }) {
             throw ImportError.incompleteDownloads
         }
         let hasSafetensors = contents.contains { $0.hasSuffix(".safetensors") }
         let hasGGUF = contents.contains { $0.lowercased().hasSuffix(".gguf") }
+        let hasCoreAI = ModelStore.isCompleteCoreAIPack(at: url)
         let format: CatalogModel.Format
-        if hasSafetensors {
+        if hasCoreAI {
+            format = .coreAI
+        } else if hasSafetensors {
             guard fm.fileExists(atPath: url.appendingPathComponent("config.json").path) else {
                 throw ImportError.missingConfig
             }
@@ -170,10 +171,12 @@ struct ModelManagerView: View {
         // Read model config for display metadata when present (GGUF folders
         // usually ship no config.json). MLXModelInspector also understands
         // nested Qwen3.5 text/vision configs and their quantization metadata.
-        var family = format == .gguf ? "GGUF" : "Custom"
-        var contextWindow = format == .gguf ? 8_192 : 32_768
+        var family = format == .gguf ? "GGUF" : (format == .coreAI ? "Core AI" : "Custom")
+        var contextWindow = format == .gguf || format == .coreAI ? 8_192 : 32_768
         var parameters = "—"
-        var quantization = format == .gguf ? (ggufQuantization(url.lastPathComponent) ?? "GGUF") : "—"
+        var quantization = format == .gguf
+            ? (ggufQuantization(url.lastPathComponent) ?? "GGUF")
+            : (format == .coreAI ? "Core AI" : "—")
         var mlxMetadata: MLXModelInspector.Metadata?
         if format == .mlx, let metadata = MLXModelInspector.read(from: url) {
             mlxMetadata = metadata
@@ -219,7 +222,9 @@ struct ModelManagerView: View {
             contextWindow: contextWindow,
             minRAMGB: max(6, Int(Double(size) / 1_000_000_000 * 1.5)),
             recommendedRAMGB: max(8, Int(Double(size) / 1_000_000_000 * 2)),
-            notes: mlxMetadata?.isVisionLanguage == true
+            notes: format == .coreAI
+                ? "Imported Apple Core AI resource pack from \(url.path)"
+                : mlxMetadata?.isVisionLanguage == true
                 ? "Imported multimodal MLX model (text + vision weights) from \(url.path)"
                 : "Imported from \(url.path)",
             format: format,
@@ -292,7 +297,7 @@ private struct ManagerHeaderView: View {
                 } else {
                     Button("Import…", action: onImport)
                         .buttonStyle(LFCapsuleButtonStyle())
-                        .help("Import a local model — an MLX folder (config.json + .safetensors) or a .gguf file")
+                        .help("Import a local MLX, GGUF, or Apple Core AI model pack")
                 }
                 Button("Done", action: onDone)
                     .keyboardShortcut(.defaultAction)
@@ -502,7 +507,7 @@ private struct ModelGlyph: View {
     let isActive: Bool
 
     var body: some View {
-        Image(systemName: format == .gguf ? "shippingbox" : "cpu")
+        Image(systemName: format == .gguf ? "shippingbox" : (format == .coreAI ? "apple.intelligence" : "cpu"))
             .font(.system(size: 16, weight: .semibold))
             .foregroundStyle(isActive ? Theme.accent : Theme.textSecondary)
             .frame(width: 38, height: 38)

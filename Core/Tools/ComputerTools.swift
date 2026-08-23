@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 import Foundation
+import os
 @preconcurrency import ScreenCaptureKit
 
 /// Computer use: lets the agent observe and drive ANY macOS app, Claude-style.
@@ -55,6 +56,7 @@ enum ComputerUseError: Error, LocalizedError {
     case unknownKey(String)
     case blockedShortcut(String)
     case textTooLong(Int)
+    case staleReference(String)
 
     var errorDescription: String? {
         switch self {
@@ -70,6 +72,8 @@ enum ComputerUseError: Error, LocalizedError {
             return "Refused to press '\(name)' — logout, lock screen, force-quit, and quit (cmd+q) are blocked."
         case .textTooLong(let count):
             return "computer_type is limited to \(ComputerTypeTool.maxCharacters) characters (got \(count)). Split the text."
+        case .staleReference(let ref):
+            return "Computer element reference '\(ref)' is stale. Call computer_ui_tree and retry with a fresh ref."
         }
     }
 }
@@ -305,10 +309,10 @@ enum AXTreeWalker {
     /// One compact line per node: `button "Save" at (840,620) 64×28`.
     /// Coordinates are screen points in TOP-LEFT origin — the same space
     /// computer_click/computer_scroll take.
-    static func render(_ nodes: [AXNodeInfo]) -> String {
+    static func render(_ nodes: [AXNodeInfo], references: [Int: String] = [:]) -> String {
         guard !nodes.isEmpty else { return "(no accessible elements found)" }
         var lines: [String] = []
-        for node in nodes {
+        for (index, node) in nodes.enumerated() {
             let indent = String(repeating: "  ", count: min(node.depth, 10))
             var parts = [indent + node.role]
             if !node.label.isEmpty { parts.append("\"\(node.label)\"") }
@@ -320,6 +324,7 @@ enum AXTreeWalker {
                 parts.append("\(Int(node.frame.width))×\(Int(node.frame.height))")
             }
             if !node.enabled { parts.append("[disabled]") }
+            if let ref = references[index] { parts.append("[ref=\(ref)]") }
             lines.append(parts.joined(separator: " "))
         }
         return lines.joined(separator: "\n")
@@ -362,6 +367,49 @@ enum AXTreeWalker {
     }
 }
 
+/// Keeps only the newest accessibility observation. Refs include a generation
+/// so a second observation invalidates every prior coordinate instead of
+/// letting the model unknowingly click a recycled index.
+enum AXReferenceStore {
+    private struct State {
+        var generation = 0
+        var points: [String: CGPoint] = [:]
+    }
+
+    private static let state = OSAllocatedUnfairLock(initialState: State())
+
+    static func capture(_ nodes: [AXNodeInfo]) -> [Int: String] {
+        state.withLock { state in
+            state.generation += 1
+            state.points.removeAll(keepingCapacity: true)
+            let prefix = "c\(state.generation)"
+            var references: [Int: String] = [:]
+            for (index, node) in nodes.enumerated()
+            where node.enabled && node.frame != .zero {
+                let ref = "\(prefix):e\(index + 1)"
+                references[index] = ref
+                state.points[ref] = CGPoint(x: node.frame.midX, y: node.frame.midY)
+            }
+            return references
+        }
+    }
+
+    static func resolve(_ ref: String) -> CGPoint? {
+        state.withLock { $0.points[ref] }
+    }
+}
+
+enum ComputerObservation {
+    static func capture(limit: Int = 100) -> String {
+        guard let nodes = AXTreeWalker.flattenFocusedApp() else {
+            return "fresh observation:\n(no focused application)"
+        }
+        let bounded = Array(nodes.prefix(max(1, limit)))
+        let references = AXReferenceStore.capture(bounded)
+        return "fresh observation:\n" + AXTreeWalker.render(bounded, references: references)
+    }
+}
+
 // MARK: - Tools
 
 struct ComputerStatusTool: AgentTool {
@@ -389,7 +437,7 @@ struct ComputerStatusTool: AgentTool {
 
 struct ComputerUITreeTool: AgentTool {
     let name = "computer_ui_tree"
-    let summary = "Read the focused Mac app's accessibility tree (names + screen coordinates)"
+    let summary = "Read the focused Mac app's accessibility tree with fresh click refs and coordinates"
     let risk = ToolRisk.read
 
     let schemaText = """
@@ -403,7 +451,8 @@ struct ComputerUITreeTool: AgentTool {
         guard let nodes = AXTreeWalker.flattenFocusedApp() else {
             throw ComputerUseError.noFocusedApp
         }
-        return AXTreeWalker.render(nodes)
+        let references = AXReferenceStore.capture(nodes)
+        return AXTreeWalker.render(nodes, references: references)
     }
 }
 
@@ -435,7 +484,7 @@ enum CaptureWindowPicker {
 
 struct ComputerScreenshotTool: AgentTool {
     let name = "computer_screenshot"
-    let summary = "Capture the focused Mac app's window to a PNG in the workspace"
+    let summary = "Capture the focused Mac app and inspect it with the installed local SmolVLM vision sidecar"
     let risk = ToolRisk.read
 
     let schemaText = """
@@ -457,7 +506,17 @@ struct ComputerScreenshotTool: AgentTool {
             throw ToolError.commandFailed(exitCode: 1)
         }
         try data.write(to: file)
-        return "screenshot saved to \(file.path) — pass it to describe_image to see the screen."
+        do {
+            if let description = try await VisionProvider.describeLocallyIfAvailable(
+                imageAt: file,
+                prompt: "Describe the visible app UI accurately. Read important text, identify controls, layout problems, dialogs, loading or error states, and anything relevant to the user's task.")
+            {
+                return "screenshot saved to \(file.path)\nlocal SmolVLM inspection:\n\(description)"
+            }
+            return "screenshot saved to \(file.path) — no installed local vision sidecar was found; use describe_image if a vision API provider is configured."
+        } catch {
+            return "screenshot saved to \(file.path) — local SmolVLM inspection failed: \(error.localizedDescription)"
+        }
     }
 
     /// SCScreenshotManager (macOS 14+): one call, no stream lifecycle.
@@ -496,19 +555,22 @@ struct ComputerScreenshotTool: AgentTool {
 
 struct ComputerClickTool: AgentTool {
     let name = "computer_click"
-    let summary = "Click the Mac screen at screen coordinates (top-left origin)"
+    let summary = "Click a fresh computer_ui_tree ref or Mac screen coordinates"
     let risk = ToolRisk.execute
 
     let schemaText = """
         {"type":"object","properties":{
+          "ref":{"type":"string","description":"Preferred: ref from the latest computer_ui_tree"},
           "x":{"type":"integer","description":"Screen X in points, top-left origin — use coordinates from computer_ui_tree"},
           "y":{"type":"integer","description":"Screen Y in points, top-left origin"},
           "button":{"type":"string","enum":["left","right"],"description":"Default left"},
-          "clickCount":{"type":"integer","description":"2 for double-click. Default 1"}
-        },"required":["x","y"]}
+          "clickCount":{"type":"integer","description":"2 for double-click. Default 1"},
+          "capture_after":{"type":"boolean","default":true,"description":"Return a fresh bounded UI tree after the action"}
+        },"required":[]}
         """
 
     func preview(_ call: ParsedToolCall, in context: ToolContext) -> ApprovalPreview {
+        if let ref = call.string("ref") { return .command("computer_click [\(ref)]") }
         guard let x = call.number("x"), let y = call.number("y") else { return .none }
         return .command("computer_click at (\(Int(x)), \(Int(y)))")
     }
@@ -517,35 +579,53 @@ struct ComputerClickTool: AgentTool {
         guard ComputerPermission.accessibilityGranted else {
             throw ComputerUseError.accessibilityNotGranted
         }
-        guard let x = call.number("x"), let y = call.number("y") else {
-            throw ToolError.missingArgument("x/y")
+        let requestedRef = call.string("ref")
+        let rawPoint: CGPoint
+        if let requestedRef {
+            guard let resolved = AXReferenceStore.resolve(requestedRef) else {
+                throw ComputerUseError.staleReference(requestedRef)
+            }
+            rawPoint = resolved
+        } else if let x = call.number("x"), let y = call.number("y") {
+            rawPoint = CGPoint(x: x, y: y)
+        } else {
+            throw ToolError.missingArgument("ref or x/y")
         }
         let button: CGMouseButton = (call.string("button") == "right") ? .right : .left
         let count = min(max(call.int("clickCount") ?? 1, 1), 3)
-        let point = await MainActor.run { ComputerEvents.clamped(x, y) }
+        let point = await MainActor.run { ComputerEvents.clamped(rawPoint.x, rawPoint.y) }
         await Task.detached(priority: .userInitiated) {
             ComputerEvents.postMouseClick(at: point, button: button, clickCount: count)
         }.value
-        return "clicked \(button == .left ? "left" : "right")×\(count) at (\(Int(point.x)), \(Int(point.y)))"
+        var result = "clicked \(button == .left ? "left" : "right")×\(count) at (\(Int(point.x)), \(Int(point.y)))"
+        if let requestedRef { result += " using [\(requestedRef)]" }
+        if call.bool("capture_after") ?? true {
+            try? await Task.sleep(for: .milliseconds(180))
+            result += "\n" + ComputerObservation.capture()
+        }
+        return result
     }
 }
 
 struct ComputerTypeTool: AgentTool {
     let name = "computer_type"
-    let summary = "Type text into whatever has keyboard focus on the Mac"
+    let summary = "Type text into a fresh UI ref or the currently focused Mac control"
     let risk = ToolRisk.execute
 
     static let maxCharacters = 4_000
 
     let schemaText = """
         {"type":"object","properties":{
-          "text":{"type":"string","description":"Text to type (any layout, Unicode-safe)"}
+          "ref":{"type":"string","description":"Preferred: editable ref from the latest computer_ui_tree; clicks it before typing"},
+          "text":{"type":"string","description":"Text to type (any layout, Unicode-safe)"},
+          "capture_after":{"type":"boolean","default":true,"description":"Return a fresh bounded UI tree after the action"}
         },"required":["text"]}
         """
 
     func preview(_ call: ParsedToolCall, in context: ToolContext) -> ApprovalPreview {
         guard let text = call.string("text") else { return .none }
-        return .command("computer_type \"\(String(text.prefix(80)))\"")
+        let target = call.string("ref").map { " into [\($0)]" } ?? ""
+        return .command("computer_type\(target) \"\(String(text.prefix(80)))\"")
     }
 
     func execute(_ call: ParsedToolCall, in context: ToolContext) async throws -> String {
@@ -556,10 +636,27 @@ struct ComputerTypeTool: AgentTool {
         guard text.count <= Self.maxCharacters else {
             throw ComputerUseError.textTooLong(text.count)
         }
+        let requestedRef = call.string("ref")
+        if let requestedRef {
+            guard let rawPoint = AXReferenceStore.resolve(requestedRef) else {
+                throw ComputerUseError.staleReference(requestedRef)
+            }
+            let point = await MainActor.run { ComputerEvents.clamped(rawPoint.x, rawPoint.y) }
+            await Task.detached(priority: .userInitiated) {
+                ComputerEvents.postMouseClick(at: point, button: .left, clickCount: 1)
+            }.value
+            try? await Task.sleep(for: .milliseconds(80))
+        }
         await Task.detached(priority: .userInitiated) {
             ComputerEvents.postText(text)
         }.value
-        return "typed \(text.count) character(s)"
+        var result = "typed \(text.count) character(s)"
+        if let requestedRef { result += " into [\(requestedRef)]" }
+        if call.bool("capture_after") ?? true {
+            try? await Task.sleep(for: .milliseconds(120))
+            result += "\n" + ComputerObservation.capture()
+        }
+        return result
     }
 }
 
@@ -571,7 +668,8 @@ struct ComputerKeyTool: AgentTool {
     let schemaText = """
         {"type":"object","properties":{
           "key":{"type":"string","description":"return, tab, escape, space, delete, left/right/up/down, home, end, page_up, page_down, f1…f12, or a single character"},
-          "modifiers":{"type":"array","items":{"type":"string","enum":["cmd","shift","alt","ctrl"]},"description":"Held while pressing, e.g. pass [cmd] for cmd+s"}
+          "modifiers":{"type":"array","items":{"type":"string","enum":["cmd","shift","alt","ctrl"]},"description":"Held while pressing, e.g. pass [cmd] for cmd+s"},
+          "capture_after":{"type":"boolean","default":true,"description":"Return a fresh bounded UI tree after the action"}
         },"required":["key"]}
         """
 
@@ -601,41 +699,64 @@ struct ComputerKeyTool: AgentTool {
         await Task.detached(priority: .userInitiated) {
             ComputerEvents.postKey(code, modifiers: modifiers)
         }.value
-        return "pressed \(key)"
+        var result = "pressed \(key)"
+        if call.bool("capture_after") ?? true {
+            try? await Task.sleep(for: .milliseconds(120))
+            result += "\n" + ComputerObservation.capture()
+        }
+        return result
     }
 }
 
 struct ComputerScrollTool: AgentTool {
     let name = "computer_scroll"
-    let summary = "Scroll at a screen position (pixels; negative dy scrolls up)"
+    let summary = "Scroll over a fresh UI ref or screen position (negative dy scrolls up)"
     let risk = ToolRisk.execute
 
     let schemaText = """
         {"type":"object","properties":{
+          "ref":{"type":"string","description":"Preferred: ref from the latest computer_ui_tree"},
           "x":{"type":"integer"},"y":{"type":"integer"},
           "dx":{"type":"integer","description":"Horizontal scroll pixels. Default 0"},
-          "dy":{"type":"integer","description":"Vertical scroll pixels; negative = up, positive = down"}
-        },"required":["x","y","dy"]}
+          "dy":{"type":"integer","description":"Vertical scroll pixels; negative = up, positive = down"},
+          "capture_after":{"type":"boolean","default":true,"description":"Return a fresh bounded UI tree after the action"}
+        },"required":["dy"]}
         """
 
     func preview(_ call: ParsedToolCall, in context: ToolContext) -> ApprovalPreview {
         let dy = call.int("dy") ?? 0
-        return .command("computer_scroll dy=\(dy)")
+        let target = call.string("ref").map { " [\($0)]" } ?? ""
+        return .command("computer_scroll\(target) dy=\(dy)")
     }
 
     func execute(_ call: ParsedToolCall, in context: ToolContext) async throws -> String {
         guard ComputerPermission.accessibilityGranted else {
             throw ComputerUseError.accessibilityNotGranted
         }
-        guard let x = call.number("x"), let y = call.number("y") else {
-            throw ToolError.missingArgument("x/y")
+        let requestedRef = call.string("ref")
+        let rawPoint: CGPoint
+        if let requestedRef {
+            guard let resolved = AXReferenceStore.resolve(requestedRef) else {
+                throw ComputerUseError.staleReference(requestedRef)
+            }
+            rawPoint = resolved
+        } else if let x = call.number("x"), let y = call.number("y") {
+            rawPoint = CGPoint(x: x, y: y)
+        } else {
+            throw ToolError.missingArgument("ref or x/y")
         }
         let dx = call.int("dx") ?? 0
         guard let dy = call.int("dy") else { throw ToolError.missingArgument("dy") }
-        let point = await MainActor.run { ComputerEvents.clamped(x, y) }
+        let point = await MainActor.run { ComputerEvents.clamped(rawPoint.x, rawPoint.y) }
         await Task.detached(priority: .userInitiated) {
             ComputerEvents.postScroll(at: point, dx: dx, dy: dy)
         }.value
-        return "scrolled dx=\(dx) dy=\(dy) at (\(Int(point.x)), \(Int(point.y)))"
+        var result = "scrolled dx=\(dx) dy=\(dy) at (\(Int(point.x)), \(Int(point.y)))"
+        if let requestedRef { result += " using [\(requestedRef)]" }
+        if call.bool("capture_after") ?? true {
+            try? await Task.sleep(for: .milliseconds(180))
+            result += "\n" + ComputerObservation.capture()
+        }
+        return result
     }
 }

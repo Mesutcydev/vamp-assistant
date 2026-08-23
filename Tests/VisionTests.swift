@@ -90,6 +90,32 @@ final class VisionTests: XCTestCase {
         XCTAssertEqual(result, "local description")
     }
 
+    func testLocalOnlyDescribeUsesSmolVLMSeamAndNeverNeedsBYOK() async throws {
+        let resolution = VisionProvider.LocalResolution(
+            model: ModelCatalog.bundled.first { $0.role == .vision }!,
+            directory: URL(fileURLWithPath: "/tmp/unused"),
+            diskBytes: 1)
+        let originalResolver = VisionProvider.localResolver
+        let originalDescribe = VisionProvider.localDescribe
+        defer {
+            VisionProvider.localResolver = originalResolver
+            VisionProvider.localDescribe = originalDescribe
+        }
+        VisionProvider.localResolver = { resolution }
+        VisionProvider.localDescribe = { _, url, prompt in
+            "local:\(url.lastPathComponent):\(prompt)"
+        }
+
+        let result = try await VisionProvider.describeLocallyIfAvailable(
+            imageAt: URL(fileURLWithPath: "/tmp/screen.png"), prompt: "inspect UI")
+        XCTAssertEqual(result, "local:screen.png:inspect UI")
+
+        VisionProvider.localResolver = { nil }
+        let unavailableResult = try await VisionProvider.describeLocallyIfAvailable(
+            imageAt: URL(fileURLWithPath: "/tmp/screen.png"), prompt: "inspect UI")
+        XCTAssertNil(unavailableResult)
+    }
+
     func testLocalFailureFallsThroughToBYOK() async throws {
         struct Probe: Error {}
         let originalResolver = VisionProvider.localResolver

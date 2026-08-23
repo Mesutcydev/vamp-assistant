@@ -625,6 +625,42 @@ final class ProviderAuditTests: XCTestCase {
         XCTAssertEqual(BrowserController.jsLiteral("sep\u{2028}line"), "\"sep\\u2028line\"")
     }
 
+    func testBrowserInteractiveElementsRenderStableRefsAndState() {
+        let element = BrowserController.InteractiveElement(
+            ref: "bdoc:e4",
+            role: "textbox",
+            name: "Email address",
+            tag: "input",
+            type: "email",
+            value: "person@example.com",
+            href: "",
+            disabled: false,
+            checked: nil,
+            x: 20,
+            y: 30,
+            width: 200,
+            height: 40)
+        let rendered = BrowserController.renderInteractiveElements([element])
+        XCTAssertTrue(rendered.hasPrefix("[bdoc:e4] textbox \"Email address\""))
+        XCTAssertTrue(rendered.contains("value \"person@example.com\""))
+        XCTAssertTrue(rendered.contains("at (120,50)"))
+    }
+
+    @MainActor
+    func testBrowserControlSchemasExposeRefsAndPostActionCapture() throws {
+        let tools: [any AgentTool] = [
+            BrowserTools.ReadTool(), BrowserTools.NavigateTool(),
+            BrowserTools.ClickTool(), BrowserTools.TypeTool(), BrowserTools.EvalTool(),
+        ]
+        for tool in tools {
+            XCTAssertNoThrow(try JSONSerialization.jsonObject(with: Data(tool.schemaText.utf8)))
+        }
+        XCTAssertTrue(BrowserTools.ReadTool().schemaText.contains("elements"))
+        XCTAssertTrue(BrowserTools.ClickTool().schemaText.contains("\"ref\""))
+        XCTAssertTrue(BrowserTools.TypeTool().schemaText.contains("\"ref\""))
+        XCTAssertTrue(BrowserTools.ClickTool().schemaText.contains("capture_after"))
+    }
+
     // MARK: Browser URL confinement
 
     func testBrowserAllowsHTTPSAndBareHosts() throws {

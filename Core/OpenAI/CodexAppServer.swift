@@ -247,6 +247,14 @@ actor CodexAppServerClient {
     func stop() async {
         readerTask?.cancel()
         readerTask = nil
+        // NSConcreteTask aborts if Process is released while it is still
+        // running. Detach the callback and wait for termination before
+        // dropping the process reference.
+        process?.terminationHandler = nil
+        if let process, process.isRunning {
+            process.terminate()
+            process.waitUntilExit()
+        }
         stdin?.closeFile()
         stdin = nil
         if let process, process.isRunning { process.terminate() }
@@ -440,17 +448,23 @@ actor CodexAppServerClient {
     func startThread(
         modelID: String,
         workspace: URL,
-        chatOnly: Bool = false
+        chatOnly: Bool = false,
+        autonomous: Bool = false,
+        dynamicTools: [LFJSONValue] = []
     ) async throws -> String {
-        let response = try await request(
-            "thread/start",
-            params: .object([
-                "model": .string(modelID),
-                "cwd": .string(workspace.path),
-                "approvalPolicy": .string(chatOnly ? "never" : "on-request"),
-                "sandbox": .string(chatOnly ? "read-only" : "workspace-write"),
-                "serviceName": .string("beetcode")
-            ]))
+        let unattended = chatOnly || autonomous
+        var params: [String: LFJSONValue] = [
+            "model": .string(modelID),
+            "cwd": .string(workspace.path),
+            "approvalPolicy": .string(unattended ? "never" : "on-request"),
+            "sandbox": .string(chatOnly ? "read-only" : "workspace-write"),
+            "serviceName": .string("beetcode")
+        ]
+        if !dynamicTools.isEmpty {
+            params["dynamicTools"] = .array(dynamicTools)
+            params["developerInstructions"] = .string(Self.dynamicToolInstructions)
+        }
+        let response = try await request("thread/start", params: .object(params))
         guard let thread = response.objectValue?["thread"]?.objectValue,
               let id = thread["id"]?.stringValue
         else { throw CodexAppServerError.malformedResponse("thread/start") }
@@ -461,15 +475,17 @@ actor CodexAppServerClient {
         threadID: String,
         modelID: String,
         workspace: URL,
-        chatOnly: Bool = false
+        chatOnly: Bool = false,
+        autonomous: Bool = false
     ) async throws -> String {
+        let unattended = chatOnly || autonomous
         let response = try await request(
             "thread/resume",
             params: .object([
                 "threadId": .string(threadID),
                 "model": .string(modelID),
                 "cwd": .string(workspace.path),
-                "approvalPolicy": .string(chatOnly ? "never" : "on-request"),
+                "approvalPolicy": .string(unattended ? "never" : "on-request"),
                 "sandbox": .string(chatOnly ? "read-only" : "workspace-write"),
                 "serviceName": .string("beetcode")
             ]))
@@ -486,8 +502,10 @@ actor CodexAppServerClient {
         workspace: URL,
         text: String,
         reasoningEffort: String? = nil,
-        chatOnly: Bool = false
+        chatOnly: Bool = false,
+        autonomous: Bool = false
     ) async throws -> String {
+        let unattended = chatOnly || autonomous
         var params: [String: LFJSONValue] = [
             "threadId": .string(threadID),
             "input": .array([
@@ -498,7 +516,7 @@ actor CodexAppServerClient {
             ]),
             "cwd": .string(workspace.path),
             "model": .string(modelID),
-            "approvalPolicy": .string(chatOnly ? "never" : "on-request"),
+            "approvalPolicy": .string(unattended ? "never" : "on-request"),
             "sandboxPolicy": .object([
                 "type": .string(chatOnly ? "readOnly" : "workspaceWrite"),
                 "writableRoots": chatOnly ? .array([]) : .array([.string(workspace.path)]),
@@ -561,11 +579,27 @@ actor CodexAppServerClient {
     }
 
     func declineDynamicTool(requestID: Int) async throws {
+        try respondToDynamicTool(
+            requestID: requestID,
+            output: "Tool call declined by Beet Code.",
+            success: false)
+    }
+
+    func respondToDynamicTool(
+        requestID: Int,
+        output: String,
+        success: Bool
+    ) throws {
         try respond(
             to: requestID,
             result: .object([
-                "contentItems": .array([]),
-                "success": .bool(false)
+                "contentItems": .array([
+                    .object([
+                        "type": .string("inputText"),
+                        "text": .string(output)
+                    ])
+                ]),
+                "success": .bool(success)
             ]))
     }
 
@@ -577,6 +611,36 @@ actor CodexAppServerClient {
                 "content": .null
             ]))
     }
+
+    /// Converts Beet Code's native tool contracts into Codex app-server's
+    /// documented dynamic function-tool shape. Invalid schemas fail closed:
+    /// a malformed tool is omitted instead of suspending a turn with a tool
+    /// the host cannot faithfully execute.
+    nonisolated static func dynamicToolSpecs(
+        for tools: [any AgentTool]
+    ) -> [LFJSONValue] {
+        tools.compactMap { tool in
+            guard let schema = try? LFJSONValue.decode(Data(tool.schemaText.utf8)) else {
+                return nil
+            }
+            return .object([
+                "type": .string("function"),
+                "name": .string(tool.name),
+                "description": .string(tool.summary),
+                "inputSchema": schema
+            ])
+        }
+    }
+
+    private nonisolated static let dynamicToolInstructions = """
+        Beet Code may provide native browser_* and computer_* tools. Prefer
+        those tools for the in-app browser and Mac UI tasks. For browser work,
+        navigate, read elements, and act with fresh document-scoped refs. For
+        computer work, call computer_status first, inspect with
+        computer_ui_tree, and prefer its latest refs for clicks, typing, and scrolling. Actions return
+        a bounded fresh observation by default; never reuse an older ref after
+        state changes. Do not claim success until that observation confirms it.
+        """
 
     // MARK: Parsing helpers
 

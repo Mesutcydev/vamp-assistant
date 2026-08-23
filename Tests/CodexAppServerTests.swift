@@ -45,10 +45,12 @@ final class CodexAppServerTests: XCTestCase {
             checkpoints: [],
             source: .app,
             schemaVersion: SessionRecord.currentSchemaVersion,
-            codexThreadID: "thr_test")
+            codexThreadID: "thr_test",
+            codexDynamicToolNames: ["browser_navigate", "computer_status"])
         let data = try JSONEncoder().encode(record)
         let decoded = try JSONDecoder().decode(SessionRecord.self, from: data)
         XCTAssertEqual(decoded.codexThreadID, "thr_test")
+        XCTAssertEqual(decoded.codexDynamicToolNames, ["browser_navigate", "computer_status"])
         XCTAssertFalse(String(decoding: data, as: UTF8.self).contains("refresh"))
         XCTAssertFalse(String(decoding: data, as: UTF8.self).contains("access_token"))
     }
@@ -60,5 +62,24 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(
             CodexAppServerError.malformedResponse("thread/resume").errorDescription,
             "Codex app-server returned an invalid response for thread/resume.")
+    }
+
+    @MainActor
+    func testNativeControlToolsConvertToCodexDynamicFunctionSpecs() throws {
+        let tools = AgentSessionController.sessionTools(
+            computerControlEnabled: true,
+            chatOnly: true)
+        let specs = CodexAppServerClient.dynamicToolSpecs(for: tools)
+        let objects = specs.compactMap(\.objectValue)
+        let names = Set(objects.compactMap { $0["name"]?.stringValue })
+
+        XCTAssertEqual(specs.count, tools.count)
+        XCTAssertTrue(names.contains("browser_navigate"))
+        XCTAssertTrue(names.contains("computer_status"))
+        XCTAssertTrue(names.contains("computer_key"))
+        XCTAssertTrue(objects.allSatisfy { $0["type"]?.stringValue == "function" })
+        XCTAssertTrue(objects.allSatisfy { $0["inputSchema"]?.objectValue != nil })
+        XCTAssertFalse(names.contains("read_file"))
+        XCTAssertFalse(names.contains("run_command"))
     }
 }

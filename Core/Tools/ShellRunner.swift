@@ -35,13 +35,18 @@ enum ShellRunner {
     /// must never redirect git commands run by the agent.
     static func sanitizedEnvironment() -> [String: String] {
         let inherited = ProcessInfo.processInfo.environment
+        let inheritedPath = inherited["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        let pathEntries = inheritedPath.split(separator: ":").map(String.init)
+        let toolDirectories = ["/usr/local/bin", "/opt/homebrew/bin"]
+        let commandPath = (pathEntries + toolDirectories.filter { !pathEntries.contains($0) })
+            .joined(separator: ":")
         let gitOverrides: Set<String> = [
             "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
             "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
             "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_PREFIX", "GIT_SHALLOW_FILE",
         ]
         return [
-            "PATH": inherited["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin",
+            "PATH": commandPath,
             "HOME": inherited["HOME"] ?? NSHomeDirectory(),
             "TMPDIR": inherited["TMPDIR"] ?? NSTemporaryDirectory(),
             "LANG": inherited["LANG"] ?? "en_US.UTF-8",
