@@ -117,7 +117,7 @@ enum AgentMode: String, CaseIterable, Codable, Identifiable, Sendable {
 
 /// Accent color palettes. Every entry ships a light+dark hex pair for both
 /// the accent and its brighter variant; `Theme` resolves them at draw time.
-/// `beetRed` is the identity default (Pantone 19-2030 TCX, #7A1F3D).
+/// `beetRed` is the calm warm-plum identity default.
 /// Foundation-only (no SwiftUI) so the CLI target can compile this file;
 /// the SwiftUI swatch extension lives in App/Theme.swift.
 enum AccentPalette: String, CaseIterable, Codable, Identifiable, Sendable {
@@ -151,9 +151,8 @@ enum AccentPalette: String, CaseIterable, Codable, Identifiable, Sendable {
     var hexes: Hexes {
         switch self {
         case .beetRed:
-            // Pantone 19-2030 TCX — #7A1F3D; dark mode lifts the hue.
-            Hexes(accentLight: 0x7A1F3D, accentDark: 0xD14775,
-                  brightLight: 0x8A2647, brightDark: 0xE06C92)
+            Hexes(accentLight: 0x8A3556, accentDark: 0x7A2E48,
+                  brightLight: 0xA6486A, brightDark: 0x9A4562)
         case .indigo:
             Hexes(accentLight: 0x6C5CE7, accentDark: 0x8B7BFF,
                   brightLight: 0x7C6CF7, brightDark: 0xA99BFF)

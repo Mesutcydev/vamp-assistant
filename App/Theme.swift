@@ -5,9 +5,8 @@ import SwiftUI
 /// status color resolves through here so light and dark stay coherent by
 /// construction instead of per-view `colorScheme ? … : …` guesses.
 ///
-/// Aesthetic: futuristic, calm, developer-native. Cool near-neutral surfaces,
-/// a deep glassy dark, and one electric indigo-violet accent that reads as
-/// "agentic" without shouting.
+/// Aesthetic: calm, warm-plum and developer-native. Surfaces carry a subtle
+/// beet undertone while text and status colors stay restrained and legible.
 enum Theme {
     // The active accent palette — read at DRAW time by the dynamic colors
     // below, so a palette switch takes effect live without recreating views.
@@ -59,18 +58,19 @@ enum Theme {
     // a whisper of plum on black. Cards lift one step lighter, inset wells
     // step darker, hairlines stay inside the beet family — one hue, four
     // depths, so the whole window reads as solid beet.
-    static let bg           = Color.dynamic(light: 0xF6F7F9, dark: 0x0C0E14, beet: 0x7A1F3D)
-    static let surface      = Color.dynamic(light: 0xFFFFFF, dark: 0x181C26, beet: 0xA84462)
-    static let surfaceInset = Color.dynamic(light: 0xE3E6EB, dark: 0x232837, beet: 0x5E1630)
-    static let hairline     = Color.dynamic(light: 0xE1E4EA, dark: 0x343B4E, beet: 0xC45A7C)
+    static let bg           = Color.dynamic(light: 0xF5F3F6, dark: 0x151217, beet: 0x151217)
+    static let surface      = Color.dynamic(light: 0xFFFFFF, dark: 0x1D1A22, beet: 0x1D1A22)
+    static let surfaceInset = Color.dynamic(light: 0xECE8EC, dark: 0x26222D, beet: 0x26222D)
+    static let hairline     = Color.dynamic(light: 0xE4DEE6, dark: 0x332E39, beet: 0x332E39)
 
     // Text tiers. Dark secondary/tertiary sit a touch brighter than the
     // neutrals around them so captions stay legible on the lifted surfaces;
     // beet tiers are warm pinks on Pantone 19-2030. Tertiary is ≥ 4.5:1
     // for captions (WCAG AA).
-    static let textPrimary   = Color.dynamic(light: 0x14161A, dark: 0xF2F4F8, beet: 0xFDF2F6)
-    static let textSecondary = Color.dynamic(light: 0x5B616E, dark: 0xA3AABB, beet: 0xF7D6E1)
-    static let textTertiary  = Color.dynamic(light: 0x8A909C, dark: 0x717889, beet: 0xF3CDD8)
+    static let textPrimary   = Color.dynamic(light: 0x241F28, dark: 0xECE7EC, beet: 0xECE7EC)
+    static let textSecondary = Color.dynamic(light: 0x6B6470, dark: 0xA59EA9, beet: 0xA59EA9)
+    static let textTertiary  = Color.dynamic(light: 0x9A93A0, dark: 0x726B76, beet: 0x726B76)
+    static let rose          = Color.dynamic(light: 0x93415E, dark: 0xB98298, beet: 0xB98298)
 
     /// Elevation shadow: a whisper in light mode, much deeper in dark —
     /// after the surface lift above, the shadow is what separates a card
@@ -89,10 +89,10 @@ enum Theme {
     static var accentSoft: Color { accent.opacity(0.14) }
 
     // Status — tuned per mode so they never blow out on the deep dark.
-    static let success = Color.dynamic(light: 0x1EA672, dark: 0x35D6A0)
-    static let warning = Color.dynamic(light: 0xC77700, dark: 0xF5B23D)
+    static let success = Color.dynamic(light: 0x2E9E76, dark: 0x5BBE96)
+    static let warning = Color.dynamic(light: 0xB67E30, dark: 0xD9A45E)
     static let danger  = Color.dynamic(light: 0xDC3B4B, dark: 0xFF6B78)
-    static let info    = Color.dynamic(light: 0x2B7FFF, dark: 0x5AA0FF)
+    static let info    = Color.dynamic(light: 0x4E7FB8, dark: 0x7FA3D0)
 
     // Tint washes — the ONLY opacities views may use for tinted fills and
     // borders, so "washed" surfaces read identically everywhere in the app.

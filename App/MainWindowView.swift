@@ -92,6 +92,66 @@ struct MainWindowView: View {
     private var configuredLayout: some View {
         responsiveLayout
             .navigationTitle(sessions.workspaceURL?.lastPathComponent ?? "Beet Code")
+            .toolbar {
+                ToolbarItem(placement: .automatic) {
+                    HStack(spacing: 2) {
+                        workspaceModeButton(
+                            "Chat",
+                            icon: "bubble.left.and.bubble.right",
+                            selected: sessions.workspaceURL == nil
+                        ) {
+                            Task { await sessions.switchToChatOnly() }
+                        }
+                        workspaceModeButton(
+                            "Code",
+                            icon: "chevron.left.forwardslash.chevron.right",
+                            selected: sessions.workspaceURL != nil
+                        ) {
+                            if sessions.workspaceURL == nil { chooseWorkspace() }
+                        }
+                    }
+                    .padding(2)
+                    .background(Theme.surfaceInset.opacity(0.38),
+                                in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(Theme.hairline.opacity(0.58), lineWidth: 1))
+                }
+                ToolbarItemGroup(placement: .primaryAction) {
+                    HStack(spacing: 2) {
+                        topToolButton("Browser", icon: "safari", active: showBrowser) {
+                            toggleToolPanel(.browser)
+                        }
+                        topToolButton("Simulator", icon: "iphone", active: showSimulator) {
+                            toggleToolPanel(.simulator)
+                        }
+                        topToolButton("Diagnostics", icon: "waveform.path.ecg", active: showDiagnostics) {
+                            toggleToolPanel(.diagnostics)
+                        }
+                    }
+                    .padding(2)
+                    .background(Theme.surfaceInset.opacity(0.40),
+                                in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Theme.hairline.opacity(0.7), lineWidth: 1))
+
+                    Menu {
+                        Button("Remote sessions…") { showRemoteAccess = true }
+                        Button("Model manager…") { showModelManager = true }
+                        Divider()
+                        Button("Export current chat as Markdown…") {
+                            exportCurrentChat(format: .markdown)
+                        }
+                        Button("Export current chat as JSON…") {
+                            exportCurrentChat(format: .json)
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .frame(width: 30, height: 28)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .help("More app actions")
+                }
+            }
             .onChange(of: appState.enginePhase) { _, phase in
                 switch phase {
                 case .idle:
@@ -116,6 +176,51 @@ struct MainWindowView: View {
                     appState.isSimulatorPanelOpen = false
                 }
             }
+    }
+
+    private func topToolButton(
+        _ title: String,
+        icon: String,
+        active: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(active ? Theme.rose : Theme.textSecondary)
+                .frame(width: 30, height: 28)
+                .background(active ? Theme.surfaceInset : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .lfHoverLift()
+        .help(title)
+        .accessibilityLabel(title)
+    }
+
+    private func workspaceModeButton(
+        _ title: String,
+        icon: String,
+        selected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 10.5, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 11.5, weight: selected ? .semibold : .medium))
+            }
+            .foregroundStyle(selected ? Theme.textPrimary : Theme.textTertiary)
+            .padding(.horizontal, 9)
+            .frame(height: 26)
+            .background(selected ? Theme.surface : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+        .help(title == "Chat" ? "Chat without project tools" : "Work in a project folder")
     }
 
     private var presentationView: some View {

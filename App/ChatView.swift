@@ -6,6 +6,7 @@ struct ChatView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var controller: AgentSessionController
     @ObservedObject private var settings = SettingsStore.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(controller: AgentSessionController) {
         self.controller = controller
@@ -16,24 +17,37 @@ struct ChatView: View {
     /// to the live controller/AppState in `.task`.
     @State private var composerStore = ComposerStore()
     @State private var sessionTitle = "New chat"
+    @State private var homeVisible = false
+    @State private var glowExpanded = false
+
+    private var isEmptyConversation: Bool {
+        controller.transcript.isEmpty
+            && controller.streamingText.isEmpty
+            && !controller.isRunning
+            && !hasPendingGate
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            ChatHeaderView(
-                title: sessionTitle,
-                phaseLabel: phaseLabel,
-                phaseTint: phaseTint,
-                canReview: controller.workspaceURL != nil)
-            if controller.workspaceTrustNeeded {
-                workspaceTrustBanner
+            if isEmptyConversation {
+                emptyState
+            } else {
+                ChatHeaderView(
+                    title: sessionTitle,
+                    phaseLabel: phaseLabel,
+                    phaseTint: phaseTint,
+                    canReview: controller.workspaceURL != nil)
+                if controller.workspaceTrustNeeded {
+                    workspaceTrustBanner
+                }
+                transcript
+                if hasPendingGate {
+                    pendingGate
+                }
+                Divider()
+                ComposerView(store: composerStore)
+                    .environmentObject(controller)
             }
-            transcript
-            if hasPendingGate {
-                pendingGate
-            }
-            Divider()
-            ComposerView(store: composerStore)
-                .environmentObject(controller)
         }
         .background { AtmosphereBackground() }
         .task {
@@ -221,34 +235,44 @@ struct ChatView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: Spacing.lg) {
-            Spacer(minLength: 0)
+        VStack(spacing: 0) {
+            Spacer(minLength: 32)
 
-            // A proper identity tile instead of a bare SF Symbol: the app's
-            // beet logo with a soft glow (danger variant when the last load
-            // failed, so the two states are never confused).
-            if case .failed = appState.enginePhase {
-                emptyStateTile(
-                    systemImage: "exclamationmark.triangle.fill",
-                    fill: AnyShapeStyle(Theme.danger),
-                    glow: Theme.danger)
-            } else {
-                Image("BeetLogo")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 64, height: 64)
-                    .clipShape(RoundedRectangle(cornerRadius: Radius.xl, style: .continuous))
-                    .shadow(color: Theme.accent.opacity(0.35), radius: 18, y: 6)
+            ZStack {
+                Circle()
+                    .fill(Theme.accentBright.opacity(glowExpanded ? 0.22 : 0.10))
+                    .frame(width: 102, height: 102)
+                    .blur(radius: 18)
+                    .scaleEffect(glowExpanded ? 1.14 : 1)
+                if case .failed = appState.enginePhase {
+                    emptyStateTile(
+                        systemImage: "exclamationmark.triangle.fill",
+                        fill: AnyShapeStyle(Theme.danger),
+                        glow: Theme.danger)
+                } else {
+                    Image("BeetLogo")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 46, height: 46)
+                        .frame(width: 58, height: 58)
+                        .background(.black, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                        .shadow(color: Theme.accent.opacity(0.55), radius: 17, y: 7)
+                }
             }
+            .padding(.bottom, 22)
 
-            Text(emptyHeadline)
-                .font(.title3.weight(.semibold))
+            Text(homeHeadline)
+                .font(.system(size: 27, weight: .semibold))
+                .tracking(-0.45)
                 .foregroundStyle(Theme.textPrimary)
-            Text(emptyBody)
-                .font(.callout)
+            Text(homeBody)
+                .font(.system(size: 13.5))
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 560)
+                .lineSpacing(3)
+                .frame(maxWidth: 420)
+                .padding(.top, 9)
 
             if controller.workspaceURL == nil {
                 HStack(spacing: 10) {
@@ -267,6 +291,7 @@ struct ChatView: View {
                     }
                     .buttonStyle(LFCapsuleButtonStyle())
                 }
+                .padding(.top, 16)
             } else if !hasRunnableModel {
                 Button {
                     NotificationCenter.default.post(name: .openModelManager, object: nil)
@@ -274,22 +299,63 @@ struct ChatView: View {
                     Label("Choose a Coding Model", systemImage: "cpu")
                 }
                 .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
+                .padding(.top, 16)
             }
 
-            // ChatGPT-style quick prompts: one tap drops a ready-made task
-            // into the composer. Only offered when a workspace and a model
-            // are both ready (no dead chips on an empty folder or failed load).
+            ComposerView(store: composerStore, placement: .home)
+                .environmentObject(controller)
+                .padding(.top, 26)
+
             if canSuggestPrompts {
                 VStack(spacing: 10) {
                     suggestionRow(suggestions[0])
                     suggestionRow(suggestions[1])
                 }
-                .padding(.top, 6)
+                .padding(.top, 20)
             }
 
             Spacer(minLength: 0)
+
+            Text("Use /create-hook to extend the agent loop with custom scripts")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Theme.textTertiary)
+                .padding(.bottom, 12)
         }
+        .padding(.horizontal, 36)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .opacity(homeVisible ? 1 : 0)
+        .offset(y: homeVisible || reduceMotion ? 0 : 10)
+        .onAppear {
+            if reduceMotion {
+                homeVisible = true
+                glowExpanded = false
+            } else {
+                withAnimation(.easeOut(duration: 0.48)) { homeVisible = true }
+                withAnimation(.easeInOut(duration: 4.5).repeatForever(autoreverses: true)) {
+                    glowExpanded = true
+                }
+            }
+        }
+    }
+
+    private var homeHeadline: LocalizedStringKey {
+        if case .failed = appState.enginePhase { return "Model failed to load" }
+        if case .loading = appState.enginePhase { return "Loading model…" }
+        if !hasRunnableModel { return "Choose a model to begin" }
+        return "What should we build?"
+    }
+
+    private var homeBody: LocalizedStringKey {
+        if case .failed = appState.enginePhase {
+            return "Check the model or choose another engine, then try again."
+        }
+        if case .loading = appState.enginePhase {
+            return "The composer unlocks when the engine is ready."
+        }
+        if !hasRunnableModel {
+            return "Choose an API, Codex, or a downloaded local model to begin."
+        }
+        return "Describe a task in plain language. Reads run automatically — every edit and command is yours to approve."
     }
 
     private func emptyStateTile(

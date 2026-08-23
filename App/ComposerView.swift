@@ -4,6 +4,11 @@ import UniformTypeIdentifiers
 
 // MARK: - Composer
 
+enum ComposerPlacement {
+    case conversation
+    case home
+}
+
 /// The composer: BeetCode's single input surface. One elevated card holding
 /// the editor and the accessory row; above it, the per-turn Intent chips and
 /// attachment chips appear only when they exist.
@@ -22,6 +27,7 @@ struct ComposerView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var store: ComposerStore
+    var placement: ComposerPlacement = .conversation
 
     @FocusState private var editorFocused: Bool
     @State private var isDropTargeted = false
@@ -45,12 +51,12 @@ struct ComposerView: View {
         }
         // The same centered column as the transcript above, so the input
         // sits directly under the conversation it belongs to.
-        .frame(maxWidth: ContentColumn.maxWidth, alignment: .leading)
+        .frame(maxWidth: placement == .home ? 640 : ContentColumn.maxWidth, alignment: .leading)
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, Spacing.xl)
-        .padding(.top, 10)
-        .padding(.bottom, 12)
-        .background(Theme.bg)
+        .padding(.horizontal, placement == .home ? 0 : Spacing.xl)
+        .padding(.top, placement == .home ? 0 : 10)
+        .padding(.bottom, placement == .home ? 0 : 12)
+        .background(placement == .home ? Color.clear : Theme.bg)
         .onReceive(NotificationCenter.default.publisher(for: .sendMessage)) { _ in
             store.send()
         }
@@ -163,7 +169,10 @@ struct ComposerView: View {
     }
 
     private var composerPlaceholder: LocalizedStringKey {
-        controller.workspaceURL == nil
+        if placement == .home {
+            return "Plan, build, or ask — / for skills, @ for context"
+        }
+        return controller.workspaceURL == nil
             ? "Message Beet Code…"
             : "Ask Beet Code to build, fix, or explain…"
     }
