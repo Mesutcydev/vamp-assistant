@@ -38,7 +38,7 @@ struct StatusBarView: View {
                 ) {
                     Text(accelerationLabel)
                 }
-                .help(accelerationHelp)
+                .help(Text(accelerationHelp))
             }
 
             if appState.lastEngineStats.mlxPromptCacheActive
@@ -47,7 +47,7 @@ struct StatusBarView: View {
                 chip(icon: "memorychip.fill", tint: Theme.info) {
                     Text(mlxExperimentLabel)
                 }
-                .help(mlxExperimentHelp)
+                .help(Text(mlxExperimentHelp))
             }
 
             chip(icon: "memorychip", tint: Theme.info) {
