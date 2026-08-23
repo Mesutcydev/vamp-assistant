@@ -479,6 +479,7 @@ textarea {
 }
 .sessions-toggle:hover { color: var(--text); }
 .sidebar.compact { overflow: hidden; }
+.mobile-sessions-button, .mobile-sheet-footer, .session-scrim { display: none; }
 
 @media (max-width: 720px) {
   .shell {
@@ -486,15 +487,28 @@ textarea {
     flex-direction: column;
   }
   .sidebar {
-    flex: 0 0 278px;
+    position: fixed;
+    z-index: 6;
+    inset: 0 0 auto 0;
+    display: flex;
     width: 100%;
-    height: 278px;
-    max-height: 278px;
+    height: min(72dvh, 620px);
+    max-height: none;
     border-right: 0;
     border-bottom: 1px solid var(--line);
-    box-shadow: 0 8px 24px var(--panel-shadow);
+    border-radius: 0 0 20px 20px;
+    box-shadow: 0 18px 50px var(--panel-shadow);
+    transform: translateY(0);
+    transition: transform 280ms var(--ease-out);
   }
-  .brand { padding: 14px 16px 10px; }
+  .sidebar.compact {
+    height: min(72dvh, 620px);
+    max-height: none;
+    overflow: hidden;
+    pointer-events: none;
+    transform: translateY(calc(-100% - 24px));
+  }
+  .brand { padding: calc(14px + env(safe-area-inset-top, 0px)) 16px 10px; }
   .brand p { display: none; }
   .sessions {
     display: block;
@@ -534,52 +548,66 @@ textarea {
     height: 40px;
   }
   .session { width: 100%; margin: 2px 0; padding: 10px 9px; }
-  .sidebar.compact {
-    flex: 0 0 auto;
-    height: auto;
-    max-height: none;
-    overflow: visible;
+  .mobile-sheet-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--line);
+    background: var(--chrome);
   }
-  .sidebar.compact .sessions {
-    flex: 0 0 auto;
-    min-height: 0;
-    overflow: visible;
+  .mobile-sheet-footer .footer-revoke {
+    min-height: 40px;
+    padding: 0 8px;
+    background: transparent;
+    color: var(--accent-bright);
+    font-size: 12px;
+    font-weight: 650;
   }
-  .sidebar.compact .sessions-toggle::after { content: '＋'; }
-  .sidebar.compact .session:not(.active) { display: none; }
-  .sidebar.compact .session.active { display: block; }
   .footer { display: none; }
+  .session-scrim {
+    position: fixed;
+    z-index: 5;
+    inset: 0;
+    display: block;
+    background: rgba(0,0,0,.28);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 220ms var(--ease-out);
+  }
+  body.sessions-open .session-scrim { opacity: 1; pointer-events: auto; }
   .main { flex: 1 1 0; min-height: 0; }
   .topbar {
-    flex: 0 0 62px;
-    height: 62px;
-    min-height: 62px;
-    padding: 0 12px;
+    flex: 0 0 58px;
+    height: 58px;
+    min-height: 58px;
+    padding: 0 10px;
     gap: 8px;
   }
+  .mobile-sessions-button {
+    display: grid;
+    flex: 0 0 40px;
+    width: 40px;
+    height: 40px;
+    place-items: center;
+    border-radius: 11px;
+    background: var(--panel-strong);
+    color: var(--text);
+    font-size: 18px;
+    touch-action: manipulation;
+  }
   .title-block { flex: 1 1 auto; min-width: 0; }
-  .topbar .sub { max-width: 43vw; }
+  .topbar h2 { font-size: 15px; }
+  .topbar .sub { max-width: 52vw; margin-top: 2px; font-size: 11px; }
   .top-actions {
     flex: 0 0 auto;
     gap: 4px;
   }
-  .top-actions .icon-button {
-    flex: 0 0 40px;
-    width: 40px;
-    height: 40px;
-  }
-  .appearance-switcher {
-    flex: 0 0 auto;
-    gap: 1px;
-    padding: 2px;
-  }
-  .appearance-option {
-    flex: 0 0 32px;
-    width: 32px;
-    min-width: 32px;
-    padding: 0;
-  }
-  .appearance-label { display: none; }
+  .top-actions .icon-button, .top-actions .appearance-switcher { display: none; }
+  .mobile-sheet-footer .appearance-switcher { display: flex; }
+  .mobile-sheet-footer .appearance-option { min-width: 40px; min-height: 36px; }
+  .mobile-sheet-footer .appearance-label { display: none; }
   .status {
     flex: 0 0 14px;
     width: 14px;
@@ -589,12 +617,13 @@ textarea {
   }
   .status #status-text { display: none; }
   .status .dot { width: 9px; height: 9px; }
-  .messages { padding: 16px 12px; }
+  .messages { padding: 10px 10px 14px; }
+  .bubble { padding: 13px 14px; margin-bottom: 10px; font-size: 16px; line-height: 1.52; }
   .interaction, .notice { width: calc(100% - 24px); }
-  .composer-wrap { padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px)); }
+  .composer-wrap { padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px)); }
   .composer { height: 58px; min-height: 58px; max-height: 58px; }
   .send, .stop { width: 40px; height: 40px; }
-  .hint { padding-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hint { display: none; }
 }
 
 @supports (height: 100dvh) {
@@ -671,6 +700,7 @@ textarea {
 </div>
 
 <div class="shell">
+  <button id="session-scrim" class="session-scrim" type="button" aria-label="Close sessions"></button>
   <aside class="sidebar" aria-label="Saved sessions">
     <div class="brand">
       <div class="brand-row"><img class="brand-logo" src="/assets/beetlogo.png" alt="Beet Code logo"><h1>Beet Code</h1></div>
@@ -683,11 +713,20 @@ textarea {
       </div>
       <div id="session-list" role="listbox" aria-label="Saved Beetcode sessions"></div>
     </div>
+    <div class="mobile-sheet-footer">
+      <div class="appearance-switcher" role="group" aria-label="Appearance">
+        <button class="appearance-option" type="button" data-theme-choice="light" aria-label="Light appearance" aria-pressed="false"><span class="appearance-glyph" aria-hidden="true">☼</span><span class="appearance-label">Light</span></button>
+        <button class="appearance-option" type="button" data-theme-choice="dark" aria-label="Dark appearance" aria-pressed="false"><span class="appearance-glyph" aria-hidden="true">☾</span><span class="appearance-label">Dark</span></button>
+        <button class="appearance-option" type="button" data-theme-choice="beet" aria-label="Beet appearance" aria-pressed="true"><span class="appearance-glyph" aria-hidden="true">B</span><span class="appearance-label">Beet</span></button>
+      </div>
+      <button id="revoke-mobile" class="footer-revoke" type="button">Revoke browser</button>
+    </div>
     <div class="footer"><span id="network-note">Runs on your Mac over Tailscale.</span><br><button id="revoke" type="button">Revoke this browser</button></div>
   </aside>
 
   <main class="main">
     <header class="topbar">
+      <button id="mobile-sessions" class="mobile-sessions-button" type="button" aria-label="Show sessions" aria-expanded="false">☰</button>
       <div class="title-block">
         <h2 id="session-title">Choose a session</h2>
         <div id="session-sub" class="sub">Your saved Beetcode sessions appear here.</div>
@@ -833,9 +872,11 @@ function updateSessionListMode() {
   const compact = Boolean(state.current) && !state.sessionsExpanded;
   const collapsed = compact && isMobile;
   sidebar.classList.toggle('compact', compact);
+  document.body.classList.toggle('sessions-open', isMobile && !collapsed);
   toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
   toggle.setAttribute('aria-label', collapsed ? 'Show all sessions' : 'Hide sessions');
   toggle.title = collapsed ? 'Show all sessions' : 'Hide sessions';
+  $('mobile-sessions').setAttribute('aria-expanded', collapsed ? 'false' : 'true');
 }
 
 function normalizedCode(raw) {
@@ -1307,13 +1348,22 @@ $('sessions-toggle').onclick = () => {
   state.sessionsExpanded = !state.sessionsExpanded;
   updateSessionListMode();
 };
+$('mobile-sessions').onclick = () => {
+  state.sessionsExpanded = true;
+  updateSessionListMode();
+};
+$('session-scrim').onclick = () => {
+  if (!state.current) return;
+  state.sessionsExpanded = false;
+  updateSessionListMode();
+};
 document.querySelectorAll('[data-theme-choice]').forEach(button => {
   button.onclick = () => applyAppearance(button.dataset.themeChoice);
 });
 $('composer').onkeydown = event => {
   if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(); }
 };
-$('revoke').onclick = async () => {
+async function revokeBrowser() {
   try {
     await api('/api/revoke', { method: 'POST' });
     clearToken();
@@ -1325,7 +1375,9 @@ $('revoke').onclick = async () => {
     updateComposer();
     showPairing('This browser was revoked. Pair it again from Beet Code.');
   } catch (error) { showNotice(error.message, 'error'); }
-};
+}
+$('revoke').onclick = revokeBrowser;
+$('revoke-mobile').onclick = revokeBrowser;
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
