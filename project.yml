@@ -148,10 +148,13 @@ targets:
       path: iOSApp/Info.plist
       properties:
         CFBundleDisplayName: "BeetCode Remote"
-        CFBundleShortVersionString: "0.1.0"
-        CFBundleVersion: "1"
+        CFBundleShortVersionString: "0.1.2"
+        CFBundleVersion: "3"
         ITSAppUsesNonExemptEncryption: false
         NSLocalNetworkUsageDescription: "BeetCode Remote connects to Beet Code running on your trusted Mac."
+        NSCameraUsageDescription: "BeetCode Remote scans the one-time pairing QR code shown by your Mac."
+        LSApplicationQueriesSchemes:
+          - tailscale
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
         UILaunchScreen:
@@ -170,8 +173,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.beetcode.remote.ios
         PRODUCT_NAME: "BeetCode Remote"
-        MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "0.1.2"
+        CURRENT_PROJECT_VERSION: "3"
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: iOSApp/Info.plist
         TARGETED_DEVICE_FAMILY: "1,2"

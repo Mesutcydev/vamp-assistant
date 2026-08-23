@@ -345,6 +345,7 @@
 		CD3069F2C0DAD47A95B341EB /* LegacyMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88E9DBB5B9D17F8413EA748D /* LegacyMigrationTests.swift */; };
 		CD9CD467B1C733B0F76F743C /* SQLiteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8F720C930E60D30E50417C3 /* SQLiteStore.swift */; };
 		CE26B649A374B017532B26F0 /* HFTokenizerLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87FAD7519BB72C74236B2414 /* HFTokenizerLoader.swift */; };
+		CE9B1FF294052D3C7250ED50 /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CED09D4D3E7BF3C121736ABC /* QRScannerView.swift */; };
 		CFB51A9CCD4315B5E95ACC89 /* AgentTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1391D4CF4F1319A3EEBB5221 /* AgentTypes.swift */; };
 		CFF26870578B6D564939B962 /* IndexEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0697D8DDF91024015A0239C9 /* IndexEngine.swift */; };
 		D046DA2BBE5106943942C6B0 /* ExternalCommandsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 463FB09192B21B1138934593 /* ExternalCommandsTests.swift */; };
@@ -633,6 +634,7 @@
 		CCE58E27A7495A29D3B68BEE /* AgentBenchmarkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentBenchmarkTests.swift; sourceTree = "<group>"; };
 		CD7B083F631043433BB92F9A /* SimBuildRunTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimBuildRunTool.swift; sourceTree = "<group>"; };
 		CDCCD8875C7FA97C619AD351 /* SessionUsage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionUsage.swift; sourceTree = "<group>"; };
+		CED09D4D3E7BF3C121736ABC /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
 		CF3C5250A60D0E24E54F3C9B /* SessionExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionExporter.swift; sourceTree = "<group>"; };
 		D04330417C5F42A40ECA0769 /* ClaimVerifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaimVerifierTests.swift; sourceTree = "<group>"; };
 		D057D679ABA99F31B1F75136 /* CodexAppServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexAppServer.swift; sourceTree = "<group>"; };
@@ -767,6 +769,7 @@
 			children = (
 				C1438B84E7B2CC7EA4EF20B7 /* BeetCodeRemoteApp.swift */,
 				E85A47F00CC8C78066042658 /* Info.plist */,
+				CED09D4D3E7BF3C121736ABC /* QRScannerView.swift */,
 				35E4FE04C22BE0E3A44DC4E4 /* RemoteAPIClient.swift */,
 				5A208E31201621377B83E3EA /* RemoteModels.swift */,
 				0CF62FEEEC83316537562E5B /* RemoteStore.swift */,
@@ -1877,6 +1880,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				27942A6503783173FE34D081 /* BeetCodeRemoteApp.swift in Sources */,
+				CE9B1FF294052D3C7250ED50 /* QRScannerView.swift in Sources */,
 				05C788BA44B34D17C243FC68 /* RemoteAPIClient.swift in Sources */,
 				B8634B8C1C4FE74EB76152B4 /* RemoteModels.swift in Sources */,
 				82C811AE5858C2EA7610F624 /* RemoteStore.swift in Sources */,
@@ -2034,7 +2038,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = iOSApp/Info.plist;
@@ -2043,7 +2047,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.beetcode.remote.ios;
 				PRODUCT_NAME = "BeetCode Remote";
 				SDKROOT = iphoneos;
@@ -2061,7 +2065,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = iOSApp/Info.plist;
@@ -2070,7 +2074,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.beetcode.remote.ios;
 				PRODUCT_NAME = "BeetCode Remote";
 				SDKROOT = iphoneos;

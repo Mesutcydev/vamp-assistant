@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct RemoteRootView: View {
     let store: RemoteStore
@@ -16,6 +17,7 @@ struct PairingView: View {
     let store: RemoteStore
     @State private var address = ""
     @State private var code = ""
+    @State private var showScanner = false
 
     var body: some View {
         NavigationStack {
@@ -23,6 +25,30 @@ struct PairingView: View {
                 VStack(spacing: 26) {
                     PairingHero()
                     VStack(spacing: 14) {
+                        Button {
+                            showScanner = true
+                        } label: {
+                            Label("Scan Beet Code QR", systemImage: "qrcode.viewfinder")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+
+                        Button {
+                            TailscaleLauncher.open()
+                        } label: {
+                            Label("Open Tailscale", systemImage: "network")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+
+                        HStack(spacing: 10) {
+                            Divider()
+                            Text("or enter manually").font(.caption).foregroundStyle(.secondary)
+                            Divider()
+                        }
+
                         TextField("http://100.x.x.x:9475", text: $address)
                             .textContentType(.URL)
                             .keyboardType(.URL)
@@ -61,11 +87,32 @@ struct PairingView: View {
             .alert("Connection problem", isPresented: errorBinding) {
                 Button("OK") { store.errorMessage = nil }
             } message: { Text(store.errorMessage ?? "Unknown error") }
+            .sheet(isPresented: $showScanner) {
+                QRScannerSheet(
+                    onScan: { value in
+                        address = value
+                        showScanner = false
+                        Task { await store.connect(address: value, code: "") }
+                    },
+                    onCancel: { showScanner = false })
+            }
         }
     }
 
     private var errorBinding: Binding<Bool> {
         Binding(get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } })
+    }
+}
+
+private enum TailscaleLauncher {
+    @MainActor
+    static func open() {
+        let application = UIApplication.shared
+        if let appURL = URL(string: "tailscale://"), application.canOpenURL(appURL) {
+            application.open(appURL)
+        } else if let storeURL = URL(string: "https://apps.apple.com/app/tailscale/id1470499037") {
+            application.open(storeURL)
+        }
     }
 }
 

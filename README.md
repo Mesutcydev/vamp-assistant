@@ -34,7 +34,7 @@ The [GitHub Pages site](https://mesutcydev.github.io/beet-code/) has the full pr
 
 ## BeetCode Remote for iPhone and iPad
 
-The repository includes a native SwiftUI companion app that connects to the Mac app's existing private Remote Sessions endpoint. It supports one-time pairing, secure token storage, automatic reconnection, session browsing, live responses, prompts, stop controls, and agent approvals/questions.
+The repository includes a native SwiftUI companion app that connects to the Mac app's existing private Remote Sessions endpoint. It supports camera QR pairing, manual one-time pairing, secure token storage, automatic reconnection, session browsing, live responses, prompts, stop controls, and agent approvals/questions.
 
 Build an unsigned sideloadable IPA:
 
