@@ -15,6 +15,7 @@
 		044B1CA06AFF3DF94C204A5C /* MemoryAdvisor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C74EE3952423C1F4762C4D8 /* MemoryAdvisor.swift */; };
 		056CBCBB03F6D315EB18D840 /* OpenAIRoutes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 314F800229989B3B8A84268E /* OpenAIRoutes.swift */; };
 		0573A55D405ED0EB6A31DDBA /* VisionTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C4C085A3FEFE2149E2C7765 /* VisionTool.swift */; };
+		05C788BA44B34D17C243FC68 /* RemoteAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35E4FE04C22BE0E3A44DC4E4 /* RemoteAPIClient.swift */; };
 		0646CF6D09ABDF5CAFED6787 /* ImpactAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F3EAB7CF94CE27D9E7A7DCE /* ImpactAnalyzer.swift */; };
 		07112DAB7215FE5489FE7FBA /* CommandPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = E54BE0F83E190CCFC3E901B0 /* CommandPolicy.swift */; };
 		081397CF3ECBAF3031BD06B9 /* PromptBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 863AFF1B9C808048112812F9 /* PromptBuilder.swift */; };
@@ -72,6 +73,7 @@
 		25CD9C4618B5C1FCD1637571 /* SQLiteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8F720C930E60D30E50417C3 /* SQLiteStore.swift */; };
 		2659873401C28D841DF98E2B /* BeetCodeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90E658DE389249BAF16015C /* BeetCodeUITests.swift */; };
 		26C056B6CE36DC4193DFCE2B /* IntentPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9F82F98CABB2BE6E45DEB7C /* IntentPicker.swift */; };
+		27942A6503783173FE34D081 /* BeetCodeRemoteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1438B84E7B2CC7EA4EF20B7 /* BeetCodeRemoteApp.swift */; };
 		27BC655EAA26135E0E2BCC95 /* HookRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40663F1C5930C47B0AD117B /* HookRunner.swift */; };
 		27C4C1630215DEFC29E650E8 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5446177C9F91F0701EFBBEE6 /* SidebarView.swift */; };
 		2827E8D6A0592CDAE69BB49A /* FixtureHub.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B2DC76E4D54DC40B8F75A7E /* FixtureHub.swift */; };
@@ -183,6 +185,7 @@
 		6B465E4FF3496C35B5324275 /* LFJSON.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FCFC0EF354710AAD4F287B4 /* LFJSON.swift */; };
 		6B619139FB7AA8B286A7847F /* ThermalMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0851A4485E434C561E711AD5 /* ThermalMonitor.swift */; };
 		6B65A116F89E359C3FB8BC0F /* SmartDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 226B95A0A0995E1574052D95 /* SmartDownloader.swift */; };
+		6BAFE0A89DBF2548BA961C35 /* RemoteViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC7D081F0DC222588A0643D6 /* RemoteViews.swift */; };
 		6C8154499793BE040D0663C0 /* AppleShipTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADF296000D22C3487D0BFF06 /* AppleShipTool.swift */; };
 		6CB482EC21E0C2BFE388DB04 /* IntelligenceInspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD52BE1C1AEDD51F4F2049B0 /* IntelligenceInspectorView.swift */; };
 		6CF00B003B53F88429E09EB7 /* ToolParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78D2882D20326053E604A3FD /* ToolParser.swift */; };
@@ -220,6 +223,7 @@
 		7FB01127F4C483D257C88811 /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 362529CA297A35C625E595BA /* SessionStore.swift */; };
 		8020BAF8C494527C351A27D0 /* SettingsProvidersTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EF5DB981DF82BC708D5A668 /* SettingsProvidersTab.swift */; };
 		829F4F6017D5CE6C1F2D88E8 /* IntelligenceContextProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDC04BB498522CFFFAF84C9C /* IntelligenceContextProvider.swift */; };
+		82C811AE5858C2EA7610F624 /* RemoteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CF62FEEEC83316537562E5B /* RemoteStore.swift */; };
 		8345AD21924EBF9F3FCFC6D3 /* MCPOAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33D16D6E29B1DC78470A1710 /* MCPOAuth.swift */; };
 		837728FDBDC40F986CBD4112 /* GGUFMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF5A58CDEE48304EC64BBB55 /* GGUFMetadata.swift */; };
 		843ECF1D72352AACB100E2CD /* VisionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D98311A3F349AD7031E7103 /* VisionTests.swift */; };
@@ -302,6 +306,7 @@
 		B5F618EF871C0FC0D6756280 /* SemanticEntity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2679B1B686CF3EE069DC572B /* SemanticEntity.swift */; };
 		B6373141C200011D3D35476F /* TolerantJSON.swift in Sources */ = {isa = PBXBuildFile; fileRef = 490C276C22A279F494DA83C4 /* TolerantJSON.swift */; };
 		B7FA5F5C4F2931F7BF3F6855 /* LiveSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB4F6172466A15DDEBDFC068 /* LiveSmokeTests.swift */; };
+		B8634B8C1C4FE74EB76152B4 /* RemoteModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A208E31201621377B83E3EA /* RemoteModels.swift */; };
 		B96F2F49EF946CBE63ED004E /* OpenCodeCompatibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55D649F87EC60140D672A7A /* OpenCodeCompatibility.swift */; };
 		BBB5DB3F76A04BF41B44D40B /* SettingsProviderCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83189CEB5822A7FB2889F212 /* SettingsProviderCapabilities.swift */; };
 		BE1040A96B1A531A638AD05F /* EntityCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E78DE427537EBF18389F3A7 /* EntityCoreTests.swift */; };
@@ -311,6 +316,7 @@
 		C146084CC23D9C02DAA91242 /* ApprovalOverrides.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6343AED4D4FC92C87B07B8F /* ApprovalOverrides.swift */; };
 		C1BD66D1A1D01FE10C3CDCC0 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6305F43E05FB978F49F4100 /* SettingsStore.swift */; };
 		C237747C4F231D8435CD41AA /* MLXModelInspectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB1ED06111F8C915FDB50D3D /* MLXModelInspectorTests.swift */; };
+		C39B3666A0F24A774E88B039 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3850DE342D609B1462067E53 /* Assets.xcassets */; };
 		C39FE777242343F128EEB763 /* Log.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C99885B596BF327B2DDB386 /* Log.swift */; };
 		C3C67088C1669259F5AD689C /* ComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D71199ED79E9A94A0CD37D1 /* ComposerView.swift */; };
 		C3E8B1F908657A3740D7EC13 /* WorkspaceCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D4DBB8B4FBD3772AA05B03 /* WorkspaceCoreTests.swift */; };
@@ -437,6 +443,7 @@
 		0BAB0FA79FF4C14D1470A44B /* MemoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryTests.swift; sourceTree = "<group>"; };
 		0C4C085A3FEFE2149E2C7765 /* VisionTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionTool.swift; sourceTree = "<group>"; };
 		0C535A1553476C476EE7FB81 /* GitReview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitReview.swift; sourceTree = "<group>"; };
+		0CF62FEEEC83316537562E5B /* RemoteStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteStore.swift; sourceTree = "<group>"; };
 		115312CC2B1791AA3924D22D /* LocalAPIServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalAPIServer.swift; sourceTree = "<group>"; };
 		11FC9325546E8FCA0AE2D412 /* SettingsKnownProviderRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsKnownProviderRow.swift; sourceTree = "<group>"; };
 		1210D17B374A93B49780C6CB /* StreamDisplayFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamDisplayFilter.swift; sourceTree = "<group>"; };
@@ -476,6 +483,7 @@
 		3457518340804AF46991BAAF /* SemanticEnricher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemanticEnricher.swift; sourceTree = "<group>"; };
 		34FCC7599AAAD923FB7E7FD0 /* SidebarGroupHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarGroupHeader.swift; sourceTree = "<group>"; };
 		35E36AC5300539E02E133F21 /* ContextCompiler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextCompiler.swift; sourceTree = "<group>"; };
+		35E4FE04C22BE0E3A44DC4E4 /* RemoteAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteAPIClient.swift; sourceTree = "<group>"; };
 		362529CA297A35C625E595BA /* SessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStore.swift; sourceTree = "<group>"; };
 		3780978AF4DBD7ACEFB5EF0D /* SymbolGraph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SymbolGraph.swift; sourceTree = "<group>"; };
 		37974B5A1A3D6B7C2951E780 /* TestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestSupport.swift; sourceTree = "<group>"; };
@@ -501,10 +509,12 @@
 		543103BCECA68751617348BD /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5446177C9F91F0701EFBBEE6 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
 		5575D39B3E7548A54465A455 /* MemoryTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryTools.swift; sourceTree = "<group>"; };
+		55E93B3CAAF1060E42620CB5 /* BeetCodeRemoteIOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BeetCodeRemoteIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		55F6937A05E6A38C51A53721 /* RunCommandTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunCommandTool.swift; sourceTree = "<group>"; };
 		562018A68D4EAAE0EEE42D6E /* IntelligenceCLIRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntelligenceCLIRunner.swift; sourceTree = "<group>"; };
 		593A9F6ECB59B6A49692A684 /* ContextResolvers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextResolvers.swift; sourceTree = "<group>"; };
 		59726842292B054AF8042074 /* BuildDiagnosticsTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuildDiagnosticsTool.swift; sourceTree = "<group>"; };
+		5A208E31201621377B83E3EA /* RemoteModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteModels.swift; sourceTree = "<group>"; };
 		5B1D5D726C824BCB90465574 /* AgentMemory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentMemory.swift; sourceTree = "<group>"; };
 		5BDFB8854BAB9DB918388F4F /* MCPToolAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPToolAdapter.swift; sourceTree = "<group>"; };
 		5C77D8F115F8B07D45867BA9 /* ModelCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelCatalog.swift; sourceTree = "<group>"; };
@@ -610,6 +620,7 @@
 		BF886B7D61E2823E685CB2F3 /* BeetCodeCLI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeetCodeCLI.swift; sourceTree = "<group>"; };
 		C0DB9230DFDEF685E02E91A9 /* SlashCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlashCommand.swift; sourceTree = "<group>"; };
 		C11D1BB78C3B41DE6F2416E6 /* DiagnosticParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticParserTests.swift; sourceTree = "<group>"; };
+		C1438B84E7B2CC7EA4EF20B7 /* BeetCodeRemoteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeetCodeRemoteApp.swift; sourceTree = "<group>"; };
 		C2853175EC9472204209EF29 /* FileTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTools.swift; sourceTree = "<group>"; };
 		C47138534FD28C74C1EC5F15 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		C7E33715D0DFCE5756D39925 /* ShellRunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellRunnerTests.swift; sourceTree = "<group>"; };
@@ -650,6 +661,8 @@
 		E2CB63524D724A95832302A8 /* ComposerAttachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerAttachment.swift; sourceTree = "<group>"; };
 		E47396D85D110473F1C301B7 /* AtmosphereBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtmosphereBackground.swift; sourceTree = "<group>"; };
 		E54BE0F83E190CCFC3E901B0 /* CommandPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPolicy.swift; sourceTree = "<group>"; };
+		E85A47F00CC8C78066042658 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		EC7D081F0DC222588A0643D6 /* RemoteViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteViews.swift; sourceTree = "<group>"; };
 		ED90EB4EC1FA8CC4C7D9FAC9 /* BeetCodeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BeetCodeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		EDC04BB498522CFFFAF84C9C /* IntelligenceContextProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntelligenceContextProvider.swift; sourceTree = "<group>"; };
 		EE655C7C79C49E65192B22C1 /* MLXEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MLXEngine.swift; sourceTree = "<group>"; };
@@ -747,6 +760,19 @@
 				6D375EF54BDD9903CA72488A /* IntentTypes.swift */,
 			);
 			path = Intent;
+			sourceTree = "<group>";
+		};
+		11358B144DD594E9F83D2EA3 /* iOSApp */ = {
+			isa = PBXGroup;
+			children = (
+				C1438B84E7B2CC7EA4EF20B7 /* BeetCodeRemoteApp.swift */,
+				E85A47F00CC8C78066042658 /* Info.plist */,
+				35E4FE04C22BE0E3A44DC4E4 /* RemoteAPIClient.swift */,
+				5A208E31201621377B83E3EA /* RemoteModels.swift */,
+				0CF62FEEEC83316537562E5B /* RemoteStore.swift */,
+				EC7D081F0DC222588A0643D6 /* RemoteViews.swift */,
+			);
+			path = iOSApp;
 			sourceTree = "<group>";
 		};
 		11E707C9840B80334D86BBDC /* SDK */ = {
@@ -1097,6 +1123,7 @@
 				76853D4BEA0678CAEF522E33 /* App */,
 				C53F0A2FC750C450F025399C /* CLI */,
 				C34B053B53546FDB4B214C35 /* Core */,
+				11358B144DD594E9F83D2EA3 /* iOSApp */,
 				C8CB9C351FA8550F45E78B0C /* Tests */,
 				FED91F8CAE32C1E7F3C11834 /* UITests */,
 				BBEB13728E5F8290A4D07142 /* Products */,
@@ -1108,6 +1135,7 @@
 			children = (
 				66EB19F867BC26F7E5036962 /* BeetCode.app */,
 				D464D55F706CAD3D0BD66CAA /* BeetCodeCLI */,
+				55E93B3CAAF1060E42620CB5 /* BeetCodeRemoteIOS.app */,
 				ED90EB4EC1FA8CC4C7D9FAC9 /* BeetCodeTests.xctest */,
 				98F2FF9EA56665AC2C6FA9F8 /* BeetCodeUITests.xctest */,
 			);
@@ -1363,6 +1391,24 @@
 			productReference = ED90EB4EC1FA8CC4C7D9FAC9 /* BeetCodeTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		707485AE1D7415D8F242DDE8 /* BeetCodeRemoteIOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6C7E5FCA28C1ED5C1DF34915 /* Build configuration list for PBXNativeTarget "BeetCodeRemoteIOS" */;
+			buildPhases = (
+				892A5D71B526729240BBAD31 /* Sources */,
+				A7828939848553143A776D86 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BeetCodeRemoteIOS;
+			packageProductDependencies = (
+			);
+			productName = BeetCodeRemoteIOS;
+			productReference = 55E93B3CAAF1060E42620CB5 /* BeetCodeRemoteIOS.app */;
+			productType = "com.apple.product-type.application";
+		};
 		75354E2E77F90DCCBF7CD265 /* BeetCodeCLI */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 7ED442881E0CB49854AF6BDC /* Build configuration list for PBXNativeTarget "BeetCodeCLI" */;
@@ -1427,6 +1473,10 @@
 						DevelopmentTeam = 438VSM6P5L;
 						ProvisioningStyle = Automatic;
 					};
+					707485AE1D7415D8F242DDE8 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Manual;
+					};
 					75354E2E77F90DCCBF7CD265 = {
 						ProvisioningStyle = Automatic;
 					};
@@ -1459,6 +1509,7 @@
 				75354E2E77F90DCCBF7CD265 /* BeetCodeCLI */,
 				3E1C77836A39B0573B0D8CD9 /* BeetCodeTests */,
 				10E75D7D018FE7F1E56FB0AB /* BeetCodeUITests */,
+				707485AE1D7415D8F242DDE8 /* BeetCodeRemoteIOS */,
 			);
 		};
 /* End PBXProject section */
@@ -1470,6 +1521,14 @@
 			files = (
 				EC6631DBCC36A3012F637D2E /* Assets.xcassets in Resources */,
 				EE0906CB08C806617E04A870 /* Localizable.xcstrings in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A7828939848553143A776D86 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C39B3666A0F24A774E88B039 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1813,6 +1872,18 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		892A5D71B526729240BBAD31 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				27942A6503783173FE34D081 /* BeetCodeRemoteApp.swift in Sources */,
+				05C788BA44B34D17C243FC68 /* RemoteAPIClient.swift in Sources */,
+				B8634B8C1C4FE74EB76152B4 /* RemoteModels.swift in Sources */,
+				82C811AE5858C2EA7610F624 /* RemoteStore.swift in Sources */,
+				6BAFE0A89DBF2548BA961C35 /* RemoteViews.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E8BAA4B200DC29BC04182C7D /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -1956,6 +2027,60 @@
 			};
 			name = Release;
 		};
+		4A82866F500FA7DEF88BB0B2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = iOSApp/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.beetcode.remote.ios;
+				PRODUCT_NAME = "BeetCode Remote";
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		4EC1F101B2CA28E5DADEBE7C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = iOSApp/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.beetcode.remote.ios;
+				PRODUCT_NAME = "BeetCode Remote";
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 		7824218380F6F06EDDC79440 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -2005,11 +2130,11 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 6.0;
@@ -2105,12 +2230,12 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 6.0;
@@ -2199,6 +2324,15 @@
 			buildConfigurations = (
 				8624D69F75BBD854DB8380C5 /* Debug */,
 				3CCF1001EE2D7E161CE24AC7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		6C7E5FCA28C1ED5C1DF34915 /* Build configuration list for PBXNativeTarget "BeetCodeRemoteIOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4EC1F101B2CA28E5DADEBE7C /* Debug */,
+				4A82866F500FA7DEF88BB0B2 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

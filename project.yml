@@ -3,6 +3,7 @@ options:
   bundleIdPrefix: com.beetcode
   deploymentTarget:
     macOS: "15.0"
+    iOS: "18.0"
   createIntermediateGroups: true
   # Xcode 16-era pbxproj (objectVersion 77) opens in Xcode 26.x and 27.x.
   projectFormat: xcode16_0
@@ -135,6 +136,54 @@ targets:
         TEST_TARGET_NAME: BeetCode
         GENERATE_INFOPLIST_FILE: YES
 
+  BeetCodeRemoteIOS:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - iOSApp
+      - path: App/Assets.xcassets
+        buildPhase: resources
+    info:
+      path: iOSApp/Info.plist
+      properties:
+        CFBundleDisplayName: "BeetCode Remote"
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        ITSAppUsesNonExemptEncryption: false
+        NSLocalNetworkUsageDescription: "BeetCode Remote connects to Beet Code running on your trusted Mac."
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        UILaunchScreen:
+          UIColorName: AccentColor
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.beetcode.remote.ios
+        PRODUCT_NAME: "BeetCode Remote"
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: iOSApp/Info.plist
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        SWIFT_STRICT_CONCURRENCY: complete
+        SWIFT_APPROACHABLE_CONCURRENCY: YES
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: ""
+        DEVELOPMENT_TEAM: ""
+
 schemes:
   BeetCode:
     build:
@@ -151,5 +200,11 @@ schemes:
     build:
       targets:
         BeetCodeCLI: all
+    run:
+      config: Debug
+  BeetCodeRemoteIOS:
+    build:
+      targets:
+        BeetCodeRemoteIOS: all
     run:
       config: Debug

@@ -32,6 +32,18 @@ Beet Code keeps your project, model, chats, browser, and iOS Simulator in one si
 
 The [GitHub Pages site](https://mesutcydev.github.io/beet-code/) has the full preview gallery, light/dark mode, and app details.
 
+## BeetCode Remote for iPhone and iPad
+
+The repository includes a native SwiftUI companion app that connects to the Mac app's existing private Remote Sessions endpoint. It supports one-time pairing, secure token storage, automatic reconnection, session browsing, live responses, prompts, stop controls, and agent approvals/questions.
+
+Build an unsigned sideloadable IPA:
+
+```sh
+./scripts/package-beetcode-remote-ios.sh
+```
+
+The resulting `BeetCode-Remote-iOS-*-unsigned.ipa` can be re-signed with AltStore, SideStore, Sideloadly, or a personal Apple development profile. Keep both devices on the same Tailscale network, then paste the address or QR URL shown by **Beet Code → Remote Sessions**.
+
 **Install:** download the [ZIP](https://github.com/Mesutcydev/beet-code/releases/latest/download/BeetCode-0.10.4.zip), extract it, and move **Beet Code.app** to Applications. Apple Silicon + macOS 15+.
 
 > Gatekeeper will warn — this build is Apple Development–signed, **not notarized** (Developer ID certs are revoked). Right-click → Open, or `xattr -dr com.apple.quarantine "/path/to/Beet Code.app"`.
