@@ -26,6 +26,8 @@ struct AppPreferences: Codable, Sendable, Equatable {
     /// Last provider metadata observed from a live `/models` catalog. This is
     /// cacheable, non-secret data and lets the composer stay honest offline.
     var remoteModelProfiles: [String: RemoteModelProfile] = [:]
+    /// Last reasoning effort selected for each ChatGPT-account model.
+    var codexReasoningEffort: [String: String] = [:]
     /// Tasks the user pinned in the sidebar. This is intentionally an id list
     /// rather than a copy of session data, so deleting a chat cannot leave a
     /// second stale task record behind.
@@ -40,7 +42,7 @@ struct AppPreferences: Codable, Sendable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, hasCompletedWelcome, lastWorkspacePath, workspaceBookmarkData, lastModelID,
              lastSessionID, autoResumeDownloads, remoteModel, customBaseURL,
-             remoteModelOverrides, remoteModelProfiles, pinnedSessionIDs,
+             remoteModelOverrides, remoteModelProfiles, codexReasoningEffort, pinnedSessionIDs,
              trustedWorkspacePaths, externalResourcePaths
     }
 
@@ -61,6 +63,8 @@ struct AppPreferences: Codable, Sendable, Equatable {
             [String: RemoteModelOverride].self, forKey: .remoteModelOverrides) ?? [:]
         remoteModelProfiles = try container.decodeIfPresent(
             [String: RemoteModelProfile].self, forKey: .remoteModelProfiles) ?? [:]
+        codexReasoningEffort = try container.decodeIfPresent(
+            [String: String].self, forKey: .codexReasoningEffort) ?? [:]
         pinnedSessionIDs = try container.decodeIfPresent([UUID].self, forKey: .pinnedSessionIDs) ?? []
         trustedWorkspacePaths = try container.decodeIfPresent([String].self, forKey: .trustedWorkspacePaths) ?? []
         externalResourcePaths = try container.decodeIfPresent([String].self, forKey: .externalResourcePaths) ?? []
@@ -126,6 +130,20 @@ final class AppPreferencesStore: @unchecked Sendable {
         var preferences = current
         for profile in profiles {
             preferences.remoteModelProfiles[remoteModelKey(profile: profile)] = profile
+        }
+        save(preferences)
+    }
+
+    func codexReasoningEffort(modelID: String) -> String? {
+        current.codexReasoningEffort[modelID]
+    }
+
+    func saveCodexReasoningEffort(_ effort: String?, modelID: String) {
+        var preferences = current
+        if let effort, !effort.isEmpty {
+            preferences.codexReasoningEffort[modelID] = effort.lowercased()
+        } else {
+            preferences.codexReasoningEffort.removeValue(forKey: modelID)
         }
         save(preferences)
     }

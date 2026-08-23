@@ -133,6 +133,10 @@ final class AppState: ObservableObject {
             guard let self, self.isCodexActive else { return nil }
             return self.activeCodexModelID
         }
+        sessions.activeCodexReasoningEffortHandler = { [weak self] in
+            guard let self, self.isCodexActive, let modelID = self.activeCodexModelID else { return nil }
+            return self.preferences.codexReasoningEffort(modelID: modelID)
+        }
         sessions.onSessionReset = { [weak self] in
             self?.sessionUsage = SessionUsage()
             self?.lastUsageSerial = 0

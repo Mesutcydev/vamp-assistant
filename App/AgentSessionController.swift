@@ -113,6 +113,8 @@ final class AgentSessionController: ObservableObject {
     /// selected one in the composer. Account mode is deliberately separate
     /// from BYOK remote endpoints and local MLX models.
     var activeCodexModelIDHandler: () -> String? = { nil }
+    /// Supplies the user's per-model reasoning effort for account-backed turns.
+    var activeCodexReasoningEffortHandler: () -> String? = { nil }
     /// Called when the user starts a fresh chat — AppState resets session usage.
     var onSessionReset: (() -> Void)?
     /// Supplies the context window compaction should target: the engine's
@@ -451,6 +453,7 @@ final class AgentSessionController: ObservableObject {
                 modelID: modelID,
                 workspace: workspace,
                 text: chatOnly ? Self.chatOnlyCodexPrompt(threadInput) : threadInput,
+                reasoningEffort: activeCodexReasoningEffortHandler(),
                 chatOnly: chatOnly)
             guard isRunning, !Task.isCancelled else {
                 try? await codexAccount.client.interrupt(

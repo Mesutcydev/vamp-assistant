@@ -485,28 +485,33 @@ actor CodexAppServerClient {
         modelID: String,
         workspace: URL,
         text: String,
+        reasoningEffort: String? = nil,
         chatOnly: Bool = false
     ) async throws -> String {
+        var params: [String: LFJSONValue] = [
+            "threadId": .string(threadID),
+            "input": .array([
+                .object([
+                    "type": .string("text"),
+                    "text": .string(text)
+                ])
+            ]),
+            "cwd": .string(workspace.path),
+            "model": .string(modelID),
+            "approvalPolicy": .string(chatOnly ? "never" : "on-request"),
+            "sandboxPolicy": .object([
+                "type": .string(chatOnly ? "readOnly" : "workspaceWrite"),
+                "writableRoots": chatOnly ? .array([]) : .array([.string(workspace.path)]),
+                "networkAccess": .bool(!chatOnly)
+            ]),
+            "summary": .string("concise")
+        ]
+        if let reasoningEffort, !reasoningEffort.isEmpty {
+            params["effort"] = .string(reasoningEffort)
+        }
         let response = try await request(
             "turn/start",
-            params: .object([
-                "threadId": .string(threadID),
-                "input": .array([
-                    .object([
-                        "type": .string("text"),
-                        "text": .string(text)
-                    ])
-                ]),
-                "cwd": .string(workspace.path),
-                "model": .string(modelID),
-                "approvalPolicy": .string(chatOnly ? "never" : "on-request"),
-                "sandboxPolicy": .object([
-                    "type": .string(chatOnly ? "readOnly" : "workspaceWrite"),
-                    "writableRoots": chatOnly ? .array([]) : .array([.string(workspace.path)]),
-                    "networkAccess": .bool(!chatOnly)
-                ]),
-                "summary": .string("concise")
-            ]))
+            params: .object(params))
         guard let turn = response.objectValue?["turn"]?.objectValue,
               let id = turn["id"]?.stringValue
         else { throw CodexAppServerError.malformedResponse("turn/start") }

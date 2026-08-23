@@ -140,6 +140,7 @@ private struct ModelPickerPopover: View {
         }
     }
     @State private var source: Source = .local
+    @State private var reasoningEffort: String?
 
     private var installedModels: [CatalogModel] {
         // Chat models only — vision sidecars are never loadable here; the
@@ -218,6 +219,7 @@ private struct ModelPickerPopover: View {
                     .pickerStyle(.segmented)
                     .labelsHidden()
                     .padding(.bottom, 2)
+                    activeReasoningControl
                     if source == .local {
                         localSection
                     } else if source == .api {
@@ -234,7 +236,74 @@ private struct ModelPickerPopover: View {
         // Opaque themed surface — a material popover would stay neutral
         // gray in Beet mode while everything around it goes plum.
         .background(Theme.surface)
-        .task { await codexAccount.refresh() }
+        .task {
+            await codexAccount.refresh()
+            if appState.isCodexActive {
+                source = .account
+            } else if appState.isRemoteActive {
+                source = .api
+            } else {
+                source = .local
+            }
+            loadReasoningEffort()
+        }
+        .onChange(of: source) { _, _ in loadReasoningEffort() }
+        .onChange(of: appState.activeCodexModelID) { _, _ in loadReasoningEffort() }
+        .onChange(of: appState.engine.activeRemoteEndpoint) { _, _ in loadReasoningEffort() }
+    }
+
+    @ViewBuilder
+    private var activeReasoningControl: some View {
+        if source == .api, let profile = activeRemoteReasoningProfile,
+           !profile.effectiveReasoningEfforts.isEmpty {
+            ReasoningModelControl(
+                modelName: profile.displayName ?? profile.model,
+                options: profile.effectiveReasoningEfforts.map(\.rawValue),
+                defaultEffort: profile.effectiveDefaultReasoningEffort,
+                selection: $reasoningEffort,
+                onSelect: { saveRemoteReasoningEffort($0, profile: profile) })
+        } else if source == .account, let model = activeCodexReasoningModel,
+                  !model.supportedReasoningEfforts.isEmpty {
+            ReasoningModelControl(
+                modelName: model.displayName,
+                options: model.supportedReasoningEfforts,
+                defaultEffort: model.defaultReasoningEffort,
+                selection: $reasoningEffort,
+                onSelect: { effort in
+                    AppPreferencesStore.shared.saveCodexReasoningEffort(effort, modelID: model.id)
+                })
+        }
+    }
+
+    private var activeRemoteReasoningProfile: RemoteModelProfile? {
+        guard appState.isRemoteActive, let endpoint = appState.engine.activeRemoteEndpoint else { return nil }
+        let base = remoteModels.first { $0.endpoint() == endpoint }
+            ?? AppPreferencesStore.shared.remoteModelProfile(endpoint: endpoint)
+        return base?.applying(AppPreferencesStore.shared.remoteModelOverride(endpoint: endpoint))
+    }
+
+    private var activeCodexReasoningModel: CodexModelProfile? {
+        guard appState.isCodexActive, let id = appState.activeCodexModelID else { return nil }
+        return codexAccount.models.first { $0.id == id }
+    }
+
+    private func loadReasoningEffort() {
+        if source == .api, let profile = activeRemoteReasoningProfile {
+            reasoningEffort = AppPreferencesStore.shared
+                .remoteModelOverride(endpoint: profile.endpoint())?.reasoningEffort
+        } else if source == .account, let model = activeCodexReasoningModel {
+            reasoningEffort = AppPreferencesStore.shared.codexReasoningEffort(modelID: model.id)
+        } else {
+            reasoningEffort = nil
+        }
+    }
+
+    private func saveRemoteReasoningEffort(_ effort: String?, profile: RemoteModelProfile) {
+        let endpoint = profile.endpoint()
+        var override = AppPreferencesStore.shared.remoteModelOverride(endpoint: endpoint)
+            ?? RemoteModelOverride()
+        override.reasoningEffort = effort
+        AppPreferencesStore.shared.saveRemoteModelOverride(override, endpoint: endpoint)
     }
 
     private var header: some View {
@@ -566,6 +635,81 @@ private struct ModelPickerPopover: View {
             .font(.caption2.weight(.semibold))
             .foregroundStyle(Theme.textTertiary)
             .padding(.bottom, 4)
+    }
+}
+
+/// Compact, model-aware reasoning selector shown beside the model list. The
+/// control is deliberately visible (rather than buried in Settings) because
+/// reasoning effort changes latency, token use, and answer depth for the very
+/// next turn.
+private struct ReasoningModelControl: View {
+    let modelName: String
+    let options: [String]
+    let defaultEffort: String?
+    @Binding var selection: String?
+    let onSelect: (String?) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 6) {
+                Image(systemName: "brain.head.profile")
+                    .foregroundStyle(Theme.accent)
+                Text("Reasoning")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Spacer()
+                Text(selection?.capitalized ?? "Auto")
+                    .font(.caption2.weight(.semibold).monospaced())
+                    .foregroundStyle(Theme.accent)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 5) {
+                    effortButton(title: "Auto", value: nil)
+                    ForEach(normalizedOptions, id: \.self) { effort in
+                        effortButton(title: effort.capitalized, value: effort)
+                    }
+                }
+            }
+
+            Text("For \(modelName) · Auto uses \((defaultEffort ?? "the model default").lowercased())")
+                .font(.caption2)
+                .foregroundStyle(Theme.textTertiary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .padding(9)
+        .background(Theme.surfaceInset.opacity(0.62), in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .strokeBorder(Theme.hairline, lineWidth: 1)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var normalizedOptions: [String] {
+        var seen = Set<String>()
+        return options.map { $0.lowercased() }.filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    private func effortButton(title: String, value: String?) -> some View {
+        let selected = selection == value
+        return Button {
+            selection = value
+            onSelect(value)
+        } label: {
+            Text(title)
+                .font(.caption2.weight(selected ? .semibold : .medium))
+                .foregroundStyle(selected ? Theme.accent : Theme.textSecondary)
+                .padding(.horizontal, 9)
+                .frame(minHeight: 25)
+                .background(selected ? Theme.washStrong(Theme.accent) : Color.clear, in: Capsule())
+                .overlay(Capsule().strokeBorder(selected ? Theme.washBorder(Theme.accent) : Theme.hairline, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .help(value == nil ? "Use the model's default reasoning effort" : "Use \(title) reasoning for the next turn")
+        .accessibilityLabel("Reasoning effort \(title)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
