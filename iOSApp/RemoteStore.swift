@@ -6,6 +6,7 @@ import Observation
 final class RemoteStore {
     var sessions: [RemoteSessionSummary] = []
     var selectedSession: RemoteSessionDetail?
+    var startModels: [RemoteStartModelOption] = []
     var isConnecting = false
     var isRefreshing = false
     var errorMessage: String?
@@ -92,6 +93,29 @@ final class RemoteStore {
         catch { errorMessage = error.localizedDescription }
     }
 
+    func loadStartModels() async {
+        guard let client else { return }
+        do { startModels = try await client.models().models }
+        catch { errorMessage = error.localizedDescription }
+    }
+
+    func startSession(modelID: String, message: String) async -> UUID? {
+        guard let client else { return nil }
+        do {
+            _ = try await client.startSession(modelID: modelID, message: message) as RemoteAcceptedResponse
+            for _ in 0..<20 {
+                try await Task.sleep(for: .milliseconds(350))
+                try await refresh()
+                if let session = sessions.first(where: { $0.isRunning }) ?? sessions.first {
+                    await select(sessionID: session.id)
+                    return session.id
+                }
+            }
+            errorMessage = "The session started, but has not appeared yet. Pull down to refresh."
+        } catch { errorMessage = error.localizedDescription }
+        return nil
+    }
+
     func send(_ text: String) async -> Bool {
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty, let client, let id = selectedSession?.id else { return false }
@@ -130,6 +154,7 @@ final class RemoteStore {
         token = nil
         RemoteTokenStore.clear()
         sessions = []
+        startModels = []
         selectedSession = nil
         connectionLabel = "Disconnected"
         if clearAddress {

@@ -12,6 +12,11 @@ final class AppState: ObservableObject {
         case loading(String)
         case ready(String)
         case failed(String)
+
+        var errorMessage: String? {
+            if case .failed(let message) = self { return message }
+            return nil
+        }
     }
 
     let settings = SettingsStore.shared
@@ -121,6 +126,13 @@ final class AppState: ObservableObject {
         }
         remoteSessionHost.taskLookupHandler = { [weak self] sessionID in
             self?.taskQueue.loadAll().first { $0.sessionID == sessionID && !$0.state.isTerminal }
+        }
+        remoteSessionHost.modelOptionsHandler = { [weak self] in
+            self?.remoteStartModels() ?? []
+        }
+        remoteSessionHost.startSessionHandler = { [weak self] modelID, message in
+            guard let self else { return "Beet Code is no longer available." }
+            return await self.startRemoteSession(modelID: modelID, message: message)
         }
         sessions.activeModelIDHandler = { [weak self] in
             if let self, self.isCodexActive, let codex = self.activeCodexModelID {
@@ -236,6 +248,45 @@ final class AppState: ObservableObject {
         refreshOpenCodeCatalog(workspace: sessions.workspaceURL)
         // Honor a persisted "server enabled" across launches.
         syncServers()
+    }
+
+    private func remoteStartModels() -> [RemoteStartModel] {
+        let local = ModelCatalog.all
+            .filter { $0.role == .chat && modelStore.isInstalled(catalogModel: $0) }
+            .map { RemoteStartModel(id: "local|\($0.id)", name: $0.displayName, source: "local", detail: "\($0.parameters) · \($0.quantization)") }
+        let api = APIKeyStore.shared.configuredProviders.flatMap { provider -> [RemoteStartModel] in
+            let saved = preferences.current.remoteModel[provider.rawValue]
+            let models = [saved, provider.defaultModel].compactMap { $0 }.filter { !$0.isEmpty }
+            return Array(Set(models)).sorted().map { model in
+                RemoteStartModel(id: "api|\(provider.rawValue)|\(model)", name: model, source: "api", detail: provider.displayName)
+            }
+        }
+        return local + api
+    }
+
+    private func startRemoteSession(modelID: String, message: String) async -> String? {
+        let parts = modelID.split(separator: "|", maxSplits: 2).map(String.init)
+        guard parts.count >= 2 else { return "That model selection is invalid." }
+        switch parts[0] {
+        case "local":
+            guard let model = ModelCatalog.model(id: parts[1]), modelStore.isInstalled(catalogModel: model) else {
+                return "That local model is no longer installed."
+            }
+            await activate(model: model)
+            guard activeModelID == model.id else { return enginePhase.errorMessage ?? "The local model could not be loaded." }
+        case "api":
+            guard parts.count == 3, let provider = LLMProvider(rawValue: parts[1]) else {
+                return "That API model is no longer configured."
+            }
+            guard await activateRemote(endpoint: RemoteEndpoint(provider: provider, model: parts[2])) else {
+                return enginePhase.errorMessage ?? "The API model could not be activated."
+            }
+        default:
+            return "That model source is not supported."
+        }
+        await sessions.switchToChatOnly()
+        sessions.send(message)
+        return nil
     }
 
     // MARK: Durable task queue

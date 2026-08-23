@@ -11,6 +11,11 @@ struct RemoteAPIClient {
 
     func status() async throws -> RemoteStatus { try await request("api/status") }
     func sessions() async throws -> RemoteSessionEnvelope { try await request("api/sessions") }
+    func models() async throws -> RemoteModelEnvelope { try await request("api/models") }
+
+    func startSession(modelID: String, message: String) async throws -> RemoteAcceptedResponse {
+        try await request("api/sessions", method: "POST", body: ["modelID": modelID, "message": message])
+    }
 
     func session(_ id: UUID) async throws -> RemoteSessionDetail {
         try await request("api/sessions/\(id.uuidString)")

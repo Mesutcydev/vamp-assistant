@@ -17,6 +17,15 @@ struct RemoteSessionEnvelope: Decodable {
     let sessions: [RemoteSessionSummary]
 }
 
+struct RemoteModelEnvelope: Decodable { let models: [RemoteStartModelOption] }
+
+struct RemoteStartModelOption: Decodable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let source: String
+    let detail: String
+}
+
 struct RemoteSessionSummary: Decodable, Identifiable, Hashable {
     let id: UUID
     let title: String

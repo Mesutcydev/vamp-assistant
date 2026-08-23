@@ -177,8 +177,9 @@ struct RemoteSecondaryButtonStyle: ButtonStyle {
 
 struct SessionNavigationView: View {
     let store: RemoteStore
+    @State private var path: [UUID] = []
     var body: some View {
-        NavigationStack { SessionListView(store: store).navigationDestination(for: UUID.self) { ConversationView(store: store, sessionID: $0) } }
+        NavigationStack(path: $path) { SessionListView(store: store, onOpen: { path.append($0) }).navigationDestination(for: UUID.self) { ConversationView(store: store, sessionID: $0) } }
             .alert("Remote Sessions", isPresented: errorBinding) { Button("OK") { store.errorMessage = nil } }
                 message: { Text(store.errorMessage ?? "Unknown error") }
     }
@@ -187,14 +188,20 @@ struct SessionNavigationView: View {
 
 struct SessionListView: View {
     let store: RemoteStore
+    let onOpen: (UUID) -> Void
     @State private var search = ""
+    @State private var showStartSession = false
     private var visible: [RemoteSessionSummary] { search.isEmpty ? store.sessions : store.sessions.filter { $0.title.localizedCaseInsensitiveContains(search) || $0.workspace.localizedCaseInsensitiveContains(search) } }
     var body: some View {
         ZStack {
             RemoteBackdrop()
             ScrollView {
                 LazyVStack(spacing: 14) {
-                    ConnectionCard(store: store); SearchField(text: $search)
+                    ConnectionCard(store: store)
+                    Button { showStartSession = true } label: {
+                        Label("Start a new session", systemImage: "plus.bubble.fill").font(.headline).frame(maxWidth: .infinity, minHeight: 52)
+                    }.buttonStyle(RemotePrimaryButtonStyle())
+                    SearchField(text: $search)
                     if visible.isEmpty { RemoteEmptySessions(isSearching: !search.isEmpty) }
                     else { ForEach(visible) { session in NavigationLink(value: session.id) { SessionCard(session: session) }.buttonStyle(.plain) } }
                 }.padding(.horizontal, 16).padding(.bottom, 28)
@@ -204,6 +211,90 @@ struct SessionListView: View {
                 Menu { AppearancePickerMenu(); Divider(); Button("Refresh", systemImage: "arrow.clockwise") { Task { try? await store.refresh() } }; Button("Revoke this device", systemImage: "iphone.slash", role: .destructive) { Task { await store.revoke() } } }
                     label: { Image(systemName: "ellipsis.circle.fill").font(.title3) }.accessibilityLabel("Session options")
             } }
+            .sheet(isPresented: $showStartSession) {
+                StartSessionSheet(store: store) { sessionID in
+                    showStartSession = false
+                    onOpen(sessionID)
+                }
+            }
+    }
+}
+
+struct StartSessionSheet: View {
+    let store: RemoteStore
+    let onStarted: (UUID) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.remoteAppearance) private var appearance
+    @State private var source = "local"
+    @State private var selectedModelID = ""
+    @State private var prompt = ""
+    @State private var isStarting = false
+
+    private var models: [RemoteStartModelOption] { store.startModels.filter { $0.source == source } }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                RemoteBackdrop()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("New session").font(.largeTitle.bold()).tracking(-0.6)
+                            Text("Choose the engine on your Mac and send the first prompt.").font(.subheadline).foregroundStyle(BeetTheme.secondaryText(appearance))
+                        }
+                        Picker("Model source", selection: $source) {
+                            Label("Local", systemImage: "cpu").tag("local")
+                            Label("API", systemImage: "cloud").tag("api")
+                        }.pickerStyle(.segmented)
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("MODEL").font(.caption2.bold()).tracking(0.8).foregroundStyle(BeetTheme.secondaryText(appearance))
+                            if models.isEmpty {
+                                ContentUnavailableView(source == "local" ? "No local models" : "No API models", systemImage: source == "local" ? "cpu" : "cloud", description: Text(source == "local" ? "Download a model on your Mac first." : "Configure an API provider on your Mac first."))
+                                    .frame(maxWidth: .infinity).padding(.vertical, 18)
+                            } else {
+                                VStack(spacing: 0) {
+                                    ForEach(models) { model in
+                                        Button { selectedModelID = model.id } label: {
+                                            HStack(spacing: 12) {
+                                                Image(systemName: selectedModelID == model.id ? "checkmark.circle.fill" : (source == "local" ? "cpu" : "cloud"))
+                                                    .foregroundStyle(selectedModelID == model.id ? BeetTheme.accentBright : BeetTheme.secondaryText(appearance)).frame(width: 24)
+                                                VStack(alignment: .leading, spacing: 3) { Text(model.name).font(.body.weight(.semibold)); Text(model.detail).font(.caption).foregroundStyle(BeetTheme.secondaryText(appearance)) }
+                                                Spacer()
+                                            }.padding(13).contentShape(Rectangle())
+                                        }.buttonStyle(.plain)
+                                        if model.id != models.last?.id { Divider().overlay(BeetTheme.line(appearance)) }
+                                    }
+                                }.background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 16)).overlay { RoundedRectangle(cornerRadius: 16).stroke(BeetTheme.line(appearance)) }
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("FIRST PROMPT").font(.caption2.bold()).tracking(0.8).foregroundStyle(BeetTheme.secondaryText(appearance))
+                            TextField("What should Beet Code work on?", text: $prompt, axis: .vertical).lineLimit(3...8).padding(14)
+                                .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 16)).overlay { RoundedRectangle(cornerRadius: 16).stroke(BeetTheme.line(appearance)) }
+                        }
+                        Button { start() } label: {
+                            HStack { if isStarting { ProgressView().tint(.white) }; Label(isStarting ? "Starting…" : "Start session", systemImage: "arrow.up.circle.fill") }
+                                .font(.headline).frame(maxWidth: .infinity, minHeight: 52)
+                        }.buttonStyle(RemotePrimaryButtonStyle()).disabled(selectedModelID.isEmpty || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isStarting)
+                    }.padding(18)
+                }
+            }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .task { await store.loadStartModels(); selectFirstModel() }
+            .onChange(of: source) { _, _ in selectFirstModel() }
+        }
+    }
+
+    private func selectFirstModel() { selectedModelID = models.first?.id ?? "" }
+    private func start() {
+        isStarting = true
+        Task {
+            if let id = await store.startSession(modelID: selectedModelID, message: prompt) { onStarted(id) }
+            isStarting = false
+        }
     }
 }
 

@@ -9,6 +9,13 @@ enum RemoteNetworkKind: String, Equatable, Sendable {
     case localNetwork
 }
 
+struct RemoteStartModel: Sendable, Equatable {
+    let id: String
+    let name: String
+    let source: String
+    let detail: String
+}
+
 /// Owns the network-facing Beetcode browser surface.
 ///
 /// This is deliberately a session controller, not a terminal bridge: the
@@ -52,6 +59,9 @@ final class RemoteSessionHost {
     /// the direct continuation behavior.
     var enqueueTaskHandler: ((UUID, String) -> QueuedAgentTask?)?
     var taskLookupHandler: ((UUID) -> QueuedAgentTask?)?
+    var modelOptionsHandler: (() -> [RemoteStartModel])?
+    /// Returns nil on success, or a user-facing error string.
+    var startSessionHandler: ((String, String) async -> String?)?
     private var server: LocalAPIServer?
     private var tokens: [String: Date] = [:]
     /// Invalidates an in-flight bind when Settings changes or the host is
@@ -193,7 +203,7 @@ final class RemoteSessionHost {
 
     // MARK: HTTP routes
 
-    private func route(_ request: LocalAPIServer.Request) -> LocalAPIServer.RouteResult {
+    private func route(_ request: LocalAPIServer.Request) async -> LocalAPIServer.RouteResult {
         refreshPairingState()
         guard allowedPeer(request.remoteAddress) else {
             return .response(json(["error": .string("This network path is not allowed for Beetcode remote sessions.")], status: 403))
@@ -227,6 +237,29 @@ final class RemoteSessionHost {
         case ("GET", "/api/sessions"):
             guard authorized(request) else { return unauthorized() }
             return .response(json(["sessions": .array(sessionSummaries())]))
+        case ("GET", "/api/models"):
+            guard authorized(request) else { return unauthorized() }
+            let models = (modelOptionsHandler?() ?? []).map { model in
+                LFJSONValue.object([
+                    "id": .string(model.id), "name": .string(model.name),
+                    "source": .string(model.source), "detail": .string(model.detail),
+                ])
+            }
+            return .response(json(["models": .array(models)]))
+        case ("POST", "/api/sessions"):
+            guard authorized(request) else { return unauthorized() }
+            guard let modelID = request.bodyJSON?.objectValue?["modelID"]?.stringValue,
+                  let message = request.bodyJSON?.objectValue?["message"]?.stringValue,
+                  !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  message.utf8.count <= Self.maxMessageBytes,
+                  let startSessionHandler else {
+                return .response(json(["error": .string("Choose a model and enter a first prompt.")], status: 400))
+            }
+            if let error = await startSessionHandler(modelID, message) {
+                return .response(json(["error": .string(error)], status: 409))
+            } else {
+                return .response(json(["accepted": .bool(true)], status: 202))
+            }
         case ("POST", "/api/revoke"):
             guard authorized(request) else { return unauthorized() }
             guard let digest = tokenDigest(from: request) else { return unauthorized() }
