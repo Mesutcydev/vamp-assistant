@@ -115,13 +115,21 @@ final class EventCollector: @unchecked Sendable {
 
     func start(_ stream: AsyncStream<AgentEvent>) async {
         for await event in stream {
-            let isFinished = withLock { () -> Bool in
-                events.append(event)
-                if case .finished(let reason) = event { finished = reason }
-                if case .finished = event { return true }
-                return false
-            }
+            let isFinished = record(event)
             if isFinished { break }
+        }
+    }
+
+    /// Records an event when a live test needs to handle interactive events
+    /// (for example, approving a safe command) while still using the normal
+    /// collector assertions.
+    @discardableResult
+    func record(_ event: AgentEvent) -> Bool {
+        withLock {
+            events.append(event)
+            if case .finished(let reason) = event { finished = reason }
+            if case .finished = event { return true }
+            return false
         }
     }
 

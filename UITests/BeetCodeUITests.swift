@@ -41,6 +41,20 @@ final class BeetCodeUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["More chat actions"].exists)
     }
 
+    func testCommandFFocusesChatSearch() {
+        let app = launchApp()
+        let search = app.textFields["Search all history"]
+        if !search.waitForExistence(timeout: 2), app.buttons["Show Sidebar"].exists {
+            app.buttons["Show Sidebar"].click()
+        }
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+
+        app.typeKey("f", modifierFlags: .command)
+        app.typeText("visual-check")
+
+        XCTAssertEqual(search.value as? String, "visual-check")
+    }
+
     private func launchApp() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["XCTestConfigurationFilePath"] = "ui-smoke"

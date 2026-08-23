@@ -1068,32 +1068,45 @@ struct SessionHistoryRow: View {
     let onExportTaskBundle: () -> Void
     @State private var isHovered = false
 
+    private var sourceIcon: String {
+        switch record.source {
+        case .app: "bubble.left.fill"
+        case .claude: "sparkles"
+        case .codex: "terminal.fill"
+        case .cursor: "cursorarrow.rays"
+        case .bundle: "shippingbox.fill"
+        }
+    }
+
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Circle()
-                .fill(record.source == .app ? Theme.textTertiary.opacity(0.7) : sourceTint.opacity(0.85))
-                .frame(width: 5, height: 5)
-                .frame(width: 10, height: 18, alignment: .center)
-                .padding(.top, 1)
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: sourceIcon)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(record.source == .app ? Theme.textSecondary : sourceTint)
+                .frame(width: 24, height: 24)
+                .background(Theme.surfaceInset.opacity(selected ? 0.9 : 0.55),
+                            in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(Theme.hairline.opacity(0.7), lineWidth: 1))
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(SessionTitle.display(for: record))
-                        .font(.system(size: 12, weight: selected ? .semibold : .medium))
+                        .font(AppFont.navigationTitle)
                         .foregroundStyle(workspaceAvailable ? Theme.textPrimary : Theme.textTertiary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Spacer(minLength: 4)
                     Text(SessionTitle.compactAge(record.updatedAt))
-                        .font(.caption2)
+                        .font(AppFont.navigationMeta)
                         .monospacedDigit()
                         .foregroundStyle(Theme.textTertiary)
                 }
                 HStack(spacing: 5) {
                     if let subtitle {
                         Text(subtitle)
-                            .font(.caption2.weight(.medium))
+                            .font(AppFont.navigationMeta.weight(.medium))
                             .foregroundStyle(Theme.textSecondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
@@ -1122,21 +1135,21 @@ struct SessionHistoryRow: View {
                         .accessibilityLabel(statusTitle)
                     }
                 }
-                .font(.caption2)
+                .font(AppFont.navigationMeta)
                 .foregroundStyle(Theme.textTertiary)
             }
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 7)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
         .background(
             selected
-                ? Theme.surfaceInset.opacity(0.82)
-                : isHovered ? Theme.surfaceInset.opacity(0.38) : Color.clear,
-            in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                ? Theme.washStrong(Theme.accent)
+                : isHovered ? Theme.surfaceInset.opacity(0.42) : Color.clear,
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .strokeBorder(selected ? Theme.hairline : Color.clear, lineWidth: 1))
-        .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(selected ? Theme.washBorder(Theme.accent) : Color.clear, lineWidth: 1))
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: 0.12), value: isHovered)
         .tag(record.id)
@@ -1183,6 +1196,7 @@ struct SidebarHeaderView: View {
     let onRunNext: () -> Void
     let onRemoveQueuedTask: (UUID) -> Void
     let onClose: () -> Void
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1308,13 +1322,15 @@ struct SidebarHeaderView: View {
     }
 
     private var historyModeBar: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 5) {
             historyModeButton(.sessions, title: "My chats", icon: "bubble.left.and.bubble.right")
             historyModeButton(.imported, title: "Other tools", icon: "arrow.down.doc")
         }
-        .padding(3)
-        .background(Theme.surfaceInset.opacity(0.62), in: Capsule())
-        .overlay(Capsule().strokeBorder(Theme.hairline.opacity(0.8), lineWidth: 1))
+        .padding(4)
+        .background(Theme.surfaceInset.opacity(0.52),
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .strokeBorder(Theme.hairline.opacity(0.75), lineWidth: 1))
     }
 
     private func historyModeButton(
@@ -1329,9 +1345,9 @@ struct SidebarHeaderView: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                 Text(title)
-                    .font(.system(size: 12, weight: active ? .semibold : .medium))
+                    .font(.system(size: 13, weight: active ? .semibold : .medium))
                 if let count, count > 0 {
                     Text("\(min(count, 99))")
                         .font(.caption2.weight(.bold))
@@ -1340,11 +1356,11 @@ struct SidebarHeaderView: View {
                 }
             }
             .foregroundStyle(active ? Theme.textPrimary : Theme.textSecondary)
-            .frame(maxWidth: .infinity, minHeight: 27)
-            .background(active ? Theme.surface : Color.clear, in: Capsule())
-            .overlay(Capsule().strokeBorder(
-                active ? Theme.hairline : Color.clear,
-                lineWidth: 1))
+            .frame(maxWidth: .infinity, minHeight: 31)
+            .background(active ? Theme.surface : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(
+                active ? Theme.hairline : Color.clear, lineWidth: 1))
             .shadow(color: active ? Theme.cardShadow.opacity(0.45) : .clear, radius: 2, y: 1)
         }
         .buttonStyle(.plain)
@@ -1355,11 +1371,12 @@ struct SidebarHeaderView: View {
     private var searchField: some View {
         HStack(spacing: 7) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Theme.textTertiary)
             TextField("Search all history", text: $historySearch)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
+                .font(.system(size: 13))
+                .focused($searchFocused)
             if !historySearch.isEmpty {
                 Button { historySearch = "" } label: {
                     Image(systemName: "xmark.circle.fill")
@@ -1371,12 +1388,15 @@ struct SidebarHeaderView: View {
             }
         }
         .padding(.horizontal, 9)
-        .frame(height: 30)
+        .frame(height: 34)
         .background(Theme.surfaceInset.opacity(0.65), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
             .strokeBorder(Theme.hairline.opacity(0.8), lineWidth: 1))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Search chat history")
+        .onReceive(NotificationCenter.default.publisher(for: .focusChatSearch)) { _ in
+            searchFocused = true
+        }
     }
 
     private var queueSummary: some View {

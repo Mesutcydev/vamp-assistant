@@ -24,6 +24,10 @@ enum AgentEvent: Sendable, Equatable {
     case toolCallFinished(ToolInvocation, output: String, failed: Bool)
     case askUser(UUID, String)
     case checkpointCreated(SessionCheckpoint)
+    /// Checkpointing is unavailable for this workspace (for example, a fresh
+    /// folder without Git). The approved mutation still executes, but undo is
+    /// unavailable until the workspace becomes a repository.
+    case checkpointSkipped(String)
     /// The checkpoint could not be taken before an approved mutation; the
     /// mutation was NOT executed.
     case checkpointFailed(String)

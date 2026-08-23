@@ -249,6 +249,20 @@ final class ContextCompactorTests: XCTestCase {
         XCTAssertTrue(request.shouldCompact)
     }
 
+    func testReliabilityV2CompactsProactivelyForRepairHeadroom() {
+        let request = ContextCompactor.RequestEstimate(
+            historyTokens: 2_800,
+            systemTokens: 700,
+            totalTokens: 3_500,
+            windowTokens: 6_000,
+            responseReserve: 1_024)
+
+        XCTAssertGreaterThan(request.fraction, 0.65)
+        XCTAssertLessThan(request.fraction, 0.75)
+        XCTAssertTrue(ContextCompactor.shouldCompact(request, reliabilityV2: true))
+        XCTAssertFalse(ContextCompactor.shouldCompact(request, reliabilityV2: false))
+    }
+
     func testCompactionKeepsRecentToolOutputs() {
         var messages: [SessionMessage] = [message(.user, "task")]
         for index in 0..<6 {

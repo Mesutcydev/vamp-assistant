@@ -112,6 +112,18 @@ final class ToolParserTests: XCTestCase {
         XCTAssertEqual(calls.map(\.name), ["list_files"])
     }
 
+    func testClosedMalformedToolWrapperRequestsRepair() {
+        let text = "```tool\n{\"arguments\": {}}\n```"
+        XCTAssertNotNil(ToolParser.malformedCallReason(text))
+        XCTAssertTrue(ToolParser.parse(text).isEmpty)
+    }
+
+    func testOrdinaryJSONIsNotAProtocolFailure() {
+        let text = "Here is the config: {\"theme\": \"dark\"}."
+        XCTAssertNil(ToolParser.malformedCallReason(text))
+        XCTAssertTrue(ToolParser.parse(text).isEmpty)
+    }
+
     func testAlternatesKeyNames() {
         for key in ["arguments", "args", "parameters", "input"] {
             let text = "```tool\n{\"name\": \"t\", \"\(key)\": {\"x\": 1}}\n```"

@@ -45,6 +45,13 @@ final class MemoryAdvisorTests: XCTestCase {
         }
     }
 
+    func testExternalProcessFootprintReadsCurrentTask() {
+        let footprint = MemoryAdvisor.processFootprint(
+            pid: ProcessInfo.processInfo.processIdentifier)
+        XCTAssertNotNil(footprint)
+        XCTAssertGreaterThan(footprint ?? 0, 0)
+    }
+
     func testAdmissionBlocksOnCooldown() {
         MemoryAdvisor.pressureCooldownSeconds = 60
         MemoryAdvisor.notePressureDump()

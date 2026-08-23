@@ -1,5 +1,42 @@
 import Foundation
 
+/// Foundation-only preference seam used when a new GGUF engine is created.
+/// Tests never inherit the developer machine's experimental switch.
+enum ExperimentalInferencePreferences {
+    static let dflashEnabledKey = "experimentalDFlashEnabled"
+    static let ngramEnabledKey = "experimentalNGramEnabled"
+    static let mlxPromptCacheEnabledKey = "experimentalMLXPromptCacheEnabled"
+    static let mlxQuantizedKVEnabledKey = "experimentalMLXQuantizedKVEnabled"
+
+    static var dflashEnabledForNewEngine: Bool {
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            return false
+        }
+        return UserDefaults.standard.bool(forKey: dflashEnabledKey)
+    }
+
+    static var ngramEnabledForNewEngine: Bool {
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            return false
+        }
+        return UserDefaults.standard.bool(forKey: ngramEnabledKey)
+    }
+
+    static var mlxPromptCacheEnabledForNewEngine: Bool {
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            return false
+        }
+        return UserDefaults.standard.bool(forKey: mlxPromptCacheEnabledKey)
+    }
+
+    static var mlxQuantizedKVEnabledForNewEngine: Bool {
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            return false
+        }
+        return UserDefaults.standard.bool(forKey: mlxQuantizedKVEnabledKey)
+    }
+}
+
 /// App color appearance. `system` follows macOS; `light`/`dark` force it;
 /// `beet` is the identity theme — a dark appearance whose neutrals are
 /// tinted from Beet Red (Pantone 19-2030 TCX) instead of cool slate.
@@ -19,6 +56,31 @@ enum AppAppearance: String, CaseIterable, Codable, Identifiable, Sendable {
         case .light: "Light"
         case .dark: "Dark"
         case .beet: "Beet"
+        }
+    }
+}
+
+/// User-controlled reading density. This changes the app's proportional
+/// reading/navigation type while leaving code and diagnostic monospace sizes
+/// stable, so larger prose never makes diffs or terminals misleading.
+enum AppTextSize: String, CaseIterable, Codable, Identifiable, Sendable {
+    case compact
+    case comfortable
+    case large
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .compact: "Compact"
+        case .comfortable: "Comfortable"
+        case .large: "Large"
+        }
+    }
+    var scale: Double {
+        switch self {
+        case .compact: 0.92
+        case .comfortable: 1
+        case .large: 1.14
         }
     }
 }
@@ -146,6 +208,7 @@ final class SettingsStore: ObservableObject {
             DefaultsKeys.agentMode: AgentMode.auto.rawValue,
             DefaultsKeys.appearance: AppAppearance.dark.rawValue,
             DefaultsKeys.accentPalette: AccentPalette.beetRed.rawValue,
+            DefaultsKeys.textSize: AppTextSize.comfortable.rawValue,
             DefaultsKeys.composerBorderAnimation: true,
             DefaultsKeys.apiServerEnabled: false,
             DefaultsKeys.apiServerPort: 1234,
@@ -159,6 +222,10 @@ final class SettingsStore: ObservableObject {
             DefaultsKeys.sendShortcut: "cmd+return",
             DefaultsKeys.stopShortcut: "cmd+.",
             DefaultsKeys.planShortcut: "cmd+shift+p",
+            DefaultsKeys.experimentalDFlashEnabled: false,
+            DefaultsKeys.experimentalNGramEnabled: false,
+            DefaultsKeys.experimentalMLXPromptCacheEnabled: false,
+            DefaultsKeys.experimentalMLXQuantizedKVEnabled: false,
         ])
 
         // Earlier builds hid reasoning by default. Migrate that implicit
@@ -203,6 +270,17 @@ final class SettingsStore: ObservableObject {
         }
         set {
             defaults.set(newValue.rawValue, forKey: DefaultsKeys.accentPalette)
+            objectWillChange.send()
+        }
+    }
+
+    var textSize: AppTextSize {
+        get {
+            AppTextSize(rawValue: defaults.string(forKey: DefaultsKeys.textSize)
+                ?? AppTextSize.comfortable.rawValue) ?? .comfortable
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: DefaultsKeys.textSize)
             objectWillChange.send()
         }
     }
@@ -486,6 +564,47 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    /// Opt-in DFlash speculative decoding for compatible Qwen3.5 9B GGUF
+    /// targets. New engines read this value when the model is loaded; toggling
+    /// it never mutates a running inference process.
+    var experimentalDFlashEnabled: Bool {
+        get { defaults.bool(forKey: DefaultsKeys.experimentalDFlashEnabled) }
+        set {
+            defaults.set(newValue, forKey: DefaultsKeys.experimentalDFlashEnabled)
+            objectWillChange.send()
+        }
+    }
+
+    /// Opt-in model-free n-gram speculative decoding for GGUF targets that
+    /// do not already expose a stronger DFlash or MTP path.
+    var experimentalNGramEnabled: Bool {
+        get { defaults.bool(forKey: DefaultsKeys.experimentalNGramEnabled) }
+        set {
+            defaults.set(newValue, forKey: DefaultsKeys.experimentalNGramEnabled)
+            objectWillChange.send()
+        }
+    }
+
+    /// Reuse an in-memory MLX prompt prefix only when Beet Code can prove the
+    /// assistant echo matches the cached generation. Reload to apply.
+    var experimentalMLXPromptCacheEnabled: Bool {
+        get { defaults.bool(forKey: DefaultsKeys.experimentalMLXPromptCacheEnabled) }
+        set {
+            defaults.set(newValue, forKey: DefaultsKeys.experimentalMLXPromptCacheEnabled)
+            objectWillChange.send()
+        }
+    }
+
+    /// Quantize eligible MLX attention KV entries to 8-bit after the first
+    /// 512 tokens. Model weights and saved conversations are never modified.
+    var experimentalMLXQuantizedKVEnabled: Bool {
+        get { defaults.bool(forKey: DefaultsKeys.experimentalMLXQuantizedKVEnabled) }
+        set {
+            defaults.set(newValue, forKey: DefaultsKeys.experimentalMLXQuantizedKVEnabled)
+            objectWillChange.send()
+        }
+    }
+
     private enum DefaultsKeys {
         static let autoApproveEdits = "autoApproveEdits"
         static let autoApproveCommands = "autoApproveCommands"
@@ -504,6 +623,7 @@ final class SettingsStore: ObservableObject {
         static let appearance = "appearance"
         static let appearanceDefaultMigration = "appearanceDefaultMigration.v1"
         static let accentPalette = "accentPalette"
+        static let textSize = "textSize"
         static let composerBorderAnimation = "composerBorderAnimation"
         static let apiServerEnabled = "apiServerEnabled"
         static let apiServerPort = "apiServerPort"
@@ -518,5 +638,9 @@ final class SettingsStore: ObservableObject {
         static let sendShortcut = "sendShortcut"
         static let stopShortcut = "stopShortcut"
         static let planShortcut = "planShortcut"
+        static let experimentalDFlashEnabled = ExperimentalInferencePreferences.dflashEnabledKey
+        static let experimentalNGramEnabled = ExperimentalInferencePreferences.ngramEnabledKey
+        static let experimentalMLXPromptCacheEnabled = ExperimentalInferencePreferences.mlxPromptCacheEnabledKey
+        static let experimentalMLXQuantizedKVEnabled = ExperimentalInferencePreferences.mlxQuantizedKVEnabledKey
     }
 }

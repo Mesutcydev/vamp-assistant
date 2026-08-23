@@ -242,4 +242,127 @@ final class PromptCapabilityGuidanceTests: XCTestCase {
         XCTAssertTrue(text.contains("Separate paragraphs"))
         XCTAssertTrue(text.contains("each item on its own bullet"))
     }
+
+    func testToolRouterKeepsCodingRouteCompactAndVerifiable() {
+        let tools: [any AgentTool] = [
+            StubTool(name: "read_file"), StubTool(name: "list_directory"),
+            StubTool(name: "search"), StubTool(name: "find_files"),
+            StubTool(name: "glob"), StubTool(name: "apply_patch"),
+            StubTool(name: "write_file"), StubTool(name: "run_command"),
+            StubTool(name: "build_diagnostics"), StubTool(name: "browser_navigate"),
+            StubTool(name: "sim_build_run"), StubTool(name: "ask_user"),
+            StubTool(name: "attempt_completion"), StubTool(name: "task"),
+        ]
+        let names = Set(ToolRouter.select(
+            from: tools,
+            for: "Fix the login bug and run tests").map(\.name))
+
+        XCTAssertTrue(names.isSuperset(of: [
+            "read_file", "search", "find_files", "apply_patch", "write_file",
+            "run_command", "build_diagnostics", "ask_user", "attempt_completion",
+        ]))
+        XCTAssertFalse(names.contains("glob"))
+        XCTAssertFalse(names.contains("browser_navigate"))
+        XCTAssertFalse(names.contains("sim_build_run"))
+        XCTAssertFalse(names.contains("task"))
+        XCTAssertLessThan(names.count, tools.count)
+    }
+
+    func testToolRouterSelectsVisualBrowserSurfaceWithoutSimulator() {
+        let tools: [any AgentTool] = [
+            StubTool(name: "browser_navigate"), StubTool(name: "browser_read"),
+            StubTool(name: "browser_screenshot"), StubTool(name: "browser_click"),
+            StubTool(name: "describe_image"), StubTool(name: "sim_build_run"),
+            StubTool(name: "ask_user"), StubTool(name: "attempt_completion"),
+        ]
+        let names = Set(ToolRouter.select(
+            from: tools,
+            for: "Inspect the website design and click the login button").map(\.name))
+
+        XCTAssertTrue(names.contains("browser_navigate"))
+        XCTAssertTrue(names.contains("browser_click"))
+        XCTAssertTrue(names.contains("browser_screenshot"))
+        XCTAssertTrue(names.contains("describe_image"))
+        XCTAssertFalse(names.contains("sim_build_run"))
+    }
+
+    func testToolRouterFailsOpenForUnrecognizedTask() {
+        let tools: [any AgentTool] = [
+            StubTool(name: "read_file"), StubTool(name: "mcp__novel__quantum"),
+            StubTool(name: "attempt_completion"),
+        ]
+        XCTAssertEqual(
+            ToolRouter.select(from: tools, for: "zorbulate the quux").map(\.name),
+            tools.map(\.name))
+    }
+
+    func testToolRouterFindsRelevantConnectedExtension() {
+        let tools: [any AgentTool] = [
+            StubTool(name: "read_file"),
+            StubTool(
+                name: "mcp__figma__inspect_design",
+                summary: "Inspect the current Figma design document"),
+            StubTool(name: "mcp__calendar__list", summary: "List calendar events"),
+            StubTool(name: "ask_user"), StubTool(name: "attempt_completion"),
+        ]
+        let names = Set(ToolRouter.select(
+            from: tools,
+            for: "Inspect the Figma design document").map(\.name))
+        XCTAssertTrue(names.contains("mcp__figma__inspect_design"))
+        XCTAssertFalse(names.contains("mcp__calendar__list"))
+    }
+
+    func testToolRouterRequiresMutationEvidenceForDirectBuildRequest() {
+        XCTAssertEqual(
+            ToolRouter.evidenceRequirement(for: "Build a one-page website and preview it"),
+            .mutation)
+        XCTAssertEqual(
+            ToolRouter.evidenceRequirement(for: "Please fix the login page"),
+            .mutation)
+    }
+
+    func testToolRouterRequiresToolEvidenceForProjectInspection() {
+        XCTAssertEqual(
+            ToolRouter.evidenceRequirement(for: "Inspect the website in the browser"),
+            .tool)
+        XCTAssertEqual(
+            ToolRouter.evidenceRequirement(for: "Why is this project build failing?"),
+            .tool)
+    }
+
+    func testToolRouterAllowsGeneralQuestionWithoutEvidence() {
+        XCTAssertEqual(
+            ToolRouter.evidenceRequirement(for: "What is a Swift actor?"),
+            .none)
+        XCTAssertEqual(
+            ToolRouter.evidenceRequirement(for: "Reply with exactly OK"),
+            .none)
+    }
+
+    func testToolRouterRecognizesBrowserPreviewEvidence() {
+        XCTAssertTrue(ToolRouter.requiresBrowserEvidence(
+            for: "Build a website and preview it in the in-app browser"))
+        XCTAssertTrue(ToolRouter.requiresBrowserEvidence(for: "Polish this page"))
+        XCTAssertFalse(ToolRouter.requiresBrowserEvidence(for: "Fix the parser"))
+    }
+
+    func testConstrainedLocalTokenBudgetFitsCompleteToolCalls() {
+        XCTAssertEqual(AgentSessionController.constrainedLocalTokenBudget(4_096), 2_048)
+        XCTAssertEqual(AgentSessionController.constrainedLocalTokenBudget(1_024), 1_024)
+    }
+
+    @MainActor
+    func testConstrainedLocalToolsKeepWebsitePreviewLoop() {
+        let names = Set(AgentSessionController.constrainedLocalTools.map(\.name))
+        XCTAssertTrue(names.isSuperset(of: [
+            "write_file", "apply_patch", "run_command", "background_process",
+            "background_status", "browser_navigate", "browser_read",
+            "browser_screenshot", "browser_click",
+            "sim_list_devices", "sim_boot_device", "sim_launch_app", "sim_tap",
+            "sim_swipe", "sim_type", "sim_describe", "sim_screenshot",
+        ]))
+        XCTAssertFalse(names.contains("browser_eval"))
+        XCTAssertFalse(names.contains("computer_click"))
+        XCTAssertFalse(names.contains("sim_build_run"))
+    }
 }

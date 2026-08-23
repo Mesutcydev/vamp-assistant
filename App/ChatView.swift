@@ -111,7 +111,7 @@ struct ChatView: View {
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 22) {
                     if controller.transcript.isEmpty && controller.streamingText.isEmpty {
                         emptyState
                     }
@@ -144,7 +144,7 @@ struct ChatView: View {
                 .frame(maxWidth: ContentColumn.maxWidth, alignment: .leading)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 20)
-                .padding(.vertical, 16)
+                .padding(.vertical, 20)
             }
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 // Pinned means the viewport bottom is within ~40 pt of the

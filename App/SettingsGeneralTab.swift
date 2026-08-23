@@ -68,6 +68,16 @@ struct GeneralTab: View {
                         get: { settings.accentPalette },
                         set: { settings.accentPalette = $0 }))
                 }
+                SettingRow(label: "Text size", value: settings.textSize.label) {
+                    Picker("Text size", selection: $settings.textSize) {
+                        ForEach(AppTextSize.allCases) { size in
+                            Text(size.label).tag(size)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 280)
+                }
             }
 
             SettingsCard(title: "Launch", icon: "power", footer: "Downloads that were interrupted by quitting resume automatically next launch. When off, they appear paused in the Model Manager for explicit resume.") {

@@ -52,6 +52,9 @@ enum RemoteLLMClient {
         /// Standard OpenAI-compatible reasoning control. It is optional so
         /// ordinary models receive the exact same payload as before.
         var reasoning_effort: String? = nil
+        /// llama.cpp extension. Only Beet Code's embedded GGUF path sets it;
+        /// strict remote providers never receive the field.
+        var cache_prompt: Bool? = nil
         /// Asks OpenAI-compatible servers for a final usage chunk — powers
         /// truthful token stats instead of chunk counting.
         var stream_options: StreamOptions?
@@ -503,6 +506,7 @@ enum RemoteLLMClient {
         temperature: Double?,
         maxTokens: Int?,
         reasoningEffort: String? = nil,
+        cachePrompt: Bool? = nil,
         tools: [NativeToolSpec] = [],
         headers: [String: String] = [:],
         onUsage: (@Sendable (UsageInfo) -> Void)? = nil
@@ -514,6 +518,7 @@ enum RemoteLLMClient {
                         provider: provider, baseURL: baseURL, apiKey: apiKey,
                         model: model, turns: turns, temperature: temperature,
                         maxTokens: maxTokens, reasoningEffort: reasoningEffort,
+                        cachePrompt: cachePrompt,
                         includeStreamOptions: true,
                         tools: tools, headers: headers, onUsage: onUsage)
                     for try await chunk in first {
@@ -527,6 +532,7 @@ enum RemoteLLMClient {
                             provider: provider, baseURL: baseURL, apiKey: apiKey,
                             model: model, turns: turns, temperature: temperature,
                             maxTokens: maxTokens, reasoningEffort: reasoningEffort,
+                            cachePrompt: cachePrompt,
                             includeStreamOptions: false,
                             tools: tools, headers: headers, onUsage: onUsage)
                         for try await chunk in retry {
@@ -541,6 +547,7 @@ enum RemoteLLMClient {
                                 provider: provider, baseURL: baseURL, apiKey: apiKey,
                                 model: model, turns: turns, temperature: temperature,
                                 maxTokens: maxTokens, reasoningEffort: reasoningEffort,
+                                cachePrompt: cachePrompt,
                                 includeStreamOptions: false,
                                 tools: [], headers: headers, onUsage: onUsage)
                             for try await chunk in plain {
@@ -573,6 +580,7 @@ enum RemoteLLMClient {
         temperature: Double?,
         maxTokens: Int?,
         reasoningEffort: String? = nil,
+        cachePrompt: Bool? = nil,
         includeStreamOptions: Bool,
         tools: [NativeToolSpec] = [],
         headers: [String: String] = [:],
@@ -594,6 +602,7 @@ enum RemoteLLMClient {
                     ? .init(type: reasoningEnabled ? "enabled" : "disabled")
                     : nil,
                 reasoning_effort: reasoningEffort,
+                cache_prompt: cachePrompt,
                 stream_options: includeStreamOptions ? .init() : nil)
             runStreamingRequest(makeRequest: {
                 var request = URLRequest(url: baseURL.appendingPathComponent("chat/completions"))
@@ -1330,6 +1339,10 @@ enum RemoteLLMClient {
     struct UsageInfo: Sendable, Equatable {
         public var promptTokens: Int?
         public var completionTokens: Int?
+        /// Provider-reported decode throughput when available. llama.cpp
+        /// exposes this as `timings.predicted_per_second`; ordinary remote
+        /// providers omit it and callers fall back to wall-clock throughput.
+        public var tokensPerSecond: Double? = nil
     }
 
     /// Processes ONE complete SSE line (raw bytes, no newline). Pure — the
@@ -1543,8 +1556,11 @@ enum RemoteLLMClient {
         if looksOpenAI, let chunk = try? JSONDecoder().decode(OpenAIChunk.self, from: data) {
             var usage: UsageInfo?
             if let u = chunk.usage {
+                let timings = topLevel["timings"] as? [String: Any]
+                let reportedTPS = (timings?["predicted_per_second"] as? NSNumber)?.doubleValue
                 usage = UsageInfo(promptTokens: u.prompt_tokens,
-                                  completionTokens: u.completion_tokens)
+                                  completionTokens: u.completion_tokens,
+                                  tokensPerSecond: reportedTPS)
             }
             if let delta = chunk.choices?.first?.delta {
                 var textParts: [String] = []

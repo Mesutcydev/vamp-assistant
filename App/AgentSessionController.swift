@@ -68,9 +68,10 @@ final class AgentSessionController: ObservableObject {
     /// Identifies the current run; events from a cancelled older run are
     /// rejected so they can never mutate a newer run's UI state.
     private var runID = UUID()
-    /// Token deltas accumulate here and publish in ~30 ms batches: at local
+    /// Token deltas accumulate here and publish in ~50 ms batches: at local
     /// model speeds per-token publishing causes quadratic string copying and
-    /// re-layout for no visible gain.
+    /// re-layout for no visible gain. Twenty UI updates per second remains
+    /// visually continuous while leaving more CPU time for local inference.
     private var pendingTokenBuffer = ""
     private var tokenFlushTask: Task<Void, Never>?
     /// Unfiltered stream accumulator — the source for display filtering
@@ -279,7 +280,7 @@ final class AgentSessionController: ObservableObject {
             settings.maxTokensPerTurn,
             maxTokensHandler() ?? settings.maxTokensPerTurn)
         let maxTokensPerTurn = constrainedLocalModel
-            ? min(configuredMaxTokensPerTurn, 768)
+            ? Self.constrainedLocalTokenBudget(configuredMaxTokensPerTurn)
             : configuredMaxTokensPerTurn
         let configuredContextWindow = contextWindowHandler() ?? 32_768
         let contextWindowTokens = constrainedLocalModel
@@ -339,6 +340,7 @@ final class AgentSessionController: ObservableObject {
                 contextWindowTokens: contextWindowTokens,
                 thermalTokenCeiling: thermal.maxTokens(ceiling: maxTokensPerTurn),
                 verifyAfterEdits: !chatOnly && settings.verifyAfterEdits,
+                reliabilityV2: !chatOnly,
                 showReasoning: showReasoning,
                 planMode: planMode,
                 goalMode: goalMode,
@@ -1140,7 +1142,7 @@ final class AgentSessionController: ObservableObject {
     private func scheduleTokenFlush() {
         guard tokenFlushTask == nil else { return }
         tokenFlushTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(30))
+            try? await Task.sleep(for: .milliseconds(50))
             guard let self else { return }
             self.tokenFlushTask = nil
             self.flushTokens()
@@ -1712,6 +1714,15 @@ final class AgentSessionController: ObservableObject {
                 TranscriptItem(id: UUID(), kind: .checkpoint(checkpoint)))
             diagnostics.record(.tool, "Checkpoint saved", detail: checkpoint.summary)
 
+        case .checkpointSkipped(let reason):
+            transcript.append(
+                TranscriptItem(
+                    id: UUID(),
+                    kind: .notice("Undo checkpoint unavailable: \(reason) The approved action continued.")))
+            diagnostics.record(
+                .tool, "Checkpoint unavailable — action continued",
+                detail: reason, level: .warning)
+
         case .checkpointFailed(let reason):
             transcript.append(
                 TranscriptItem(
@@ -1890,9 +1901,10 @@ final class AgentSessionController: ObservableObject {
     }
 
     /// The compact registry used when a local model is close to the machine's
-    /// RAM ceiling. These tools preserve the core coding workflow while
-    /// avoiding browser, simulator, computer-use, and app-scaffolding schemas
-    /// in every model prefill.
+    /// RAM ceiling. These tools preserve core coding, a minimal website
+    /// preview loop, and lightweight simulator inspection/interaction while
+    /// avoiding computer-use, app-scaffolding, build-run orchestration, and
+    /// advanced browser schemas in every model prefill.
     static let constrainedLocalTools: [any AgentTool] = [
         ReadFileTool(),
         WriteFileTool(),
@@ -1901,7 +1913,29 @@ final class AgentSessionController: ObservableObject {
         FindFilesTool(),
         ApplyPatchTool(),
         RunCommandTool(),
+        BackgroundProcessTool(),
+        BackgroundStatusTool(),
+        BrowserTools.NavigateTool(),
+        BrowserTools.ReadTool(),
+        BrowserTools.ScreenshotTool(),
+        BrowserTools.ClickTool(),
+        SimListDevicesTool(),
+        SimBootDeviceTool(),
+        SimLaunchAppTool(),
+        SimTapTool(),
+        SimSwipeTool(),
+        SimTypeTool(),
+        SimDescribeTool(),
+        SimScreenshotTool(),
     ]
+
+    /// Lean local mode still needs enough completion room to close a JSON
+    /// tool call containing a modest source file. The previous 768-token cap
+    /// routinely cut `write_file` calls mid-object. Respect a deliberately
+    /// smaller user/provider ceiling, but allow up to 2K tokens otherwise.
+    nonisolated static func constrainedLocalTokenBudget(_ configured: Int) -> Int {
+        min(configured, 2_048)
+    }
 
     private static func isConstrainedLocalModel(
         engine: any LLMEngine,

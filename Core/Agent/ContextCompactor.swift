@@ -98,6 +98,12 @@ enum ContextCompactor {
             responseReserve: responseReserve)
     }
 
+    /// Project-agent repair loops need more headroom than ordinary chat. In
+    /// Reliability V2 they compact at 65%; legacy/chat behavior stays at 75%.
+    static func shouldCompact(_ request: RequestEstimate, reliabilityV2: Bool) -> Bool {
+        request.fraction > (reliabilityV2 ? 0.65 : 0.75)
+    }
+
     /// Replaces the content of old tool results (keeping the most recent
     /// `keepRecent`) with a stub. User/assistant messages are never dropped.
     /// Aggressive levels additionally truncate the preserved results.

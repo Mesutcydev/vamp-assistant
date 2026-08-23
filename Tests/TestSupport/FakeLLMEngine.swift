@@ -5,7 +5,7 @@ import Foundation
 /// weights, no Metal, no network — every generation returns the next scripted
 /// response, and every stream(adding:) call records the exact turns it was
 /// given so tests can assert history sequencing.
-final class FakeLLMEngine: LLMEngine, @unchecked Sendable {
+final class FakeLLMEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
 
     /// A scripted generation outcome, consumed FIFO by stream(adding:).
     enum Scripted: Sendable {
@@ -28,6 +28,10 @@ final class FakeLLMEngine: LLMEngine, @unchecked Sendable {
     private var resetCount = 0
     private var cancelCount = 0
     private var streamCount = 0
+    private var configuredNativeTools: [NativeToolSpec] = []
+    private var semanticRebases: [[ChatTurn]] = []
+    private var _semanticRebaseEnabled = false
+    private var transientTrimCount = 0
 
     // Runtime state.
     private var cancelRequested = false
@@ -94,6 +98,23 @@ final class FakeLLMEngine: LLMEngine, @unchecked Sendable {
         withLock { recordedTurns }
     }
 
+    var configuredNativeToolNames: [String] {
+        withLock { configuredNativeTools.map(\.name) }
+    }
+
+    var semanticRebaseEnabled: Bool {
+        get { withLock { _semanticRebaseEnabled } }
+        set { withLock { _semanticRebaseEnabled = newValue } }
+    }
+
+    var semanticRebaseCallCount: Int {
+        withLock { semanticRebases.count }
+    }
+
+    var trimTransientMemoryCallCount: Int {
+        withLock { transientTrimCount }
+    }
+
     var isCancelRequested: Bool {
         withLock { cancelRequested }
     }
@@ -119,6 +140,10 @@ final class FakeLLMEngine: LLMEngine, @unchecked Sendable {
         get async { withLock { statsState } }
     }
 
+    func configureNativeTools(_ tools: [NativeToolSpec]) {
+        withLock { configuredNativeTools = tools }
+    }
+
     func load(directory: URL, modelID: String, diskBytes: Int64) async throws {
         withLock {
             loadedID = modelID
@@ -139,6 +164,19 @@ final class FakeLLMEngine: LLMEngine, @unchecked Sendable {
             resetCount += 1
             cancelRequested = false
         }
+    }
+
+    func rebaseConversation(to turns: [ChatTurn]) async -> SemanticRebaseResult {
+        withLock {
+            semanticRebases.append(turns)
+            return _semanticRebaseEnabled
+                ? SemanticRebaseResult(installedHistory: true)
+                : .unsupported
+        }
+    }
+
+    func trimTransientMemory() async {
+        withLock { transientTrimCount += 1 }
     }
 
     func stream(

@@ -142,6 +142,8 @@ struct UserBubble: View {
             if Self.isLongForm(text) {
                 HStack {
                     Text(text)
+                        .font(AppFont.chatBody)
+                        .lineSpacing(3)
                         .foregroundStyle(Theme.textPrimary)
                         .multilineTextAlignment(.leading)
                         .padding(.horizontal, 14)
@@ -157,6 +159,8 @@ struct UserBubble: View {
                 HStack {
                     Spacer()
                     Text(text)
+                        .font(AppFont.chatBody)
+                        .lineSpacing(3)
                         .foregroundStyle(Theme.textPrimary)
                         .multilineTextAlignment(.leading)
                         .padding(.horizontal, 14)
@@ -182,7 +186,7 @@ struct AssistantMessage: View {
         if case .assistant(let text) = item.kind {
             HStack(alignment: .top, spacing: 12) {
                 AssistantAvatar()
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 12) {
                     MarkdownText(text: text)
                     AnswerFooterRow(text: text, metrics: item.answerMetrics)
                 }
@@ -262,7 +266,7 @@ struct MarkdownText: View {
         let displayText = AssistantAnswerFormatter.formattedForDisplay(text)
         let blocks = MarkdownDocumentParser.blocks(from: displayText)
 
-        VStack(alignment: .leading, spacing: 13) {
+        VStack(alignment: .leading, spacing: 16) {
             ForEach(blocks) { block in
                 MarkdownBlockView(block: block)
             }
@@ -330,6 +334,7 @@ struct MarkdownBlock: Identifiable, Equatable {
         case numbers([String])
         case quote(String)
         case code(language: String?, text: String)
+        case table(headers: [String], rows: [[String]])
         case divider
     }
 
@@ -346,6 +351,31 @@ enum MarkdownDocumentParser {
         var codeLines: [String] = []
         var codeLanguage: String?
         var insideCode = false
+        var tableHeaders: [String]?
+        var tableRows: [[String]] = []
+
+        func tableCells(_ line: String) -> [String] {
+            var body = line.trimmingCharacters(in: .whitespaces)
+            if body.hasPrefix("|") { body.removeFirst() }
+            if body.hasSuffix("|") { body.removeLast() }
+            return body.split(separator: "|", omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+        }
+
+        func isTableSeparator(_ line: String) -> Bool {
+            let cells = tableCells(line)
+            return cells.count >= 2 && cells.allSatisfy { cell in
+                let stripped = cell.replacingOccurrences(of: ":", with: "")
+                return stripped.count >= 3 && stripped.allSatisfy { $0 == "-" }
+            }
+        }
+
+        func flushTable() {
+            guard let headers = tableHeaders else { return }
+            contents.append(.table(headers: headers, rows: tableRows))
+            tableHeaders = nil
+            tableRows.removeAll(keepingCapacity: true)
+        }
 
         func flushParagraph() {
             guard !paragraph.isEmpty else { return }
@@ -360,6 +390,7 @@ enum MarkdownDocumentParser {
         }
 
         func flushProse() {
+            flushTable()
             flushParagraph()
             flushList()
         }
@@ -386,6 +417,14 @@ enum MarkdownDocumentParser {
                 let language = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
                 codeLanguage = language.isEmpty ? nil : language
                 insideCode = true
+            } else if isTableSeparator(line), let header = paragraph.last,
+                      header.contains("|") {
+                paragraph.removeLast()
+                flushParagraph()
+                flushList()
+                tableHeaders = tableCells(header)
+            } else if tableHeaders != nil, line.contains("|") {
+                tableRows.append(tableCells(line))
             } else if line.isEmpty {
                 flushProse()
             } else if isDivider(line) {
@@ -470,8 +509,8 @@ struct MarkdownBlockView: View {
         switch block.content {
         case .paragraph(let text):
             inline(text)
-                .font(.body)
-                .lineSpacing(4)
+                .font(AppFont.chatBody)
+                .lineSpacing(5)
                 .fixedSize(horizontal: false, vertical: true)
 
         case .heading(let level, let text):
@@ -491,8 +530,8 @@ struct MarkdownBlockView: View {
                     .fill(Theme.hairline)
                     .frame(width: 2)
                 inline(text)
-                    .font(.body)
-                    .lineSpacing(4)
+                    .font(AppFont.chatBody)
+                    .lineSpacing(5)
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -517,11 +556,47 @@ struct MarkdownBlockView: View {
             .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
                 .strokeBorder(Theme.hairline, lineWidth: 1))
 
+        case .table(let headers, let rows):
+            ScrollView(.horizontal, showsIndicators: true) {
+                Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+                    GridRow {
+                        ForEach(headers.indices, id: \.self) { index in
+                            tableCell(headers[index], emphasized: true)
+                        }
+                    }
+                    ForEach(rows.indices, id: \.self) { rowIndex in
+                        GridRow {
+                            ForEach(headers.indices, id: \.self) { columnIndex in
+                                tableCell(rows[rowIndex].indices.contains(columnIndex)
+                                    ? rows[rowIndex][columnIndex] : "", emphasized: false)
+                            }
+                        }
+                    }
+                }
+                .background(Theme.surface)
+                .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                    .strokeBorder(Theme.hairline, lineWidth: 1))
+            }
+
         case .divider:
             Divider()
                 .overlay(Theme.hairline.opacity(0.75))
                 .padding(.vertical, 2)
         }
+    }
+
+    private func tableCell(_ source: String, emphasized: Bool) -> some View {
+        inline(source)
+            .font(.system(size: 13.5 * CGFloat(Theme.currentTextSize.scale),
+                          weight: emphasized ? .semibold : .regular))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .frame(minWidth: 120, alignment: .leading)
+            .background(emphasized ? Theme.surfaceInset.opacity(0.72) : Color.clear)
+            .overlay(alignment: .trailing) {
+                Rectangle().fill(Theme.hairline.opacity(0.7)).frame(width: 1)
+            }
     }
 
     private func inline(_ source: String) -> Text {
@@ -535,23 +610,24 @@ struct MarkdownBlockView: View {
 
     private func headingFont(_ level: Int) -> Font {
         switch level {
-        case 1: .title2.weight(.semibold)
-        case 2: .title3.weight(.semibold)
-        default: .headline
+        case 1: .system(size: 22 * CGFloat(Theme.currentTextSize.scale), weight: .bold, design: .default)
+        case 2: AppFont.chatHeading
+        default: .system(size: 16 * CGFloat(Theme.currentTextSize.scale), weight: .semibold, design: .default)
         }
     }
 
     private func list(items: [String], numbered: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 9) {
             ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                 HStack(alignment: .firstTextBaseline, spacing: 9) {
                     Text(numbered ? "\(index + 1)." : "•")
-                        .font(.body.weight(numbered ? .regular : .semibold))
+                        .font(.system(size: 16 * CGFloat(Theme.currentTextSize.scale),
+                                      weight: numbered ? .regular : .semibold))
                         .foregroundStyle(Theme.textSecondary)
                         .frame(width: 20, alignment: .trailing)
                     inline(item)
-                        .font(.body)
-                        .lineSpacing(4)
+                        .font(AppFont.chatBody)
+                        .lineSpacing(5)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -1523,6 +1599,11 @@ struct FinishBanner: View {
 /// Live streaming assistant output: avatar-led (same identity as finished
 /// messages), inline markdown, and a pulsing accent caret while generating.
 /// Reduce Motion: the caret renders solid instead of pulsing.
+///
+/// The model/controller may publish around twenty text updates per second.
+/// `StreamingMarkdownText` narrows that invalidation boundary and limits the
+/// expensive full-document repair + Markdown parse to ten frames per second;
+/// the final assistant row still renders immediately with `MarkdownText`.
 struct StreamingCard: View {
     let text: String
 
@@ -1533,7 +1614,7 @@ struct StreamingCard: View {
         HStack(alignment: .top, spacing: 12) {
             AssistantAvatar()
             VStack(alignment: .leading, spacing: 4) {
-                MarkdownText(text: text)
+                StreamingMarkdownText(text: text)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 // Caret: a brand-gradient bar, pulsing while generating
                 // (solid under Reduce Motion).
@@ -1553,6 +1634,35 @@ struct StreamingCard: View {
                 try? await Task.sleep(for: .milliseconds(450))
             }
         }
+    }
+}
+
+/// High-frequency streaming boundary with a narrow String input. `latestText`
+/// follows every controller update, while `renderedText` advances on a fixed
+/// cadence so unchanged Markdown subtrees are skipped by SwiftUI diffing.
+private struct StreamingMarkdownText: View {
+    let text: String
+
+    @State private var latestText = ""
+    @State private var renderedText = ""
+
+    var body: some View {
+        MarkdownText(text: renderedText)
+            .onAppear {
+                latestText = text
+                renderedText = text
+            }
+            .onChange(of: text) { _, newValue in
+                latestText = newValue
+            }
+            .task {
+                while !Task.isCancelled {
+                    if renderedText != latestText {
+                        renderedText = latestText
+                    }
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+            }
     }
 }
 

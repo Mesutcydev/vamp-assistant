@@ -190,6 +190,23 @@ struct BuildDiagnosticsTool: AgentTool, CommandExecuting {
         return "swift build"
     }
 
+    /// Chooses completion evidence without inventing a build system. Plain
+    /// repositories still get a useful whitespace/conflict check; an
+    /// unversioned notes folder honestly has no automated project check.
+    static func reliabilityCommand(in directory: URL) -> String? {
+        let fm = FileManager.default
+        let kids = (try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        if kids.contains(where: { $0.pathExtension == "xcworkspace" || $0.pathExtension == "xcodeproj" })
+            || fm.fileExists(atPath: directory.appendingPathComponent("project.yml").path)
+            || fm.fileExists(atPath: directory.appendingPathComponent("Package.swift").path) {
+            return defaultCommand(in: directory)
+        }
+        if fm.fileExists(atPath: directory.appendingPathComponent(".git").path) {
+            return "git diff --check"
+        }
+        return nil
+    }
+
     /// Test targets are deliberately detected from the source tree rather
     /// than inferred from the project name. This keeps generated apps without
     /// tests buildable while making SPM/Xcode test suites part of verification

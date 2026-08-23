@@ -20,6 +20,10 @@ actor AgentLoop {
         /// diagnostics command still runs through the normal approval path —
         /// never silently.
         var verifyAfterEdits: Bool = false
+        /// Reliability V2: a project mutation creates verification debt.
+        /// Completion is gated until the latest workspace generation passes
+        /// detected project checks. Chat-only sessions never enable it.
+        var reliabilityV2: Bool = false
         /// Show chain-of-thought (think) blocks in the transcript (v0.3).
         var showReasoning: Bool = false
         /// Plan mode: the model must present a plan and the user must approve
@@ -72,6 +76,9 @@ actor AgentLoop {
     private let memory: AgentMemory?
     private let taskHint: String
     private let hooks: HookRunner
+    /// Complete registry remains behind the executor/permission gate. This
+    /// set is the compact surface advertised to the model for this task.
+    private let advertisedToolNames: Set<String>
 
     // Loop state
     private var systemPrompt: String
@@ -89,6 +96,15 @@ actor AgentLoop {
     private var planApproved = false
     /// True when the most recent verification checks produced failures — used
     private var lastVerificationFailed = false
+    private var mutationGeneration = 0
+    private var verifiedMutationGeneration = 0
+    private var successfulToolActionCount = 0
+    private var evidenceRequirement: ToolRouter.EvidenceRequirement = .none
+    private var requiresBrowserEvidence = false
+    private var successfulToolNames = Set<String>()
+    private var changedPaths = Set<String>()
+    private var failedActionCounts: [String: Int] = [:]
+    private var successfulMutationSignatures = Set<String>()
 
     private func setPhase(_ newPhase: AgentPhase) {
         guard newPhase != phase else { return }
@@ -155,6 +171,8 @@ actor AgentLoop {
         let context = ToolContext(workspace: workspace)
         context.memory = memory
         self.executor = ToolExecutor(tools: allTools, context: context)
+        let advertisedTools = ToolRouter.select(from: allTools, for: taskHint)
+        self.advertisedToolNames = Set(advertisedTools.map(\.name))
         var effectivePermissions = permissions
         effectivePermissions.openCodePermissions = permissions.openCodePermissions.merged(
             with: projectPolicy?.openCodePermissions ?? .empty)
@@ -172,7 +190,7 @@ actor AgentLoop {
             ? nil
             : WorkspaceHistory.section(workspacePath: workspace.root.path)
         self.systemPrompt = PromptBuilder.systemPrompt(
-            tools: allTools,
+            tools: advertisedTools,
             workspace: workspace,
             repoIndex: effectiveConfiguration.leanPrompt ? nil : repoIndex,
             memorySection: effectiveConfiguration.leanPrompt ? nil : memorySection,
@@ -188,7 +206,7 @@ actor AgentLoop {
             leanPrompt: effectiveConfiguration.leanPrompt,
             chatOnly: effectiveConfiguration.chatOnly)
         (engine as? any NativeToolConfigurable)?.configureNativeTools(
-            allTools.map { NativeToolSpec(tool: $0) })
+            advertisedTools.map { NativeToolSpec(tool: $0) })
         if let seed = seedRecord {
             // Continuation: resume an existing session instead of starting a
             // fresh record — history and checkpoints carry over.
@@ -234,6 +252,20 @@ actor AgentLoop {
         cancelled = false
         hasFinished = false
         pending = nil
+        mutationGeneration = 0
+        verifiedMutationGeneration = 0
+        successfulToolActionCount = 0
+        evidenceRequirement = configuration.reliabilityV2
+            ? ToolRouter.evidenceRequirement(for: userMessage)
+            : .none
+        requiresBrowserEvidence = configuration.reliabilityV2
+            && advertisedToolNames.contains("browser_read")
+            && ToolRouter.requiresBrowserEvidence(for: userMessage)
+        successfulToolNames.removeAll(keepingCapacity: true)
+        changedPaths.removeAll(keepingCapacity: true)
+        failedActionCounts.removeAll(keepingCapacity: true)
+        successfulMutationSignatures.removeAll(keepingCapacity: true)
+        lastVerificationFailed = false
         executor.context.clearCancellation()
         setPhase(configuration.planMode ? .planning : .working)
 
@@ -358,6 +390,10 @@ actor AgentLoop {
         // re-prompt is fair (the model may comply); a streak means the
         // reasoning chronically eats the whole token budget — surface it.
         var emptyReplyStreak = 0
+        // A weak local model may repeatedly emit broken wire format. Bound
+        // repair attempts so a task fails clearly instead of burning every
+        // turn on the same malformed call.
+        var protocolFailureStreak = 0
 
         do {
             await engine.reset()
@@ -462,13 +498,20 @@ actor AgentLoop {
                 // mid-call. Never show the raw fragment as an answer or
                 // declare completion: hand the model a protocol observation
                 // and let it re-emit a call that fits the budget.
-                if calls.isEmpty, ToolParser.looksLikeToolCallFragment(visible) {
-                    let notice = "error: malformed tool call — the JSON was cut off before it closed, so nothing was executed. "
-                        + "Re-emit exactly one complete tool block. If you are writing a file, keep the content small enough to fit in one reply or build it up in several appends."
+                if calls.isEmpty,
+                   let malformed = ToolParser.malformedCallReason(visible) {
+                    protocolFailureStreak += 1
+                    let notice = "error: malformed tool call — \(malformed), so nothing was executed. "
+                        + "Re-emit exactly one complete tool block using one of the advertised tools. If you are writing a large file, use apply_patch with an empty SEARCH block and add it in focused chunks across replies."
                     record.messages.append(
                         SessionMessage(role: .toolResult, content: notice, toolName: "protocol", timestamp: Date()))
                     history.append(ChatTurn(role: .tool, content: notice))
                     eventContinuation?.yield(.protocolError(notice))
+                    if protocolFailureStreak >= 3 {
+                        await finish(.engineError(
+                            "The model produced three malformed tool calls in a row. No action was executed."))
+                        return
+                    }
                     await compactIfNeeded()
                     continue
                 }
@@ -540,6 +583,17 @@ actor AgentLoop {
 
 
                 if calls.isEmpty {
+                    if let notice = completionEvidenceFailure() {
+                        // Keep the rejected prose claim paired with the
+                        // reliability observation in model history.
+                        record.messages.append(
+                            SessionMessage(role: .assistant, content: visible, toolName: nil, timestamp: Date()))
+                        history.append(ChatTurn(role: .assistant, content: visible))
+                        appendReliabilityNotice(notice)
+                        await compactIfNeeded()
+                        continue
+                    }
+                    guard await prepareForCompletion() else { continue }
                     // Verification-before-completion for final prose too.
                     if configuration.verifyAfterEdits, lastVerificationFailed {
                         // Pair the refusal with the assistant claim it
@@ -555,11 +609,12 @@ actor AgentLoop {
                         eventContinuation?.yield(.protocolError(notice))
                         continue
                     }
+                    let finalAnswer = completionReport(for: visible)
                     record.messages.append(
-                        SessionMessage(role: .assistant, content: visible, toolName: nil, timestamp: Date()))
-                    eventContinuation?.yield(.assistantMessage(visible))
-                    rememberCompletion(summary: visible)
-                    await finish(.completed(visible))
+                        SessionMessage(role: .assistant, content: finalAnswer, toolName: nil, timestamp: Date()))
+                    eventContinuation?.yield(.assistantMessage(finalAnswer))
+                    rememberCompletion(summary: finalAnswer)
+                    await finish(.completed(finalAnswer))
                     return
                 }
 
@@ -574,6 +629,7 @@ actor AgentLoop {
                 // structured protocol error observation, never a bundled
                 // batch.
                 if calls.count > 1 {
+                    protocolFailureStreak += 1
                     let names = calls.map(\.name).joined(separator: ", ")
                     let error = "error: protocol violation — multiple tool calls in one reply (\(names)). "
                         + "Emit exactly one tool block per message, wait for its result, then continue."
@@ -581,15 +637,48 @@ actor AgentLoop {
                         SessionMessage(role: .toolResult, content: error, toolName: "protocol", timestamp: Date()))
                     history.append(ChatTurn(role: .tool, content: error))
                     eventContinuation?.yield(.protocolError(error))
+                    if protocolFailureStreak >= 3 {
+                        await finish(.engineError(
+                            "The model violated the one-tool-per-turn protocol three times in a row. No bundled call was executed."))
+                        return
+                    }
                     await compactIfNeeded()
                     continue
                 }
 
                 var call = calls[0]
 
+                // The router intentionally advertises only a compact task
+                // surface. Reject calls outside it before permission prompts
+                // or hooks; the full executor registry is not a hidden bypass.
+                guard advertisedToolNames.contains(call.name) else {
+                    protocolFailureStreak += 1
+                    let available = advertisedToolNames.sorted().joined(separator: ", ")
+                    let notice = "error: tool '\(call.name)' is not enabled for this task. "
+                        + "Use exactly one of: \(available)."
+                    record.messages.append(
+                        SessionMessage(role: .toolResult, content: notice, toolName: "protocol", timestamp: Date()))
+                    history.append(ChatTurn(role: .tool, content: notice))
+                    eventContinuation?.yield(.protocolError(notice))
+                    if protocolFailureStreak >= 3 {
+                        await finish(.engineError(
+                            "The model requested an unavailable tool three times in a row. Nothing outside the routed tool set was executed."))
+                        return
+                    }
+                    await compactIfNeeded()
+                    continue
+                }
+                protocolFailureStreak = 0
+
                 // 3b. Control-flow pseudo-tools handled by the loop itself.
                 if call.name == "attempt_completion" {
                     let summary = call.string("result") ?? call.string("summary") ?? "Task complete."
+                    if let notice = completionEvidenceFailure() {
+                        appendReliabilityNotice(notice)
+                        await compactIfNeeded()
+                        continue
+                    }
+                    guard await prepareForCompletion() else { continue }
                     // Verification-before-completion: with verification enabled,
                     // a completion claim while the last build still fails is
                     // refused — the diagnostics are fed back instead.
@@ -602,11 +691,12 @@ actor AgentLoop {
                         eventContinuation?.yield(.protocolError(notice))
                         continue
                     }
+                    let finalAnswer = completionReport(for: summary)
                     record.messages.append(
-                        SessionMessage(role: .assistant, content: summary, toolName: nil, timestamp: Date()))
-                    eventContinuation?.yield(.assistantMessage(summary))
-                    rememberCompletion(summary: summary)
-                    await finish(.completed(summary))
+                        SessionMessage(role: .assistant, content: finalAnswer, toolName: nil, timestamp: Date()))
+                    eventContinuation?.yield(.assistantMessage(finalAnswer))
+                    rememberCompletion(summary: finalAnswer)
+                    await finish(.completed(finalAnswer))
                     return
                 }
                 if call.name == "ask_user" {
@@ -666,6 +756,17 @@ actor AgentLoop {
                         toolName: call.name, timestamp: Date()))
 
                 let risk = executor.tool(named: call.name)?.risk
+                let actionSignature = Self.actionSignature(call)
+                if isMutation(risk: risk, call: call),
+                   successfulMutationSignatures.contains(actionSignature) {
+                    let message = "already completed: this exact mutation succeeded earlier; inspect the result or run verification instead of repeating it"
+                    record.messages.append(
+                        SessionMessage(role: .toolResult, content: message, toolName: call.name, timestamp: Date()))
+                    history.append(ChatTurn(role: .tool, content: message))
+                    eventContinuation?.yield(.toolCallFinished(invocation, output: message, failed: false))
+                    await compactIfNeeded()
+                    continue
+                }
                 switch permissionGate.decision(for: call, risk: risk) {
                 case .denied(let reason):
                     let message = "denied by OpenCode permission: \(reason)"
@@ -741,6 +842,12 @@ actor AgentLoop {
                             summary: "before \(call.name) on turn \(turns)")
                         record.checkpoints.append(checkpoint)
                         eventContinuation?.yield(.checkpointCreated(checkpoint))
+                    } catch GitCheckpointer.CheckpointError.noRepository {
+                        // Brand-new project folders are valid before `git init`.
+                        // Continue the approved edit while making the missing
+                        // undo protection explicit to the user.
+                        eventContinuation?.yield(.checkpointSkipped(
+                            "This folder is not a Git repository yet."))
                     } catch {
                         // Surface the failure and do NOT execute the mutation:
                         // an action that cannot be undone must not run.
@@ -765,6 +872,41 @@ actor AgentLoop {
                 record.messages.append(
                     SessionMessage(role: .toolResult, content: result.output, toolName: call.name, timestamp: Date()))
                 history.append(ChatTurn(role: .tool, content: result.output))
+
+                if result.failed {
+                    if isVerificationCall(call) { lastVerificationFailed = true }
+                    let failureSignature = actionSignature + "\n" + result.output
+                    let count = failedActionCounts[failureSignature, default: 0] + 1
+                    failedActionCounts[failureSignature] = count
+                    if count == 2 {
+                        let notice = "loop warning: the same action failed twice with the same result. Inspect the relevant files or change strategy before retrying."
+                        record.messages.append(
+                            SessionMessage(role: .toolResult, content: notice, toolName: "reliability", timestamp: Date()))
+                        history.append(ChatTurn(role: .tool, content: notice))
+                        eventContinuation?.yield(.protocolError(notice))
+                    } else if count >= 3 {
+                        await finish(.engineError(
+                            "Reliability V2 stopped a repeated failing action after three identical attempts. The workspace remains recoverable from its checkpoints."))
+                        return
+                    }
+                } else {
+                    successfulToolActionCount += 1
+                    successfulToolNames.insert(call.name)
+                    failedActionCounts.removeAll(keepingCapacity: true)
+                    if isMutation(risk: risk, call: call) {
+                        mutationGeneration += 1
+                        // Duplicate suppression is generation-scoped. A
+                        // later source edit must allow the same test command
+                        // to run again against the new workspace state.
+                        successfulMutationSignatures.removeAll(keepingCapacity: true)
+                        successfulMutationSignatures.insert(actionSignature)
+                        if let path = Self.changedPath(from: call) { changedPaths.insert(path) }
+                    }
+                    if isVerificationCall(call) {
+                        lastVerificationFailed = false
+                        verifiedMutationGeneration = mutationGeneration
+                    }
+                }
 
                 // 3f. Optional post-edit verification: after a successful
                 // mutating action, run build diagnostics through the same
@@ -797,6 +939,16 @@ actor AgentLoop {
 
     /// One model generation: sends only unsent turns.
     private func generate() async throws -> String {
+        let contextTokens = history.reduce(0) { partial, turn in
+            partial + ContextCompactor.estimateTokens(turn.content)
+        }
+        // This is a generation boundary: no Metal command or llama.cpp token
+        // loop is active, so the pool may safely evict idle models and trim
+        // disposable allocator caches without touching this conversation.
+        await engine.prepareForGeneration(
+            contextTokens: contextTokens,
+            contextWindow: configuration.contextWindowTokens)
+
         let unsent = Array(history[sentTurnCount...])
         sentTurnCount = history.count
 
@@ -862,10 +1014,77 @@ actor AgentLoop {
         }()
         record.messages = fitted
         rebuildHistory(from: fitted, replacingLastUserWith: activeUserTurn)
-        sentTurnCount = 0
-        await engine.reset()
+        await rebaseEngineAfterContextEdit()
         saveTaskCapsule()
         return true
+    }
+
+    /// A successful edit is not evidence that the task works. Reliability V2
+    /// turns every workspace mutation into verification debt and pays that
+    /// debt once, immediately before the first completion claim.
+    private func prepareForCompletion() async -> Bool {
+        guard configuration.reliabilityV2,
+              mutationGeneration > verifiedMutationGeneration else { return true }
+        let passed = await runVerificationChecks()
+        guard passed else {
+            let notice = "error: completion is blocked because the latest workspace changes have not passed project checks. Repair the diagnostics, then verify again."
+            record.messages.append(
+                SessionMessage(role: .toolResult, content: notice, toolName: "reliability", timestamp: Date()))
+            history.append(ChatTurn(role: .tool, content: notice))
+            eventContinuation?.yield(.protocolError(notice))
+            return false
+        }
+        return true
+    }
+
+    private func completionEvidenceFailure() -> String? {
+        switch evidenceRequirement {
+        case .none:
+            return nil
+        case .tool where successfulToolActionCount == 0:
+            return "error: completion rejected — this request requires project evidence, but no tool has completed successfully. Use one relevant inspection, browser, command, or verification tool before answering."
+        case .mutation where mutationGeneration == 0:
+            return "error: completion rejected — this request requires a workspace change, but no edit has completed successfully. Use write_file or apply_patch first; do not print proposed code as the final answer."
+        case .tool, .mutation:
+            break
+        }
+        let inspectedBrowser = successfulToolNames.contains("browser_navigate")
+            && !successfulToolNames.isDisjoint(with: [
+                "browser_read", "browser_screenshot", "browser_click",
+            ])
+        if requiresBrowserEvidence, !inspectedBrowser {
+            return "error: completion rejected — this task requested a browser preview, but the rendered page has not been inspected. Open it with browser_navigate, then verify it with browser_read or browser_screenshot before completing."
+        }
+        return nil
+    }
+
+    private func appendReliabilityNotice(_ notice: String) {
+        record.messages.append(
+            SessionMessage(role: .toolResult, content: notice, toolName: "reliability", timestamp: Date()))
+        history.append(ChatTurn(role: .tool, content: notice))
+        eventContinuation?.yield(.protocolError(notice))
+    }
+
+    private func completionReport(for summary: String) -> String {
+        guard configuration.reliabilityV2, mutationGeneration > 0 else { return summary }
+        let paths = changedPaths.isEmpty ? "workspace changes" : changedPaths.sorted().joined(separator: ", ")
+        return summary + "\n\nVerified project checks passed. Changed: \(paths)."
+    }
+
+    private func isVerificationCall(_ call: ParsedToolCall) -> Bool {
+        if call.name == "build_diagnostics" { return true }
+        guard call.name == "run_command",
+              let command = call.string("command")?.lowercased() else { return false }
+        return [" test", "test ", "swift test", "build", "lint", "typecheck", "xcodebuild"]
+            .contains { command.contains($0) }
+    }
+
+    private static func actionSignature(_ call: ParsedToolCall) -> String {
+        call.name + "\n" + call.argumentsJSON
+    }
+
+    private static func changedPath(from call: ParsedToolCall) -> String? {
+        call.string("path") ?? call.string("destination") ?? call.string("to")
     }
 
     /// The most common provider wording is “request (N tokens) exceeds the
@@ -920,9 +1139,23 @@ actor AgentLoop {
     /// Runs the configured verification checks after an edit, through the
     /// same permission gate as any other command. Declined or failed
     /// verifications are observations, not crashes.
-    private func runVerificationChecks() async {
+    @discardableResult
+    private func runVerificationChecks() async -> Bool {
         setPhase(.verifying)
-        let call = ParsedToolCall(name: "build_diagnostics", arguments: .object([:]), index: 0)
+        guard let detectedCommand = BuildDiagnosticsTool.reliabilityCommand(in: workspace.root) else {
+            let observation = "No automated build, test, or repository check was detected for this workspace. The changed paths are recorded for review."
+            record.messages.append(
+                SessionMessage(role: .toolResult, content: observation, toolName: "verification", timestamp: Date()))
+            history.append(ChatTurn(role: .tool, content: observation))
+            lastVerificationFailed = false
+            verifiedMutationGeneration = mutationGeneration
+            setPhase(.working)
+            return true
+        }
+        let call = ParsedToolCall(
+            name: "build_diagnostics",
+            arguments: .object(["command": .string(detectedCommand)]),
+            index: 0)
         let invocation = ToolInvocation(call: call, summary: "Run build diagnostics after edit")
         eventContinuation?.yield(.toolCallStarted(invocation))
         record.messages.append(
@@ -934,16 +1167,20 @@ actor AgentLoop {
             eventContinuation?.yield(.toolCallFinished(invocation, output: message, failed: true))
             record.messages.append(
                 SessionMessage(role: .toolResult, content: message, toolName: call.name, timestamp: Date()))
+            history.append(ChatTurn(role: .tool, content: message))
+            lastVerificationFailed = true
             setPhase(.working)
-            return
+            return false
         case .needsApproval:
             guard await requestApproval(for: call, invocation: invocation) != nil else {
                 let declined = "verification checks declined by user"
                 eventContinuation?.yield(.toolCallFinished(invocation, output: declined, failed: true))
                 record.messages.append(
                     SessionMessage(role: .toolResult, content: declined, toolName: call.name, timestamp: Date()))
+                history.append(ChatTurn(role: .tool, content: declined))
+                lastVerificationFailed = true
                 setPhase(.working)
-                return
+                return false
             }
             setPhase(.verifying)
         case .auto:
@@ -955,7 +1192,9 @@ actor AgentLoop {
         record.messages.append(
             SessionMessage(role: .toolResult, content: result.output, toolName: call.name, timestamp: Date()))
         history.append(ChatTurn(role: .tool, content: result.output))
+        if !result.failed { verifiedMutationGeneration = mutationGeneration }
         setPhase(.working)
+        return !result.failed
     }
     /// Whether the tool call mutates the workspace, meaning an approved
     /// action needs a checkpoint before it runs.
@@ -991,17 +1230,22 @@ actor AgentLoop {
             responseReserve: configuration.maxTokensPerTurn)
         // Compact against the whole request, not only the persisted messages:
         // system instructions and native/text tool protocol can consume a
-        // meaningful part of a remote provider's context window.
-        let compacted = ContextCompactor.compact(
-            messages,
-            keepRecent: configuration.compressionLevel.keepRecent,
-            maxToolResultChars: configuration.compressionLevel.maxToolResultChars)
+        // meaningful part of a remote provider's context window. V2 starts at
+        // 65%; ordinary sessions retain the established 75% threshold.
+        let shouldCompressOutputs = estimate.shouldCompact
+            || ContextCompactor.shouldCompact(request, reliabilityV2: configuration.reliabilityV2)
+        let compacted = shouldCompressOutputs
+            ? ContextCompactor.compact(
+                messages,
+                keepRecent: configuration.compressionLevel.keepRecent,
+                maxToolResultChars: configuration.compressionLevel.maxToolResultChars)
+            : messages
         let fitted = ContextCompactor.fit(
             compacted,
             systemPrompt: systemPrompt,
             windowTokens: configuration.contextWindowTokens,
             responseReserve: configuration.maxTokensPerTurn)
-        guard estimate.shouldCompact || request.shouldCompact || fitted != messages else { return }
+        guard fitted != messages else { return }
 
         // Keep the per-task intelligence block in the active model history;
         // the persisted session intentionally stores the clean user message.
@@ -1034,12 +1278,28 @@ actor AgentLoop {
            let index = history.lastIndex(where: { $0.role == .user }) {
             history[index] = activeUserTurn
         }
-        sentTurnCount = 0
-        await engine.reset()
+        await rebaseEngineAfterContextEdit()
         // Epoch boundary: persist the durable task capsule so agent progress
         // survives any termination — this is deliberate state, not cache.
         saveTaskCapsule()
         Log.agent.info("Compacted transcript from \(request.totalTokens) estimated request tokens")
+    }
+
+    /// Installs a transcript rebuilt at complete turn boundaries. GGUF keeps
+    /// llama.cpp's one-slot prompt cache alive and reuses the unchanged prefix;
+    /// opaque backends decline and take the correctness-first reset path.
+    private func rebaseEngineAfterContextEdit() async {
+        let result = await engine.rebaseConversation(to: history)
+        if result.installedHistory {
+            sentTurnCount = history.count
+            if result.preservedCachePrefixTurns > 0 {
+                Log.agent.info(
+                    "Semantic context checkpoint preserved \(result.preservedCachePrefixTurns) turns")
+            }
+        } else {
+            sentTurnCount = 0
+            await engine.reset()
+        }
     }
 
     /// Deterministically extracts the durable continuation state (changed

@@ -253,6 +253,24 @@ enum ToolParser {
         return depth > 0
     }
 
+    /// Identifies explicit tool wire-format that did not produce a valid
+    /// call. Ordinary JSON/prose is deliberately ignored: only a `tool`
+    /// fence, a `<tool_call>` tag, or a clearly truncated name object is a
+    /// protocol commitment that deserves an automatic repair turn.
+    static func malformedCallReason(_ text: String) -> String? {
+        if looksLikeToolCallFragment(text) {
+            return "the JSON was cut off before its closing brace"
+        }
+        let lower = text.lowercased()
+        let hasToolFence = lower.range(
+            of: #"```\s*tool(?:\s|$)"#,
+            options: .regularExpression) != nil
+        let hasToolTag = lower.contains("<tool_call>")
+            || lower.contains("</tool_call>")
+        guard hasToolFence || hasToolTag, parse(text).isEmpty else { return nil }
+        return "the tool wrapper did not contain a valid name and JSON arguments object"
+    }
+
     // MARK: Shape validation
 
     private struct Shaped: Equatable {

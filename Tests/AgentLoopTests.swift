@@ -1,6 +1,20 @@
 import XCTest
 @testable import BeetCode
 
+private struct WorkspaceVerificationTool: AgentTool {
+    let name = "build_diagnostics"
+    let summary = "Verify the deterministic test workspace"
+    let risk = ToolRisk.execute
+    let schemaText = #"{"type":"object","properties":{},"required":[]}"#
+
+    func execute(_ call: ParsedToolCall, in context: ToolContext) async throws -> String {
+        let url = context.workspace.root.appendingPathComponent("value.swift")
+        let content = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        guard content.hasPrefix("GOOD") else { throw ToolError.commandFailed(exitCode: 1) }
+        return "Checks completed successfully."
+    }
+}
+
 /// Deterministic AgentLoop tests driven by FakeLLMEngine — no model weights,
 /// no Metal, no network.
 final class AgentLoopTests: XCTestCase {
@@ -31,7 +45,8 @@ final class AgentLoopTests: XCTestCase {
     private func makeLoop(
         config: AgentLoop.Configuration = AgentLoop.Configuration(),
         autoApproveEdits: Bool = false,
-        autoApproveCommands: Bool = false
+        autoApproveCommands: Bool = false,
+        taskHint: String = ""
     ) -> AgentLoop {
         let permissions = PermissionGate(
             autoApproveEdits: autoApproveEdits,
@@ -47,9 +62,11 @@ final class AgentLoopTests: XCTestCase {
                 SearchTool(),
                 ApplyPatchTool(),
                 RunCommandTool(),
+                WorkspaceVerificationTool(),
             ],
             permissions: permissions,
-            configuration: config)
+            configuration: config,
+            taskHint: taskHint)
     }
 
     @discardableResult
@@ -331,11 +348,12 @@ final class AgentLoopTests: XCTestCase {
         XCTAssertTrue(workspace!.exists("created-by-agent.txt"))
     }
 
-    func testCheckpointFailurePreventsMutation() async throws {
-        // No git repository → checkpointing must refuse the mutation.
+    func testFreshNonGitWorkspaceSkipsCheckpointAndExecutesApprovedMutation() async throws {
+        // A new project folder may not have Git yet. The edit should proceed,
+        // while the UI clearly reports that undo is unavailable.
         engine.enqueue(texts: [
             toolCall("write_file", "{\"path\": \"new.txt\", \"content\": \"x\"}"),
-            "The write was blocked. Complete.",
+            "The file was written.",
         ])
         let loop = makeLoop()
         let collector = EventCollector()
@@ -346,14 +364,18 @@ final class AgentLoopTests: XCTestCase {
         let finish = await collector.waitForFinish()
         _ = await collection
 
-        XCTAssertEqual(finish, .completed("The write was blocked. Complete."))
-        XCTAssertFalse(workspace!.exists("new.txt"), "mutation must not run when the checkpoint fails")
-        let failures = collector.events { event in
-            if case .checkpointFailed(let reason) = event { return reason }
+        XCTAssertEqual(finish, .completed("The file was written."))
+        XCTAssertEqual(workspace!.read("new.txt"), "x")
+        let skipped = collector.events { event in
+            if case .checkpointSkipped(let reason) = event { return reason }
             return nil
         }
-        XCTAssertEqual(failures.count, 1)
-        XCTAssertTrue(failures[0].contains("not a git repository"), failures[0])
+        XCTAssertEqual(skipped.count, 1)
+        XCTAssertTrue(skipped[0].contains("not a Git repository"), skipped[0])
+        XCTAssertFalse(collector.all.contains { event in
+            if case .checkpointFailed = event { return true }
+            return false
+        })
     }
 
     // MARK: Control flow
@@ -398,6 +420,187 @@ final class AgentLoopTests: XCTestCase {
         XCTAssertEqual(collector.assistantMessages(), ["Fixed the build."])
     }
 
+    func testReliabilityV2RejectsProseOnlyCompletionForMutationRequest() async throws {
+        var config = AgentLoop.Configuration()
+        config.checkpointingEnabled = false
+        config.reliabilityV2 = true
+        engine.enqueue(texts: [
+            "Here is the HTML you should create. Task complete.",
+            toolCall("write_file", "{\"path\": \"index.html\", \"content\": \"<h1>Ready</h1>\"}"),
+            toolCall("attempt_completion", "{\"result\": \"Created the page.\"}"),
+        ])
+        let loop = makeLoop(
+            config: config,
+            autoApproveEdits: true,
+            autoApproveCommands: true,
+            taskHint: "Build a website page")
+        let collector = await runToCompletion(loop, message: "Build a website page")
+
+        XCTAssertEqual(workspace.read("index.html"), "<h1>Ready</h1>")
+        let notices = collector.events { event in
+            if case .protocolError(let message) = event { return message }
+            return nil
+        }
+        XCTAssertTrue(notices.contains { $0.contains("requires a workspace change") })
+        guard case .completed(let answer)? = collector.finish else {
+            return XCTFail("expected completion after the real edit")
+        }
+        XCTAssertTrue(answer.contains("Created the page."), answer)
+    }
+
+    func testReliabilityV2RejectsAttemptCompletionBeforeRequestedMutation() async throws {
+        var config = AgentLoop.Configuration()
+        config.checkpointingEnabled = false
+        config.reliabilityV2 = true
+        engine.enqueue(texts: [
+            toolCall("attempt_completion", "{\"result\": \"Already done.\"}"),
+            toolCall("write_file", "{\"path\": \"fixed.txt\", \"content\": \"fixed\"}"),
+            toolCall("attempt_completion", "{\"result\": \"Actually fixed.\"}"),
+        ])
+        let loop = makeLoop(
+            config: config,
+            autoApproveEdits: true,
+            autoApproveCommands: true,
+            taskHint: "Fix the project")
+        let collector = await runToCompletion(loop, message: "Fix the project")
+
+        XCTAssertEqual(workspace.read("fixed.txt"), "fixed")
+        XCTAssertTrue(collector.events { event in
+            if case .protocolError(let message) = event { return message }
+            return nil
+        }.contains { $0.contains("no edit has completed") })
+        guard case .completed? = collector.finish else {
+            return XCTFail("expected completion after mutation evidence")
+        }
+    }
+
+    func testReliabilityV2StillAllowsGeneralKnowledgeAnswerWithoutTools() async throws {
+        var config = AgentLoop.Configuration()
+        config.reliabilityV2 = true
+        engine.enqueue(.text("An actor serializes access to its isolated state."))
+        let loop = makeLoop(config: config, taskHint: "What is a Swift actor?")
+        let collector = await runToCompletion(loop, message: "What is a Swift actor?")
+
+        XCTAssertEqual(
+            collector.finish,
+            .completed("An actor serializes access to its isolated state."))
+        XCTAssertTrue(collector.toolCalls().isEmpty)
+    }
+
+    func testReliabilityV2BlocksCompletionRepairsAndVerifiesLatestEdit() async throws {
+        workspace.write("// test package marker", to: "Package.swift")
+        var config = AgentLoop.Configuration()
+        config.checkpointingEnabled = false
+        config.reliabilityV2 = true
+        engine.enqueue(texts: [
+            toolCall("write_file", "{\"path\": \"value.swift\", \"content\": \"BAD\"}"),
+            toolCall("attempt_completion", "{\"result\": \"Done too early.\"}"),
+            toolCall("read_file", "{\"path\": \"value.swift\"}"),
+            toolCall("write_file", "{\"path\": \"value.swift\", \"content\": \"GOOD\"}"),
+            toolCall("attempt_completion", "{\"result\": \"Repaired the value.\"}"),
+        ])
+        let loop = makeLoop(
+            config: config,
+            autoApproveEdits: true,
+            autoApproveCommands: true,
+            taskHint: "Fix value.swift and run tests")
+        let collector = await runToCompletion(
+            loop, message: "Fix value.swift and run tests", timeout: 15)
+
+        XCTAssertEqual(workspace!.read("value.swift"), "GOOD")
+        XCTAssertEqual(
+            collector.toolCalls().map(\.name),
+            ["write_file", "build_diagnostics", "read_file", "write_file", "build_diagnostics"])
+        let reliabilityErrors = collector.events { event in
+            if case .protocolError(let message) = event { return message }
+            return nil
+        }
+        XCTAssertTrue(reliabilityErrors.contains { $0.contains("completion is blocked") })
+        guard case .completed(let answer)? = collector.finish else {
+            return XCTFail("expected verified completion")
+        }
+        XCTAssertTrue(answer.contains("Repaired the value."), answer)
+        XCTAssertTrue(answer.contains("Verified project checks passed"), answer)
+        XCTAssertTrue(answer.contains("value.swift"), answer)
+    }
+
+    func testReliabilityV2StopsThreeIdenticalFailedActions() async throws {
+        let missing = toolCall("read_file", "{\"path\": \"missing.txt\"}")
+        engine.enqueue(texts: [missing, missing, missing])
+        var config = AgentLoop.Configuration()
+        config.reliabilityV2 = true
+        let loop = makeLoop(config: config, taskHint: "Inspect missing.txt")
+        let collector = await runToCompletion(loop)
+
+        XCTAssertEqual(collector.toolCalls().map(\.name), ["read_file", "read_file", "read_file"])
+        let loopErrors = collector.events { event in
+            if case .protocolError(let message) = event { return message }
+            return nil
+        }
+        XCTAssertTrue(loopErrors.contains { $0.contains("same action failed twice") })
+        guard case .engineError(let message)? = collector.finish else {
+            return XCTFail("expected loop detection failure")
+        }
+        XCTAssertTrue(message.contains("three identical attempts"), message)
+    }
+
+    func testReliabilityV2DoesNotRepeatAnIdenticalSuccessfulMutation() async throws {
+        workspace.write("// test package marker", to: "Package.swift")
+        let write = toolCall("write_file", "{\"path\": \"value.swift\", \"content\": \"GOOD\"}")
+        engine.enqueue(texts: [
+            write,
+            write,
+            toolCall("attempt_completion", "{\"result\": \"Done.\"}"),
+        ])
+        var config = AgentLoop.Configuration()
+        config.checkpointingEnabled = false
+        config.reliabilityV2 = true
+        let loop = makeLoop(
+            config: config,
+            autoApproveEdits: true,
+            autoApproveCommands: true,
+            taskHint: "Fix value.swift and test it")
+        let collector = await runToCompletion(loop, timeout: 15)
+
+        XCTAssertEqual(workspace!.read("value.swift"), "GOOD")
+        let outputs = collector.events { event in
+            if case .toolCallFinished(_, let output, _) = event { return output }
+            return nil
+        }
+        XCTAssertTrue(outputs.contains { $0.contains("already completed") })
+        XCTAssertEqual(collector.toolCalls().filter { $0.name == "build_diagnostics" }.count, 1)
+    }
+
+    func testReliabilityV2AllowsSameCheckAgainAfterNewSourceGeneration() async throws {
+        workspace.write("// test package marker", to: "Package.swift")
+        var config = AgentLoop.Configuration()
+        config.checkpointingEnabled = false
+        config.reliabilityV2 = true
+        let check = toolCall("build_diagnostics", "{\"command\": \"swift test\"}")
+        engine.enqueue(texts: [
+            toolCall("write_file", "{\"path\": \"value.swift\", \"content\": \"GOOD_ONE\"}"),
+            check,
+            toolCall("read_file", "{\"path\": \"value.swift\"}"),
+            toolCall("write_file", "{\"path\": \"value.swift\", \"content\": \"GOOD_TWO\"}"),
+            check,
+            toolCall("attempt_completion", "{\"result\": \"Checked both generations.\"}"),
+        ])
+        let loop = makeLoop(
+            config: config,
+            autoApproveEdits: true,
+            autoApproveCommands: true,
+            taskHint: "Update value.swift and run tests after every edit")
+        let collector = await runToCompletion(loop, timeout: 15)
+
+        XCTAssertEqual(
+            collector.toolCalls().filter { $0.name == "build_diagnostics" }.count,
+            2)
+        XCTAssertEqual(workspace.read("value.swift"), "GOOD_TWO")
+        guard case .completed? = collector.finish else {
+            return XCTFail("expected verified completion")
+        }
+    }
+
     func testMultipleCallsAreProtocolErrorNotBatched() async throws {
         workspace!.write("a", to: "a.txt")
         workspace!.write("b", to: "b.txt")
@@ -421,6 +624,60 @@ final class AgentLoopTests: XCTestCase {
         XCTAssertEqual(collector.toolCalls().count, 1)
         XCTAssertEqual(collector.toolCalls()[0].name, "read_file")
         XCTAssertEqual(collector.finish, .completed("Done."))
+    }
+
+    func testTaskRoutingAdvertisesCompactNativeAndPromptCatalogs() async throws {
+        engine.enqueue(.text("Done."))
+        let loop = makeLoop(taskHint: "Fix the login bug and run tests")
+        _ = await runToCompletion(loop, message: "Fix the login bug and run tests")
+
+        let native = Set(engine.configuredNativeToolNames)
+        XCTAssertTrue(native.contains("read_file"))
+        XCTAssertTrue(native.contains("apply_patch"))
+        XCTAssertTrue(native.contains("run_command"))
+        XCTAssertTrue(native.contains("attempt_completion"))
+        XCTAssertFalse(native.contains("list_directory"))
+        XCTAssertFalse(native.contains("task"))
+
+        let system = try XCTUnwrap(engine.turnHistory.first?.first?.content)
+        XCTAssertTrue(system.contains("## apply_patch —"))
+        XCTAssertFalse(system.contains("## list_directory —"))
+    }
+
+    func testToolOutsideRoutedCatalogIsRejectedBeforeExecution() async throws {
+        engine.enqueue(texts: [
+            toolCall("write_file", "{\"path\": \"forbidden.txt\", \"content\": \"x\"}"),
+            "No write was needed.",
+        ])
+        let loop = makeLoop(
+            autoApproveEdits: true,
+            taskHint: "Explain the code in README.md")
+        let collector = await runToCompletion(loop, message: "Explain the code in README.md")
+
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: workspace!.url.appendingPathComponent("forbidden.txt").path))
+        XCTAssertTrue(collector.toolCalls().isEmpty)
+        let errors = collector.events { event in
+            if case .protocolError(let message) = event { return message }
+            return nil
+        }
+        XCTAssertEqual(errors.count, 1)
+        XCTAssertTrue(errors[0].contains("not enabled for this task"), errors[0])
+        XCTAssertEqual(collector.finish, .completed("No write was needed."))
+    }
+
+    func testThreeMalformedToolCallsStopWithoutExecutingAnything() async throws {
+        let malformed = "```tool\n{\"arguments\": {}}\n```"
+        engine.enqueue(texts: [malformed, malformed, malformed])
+        let loop = makeLoop()
+        let collector = await runToCompletion(loop)
+
+        XCTAssertTrue(collector.toolCalls().isEmpty)
+        XCTAssertEqual(engine.streamCallCount, 3)
+        guard case .engineError(let message)? = collector.finish else {
+            return XCTFail("expected bounded protocol engine error")
+        }
+        XCTAssertTrue(message.contains("three malformed tool calls"), message)
     }
 
     func testMaxTurnsTermination() async throws {
@@ -559,6 +816,7 @@ final class AgentLoopTests: XCTestCase {
 
     func testCompactionPreservesAssistantToolPairing() async throws {
         workspace!.write("x", to: "a.txt")
+        engine.semanticRebaseEnabled = true
         var responses: [String] = []
         for _ in 0..<5 {
             responses.append(toolCall("read_file", "{\"path\": \"a.txt\"}"))
@@ -594,6 +852,9 @@ final class AgentLoopTests: XCTestCase {
         XCTAssertGreaterThan(stubbed.count, 0)
         let assistantContents = messages.filter { $0.role == .assistant }.map(\.content)
         XCTAssertFalse(assistantContents.contains { $0.contains("omitted") })
+        XCTAssertGreaterThan(
+            engine.semanticRebaseCallCount, 0,
+            "compaction should rebase at a semantic turn boundary")
     }
 
 

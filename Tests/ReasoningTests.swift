@@ -83,6 +83,21 @@ final class ReasoningTests: XCTestCase {
         ])
     }
 
+    func testMarkdownDocumentParserPreservesTables() {
+        let blocks = MarkdownDocumentParser.blocks(from: """
+        | Model | Result | Speed |
+        | --- | --- | ---: |
+        | Qwen | Pass | 11.2 tok/s |
+        | API | Pass | 92.8 tok/s |
+        """)
+
+        XCTAssertEqual(blocks.map(\.content), [
+            .table(
+                headers: ["Model", "Result", "Speed"],
+                rows: [["Qwen", "Pass", "11.2 tok/s"], ["API", "Pass", "92.8 tok/s"]]),
+        ])
+    }
+
     func testAdjacentProviderReasoningDeltasReadAsOneTrace() {
         let raw = "<think>I</think><think> need</think><think> to create</think>"
         XCTAssertEqual(

@@ -109,6 +109,73 @@ final class EnginePoolTests: XCTestCase {
         XCTAssertFalse(EnginePool.Planner.underCap(residentCount: 4, maxResident: 4))
     }
 
+    func testSixteenGBResidentSetAllowsOneLargeModelButRejectsTwo() {
+        let physical: UInt64 = 16 * 1_024 * 1_024 * 1_024
+        let cleanBudget = UInt64(Double(physical) * 0.70)
+        let qwenDiskBytes: Int64 = 6_631_575_552
+
+        XCTAssertTrue(EnginePool.Planner.residentSetFits(
+            residents: [],
+            candidateDiskBytes: qwenDiskBytes,
+            cleanUsableBudget: cleanBudget))
+
+        let resident = EnginePool.Resident(
+            modelID: "qwen-a",
+            directory: URL(fileURLWithPath: "/tmp/qwen-a"),
+            diskBytes: qwenDiskBytes,
+            lastUsed: Date(),
+            format: .gguf,
+            reservedBytes: MemoryAdvisor.projectedFootprint(
+                diskBytes: qwenDiskBytes))
+        XCTAssertFalse(EnginePool.Planner.residentSetFits(
+            residents: [resident],
+            candidateDiskBytes: qwenDiskBytes,
+            cleanUsableBudget: cleanBudget))
+    }
+
+    func testSemanticContextPlannerStopsAtFirstChangedTurnBoundary() {
+        let original = [
+            ChatTurn(role: .system, content: "rules"),
+            ChatTurn(role: .user, content: "task"),
+            ChatTurn(role: .assistant, content: "tool call"),
+            ChatTurn(role: .tool, content: "large old output"),
+            ChatTurn(role: .assistant, content: "continue"),
+        ]
+        var compacted = original
+        compacted[3] = ChatTurn(role: .tool, content: "[older tool output omitted]")
+
+        XCTAssertEqual(
+            SemanticContextPlanner.commonPrefixTurnCount(original, compacted),
+            3)
+        XCTAssertEqual(
+            SemanticContextPlanner.commonPrefixTurnCount(original, original),
+            original.count)
+    }
+
+    func testContextPressurePlannerActsEarlierOnSmallUnifiedMemoryMacs() {
+        let gib: UInt64 = 1_024 * 1_024 * 1_024
+        XCTAssertEqual(
+            EnginePool.Planner.contextPressureLevel(
+                contextTokens: 349, contextWindow: 1_000,
+                physicalMemory: 16 * gib, availableBudget: 4 * gib),
+            .none)
+        XCTAssertEqual(
+            EnginePool.Planner.contextPressureLevel(
+                contextTokens: 350, contextWindow: 1_000,
+                physicalMemory: 16 * gib, availableBudget: 4 * gib),
+            .trimTransientCaches)
+        XCTAssertEqual(
+            EnginePool.Planner.contextPressureLevel(
+                contextTokens: 500, contextWindow: 1_000,
+                physicalMemory: 16 * gib, availableBudget: 4 * gib),
+            .evictIdleAndTrim)
+        XCTAssertEqual(
+            EnginePool.Planner.contextPressureLevel(
+                contextTokens: 500, contextWindow: 1_000,
+                physicalMemory: 64 * gib, availableBudget: 8 * gib),
+            .none)
+    }
+
     func testActivateLoadsAndSwitchesWarm() async throws {
         let pool = EnginePool(maxResident: 3)
         await pool.setAdmitLoad { _ in }  // tests never touch real memory budgets
@@ -191,6 +258,45 @@ final class EnginePoolTests: XCTestCase {
         let residents = await pool.residentModelIDs
         XCTAssertEqual(residents, ["a"], "only the active model (b) unloads")
     }
+
+    func testContextGrowthEvictsOnlyIdleResidentsAndTrimsOncePerBand() async throws {
+        let pool = EnginePool(maxResident: 3)
+        await pool.setAdmitLoad { _ in }
+        let fakes = FakeEngineBag()
+        await pool.setEngineFactory { _, _ in fakes.make() }
+        try await pool.activate(
+            directory: URL(fileURLWithPath: "/tmp/a"),
+            modelID: "a", diskBytes: 100)
+        try await pool.activate(
+            directory: URL(fileURLWithPath: "/tmp/b"),
+            modelID: "b", diskBytes: 100)
+
+        let gib: UInt64 = 1_024 * 1_024 * 1_024
+        await pool.prepareForGeneration(
+            contextTokens: 500, contextWindow: 1_000,
+            physicalMemory: 16 * gib, availableBudget: 4 * gib)
+
+        let residents = await pool.residentModelIDs
+        XCTAssertEqual(residents, ["b"])
+        XCTAssertTrue(fakes.engines[0].unloaded)
+        XCTAssertFalse(fakes.engines[1].unloaded)
+        XCTAssertEqual(fakes.engines[1].trimTransientMemoryCallCount, 1)
+
+        await pool.prepareForGeneration(
+            contextTokens: 550, contextWindow: 1_000,
+            physicalMemory: 16 * gib, availableBudget: 4 * gib)
+        XCTAssertEqual(
+            fakes.engines[1].trimTransientMemoryCallCount, 1,
+            "remaining in one pressure band must not purge every turn")
+
+        await pool.prepareForGeneration(
+            contextTokens: 100, contextWindow: 1_000,
+            physicalMemory: 16 * gib, availableBudget: 4 * gib)
+        await pool.prepareForGeneration(
+            contextTokens: 500, contextWindow: 1_000,
+            physicalMemory: 16 * gib, availableBudget: 4 * gib)
+        XCTAssertEqual(fakes.engines[1].trimTransientMemoryCallCount, 2)
+    }
 }
 
 /// Tracks every engine the pool's factory produces.
@@ -210,6 +316,79 @@ private final class FakeEngineBag: @unchecked Sendable {
         _engines.append(engine)
         lock.unlock()
         return engine
+    }
+}
+
+// MARK: - MLX reversible experiments
+
+final class MLXExperimentPlannerTests: XCTestCase {
+
+    func testMatchingAssistantEchoReusesOnlyFollowingTurns() {
+        let turns = [
+            ChatTurn(role: .assistant, content: "  cached answer\n"),
+            ChatTurn(role: .tool, content: "tool result"),
+        ]
+
+        XCTAssertEqual(
+            MLXPromptCachePlanner.plan(
+                newTurns: turns,
+                expectedAssistantEcho: "cached answer",
+                enabled: true),
+            .incremental([ChatTurn(role: .tool, content: "tool result")]))
+    }
+
+    func testMismatchAlwaysFallsBackToCanonicalReplay() {
+        let turns = [
+            ChatTurn(role: .assistant, content: "display-repaired answer"),
+            ChatTurn(role: .tool, content: "tool result"),
+        ]
+
+        XCTAssertEqual(
+            MLXPromptCachePlanner.plan(
+                newTurns: turns,
+                expectedAssistantEcho: "raw model answer",
+                enabled: true),
+            .fullReplay)
+    }
+
+    func testAssistantOnlyContinuationUsesFullReplay() {
+        XCTAssertEqual(
+            MLXPromptCachePlanner.plan(
+                newTurns: [ChatTurn(role: .assistant, content: "approved plan")],
+                expectedAssistantEcho: "approved plan",
+                enabled: true),
+            .fullReplay,
+            "an empty incremental message list cannot safely render a new generation prompt")
+    }
+
+    func testDisabledPromptCacheAlwaysUsesFullReplay() {
+        XCTAssertEqual(
+            MLXPromptCachePlanner.plan(
+                newTurns: [
+                    ChatTurn(role: .assistant, content: "same"),
+                    ChatTurn(role: .user, content: "continue"),
+                ],
+                expectedAssistantEcho: "same",
+                enabled: false),
+            .fullReplay)
+    }
+
+    func testKV8ParametersAreIndependentAndConservative() {
+        let standard = MLXEngine.makeParameters(
+            temperature: 0.6, maxTokens: 10, quantizedKVEnabled: false)
+        XCTAssertNil(standard.kvBits)
+
+        let kv8 = MLXEngine.makeParameters(
+            temperature: 0.6, maxTokens: 10, quantizedKVEnabled: true)
+        XCTAssertEqual(kv8.kvBits, 8)
+        XCTAssertEqual(kv8.kvGroupSize, 64)
+        XCTAssertEqual(kv8.quantizedKVStart, 512)
+    }
+
+    func testAssistantEchoUsesTheSameVisibleTextRepairAsAgentLoop() {
+        XCTAssertEqual(
+            MLXEngine.assistantEcho(from: "<think>hidden</think>\n\nVisible answer"),
+            "Visible answer")
     }
 }
 
@@ -262,11 +441,119 @@ final class GGUFPlannerTests: XCTestCase {
     func testServerArgumentsMTPFlagIsOptIn() {
         let plain = GGUFEngine.Planner.serverArguments(modelPath: "/m.gguf", port: 1)
         XCTAssertFalse(plain.contains("--spec-type"))
+        XCTAssertEqual(plain[plain.firstIndex(of: "--parallel")! + 1], "1")
+        XCTAssertTrue(plain.contains("--cache-prompt"))
+        XCTAssertTrue(plain.contains("--jinja"))
 
         let mtp = GGUFEngine.Planner.serverArguments(
-            modelPath: "/m.gguf", port: 1, speculativeMTP: true)
+            modelPath: "/m.gguf", port: 1, speculation: .mtp)
         XCTAssertEqual(mtp[mtp.firstIndex(of: "--spec-type")! + 1], "draft-mtp")
         XCTAssertEqual(mtp[mtp.firstIndex(of: "--spec-draft-n-max")! + 1], "2")
+    }
+
+    func testM4BasePerformanceProfileUsesMeasuredPrefillBatches() {
+        let args = GGUFEngine.Planner.serverArguments(
+            modelPath: "/m.gguf",
+            port: 1,
+            performanceProfile: .m4Base16GB)
+
+        XCTAssertEqual(args[args.firstIndex(of: "--batch-size")! + 1], "1024")
+        XCTAssertEqual(args[args.firstIndex(of: "--ubatch-size")! + 1], "256")
+    }
+
+    func testNGramArgumentsAreOptInAndUseUpstreamQualityDefaults() {
+        let args = GGUFEngine.Planner.serverArguments(
+            modelPath: "/m.gguf", port: 1, speculation: .ngram)
+
+        XCTAssertEqual(args[args.firstIndex(of: "--spec-type")! + 1], "ngram-mod")
+        XCTAssertFalse(args.contains("--spec-ngram-mod-n-match"))
+        XCTAssertFalse(args.contains("--spec-ngram-mod-n-min"))
+        XCTAssertFalse(args.contains("--spec-ngram-mod-n-max"))
+    }
+
+    func testAppleSiliconUsesStableDecodingForEmbeddedMTPByDefault() {
+        let metadata = GGUFMetadata(mtpPredictLayers: 1)
+        XCTAssertEqual(
+            GGUFEngine.Planner.fallbackSpeculation(
+                metadata: metadata,
+                experimentalNGramEnabled: false,
+                isAppleSilicon: true),
+            .none)
+        XCTAssertEqual(
+            GGUFEngine.Planner.fallbackSpeculation(
+                metadata: metadata,
+                experimentalNGramEnabled: false,
+                isAppleSilicon: false),
+            .mtp)
+    }
+
+    func testExplicitNGramPreferenceOverridesEmbeddedMTP() {
+        XCTAssertEqual(
+            GGUFEngine.Planner.fallbackSpeculation(
+                metadata: GGUFMetadata(mtpPredictLayers: 1),
+                experimentalNGramEnabled: true,
+                isAppleSilicon: true),
+            .ngram)
+    }
+
+    func testChatOnlyUsesNonThinkingModeUnlessUserExplicitlyRequestsDepth() {
+        let chat = ChatTurn(
+            role: .system,
+            content: "You are Beet Code in chat-only mode. Have a helpful conversation.")
+        XCTAssertEqual(
+            GGUFEngine.Planner.reasoningEffort(
+                turns: [chat, ChatTurn(role: .user, content: "Reply with exactly: OK")],
+                maxTokens: 4_096),
+            "none")
+        XCTAssertNil(
+            GGUFEngine.Planner.reasoningEffort(
+                turns: [chat, ChatTurn(role: .user, content: "Think deeply and prove this claim.")],
+                maxTokens: 4_096))
+    }
+
+    func testSmallOutputBudgetCannotBeConsumedByHiddenReasoning() {
+        let project = ChatTurn(
+            role: .system,
+            content: "You are Beet Code, an autonomous coding agent.")
+        XCTAssertEqual(
+            GGUFEngine.Planner.reasoningEffort(
+                turns: [project, ChatTurn(role: .user, content: "Reply with OK")],
+                maxTokens: 256),
+            "none")
+        XCTAssertNil(
+            GGUFEngine.Planner.reasoningEffort(
+                turns: [project, ChatTurn(role: .user, content: "Inspect the project")],
+                maxTokens: 768))
+    }
+
+    func testDFlashArgumentsAreOptInAndUseTheFourTokenMacProfile() throws {
+        let draft = try XCTUnwrap(GGUFEngine.Planner.dflashDraft(
+            modelID: "qwen3.5-9b-gguf-q4", metadata: nil))
+        let args = GGUFEngine.Planner.serverArguments(
+            modelPath: "/qwen35-9b.gguf", port: 1,
+            speculation: .dflash(
+                modelPath: "/draft/qwen35-9b-dflash-Q4_K_M.gguf",
+                maxDraftTokens: draft.maxDraftTokens))
+
+        XCTAssertEqual(args[args.firstIndex(of: "--spec-type")! + 1], "draft-dflash")
+        XCTAssertEqual(
+            args[args.firstIndex(of: "--spec-draft-model")! + 1],
+            "/draft/qwen35-9b-dflash-Q4_K_M.gguf")
+        XCTAssertEqual(args[args.firstIndex(of: "--spec-draft-n-max")! + 1], "4")
+        XCTAssertEqual(args[args.firstIndex(of: "--flash-attn")! + 1], "on")
+        XCTAssertTrue(args.contains("--jinja"))
+    }
+
+    func testDFlashPairingRejectsWrongFamilyOrParameterSize() {
+        XCTAssertNil(GGUFEngine.Planner.dflashDraft(
+            modelID: "qwen3.5-4b-gguf-q4", metadata: nil))
+        XCTAssertNil(GGUFEngine.Planner.dflashDraft(
+            modelID: "qwen3-8b-gguf-q4", metadata: nil))
+
+        let imported = GGUFMetadata(
+            architecture: "qwen35", modelName: "Custom Qwen 9B")
+        XCTAssertNotNil(GGUFEngine.Planner.dflashDraft(
+            modelID: "custom-model", metadata: imported))
     }
 
     // MARK: KV-aware context admission

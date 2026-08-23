@@ -174,8 +174,24 @@ final class SettingsStoreTests: XCTestCase {
         let store = SettingsStore(defaults: defaults)
 
         XCTAssertEqual(store.appearance, .dark)
+        XCTAssertEqual(store.textSize, .comfortable)
         XCTAssertFalse(store.computerControlEnabled)
         XCTAssertFalse(store.intelligenceInspectorEnabled)
+        XCTAssertFalse(store.experimentalDFlashEnabled)
+        XCTAssertFalse(store.experimentalNGramEnabled)
+        XCTAssertFalse(store.experimentalMLXPromptCacheEnabled)
+        XCTAssertFalse(store.experimentalMLXQuantizedKVEnabled)
+    }
+
+    func testTextSizePersistsIndependently() {
+        let (defaults, suite) = isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = SettingsStore(defaults: defaults)
+        store.textSize = .large
+
+        XCTAssertEqual(SettingsStore(defaults: defaults).textSize, .large)
+        XCTAssertEqual(store.appearance, .dark)
     }
 
     func testLegacyBeetAppearanceMigratesToDarkOnce() {
@@ -189,6 +205,49 @@ final class SettingsStoreTests: XCTestCase {
         migrated.appearance = .beet
         let reopened = SettingsStore(defaults: defaults)
         XCTAssertEqual(reopened.appearance, .beet)
+    }
+
+    func testExperimentalDFlashPreferencePersistsWithoutChangingItsDefault() {
+        let (defaults, suite) = isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = SettingsStore(defaults: defaults)
+        XCTAssertFalse(store.experimentalDFlashEnabled)
+        store.experimentalDFlashEnabled = true
+        XCTAssertTrue(SettingsStore(defaults: defaults).experimentalDFlashEnabled)
+    }
+
+    func testExperimentalNGramPreferencePersistsWithoutChangingItsDefault() {
+        let (defaults, suite) = isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = SettingsStore(defaults: defaults)
+        XCTAssertFalse(store.experimentalNGramEnabled)
+        store.experimentalNGramEnabled = true
+        XCTAssertTrue(SettingsStore(defaults: defaults).experimentalNGramEnabled)
+    }
+
+    func testExperimentalMLXPreferencesPersistIndependentlyAndDefaultOff() {
+        let (defaults, suite) = isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = SettingsStore(defaults: defaults)
+        XCTAssertFalse(store.experimentalMLXPromptCacheEnabled)
+        XCTAssertFalse(store.experimentalMLXQuantizedKVEnabled)
+
+        store.experimentalMLXPromptCacheEnabled = true
+        XCTAssertTrue(SettingsStore(defaults: defaults).experimentalMLXPromptCacheEnabled)
+        XCTAssertFalse(SettingsStore(defaults: defaults).experimentalMLXQuantizedKVEnabled)
+
+        store.experimentalMLXQuantizedKVEnabled = true
+        let reopened = SettingsStore(defaults: defaults)
+        XCTAssertTrue(reopened.experimentalMLXPromptCacheEnabled)
+        XCTAssertTrue(reopened.experimentalMLXQuantizedKVEnabled)
+
+        reopened.experimentalMLXPromptCacheEnabled = false
+        reopened.experimentalMLXQuantizedKVEnabled = false
+        XCTAssertFalse(SettingsStore(defaults: defaults).experimentalMLXPromptCacheEnabled)
+        XCTAssertFalse(SettingsStore(defaults: defaults).experimentalMLXQuantizedKVEnabled)
     }
 }
 

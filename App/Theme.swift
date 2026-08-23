@@ -18,11 +18,16 @@ enum Theme {
     // so a Beet-mode switch re-tints every neutral live. Only ever mutated
     // from the main actor via applyAppearance.
     nonisolated(unsafe) static var currentAppearance: AppAppearance = .system
+    nonisolated(unsafe) static var currentTextSize: AppTextSize = .comfortable
 
     /// Applies the user's palette choice. Called once at launch and again on
     /// every change (mirrors `applyAppearance`).
     @MainActor static func applyPalette(_ palette: AccentPalette) {
         currentPalette = palette
+    }
+
+    @MainActor static func applyTextSize(_ size: AppTextSize) {
+        currentTextSize = size
     }
 
     /// Palette-driven dynamic color: resolves the CURRENT palette's hex
@@ -145,7 +150,15 @@ enum ContentColumn {
 /// native proportional face; code, diffs, and diagnostics keep monospaced
 /// typography in their dedicated surfaces.
 enum AppFont {
-    static let editor = Font.system(size: 15, weight: .regular, design: .default)
+    /// SF Pro remains the most legible native face on macOS. Explicit roles
+    /// keep chat prose comfortably larger than dense controls instead of
+    /// letting every view fall back to the compact macOS body size.
+    private static var scale: CGFloat { CGFloat(Theme.currentTextSize.scale) }
+    static var chatBody: Font { .system(size: 16 * scale, weight: .regular, design: .default) }
+    static var chatHeading: Font { .system(size: 18 * scale, weight: .semibold, design: .default) }
+    static var navigationTitle: Font { .system(size: 13.5 * scale, weight: .semibold, design: .default) }
+    static var navigationMeta: Font { .system(size: 11.5 * scale, weight: .regular, design: .default) }
+    static var editor: Font { .system(size: 15.5 * scale, weight: .regular, design: .default) }
 }
 
 /// Spacing — 4pt grid. Use these instead of ad-hoc padding literals.

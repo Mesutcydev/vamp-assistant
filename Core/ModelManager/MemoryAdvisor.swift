@@ -80,6 +80,13 @@ enum MemoryAdvisor {
         UInt64(ProcessInfo.processInfo.physicalMemory)
     }
 
+    /// Total model budget on a clean process. EnginePool uses this for a
+    /// conservative resident-set reservation so lazy MLX mappings and GGUF
+    /// helper processes cannot both look free before their pages are touched.
+    static var cleanUsableBudget: UInt64 {
+        UInt64(Double(physicalMemory) * (1.0 - osReserveFraction))
+    }
+
     /// This process's true memory footprint. `phys_footprint` matches what the
     /// kernel charges us and includes Metal buffers; `resident_size` would
     /// over-report once the GPU touches weights.
@@ -93,6 +100,25 @@ enum MemoryAdvisor {
         }
         guard result == KERN_SUCCESS else { return 0 }
         return UInt64(info.phys_footprint)
+    }
+
+    /// True physical footprint for a child process. `resident_size` misses
+    /// some unified-memory accounting; rusage v4 exposes the same
+    /// `phys_footprint` concept used for Beet Code's own task.
+    static func processFootprint(pid: Int32) -> UInt64? {
+        guard pid > 0 else { return nil }
+        var info = rusage_info_v4()
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            // C declares this as `rusage_info_t *` where rusage_info_t is
+            // `void *`, but the function writes the struct directly into the
+            // supplied storage. Match the canonical `(rusage_info_t *)&info`
+            // cast without introducing an intermediate pointer variable.
+            let buffer = UnsafeMutableRawPointer(pointer)
+                .assumingMemoryBound(to: rusage_info_t?.self)
+            return proc_pid_rusage(pid, RUSAGE_INFO_V4, buffer)
+        }
+        guard result == 0 else { return nil }
+        return info.ri_phys_footprint
     }
 
     // NOTE: `os_proc_available_memory()` is iOS-only. On macOS the budget is

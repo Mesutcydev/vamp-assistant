@@ -30,6 +30,26 @@ struct StatusBarView: View {
             .help(appState.isRemoteActive ? "Active remote (BYOK) engine" : "Active local MLX model")
             .layoutPriority(2)
 
+            if appState.lastEngineStats.acceleration != .standard {
+                chip(
+                    icon: accelerationIcon,
+                    tint: appState.lastEngineStats.acceleration == .dflash
+                        ? Theme.success : Theme.info
+                ) {
+                    Text(accelerationLabel)
+                }
+                .help(accelerationHelp)
+            }
+
+            if appState.lastEngineStats.mlxPromptCacheActive
+                || appState.lastEngineStats.mlxQuantizedKVActive
+            {
+                chip(icon: "memorychip.fill", tint: Theme.info) {
+                    Text(mlxExperimentLabel)
+                }
+                .help(mlxExperimentHelp)
+            }
+
             chip(icon: "memorychip", tint: Theme.info) {
                 Text(ByteFormatter.bytes(appState.currentFootprint))
                     .monospacedDigit()
@@ -72,6 +92,57 @@ struct StatusBarView: View {
                 .help("This chat: \(appState.sessionUsage.promptTokens) prompt + \(appState.sessionUsage.completionTokens) completion tokens across \(appState.sessionUsage.turns) generation(s). Cost is a published-rate estimate, not a bill.")
             }
         }
+    }
+
+    private var accelerationIcon: String {
+        switch appState.lastEngineStats.acceleration {
+        case .dflash: "bolt.fill"
+        case .ngram: "text.word.spacing"
+        case .mtp: "arrow.trianglehead.2.clockwise.rotate.90"
+        case .standard: ""
+        }
+    }
+
+    private var accelerationLabel: LocalizedStringResource {
+        switch appState.lastEngineStats.acceleration {
+        case .dflash: "DFlash"
+        case .ngram: "N-gram"
+        case .mtp: "MTP"
+        case .standard: "Standard"
+        }
+    }
+
+    private var accelerationHelp: LocalizedStringResource {
+        switch appState.lastEngineStats.acceleration {
+        case .dflash: "Experimental DFlash speculative decoding is active."
+        case .ngram: "Experimental model-free n-gram speculative decoding is active."
+        case .mtp: "Built-in multi-token prediction is active."
+        case .standard: "Standard decoding is active."
+        }
+    }
+
+    private var mlxExperimentLabel: LocalizedStringResource {
+        if appState.lastEngineStats.mlxPromptCacheActive
+            && appState.lastEngineStats.mlxQuantizedKVActive
+        {
+            return "MLX cache + KV8"
+        }
+        if appState.lastEngineStats.mlxPromptCacheActive {
+            return "MLX cache"
+        }
+        return "MLX KV8"
+    }
+
+    private var mlxExperimentHelp: LocalizedStringResource {
+        if appState.lastEngineStats.mlxPromptCacheActive
+            && appState.lastEngineStats.mlxQuantizedKVActive
+        {
+            return "Verified in-memory prompt reuse and experimental 8-bit MLX KV cache are active."
+        }
+        if appState.lastEngineStats.mlxPromptCacheActive {
+            return "Verified in-memory MLX prompt reuse is active."
+        }
+        return "Experimental 8-bit MLX KV cache is active after the first 512 tokens."
     }
 
     /// Thermal state only — never a percentage, so nobody reads it as a

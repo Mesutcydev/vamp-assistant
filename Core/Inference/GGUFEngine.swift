@@ -11,7 +11,7 @@ import Foundation
 /// Lifecycle mirrors the MLX engine: admission goes through `MemoryAdvisor`,
 /// generation is serialized on the pool's shared `GenerationGate`, and unload
 /// terminates the server process.
-final class GGUFEngine: LLMEngine, @unchecked Sendable {
+final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
 
     enum GGUFError: Error, LocalizedError, Equatable {
         case noGGUFFile
@@ -36,6 +36,91 @@ final class GGUFEngine: LLMEngine, @unchecked Sendable {
     /// Pure decisions — deterministic and unit-testable.
     enum Planner {
 
+        struct DFlashDraft: Sendable, Equatable {
+            let repository: String
+            let fileName: String
+            let sourceURL: URL
+            let diskBytes: Int64
+            let maxDraftTokens: Int
+        }
+
+        struct PerformanceProfile: Sendable, Equatable {
+            let batchSize: Int
+            let microBatchSize: Int
+
+            /// Measured on the base M4 / 16 GB Qwen3.8 9B Q5 workload:
+            /// 193.8 prompt tok/s versus 183.4 at llama.cpp's 2048/512
+            /// defaults, while also reducing transient prefill memory.
+            static let m4Base16GB = PerformanceProfile(
+                batchSize: 1_024,
+                microBatchSize: 256)
+
+            static func recommended(for device: DeviceProfile) -> PerformanceProfile? {
+                guard device.generationNumber == 4,
+                      device.variant == .base,
+                      device.memoryGB <= 16
+                else { return nil }
+                return .m4Base16GB
+            }
+        }
+
+        enum Speculation: Sendable, Equatable {
+            case none
+            case mtp
+            case dflash(modelPath: String, maxDraftTokens: Int)
+            case ngram
+
+            var acceleration: EngineAcceleration {
+                switch self {
+                case .none: .standard
+                case .mtp: .mtp
+                case .dflash: .dflash
+                case .ngram: .ngram
+                }
+            }
+        }
+
+        /// Choose the stable speculative path after any explicit DFlash
+        /// attempt. ngram-mod is an explicit, reversible preference and must
+        /// not be silently shadowed by an embedded MTP head. On Apple
+        /// silicon, current llama.cpp Metal builds can spend as much work
+        /// evaluating the MTP head as they save by accepting its drafts, so
+        /// ordinary decoding remains the stable default there. Other
+        /// platforms keep using a model-provided MTP head automatically.
+        static func fallbackSpeculation(
+            metadata: GGUFMetadata?,
+            experimentalNGramEnabled: Bool,
+            isAppleSilicon: Bool
+        ) -> Speculation {
+            if experimentalNGramEnabled { return .ngram }
+            if metadata?.supportsDraftMTP == true, !isAppleSilicon { return .mtp }
+            return .none
+        }
+
+        /// llama.cpp's current OpenAI-compatible request contract maps
+        /// `reasoning_effort: none` to a hybrid model's non-thinking chat
+        /// template. Chat-only turns use that fast path by default so a tiny
+        /// answer cannot spend its entire output allowance in hidden
+        /// reasoning. A user can still ask explicitly for deep reasoning;
+        /// project-agent turns retain the model's automatic reasoning mode.
+        static func reasoningEffort(turns: [ChatTurn], maxTokens: Int?) -> String? {
+            if let maxTokens, maxTokens <= 512 { return "none" }
+            guard let system = turns.first(where: { $0.role == .system })?.content,
+                  system.localizedCaseInsensitiveContains("chat-only mode")
+            else { return nil }
+            let request = turns.last(where: { $0.role == .user })?.content ?? ""
+            return requestsDeepReasoning(request) ? nil : "none"
+        }
+
+        private static func requestsDeepReasoning(_ request: String) -> Bool {
+            let normalized = request.lowercased()
+            return [
+                "think deeply", "reason carefully", "analyze deeply",
+                "step by step", "extended reasoning", "show your reasoning",
+                "take your time and think", "work through the proof",
+            ].contains(where: normalized.contains)
+        }
+
         /// The weight file to serve: the LARGEST `.gguf` in the directory
         /// (multi-file splits are rare; the biggest shard is the real model).
         static func selectGGUF(named fileNames: [String]) -> String? {
@@ -59,26 +144,85 @@ final class GGUFEngine: LLMEngine, @unchecked Sendable {
         }
 
         /// Server launch arguments: loopback-only, no web UI, GPU-offloaded.
-        /// `speculativeMTP` turns on draft-mtp speculative decoding — only
-        /// pass true when the GGUF ships nextn tensors (GGUFMetadata
-        /// .supportsDraftMTP); without them the flag is dead weight.
-        /// n-max 2: deeper drafts waste verify passes on code (acceptance
-        /// falls off fast past the second token).
+        /// Speculation is explicit and mutually exclusive. DFlash takes a
+        /// separate 4-bit draft checkpoint; MTP uses next-token tensors
+        /// embedded in the target GGUF. The ordinary launch remains the
+        /// default and contains no experimental flags.
         static func serverArguments(modelPath: String, port: Int, contextSize: Int = defaultContextSize,
-                                    speculativeMTP: Bool = false) -> [String] {
+                                    speculation: Speculation = .none,
+                                    performanceProfile: PerformanceProfile? = nil) -> [String] {
             var args = [
                 "--model", modelPath,
                 "--host", "127.0.0.1",
                 "--port", String(port),
                 "--ctx-size", String(clampContextSize(contextSize)),
+                // Beet Code serializes generation for one local user. One
+                // slot avoids reserving four independent KV contexts while
+                // keeping the full requested context available to the chat.
+                "--parallel", "1",
+                // Full conversation replay has a stable prefix. Make the
+                // server's exact-prefix KV reuse contract explicit.
+                "--cache-prompt",
+                // llama.cpp's Jinja chat templates are the path that accepts
+                // OpenAI-compatible native tool definitions for Qwen/Llama.
+                // The request layer still retries without tools when an older
+                // embedded server rejects them.
+                "--jinja",
                 "--n-gpu-layers", "99",
                 "--alias", "beetcode",
                 "--no-webui",
             ]
-            if speculativeMTP {
+            if let performanceProfile {
+                args += [
+                    "--batch-size", String(performanceProfile.batchSize),
+                    "--ubatch-size", String(performanceProfile.microBatchSize),
+                ]
+            }
+            switch speculation {
+            case .none:
+                break
+            case .mtp:
+                // Deeper MTP drafts lose acceptance quickly for code.
                 args += ["--spec-type", "draft-mtp", "--spec-draft-n-max", "2"]
+            case .dflash(let draftPath, let maxDraftTokens):
+                args += [
+                    "--spec-draft-model", draftPath,
+                    "--spec-type", "draft-dflash",
+                    "--spec-draft-n-max", String(maxDraftTokens),
+                    "--flash-attn", "on",
+                ]
+            case .ngram:
+                // Model-free and constant-memory (~16 MB). Upstream defaults
+                // deliberately require long matches to protect quality.
+                args += ["--spec-type", "ngram-mod"]
             }
             return args
+        }
+
+        /// The first experimental pairing is intentionally narrow. The
+        /// draft was trained for Qwen3.5 9B; using it with a different size
+        /// can make speculation slower or invalid. Imported derivatives are
+        /// accepted only when the GGUF id/name still identifies both family
+        /// and parameter size.
+        static func dflashDraft(modelID: String, metadata: GGUFMetadata?) -> DFlashDraft? {
+            let identity = [modelID, metadata?.modelName, metadata?.architecture]
+                .compactMap { $0 }
+                .joined(separator: " ")
+                .lowercased()
+                .filter { $0.isLetter || $0.isNumber }
+            guard identity.contains("qwen35"), identity.contains("9b") else { return nil }
+            let repository = "Anbeeld/Qwen3.5-9B-DFlash-GGUF"
+            let fileName = "qwen35-9b-dflash-Q4_K_M.gguf"
+            return DFlashDraft(
+                repository: repository,
+                fileName: fileName,
+                sourceURL: URL(
+                    string: "https://huggingface.co/\(repository)/resolve/main/\(fileName)")!,
+                diskBytes: 765_959_872,
+                // Quantized verification widths above five currently lose
+                // efficiency on Apple silicon; four is the conservative
+                // coding/agent default.
+                maxDraftTokens: 4)
         }
 
         /// Context the server gets when the catalog says nothing.
@@ -174,12 +318,25 @@ final class GGUFEngine: LLMEngine, @unchecked Sendable {
     /// instead of waiting for llama-server to finish the full response.
     private var generationTask: Task<Void, Never>?
     private var generationID: UUID?
+    /// Compact task-specific catalog supplied by AgentLoop. llama-server can
+    /// apply the model's native tool template instead of relying only on the
+    /// text fence described in the system prompt.
+    private var nativeTools: [NativeToolSpec] = []
     /// Stateless replay buffer — identical semantics to RemoteLLMEngine:
     /// llama-server slots are not guaranteed across requests, so every call
     /// sends the full conversation.
     private var accumulated: [ChatTurn] = []
 
-    init() {}
+    private let experimentalDFlashEnabled: Bool
+    private let experimentalNGramEnabled: Bool
+
+    init(
+        experimentalDFlashEnabled: Bool = false,
+        experimentalNGramEnabled: Bool = false
+    ) {
+        self.experimentalDFlashEnabled = experimentalDFlashEnabled
+        self.experimentalNGramEnabled = experimentalNGramEnabled
+    }
 
     var loadedModelID: String? {
         get async { withLock { loadedID } }
@@ -191,6 +348,18 @@ final class GGUFEngine: LLMEngine, @unchecked Sendable {
 
     var stats: EngineStats {
         get async { withLock { statsState } }
+    }
+
+    var externalResidentMemoryBytes: UInt64? {
+        get async {
+            let pid = withLock { process?.processIdentifier }
+            guard let pid else { return nil }
+            return MemoryAdvisor.processFootprint(pid: pid)
+        }
+    }
+
+    func configureNativeTools(_ tools: [NativeToolSpec]) {
+        withLock { nativeTools = tools }
     }
 
     // MARK: Lifecycle
@@ -223,29 +392,87 @@ final class GGUFEngine: LLMEngine, @unchecked Sendable {
         // header and buy as many KV tokens as the budget left over after the
         // weights affords. Unsniffable headers keep the conservative 32 K cap.
         let sniffed = GGUFMetadata.read(from: URL(fileURLWithPath: modelPath))
+        let candidateDraft = experimentalDFlashEnabled
+            ? Planner.dflashDraft(modelID: modelID, metadata: sniffed)
+            : nil
+        let dflashDraft: Planner.DFlashDraft?
+        if let candidateDraft,
+           (try? MemoryAdvisor.admitLoad(
+                diskBytes: diskBytes + candidateDraft.diskBytes)) != nil {
+            dflashDraft = candidateDraft
+        } else {
+            dflashDraft = nil
+            if candidateDraft != nil {
+                Log.engine.warning(
+                    "DFlash skipped: target plus draft exceeds the current safe memory budget")
+            }
+        }
+        let reservedDraftBytes = dflashDraft.map {
+            MemoryAdvisor.projectedFootprint(diskBytes: $0.diskBytes)
+        } ?? 0
+        let contextBudget = MemoryAdvisor.availableBudget > reservedDraftBytes
+            ? MemoryAdvisor.availableBudget - reservedDraftBytes
+            : 0
         let chosenContext = Planner.chooseContextSize(
             requested: contextSize ?? Planner.defaultContextSize,
             kvBytesPerToken: sniffed.flatMap(Planner.kvBytesPerToken),
             projectedWeights: MemoryAdvisor.projectedFootprint(diskBytes: diskBytes),
-            availableBudget: MemoryAdvisor.availableBudget)
+            availableBudget: contextBudget)
 
-        // MTP speculative decoding: when the GGUF ships nextn tensors (Qwen3.5
-        // "MTP" builds like Qwythos), prefer a draft-mtp launch — llama.cpp
-        // reports ~1.3–1.4× decode on this hybrid arch. A binary too old to
-        // know the flag exits at arg-parse, which fails the health wait in
-        // ~250 ms; we then retry once without it rather than failing the load.
-        let wantsMTP = sniffed?.supportsDraftMTP == true
-        var attempt = try await launchServer(
-            binary: binary, modelPath: modelPath,
-            contextSize: chosenContext, speculativeMTP: wantsMTP)
-        if attempt == nil, wantsMTP {
-            Log.engine.warning("llama-server rejected draft-mtp; retrying without speculative decoding")
+        // Experimental DFlash gets the first attempt only for the exact
+        // compatible family/size and when its additional working set fits.
+        // It may download the public 4-bit draft on first use, hence the
+        // longer health timeout. Any failure falls back to existing MTP and
+        // finally ordinary decoding, so enabling the experiment cannot make
+        // a previously working GGUF model unloadable.
+        let fallbackSpeculation = Planner.fallbackSpeculation(
+            metadata: sniffed,
+            experimentalNGramEnabled: experimentalNGramEnabled,
+            isAppleSilicon: DeviceProfile.current().isAppleSilicon)
+        var usedSpeculation: Planner.Speculation = .none
+        var attempt: (child: Process, watchdog: Process, port: Int)?
+        if let dflashDraft {
+            do {
+                let draftPath = try await Self.cachedDFlashDraftPath(for: dflashDraft)
+                let mode = Planner.Speculation.dflash(
+                    modelPath: draftPath,
+                    maxDraftTokens: dflashDraft.maxDraftTokens)
+                attempt = try await launchServer(
+                    binary: binary, modelPath: modelPath,
+                    contextSize: chosenContext, speculation: mode,
+                    timeout: 180)
+                if attempt != nil {
+                    usedSpeculation = mode
+                } else {
+                    Log.engine.warning(
+                        "DFlash launch failed; retrying with a stable decoding path")
+                }
+            } catch {
+                Log.engine.warning(
+                    "DFlash draft unavailable (\(error.localizedDescription, privacy: .public)); retrying with a stable decoding path")
+            }
+        }
+        if attempt == nil, fallbackSpeculation != .none {
+            let mode = fallbackSpeculation
             attempt = try await launchServer(
                 binary: binary, modelPath: modelPath,
-                contextSize: chosenContext, speculativeMTP: false)
+                contextSize: chosenContext, speculation: mode)
+            if attempt != nil {
+                usedSpeculation = mode
+            } else {
+                Log.engine.warning(
+                    "llama-server rejected the selected acceleration; retrying standard decoding")
+            }
+        }
+        if attempt == nil {
+            usedSpeculation = .none
+            attempt = try await launchServer(
+                binary: binary, modelPath: modelPath,
+                contextSize: chosenContext, speculation: .none)
         }
         guard let (child, watchdog, serverPort) = attempt else {
-            throw GGUFError.serverFailedToStart("no response from llama-server within 120s")
+            throw GGUFError.serverFailedToStart(
+                "no response from llama-server after experimental and stable launch attempts")
         }
 
         withLock {
@@ -254,7 +481,7 @@ final class GGUFEngine: LLMEngine, @unchecked Sendable {
             self.port = serverPort
             self.loadedID = modelID
             self.launchedContextSize = chosenContext
-            self.statsState = EngineStats()
+            self.statsState = EngineStats(acceleration: usedSpeculation.acceleration)
             self.accumulated.removeAll()
         }
         child.terminationHandler = { [weak self] _ in
@@ -304,6 +531,21 @@ final class GGUFEngine: LLMEngine, @unchecked Sendable {
         withLock { accumulated.removeAll() }
     }
 
+    func rebaseConversation(to turns: [ChatTurn]) async -> SemanticRebaseResult {
+        let preserved = withLock { () -> Int in
+            let count = SemanticContextPlanner.commonPrefixTurnCount(
+                accumulated, turns)
+            accumulated = turns
+            return count
+        }
+        // Deliberately do not reset or restart llama-server. Its single slot
+        // retains token-granular KV pages, and --cache-prompt reuses the exact
+        // prefix through the last unchanged semantic turn.
+        return SemanticRebaseResult(
+            installedHistory: true,
+            preservedCachePrefixTurns: preserved)
+    }
+
     // MARK: Generation
 
     func stream(
@@ -316,6 +558,12 @@ final class GGUFEngine: LLMEngine, @unchecked Sendable {
             return accumulated
         }
         let baseURL = withLock { URL(string: "http://127.0.0.1:\(port)/v1")! }
+        let usageBox = UsageBox()
+        let tools = withLock { nativeTools }
+        let onUsage: @Sendable (RemoteLLMClient.UsageInfo) -> Void = { [weak self] usage in
+            usageBox.store(usage)
+            self?.noteUsage(usage, startedAt: usageBox.started)
+        }
         let inner = RemoteLLMClient.streamOpenAICompatible(
             provider: .custom,
             baseURL: baseURL,
@@ -323,7 +571,12 @@ final class GGUFEngine: LLMEngine, @unchecked Sendable {
             model: "beetcode",
             turns: allTurns,
             temperature: temperature ?? 0.6,
-            maxTokens: maxTokens)
+            maxTokens: maxTokens,
+            reasoningEffort: Planner.reasoningEffort(
+                turns: allTurns, maxTokens: maxTokens),
+            cachePrompt: true,
+            tools: tools,
+            onUsage: onUsage)
 
         // Relay while measuring throughput (same stats contract as the other
         // engines).
@@ -340,14 +593,18 @@ final class GGUFEngine: LLMEngine, @unchecked Sendable {
                         tokens += 1
                     }
                     let elapsed = Date().timeIntervalSince(started)
-                    if elapsed > 0.2 {
-                        let newStats = EngineStats(
-                            tokensPerSecond: Double(tokens) / elapsed,
-                            generatedTokens: tokens)
+                    if elapsed > 0.2, usageBox.load() == nil {
                         // NSLock lives inside the synchronous withLock
                         // helper — never raw lock/unlock in async contexts.
                         if let self {
-                            self.withLock { self.statsState = newStats }
+                            self.withLock {
+                                let nextSerial = self.statsState.usageSerial + 1
+                                self.statsState = EngineStats(
+                                    tokensPerSecond: Double(tokens) / elapsed,
+                                    generatedTokens: tokens,
+                                    usageSerial: nextSerial,
+                                    acceleration: self.statsState.acceleration)
+                            }
                         }
                     }
                     continuation.finish()
@@ -392,6 +649,50 @@ final class GGUFEngine: LLMEngine, @unchecked Sendable {
         task?.cancel()
     }
 
+    /// llama-server supplies exact usage in its final SSE frame. Prefer that
+    /// over transport-chunk counting so the status bar and per-answer token
+    /// details remain truthful even when the network coalesces many tokens
+    /// into one chunk.
+    private func noteUsage(
+        _ usage: RemoteLLMClient.UsageInfo,
+        startedAt: Date
+    ) {
+        let completion = usage.completionTokens ?? 0
+        let prompt = usage.promptTokens ?? 0
+        guard completion > 0 || prompt > 0 else { return }
+        let elapsed = Date().timeIntervalSince(startedAt)
+        withLock {
+            let nextSerial = statsState.usageSerial + 1
+            statsState = EngineStats(
+                tokensPerSecond: usage.tokensPerSecond
+                    ?? (elapsed > 0 && completion > 0
+                        ? Double(completion) / elapsed
+                        : nil),
+                generatedTokens: completion,
+                promptTokens: prompt,
+                usageSerial: nextSerial,
+                acceleration: statsState.acceleration)
+        }
+    }
+
+    private final class UsageBox: @unchecked Sendable {
+        let started = Date()
+        private let lock = NSLock()
+        private var last: RemoteLLMClient.UsageInfo?
+
+        func store(_ usage: RemoteLLMClient.UsageInfo) {
+            lock.lock()
+            last = usage
+            lock.unlock()
+        }
+
+        func load() -> RemoteLLMClient.UsageInfo? {
+            lock.lock()
+            defer { lock.unlock() }
+            return last
+        }
+    }
+
     private func setGenerationTask(_ task: Task<Void, Never>, id: UUID) {
         withLock {
             generationTask = task
@@ -420,20 +721,67 @@ final class GGUFEngine: LLMEngine, @unchecked Sendable {
 
     // MARK: Helpers
 
+    /// Resolve the experimental draft into Beet Code's managed model cache.
+    /// Some llama.cpp builds leave their HF draft shortcut with an empty
+    /// path, so the app owns this one-file download and launches the server
+    /// with an explicit local checkpoint. Exact sizing rejects partial files.
+    private static func cachedDFlashDraftPath(for draft: Planner.DFlashDraft) async throws -> String {
+        let support = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let directory = support
+            .appendingPathComponent("BeetCode/Models/.DFlash", isDirectory: true)
+        let destination = directory.appendingPathComponent(draft.fileName)
+        if fileSize(at: destination) == draft.diskBytes {
+            return destination.path
+        }
+
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 120
+        configuration.timeoutIntervalForResource = 1_200
+        let session = URLSession(configuration: configuration)
+        defer { session.finishTasksAndInvalidate() }
+        let (temporary, response) = try await session.download(from: draft.sourceURL)
+        guard let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode)
+        else {
+            throw URLError(.badServerResponse)
+        }
+        guard fileSize(at: temporary) == draft.diskBytes else {
+            throw GGUFError.serverFailedToStart(
+                "the downloaded DFlash checkpoint was incomplete")
+        }
+
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
+        }
+        try FileManager.default.moveItem(at: temporary, to: destination)
+        return destination.path
+    }
+
+    private static func fileSize(at url: URL) -> Int64? {
+        let values = try? url.resourceValues(forKeys: [.fileSizeKey])
+        return values?.fileSize.map(Int64.init)
+    }
+
     /// Spawns llama-server (plus its crash watchdog) and waits for the health
     /// endpoint. Returns nil when the server never answers — the caller may
     /// retry with different arguments. Spawn failures throw immediately (no
     /// retry would fix a bad binary path).
     private func launchServer(
         binary: URL, modelPath: String,
-        contextSize: Int, speculativeMTP: Bool
+        contextSize: Int, speculation: Planner.Speculation,
+        timeout: TimeInterval = 120
     ) async throws -> (child: Process, watchdog: Process, port: Int)? {
         let serverPort = Self.freePort()
         let child = Process()
         child.executableURL = binary
         child.arguments = Planner.serverArguments(
             modelPath: modelPath, port: serverPort,
-            contextSize: contextSize, speculativeMTP: speculativeMTP)
+            contextSize: contextSize, speculation: speculation,
+            performanceProfile: Planner.PerformanceProfile.recommended(
+                for: DeviceProfile.current()))
         child.environment = ShellRunner.sanitizedEnvironment()
         child.standardOutput = FileHandle.nullDevice
         child.standardError = FileHandle.nullDevice
@@ -459,7 +807,7 @@ final class GGUFEngine: LLMEngine, @unchecked Sendable {
         try? watchdog.run()
 
         // Wait for the HTTP health endpoint (model page-in can take a while).
-        let healthy = await waitForHealthy(port: serverPort, process: child, timeout: 120)
+        let healthy = await waitForHealthy(port: serverPort, process: child, timeout: timeout)
         guard healthy else {
             child.terminate()
             watchdog.terminate()

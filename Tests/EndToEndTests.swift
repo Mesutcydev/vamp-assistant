@@ -90,7 +90,14 @@ final class EndToEndTests: XCTestCase {
         await appState.activate(model: model)
         XCTAssertEqual(appState.enginePhase, .ready(model.displayName))
         XCTAssertEqual(appState.activeModelID, model.id)
-        engine.enqueue(.text("All done here."))
+        engine.enqueue(texts: [
+            """
+            ```tool
+            {"name":"read_file","arguments":{"path":"base.txt"}}
+            ```
+            """,
+            "All done here.",
+        ])
         appState.sessions.send("inspect the repo")
         let finishDeadline = Date().addingTimeInterval(15)
         while appState.sessions.finishReason == nil, Date() < finishDeadline {
@@ -183,11 +190,31 @@ final class EndToEndTests: XCTestCase {
             return XCTFail("expected approval request")
         }
         appState.sessions.approve(true)
+
+        // Reliability V2 turns the edit into verification debt. This plain
+        // Git repository has no build system, so the appropriate evidence is
+        // an approval-gated `git diff --check`.
+        let verificationDeadline = Date().addingTimeInterval(10)
+        while appState.sessions.pendingApproval == nil,
+              appState.sessions.finishReason == nil,
+              Date() < verificationDeadline {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        guard appState.sessions.finishReason != nil || appState.sessions.pendingApproval != nil else {
+            return XCTFail("expected verification approval request")
+        }
+        if appState.sessions.pendingApproval != nil {
+            appState.sessions.approve(true)
+        }
         let finishDeadline = Date().addingTimeInterval(15)
         while appState.sessions.finishReason == nil, Date() < finishDeadline {
             try? await Task.sleep(for: .milliseconds(50))
         }
-        XCTAssertEqual(appState.sessions.finishReason, .completed("Changed it."))
+        guard case .completed(let answer)? = appState.sessions.finishReason else {
+            return XCTFail("expected verified completion, got \(String(describing: appState.sessions.finishReason))")
+        }
+        XCTAssertTrue(answer.contains("Changed it."), answer)
+        XCTAssertTrue(answer.contains("Verified project checks passed"), answer)
         XCTAssertEqual(repo.read("file.txt"), "agent change")
 
         // Undo via the sidebar control: restores the checkpoint.

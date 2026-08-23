@@ -31,6 +31,7 @@ enum ToolError: Error, LocalizedError, Equatable {
     case pathOutsideWorkspace(String)
     case notPreviouslyRead(String)
     case binaryFile(String)
+    case fileNotFound(String)
     case fileTooLarge(String, size: Int, limit: Int)
     case missingArgument(String)
     case timeout(Int)
@@ -46,6 +47,8 @@ enum ToolError: Error, LocalizedError, Equatable {
             return "Read '\(path)' before editing it."
         case .binaryFile(let path):
             return "'\(path)' looks like a binary file."
+        case .fileNotFound(let path):
+            return "File not found: \(path)"
         case .fileTooLarge(let path, let size, let limit):
             return "'\(path)' is \(ByteFormatter.bytes(Int64(size))) — larger than the \(ByteFormatter.bytes(Int64(limit))) read limit."
         case .missingArgument(let name):

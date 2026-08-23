@@ -255,6 +255,7 @@ final class ProviderAuditTests: XCTestCase {
                 reasoning_effort: "high",
                 stream_options: nil))) as? [String: Any]
         XCTAssertEqual(openAI?["reasoning_effort"] as? String, "high")
+        XCTAssertNil(openAI?["cache_prompt"])
 
         let ordinaryOpenAI = try JSONSerialization.jsonObject(
             with: JSONEncoder().encode(RemoteLLMClient.OpenAIRequest(
@@ -269,6 +270,22 @@ final class ProviderAuditTests: XCTestCase {
                 reasoning_effort: nil,
                 stream_options: nil))) as? [String: Any]
         XCTAssertNil(ordinaryOpenAI?["reasoning_effort"])
+        XCTAssertNil(ordinaryOpenAI?["cache_prompt"])
+
+        let llamaRequest = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(RemoteLLMClient.OpenAIRequest(
+                model: "beetcode",
+                messages: [],
+                temperature: 0,
+                max_tokens: 16,
+                max_completion_tokens: nil,
+                stream: true,
+                tools: nil,
+                thinking: nil,
+                reasoning_effort: nil,
+                cache_prompt: true,
+                stream_options: nil))) as? [String: Any]
+        XCTAssertEqual(llamaRequest?["cache_prompt"] as? Bool, true)
 
         let responses = try JSONSerialization.jsonObject(
             with: JSONEncoder().encode(RemoteLLMClient.ResponsesRequest(
@@ -541,6 +558,15 @@ final class ProviderAuditTests: XCTestCase {
         XCTAssertEqual(
             RemoteLLMClient.extractText(from: Data(json.utf8)),
             "<think>inspect the project</think>The answer")
+    }
+
+    func testLlamaServerUsagePreservesExactDecodeThroughput() {
+        let json = #"{"choices":[],"usage":{"prompt_tokens":44,"completion_tokens":8},"timings":{"predicted_per_second":15.95}}"#
+        let extracted = RemoteLLMClient.extract(from: Data(json.utf8))
+
+        XCTAssertEqual(extracted?.usage?.promptTokens, 44)
+        XCTAssertEqual(extracted?.usage?.completionTokens, 8)
+        XCTAssertEqual(extracted?.usage?.tokensPerSecond, 15.95)
     }
 
     func testOpenAIReasoningIsPreservedAlongsideToolDelta() {

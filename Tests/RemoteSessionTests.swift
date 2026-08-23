@@ -102,21 +102,21 @@ final class RemoteSessionTests: XCTestCase {
         }
 
         let engine = FakeLLMEngine()
-        engine.enqueue(.text("<think>inspect the project</think>Here is the answer."))
+        engine.enqueue(.text("<think>recall actor semantics</think>Here is the answer."))
         let controller = AgentSessionController(
             engine: engine,
             settings: settings,
             thermal: ThermalMonitor())
         await controller.switchWorkspace(to: workspace.url)
 
-        controller.send("Inspect the project")
+        controller.send("What is actor isolation?")
         for _ in 0..<200 where controller.isRunning {
             try await Task.sleep(for: .milliseconds(10))
         }
 
         XCTAssertFalse(controller.isRunning)
         XCTAssertTrue(controller.transcript.contains { item in
-            if case .reasoning("inspect the project") = item.kind { return true }
+            if case .reasoning("recall actor semantics") = item.kind { return true }
             return false
         })
         XCTAssertTrue(controller.transcript.contains { item in

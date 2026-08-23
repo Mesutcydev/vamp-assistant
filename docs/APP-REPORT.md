@@ -85,6 +85,126 @@
 > real load-and-generation smoke test on an M4 Mac with 16 GB. The suite now
 > contains 744 unit tests plus 3 UI tests.
 >
+> **Addendum (2026-08-22, experimental DFlash):** Settings > Agent now has an
+> off-by-default DFlash switch for compatible Qwen3.5 9B GGUF targets. Beet
+> Code caches a 766 MB Q4 draft locally, reserves its projected working set
+> before choosing context size, and reports the acceleration actually loaded.
+> Draft download, memory admission, or server failure falls back to embedded
+> MTP and then standard decoding. A real Qwen3.5 9B generation passed on an M4
+> Mac with 16 GB; the deterministic suite executes 753 tests with 4 intentional
+> live skips and no failures. This uses DFlash v1 until a compatible 9B DFlash
+> 2 checkpoint is published.
+>
+> **Addendum (2026-08-22, local inference tuning):** every GGUF server now
+> uses one slot (Beet Code serializes a single local user's generation) and
+> explicitly retains prompt-prefix caching, avoiding the automatic four-slot
+> KV reservation while preserving the full context window. Settings > Agent
+> also offers off-by-default model-free n-gram speculation for GGUF models
+> without DFlash/MTP. It uses llama.cpp's conservative `ngram-mod` defaults,
+> reports its live state in the status bar, and falls back to standard decoding
+> if unsupported. On the installed Qwen3.5 9B benchmark, a deterministic
+> repeated-text response was identical at 27.8 tok/s versus 15.9 tok/s without
+> n-gram speculation; the app-path live smoke also passed on Qwen2.5 7B.
+>
+> **Addendum (2026-08-22, reversible MLX experiments):** Settings > Agent now
+> exposes two independent, off-by-default MLX switches. Verified prompt reuse
+> keeps an in-memory prefix only when the assistant echo exactly matches what
+> MLX generated and another turn follows; mismatch, reset, compaction, memory
+> pressure, or isolated replay clears it and returns to canonical full replay.
+> KV8 quantizes eligible attention-cache entries after 512 tokens while leaving
+> weights, model files, and chat history untouched. A pre-output failure retries
+> once with standard KV and full replay; either switch can be disabled and the
+> model reloaded to restore the previous path. On the installed Qwen3.5 9B
+> 4-bit MLX checkpoint (native 262,144-token window), the deterministic test
+> used 1,333 prompt tokens, then processed an identical continuation in 0.38 s
+> and 18 new prompt tokens versus 7.05 s and 1,351 prompt tokens for full
+> replay. Both produced exactly `CACHE_TWO`; decode measured 18.8 tok/s with
+> caching and 17.5 tok/s with full replay. The
+> deterministic suite executes 761 tests with 5 intentional live skips and no
+> failures, and the opt-in real-model cache/KV8 smoke also passes.
+>
+> **Addendum (2026-08-22, Qwen3.8 chat efficiency):** local GGUF chat-only
+> requests now use llama.cpp's current per-request non-thinking control unless
+> the user explicitly asks for deep reasoning. Output budgets of 512 tokens or
+> less also force the visible-answer path, preventing a complete allowance from
+> disappearing into hidden reasoning. Project-agent turns keep automatic
+> reasoning. On Apple silicon, embedded MTP is no longer selected by default
+> because its Metal verification overhead did not materially beat ordinary
+> decoding on the installed Qwen3.8 9B Q5 model; an explicitly enabled
+> ngram-mod experiment now takes priority even when the GGUF contains MTP.
+> GGUF answers also consume llama-server's exact prompt/completion usage
+> instead of counting network chunks as tokens. The suite executes 767 unit
+> tests with 6 intentional live skips plus 3 UI tests, with no failures. On
+> the same cached Qwen3.8 exact-answer request, automatic reasoning used 43
+> completion tokens and 2.737 s; the non-thinking request used 4 tokens and
+> 0.364 s with identical visible output. A real post-change Beet Code engine
+> smoke returned the exact answer without a think block and reported exact
+> usage. On a repeated-text benchmark, ngram-mod reached 21.0 tok/s versus
+> 16.0 tok/s standard; MTP measured 16.1 tok/s.
+>
+> **Addendum (2026-08-22, M4 16 GB efficiency pass):** the engine pool now
+> accounts for the live physical footprint of out-of-process llama.cpp
+> servers and evaluates the complete resident set before retaining another
+> model. This keeps one Qwen3.8 9B Q5 model admissible on a clean 16 GB Mac
+> while preventing a second large resident from forcing swap. Base M4 Macs
+> with 16 GB use the measured llama.cpp batch profile of 1,024 logical and
+> 256 physical tokens; a 2,048-token prompt benchmark improved from 183.4 to
+> 193.8 prompt tok/s (+5.7%). Streaming transcript publication is limited to
+> 20 Hz and Markdown repair/rendering to 10 Hz, while the final answer remains
+> immediate and fully rendered. A real Qwen3.8 app-path smoke at an 8,192-token
+> context returned exactly `QWEN38_FAST_OK` without a think block in 1.362 s,
+> reporting 44 prompt and 8 completion tokens at 10.9 decode tok/s. The full
+> verified suite executes 770 unit tests with 6 intentional live skips plus 3
+> UI tests, with no failures.
+>
+> **Addendum (2026-08-22, agent reliability v1):** project-agent sessions now
+> advertise a task-scoped tool catalog while retaining the complete
+> permission-filtered registry behind the executor. A representative
+> fix-and-test task exposes 9 of the 36 available app tools (75% fewer schemas),
+> reducing local-model prompt load and tool-choice ambiguity. Calls outside the
+> routed set are rejected before approval or execution. GGUF sessions enable
+> llama.cpp's native Jinja tool templates and pass the same routed schemas,
+> with the existing no-tools retry retained for older servers. Three repeated
+> malformed, bundled, or unavailable calls now end honestly without executing
+> an action instead of consuming the entire turn budget. An opt-in live
+> Qwen3.8 9B Q5 test at an 8,192-token context selected and executed
+> `read_file`, consumed its result, and returned `VALUE_ALPHA` in 22.466 s
+> after model load. The verified suite passes 776 unit tests with 7 intentional
+> live skips plus 3 UI tests, with no failures.
+>
+> **Addendum (2026-08-22, agent reliability v2):** every project-agent edit
+> now creates verification debt. A completion claim automatically runs the
+> detected project test/build, or `git diff --check` for a plain repository,
+> and is rejected until the latest mutation generation passes. Unversioned
+> folders report honestly when no automated checker exists. Successful
+> mutations and changed paths are tracked, exact duplicate edits are not
+> executed twice, and three identical failed actions terminate with a
+> recoverable error instead of looping. Missing-file reads now produce typed
+> failures. Context fitting retains the first objective plus newest work,
+> preserves assistant/tool pairs, retries one provider-reported overflow, and
+> project repair sessions proactively compact at 65% of usable context versus
+> 75% for ordinary/chat sessions. A real Qwen3.8 9B Q5 run at 8,192 context
+> completed read → write → real `swift test` → verified completion in 44.807 s;
+> the broader initial tool surface did not finish within 180 s, confirming the
+> benefit of constrained routing for this 9B model. The verified suite passes
+> 778 unit tests with 8 intentional live skips plus 3 UI tests, with no
+> failures.
+>
+> **Addendum (2026-08-22, semantic checkpoints and elastic memory):** automatic
+> compaction and provider-overflow recovery now install their rebuilt history
+> at complete semantic-turn boundaries. GGUF keeps the live llama.cpp slot and
+> reuses only its exact unchanged prompt prefix; MLX clears its opaque KV state
+> and performs a correctness-first replay because ChatSession cannot safely
+> rewind to an arbitrary turn. On Macs with 24 GB or less, the generation
+> safe-point governor trims disposable backend allocations at 35% context use,
+> then evicts only idle resident models and trims again at 50% (or when usable
+> headroom falls below the greater of 1 GB and 8% of physical memory). The
+> active model, active KV, transcript, and durable task capsule are never
+> discarded. An installed Qwen3.8 9B Q5 live test reduced a 320-sentence stable
+> prefix continuation from 17.105 s full processing to 0.819 s after semantic
+> rebase, with the exact expected answer. The deterministic suite executes 790
+> tests: 781 passed, 9 intentional live skips, and 0 failures.
+>
 |> **Addendum (2026-08-19, prompt capability guidance):** the in-app browser
 |> (README v0.6) and the simulator tools were registered but the system prompt
 |> never told models WHEN to use them. `PromptBuilder.capabilityGuidance` now
@@ -126,7 +246,7 @@ xcodebuild -project BeetCode.xcodeproj -scheme BeetCode \
   -destination 'platform=macOS' -derivedDataPath .derived test
 ```
 
-Current suite: **741 unit tests executed, 2 intentionally skipped, plus 3 UI tests; 0 failures**.
+Current suite: **790 unit tests total: 781 passed, 9 intentional live-test skips, plus 3 UI tests; 0 failures**.
 Tests never need model weights or Metal (FakeLLMEngine + FixtureHub).
 
 ## 3. Directory map
@@ -290,7 +410,9 @@ validatedWorkspaceURL/bookmarkData. `SettingsStore`: keys below.
 
 autoApproveEdits, autoApproveCommands, maxTurns, maxTokensPerTurn,
 temperature, checkpointingEnabled, verifyAfterEdits, memoryMode,
-compressionLevel, composerFlow, showReasoning, planMode.
+compressionLevel, composerFlow, showReasoning, planMode,
+experimentalDFlashEnabled, experimentalNGramEnabled,
+experimentalMLXPromptCacheEnabled, experimentalMLXQuantizedKVEnabled.
 AppPreferences (JSON): lastWorkspacePath (+bookmark), lastModelID,
 lastSessionID, autoResumeDownloads, remoteModel[provider].
 

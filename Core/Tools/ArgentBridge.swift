@@ -68,41 +68,24 @@ enum ArgentBridge {
             arguments += ["--out", outputPath]
         }
 
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = arguments
-        process.environment = ShellRunner.sanitizedEnvironment()
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
+        let result: CommandResult
         do {
-            try process.run()
+            result = try ShellRunner.runProcess(
+                executable: executable.path,
+                arguments: arguments,
+                workingDirectory: FileManager.default.temporaryDirectory,
+                environment: ShellRunner.sanitizedEnvironment(),
+                timeout: timeout)
         } catch {
             throw ArgentError.failed(error.localizedDescription)
         }
 
-        // Read with a hard deadline: a hung argent tool must never block the
-        // agent. The whole process tree is killed on expiry.
-        let deadline = Date().addingTimeInterval(timeout)
-        var data = Data()
-        let handle = pipe.fileHandleForReading
-        while Date() < deadline {
-            let chunk = handle.availableData
-            if chunk.isEmpty { break }
-            data.append(chunk)
-        }
-        var status: Int32 = 0
-        let reaped = waitpid(process.processIdentifier, &status, WNOHANG)
-        if reaped != process.processIdentifier {
-            kill(process.processIdentifier, SIGKILL)
-            _ = waitpid(process.processIdentifier, &status, 0)
+        guard !result.timedOut else {
             throw ArgentError.failed("argent \(tool) timed out after \(Int(timeout))s")
         }
-        let output = String(decoding: data, as: UTF8.self)
-        let exitCode = (status & 0x7f) == 0 ? (status >> 8) & 0xff : 1
-        guard exitCode == 0 else {
-            throw ArgentError.failed(output.isEmpty ? "exit \(process.terminationStatus)" : output)
+        guard result.exitCode == 0 else {
+            throw ArgentError.failed(result.output.isEmpty ? "exit \(result.exitCode)" : result.output)
         }
-        return output
+        return result.output
     }
 }

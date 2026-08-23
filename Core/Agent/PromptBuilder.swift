@@ -68,6 +68,18 @@ enum PromptBuilder {
 
         sections.append(outputStylePrompt(outputStyle))
 
+        sections.append("""
+        # Reliable execution contract
+
+        Before editing, inspect the target file plus its closest definitions,
+        callers, and tests. Make the smallest change that satisfies the task.
+        After any workspace mutation, run the narrowest relevant test or build.
+        If it fails, use the exact diagnostics to repair the change and verify
+        again. Do not repeat an unchanged failing action. Review the final diff
+        for unintended files. Never claim success until the latest changes have
+        passed an appropriate check; report the check and any remaining risk.
+        """)
+
         if !leanPrompt,
            let agentPrompt,
            !agentPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -97,6 +109,12 @@ enum PromptBuilder {
         - One tool call per reply. After each call you receive its output as the \
         next message, then continue.
         - Use only the listed tools with valid JSON arguments.
+        - If the user asks you to create, edit, fix, build, or test something, \
+        perform the work with tools before describing it. Never print proposed \
+        file contents as prose and then claim the task is complete.
+        - Keep each tool call small enough to finish valid JSON. For a large new \
+        file, use `apply_patch` with an empty SEARCH block to create the first \
+        chunk, then append focused chunks in later calls.
         - When the task is fully complete, call `attempt_completion` with a short \
         summary of what changed.
         - If you need information only the user can provide, call `ask_user`.
@@ -771,5 +789,245 @@ enum PromptBuilder {
             with: "",
             options: [.caseInsensitive])
         return result
+    }
+}
+
+/// Selects the smallest useful tool surface for one user task. The executor
+/// still owns the complete permission-filtered registry; this router only
+/// controls what the model sees in its prompt/native function catalog.
+/// Unknown or vague tasks fail open to the full registry so routing can never
+/// make an unusual workflow impossible.
+enum ToolRouter {
+
+    enum EvidenceRequirement: Equatable {
+        case none
+        case tool
+        case mutation
+    }
+
+    static func select(
+        from tools: [any AgentTool],
+        for task: String
+    ) -> [any AgentTool] {
+        let trimmed = task.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !tools.isEmpty else { return tools }
+
+        let lower = trimmed.lowercased()
+        let words = tokens(in: lower)
+        let available = Set(tools.map(\.name))
+        var selected = Set<String>()
+        var recognized = false
+
+        func has(_ candidates: Set<String>) -> Bool {
+            !words.isDisjoint(with: candidates)
+        }
+
+        func include(_ names: [String]) {
+            selected.formUnion(names.filter { available.contains($0) })
+        }
+
+        // Control flow is always available. It is tiny, and omitting it can
+        // strand a model after otherwise successful work.
+        include(["ask_user", "attempt_completion"])
+
+        let mutating = has(mutationWords)
+        let inspecting = mutating || has(inspectionWords)
+        let verifying = mutating || has(verificationWords)
+
+        if inspecting {
+            recognized = true
+            include(["read_file", "search", "find_files"])
+            if has(["directory", "folder", "list", "structure", "tree"]) {
+                include(["list_directory"])
+            }
+        }
+        if mutating {
+            include(["apply_patch", "write_file"])
+            if has(["move", "rename"]) { include(["move_file"]) }
+        }
+        if verifying {
+            recognized = true
+            include(["run_command"])
+            if has(["build", "compile", "diagnose", "test", "tests", "xcode", "swift"]) {
+                include(["build_diagnostics"])
+            }
+        }
+        if has(["background", "daemon", "server", "serve", "watch"]) {
+            recognized = true
+            include(["background_process", "background_status"])
+        }
+
+        let webWords: Set<String> = [
+            "api", "docs", "documentation", "github", "http", "https", "internet",
+            "online", "research", "url", "web",
+        ]
+        if has(webWords) || lower.contains("www.") || lower.contains("://") {
+            recognized = true
+            include(["web_fetch"])
+        }
+
+        let browserWords: Set<String> = [
+            "browser", "button", "click", "dom", "form", "page", "rendered",
+            "site", "website",
+        ]
+        if has(browserWords) {
+            recognized = true
+            include([
+                "browser_navigate", "browser_read", "browser_screenshot",
+                "browser_click", "browser_type", "browser_eval",
+            ])
+        }
+
+        let simulatorWords: Set<String> = [
+            "iphone", "ipad", "ios", "simulator", "simctl",
+        ]
+        if has(simulatorWords) {
+            recognized = true
+            include(["sim_build_run", "sim_describe", "sim_screenshot"])
+            if has(["boot", "gesture", "interact", "launch", "swipe", "tap", "type"]) {
+                include([
+                    "sim_list_devices", "sim_boot_device", "sim_launch_app",
+                    "sim_tap", "sim_swipe", "sim_type",
+                ])
+            }
+        }
+
+        let computerWords: Set<String> = [
+            "desktop", "finder", "keynote", "mac", "macos", "screen", "system",
+        ]
+        if has(computerWords) && has(["click", "control", "interact", "open", "operate", "type"]) {
+            recognized = true
+            include([
+                "computer_status", "computer_ui_tree", "computer_screenshot",
+                "computer_click", "computer_type", "computer_key", "computer_scroll",
+            ])
+        }
+
+        if has(["design", "image", "photo", "screenshot", "visual"]) {
+            recognized = true
+            include(["describe_image"])
+        }
+
+        if has(["scaffold"]) || (has(["create", "new"]) && has(["app", "application"])) {
+            recognized = true
+            include(["create_macos_app", "create_ios_app", "macos_build_run"])
+        }
+        if has(["archive", "device", "distribution", "ipa", "ship", "sign", "testflight", "upload"]) {
+            recognized = true
+            include(["apple_ship", "macos_build_run"])
+        }
+        if has(["delegate", "parallel", "subagent"]) {
+            recognized = true
+            include(["task"])
+        }
+        if has(["forget", "memory", "remember"]) {
+            recognized = true
+            include(["memory_add", "memory_delete"])
+        }
+
+        // Connected tools have arbitrary names. Include a bounded number only
+        // when their name/summary meaningfully overlaps the task.
+        let extensionMatches = tools.compactMap { tool -> (String, Int)? in
+            guard !knownToolNames.contains(tool.name) else { return nil }
+            let haystack = tokens(in: tool.name + " " + tool.summary)
+            let overlap = words.intersection(haystack).count
+            let exact = lower.contains(tool.name.lowercased()) ? 4 : 0
+            let score = overlap + exact
+            return score >= 2 ? (tool.name, score) : nil
+        }
+        .sorted { lhs, rhs in
+            lhs.1 == rhs.1 ? lhs.0 < rhs.0 : lhs.1 > rhs.1
+        }
+        if !extensionMatches.isEmpty {
+            recognized = true
+            include(extensionMatches.prefix(4).map(\.0))
+        }
+
+        guard recognized else { return tools }
+        return tools.filter { selected.contains($0.name) }
+    }
+
+    /// Classifies whether a project request needs observable execution before
+    /// the agent may call it complete. Direct imperatives and concrete project
+    /// diagnostics require evidence; ordinary knowledge questions do not.
+    static func evidenceRequirement(for task: String) -> EvidenceRequirement {
+        let lower = task.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !lower.isEmpty, PromptBuilder.exactRequestedAnswer(in: task) == nil else {
+            return .none
+        }
+        let words = tokens(in: lower)
+        let first = lower.split { !$0.isLetter && !$0.isNumber }.first.map(String.init) ?? ""
+        let directivePrefixes = [
+            "please ", "can you ", "could you ", "would you ", "will you ",
+            "i want you to ", "i need you to ", "need you to ", "let's ",
+            "lets ", "go ahead", "proceed",
+        ]
+        let directAction = actionWords.contains(first)
+            || directivePrefixes.contains(where: lower.hasPrefix)
+
+        if directAction && !words.isDisjoint(with: mutationWords) {
+            return .mutation
+        }
+        if directAction && !words.isDisjoint(with: toolActionWords) {
+            return .tool
+        }
+
+        let projectSpecific = !words.isDisjoint(with: projectWords)
+        let diagnostic = !words.isDisjoint(with: inspectionWords.union(verificationWords))
+        if projectSpecific && diagnostic { return .tool }
+        return .none
+    }
+
+    static func requiresBrowserEvidence(for task: String) -> Bool {
+        let lower = task.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let words = tokens(in: lower)
+        return !words.isDisjoint(with: browserEvidenceWords)
+            || lower.contains("in-app browser")
+    }
+
+    private static let knownToolNames: Set<String> = [
+        "read_file", "write_file", "move_file", "list_directory", "search",
+        "find_files", "glob", "web_fetch", "background_process", "background_status",
+        "apply_patch", "run_command", "build_diagnostics", "create_macos_app",
+        "create_ios_app", "macos_build_run", "apple_ship", "sim_list_devices",
+        "sim_boot_device", "sim_launch_app", "sim_tap", "sim_swipe", "sim_type",
+        "sim_describe", "sim_screenshot", "describe_image", "sim_build_run",
+        "browser_read", "browser_screenshot", "browser_navigate", "browser_click",
+        "browser_type", "browser_eval", "computer_status", "computer_ui_tree",
+        "computer_screenshot", "computer_click", "computer_type", "computer_key",
+        "computer_scroll", "task", "memory_add", "memory_delete", "ask_user",
+        "attempt_completion",
+    ]
+
+    private static let mutationWords: Set<String> = [
+        "add", "adjust", "build", "change", "clean", "convert", "correct",
+        "create", "delete", "edit", "enable", "fix", "implement", "improve",
+        "install", "make", "migrate", "modify", "optimize", "polish", "refactor",
+        "remove", "rename", "replace", "rewrite", "support", "update", "upgrade",
+        "write",
+    ]
+    private static let inspectionWords: Set<String> = [
+        "analyze", "audit", "check", "code", "debug", "diagnose", "explain",
+        "file", "find", "inspect", "investigate", "issue", "locate", "project",
+        "repo", "repository", "review", "source", "trace",
+    ]
+    private static let verificationWords: Set<String> = [
+        "benchmark", "build", "compile", "diagnose", "lint", "profile", "run",
+        "test", "tests", "verify",
+    ]
+    private static let toolActionWords: Set<String> = inspectionWords
+        .union(verificationWords)
+        .union(["browse", "click", "navigate", "open", "preview", "read", "search", "serve"])
+    private static let actionWords: Set<String> = mutationWords.union(toolActionWords)
+    private static let projectWords: Set<String> = [
+        "app", "build", "code", "error", "file", "folder", "page", "project",
+        "repo", "repository", "site", "source", "test", "tests", "website",
+    ]
+    private static let browserEvidenceWords: Set<String> = [
+        "browser", "page", "preview", "render", "rendered", "site", "website",
+    ]
+
+    private static func tokens(in text: String) -> Set<String> {
+        Set(text.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init))
     }
 }

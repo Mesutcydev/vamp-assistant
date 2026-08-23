@@ -22,10 +22,20 @@ actor EnginePool {
         var directory: URL
         var diskBytes: Int64
         var lastUsed: Date
+        var format: CatalogModel.Format = .mlx
+        /// Conservative reservation: projected lazy weight working set, raised
+        /// to the measured helper-process footprint when GGUF reports more.
+        var reservedBytes: UInt64 = 0
     }
 
     /// Pure residency planning — deterministic, no engines involved.
     enum Planner {
+
+        enum ContextPressureLevel: Int, Sendable, Equatable {
+            case none
+            case trimTransientCaches
+            case evictIdleAndTrim
+        }
 
         /// Orders eviction candidates: idle (not active) residents, least
         /// recently used first. The active model is never a candidate.
@@ -43,6 +53,55 @@ actor EnginePool {
         static func underCap(residentCount: Int, maxResident: Int) -> Bool {
             residentCount < maxResident
         }
+
+        /// Multi-residency must be affordable on a clean machine even when
+        /// MLX has not paged lazy mappings yet or GGUF runs in another task.
+        /// Saturating addition makes corrupt metadata fail closed.
+        static func residentSetFits(
+            residents: [Resident],
+            candidateDiskBytes: Int64,
+            cleanUsableBudget: UInt64
+        ) -> Bool {
+            let candidate = MemoryAdvisor.projectedFootprint(
+                diskBytes: candidateDiskBytes)
+            let total = residents.reduce(candidate) { partial, resident in
+                let reserved = resident.reservedBytes > 0
+                    ? resident.reservedBytes
+                    : MemoryAdvisor.projectedFootprint(
+                        diskBytes: resident.diskBytes)
+                let (sum, overflow) = partial.addingReportingOverflow(reserved)
+                return overflow ? UInt64.max : sum
+            }
+            return MemoryAdvisor.verdict(
+                projected: total,
+                budget: cleanUsableBudget).fitsLoad
+        }
+
+        /// Proactive safe-point policy for a growing agent transcript. Small
+        /// unified-memory Macs act earlier because KV growth competes directly
+        /// with app, Metal, and model pages. The active model is never a
+        /// candidate; the strongest action only releases idle residents.
+        static func contextPressureLevel(
+            contextTokens: Int,
+            contextWindow: Int,
+            physicalMemory: UInt64,
+            availableBudget: UInt64
+        ) -> ContextPressureLevel {
+            guard contextTokens > 0, contextWindow > 0 else { return .none }
+            let fraction = Double(contextTokens) / Double(contextWindow)
+            let gib: UInt64 = 1_024 * 1_024 * 1_024
+            let smallUnifiedMemoryMac = physicalMemory <= 24 * gib
+            let lowHeadroom = max(gib, UInt64(Double(physicalMemory) * 0.08))
+
+            if availableBudget < lowHeadroom
+                || fraction >= (smallUnifiedMemoryMac ? 0.50 : 0.75) {
+                return .evictIdleAndTrim
+            }
+            if fraction >= (smallUnifiedMemoryMac ? 0.35 : 0.60) {
+                return .trimTransientCaches
+            }
+            return .none
+        }
     }
 
     // MARK: State
@@ -59,6 +118,11 @@ actor EnginePool {
     private(set) var activeModelID: String?
     private let maxResident: Int
     private var engineFactory: @Sendable (CatalogModel.Format, GenerationGate) -> any LLMEngine
+    /// Prevents repeated cache purges on every token turn while the context
+    /// remains in the same pressure band. Compaction or a model switch lowers
+    /// the band and arms the next transition again.
+    private var lastContextPressureLevel: Planner.ContextPressureLevel = .none
+    private var pressureModelID: String?
 
     /// Test seam: swap the admission authority (tests inject a fixed budget).
     var admitLoad: @Sendable (_ diskBytes: Int64) throws -> Void = { diskBytes in
@@ -73,8 +137,19 @@ actor EnginePool {
         // serialized inside that child, not in our process).
         self.engineFactory = { format, sharedGate in
             switch format {
-            case .mlx: return MLXEngine(gate: sharedGate)
-            case .gguf: return GGUFEngine()
+            case .mlx:
+                return MLXEngine(
+                    gate: sharedGate,
+                    experimentalPromptCacheEnabled:
+                        ExperimentalInferencePreferences.mlxPromptCacheEnabledForNewEngine,
+                    experimentalQuantizedKVEnabled:
+                        ExperimentalInferencePreferences.mlxQuantizedKVEnabledForNewEngine)
+            case .gguf:
+                return GGUFEngine(
+                    experimentalDFlashEnabled:
+                        ExperimentalInferencePreferences.dflashEnabledForNewEngine,
+                    experimentalNGramEnabled:
+                        ExperimentalInferencePreferences.ngramEnabledForNewEngine)
             }
         }
     }
@@ -124,15 +199,25 @@ actor EnginePool {
     ) async throws {
         touch(modelID)
         if engines[modelID] != nil {
+            if activeModelID != modelID {
+                pressureModelID = modelID
+                lastContextPressureLevel = .none
+            }
             activeModelID = modelID
             return
         }
+
+        await refreshExternalReservations()
 
         // Make room: residency cap first, then memory budget. Each eviction
         // frees one model's weights + cache; admission is re-checked after
         // every eviction because the footprint only drops once the kernel
         // reclaims the pages.
         while !Planner.underCap(residentCount: residents.count, maxResident: maxResident)
+            || !Planner.residentSetFits(
+                residents: Array(residents.values),
+                candidateDiskBytes: diskBytes,
+                cleanUsableBudget: MemoryAdvisor.cleanUsableBudget)
             || !admissible(diskBytes: diskBytes) {
             guard let victim = Planner.evictionCandidates(
                 residents: Array(residents.values), activeModelID: modelID).first
@@ -150,9 +235,19 @@ actor EnginePool {
             throw error
         }
         engines[modelID] = engine
+        let measuredExternal = await engine.externalResidentMemoryBytes ?? 0
         residents[modelID] = Resident(
-            modelID: modelID, directory: directory, diskBytes: diskBytes, lastUsed: Date())
+            modelID: modelID,
+            directory: directory,
+            diskBytes: diskBytes,
+            lastUsed: Date(),
+            format: format,
+            reservedBytes: max(
+                MemoryAdvisor.projectedFootprint(diskBytes: diskBytes),
+                measuredExternal))
         activeModelID = modelID
+        pressureModelID = modelID
+        lastContextPressureLevel = .none
         Log.engine.info("Pool: model \(modelID, privacy: .public) resident (\(self.residents.count) total)")
     }
 
@@ -169,12 +264,41 @@ actor EnginePool {
         residents[modelID] = nil
         if activeModelID == modelID {
             activeModelID = nil
+            pressureModelID = nil
+            lastContextPressureLevel = .none
         }
         Log.engine.info("Pool: evicted \(modelID, privacy: .public)")
     }
 
     private func touch(_ modelID: String) {
         residents[modelID]?.lastUsed = Date()
+    }
+
+    /// GGUF model memory belongs to llama-server, not Beet Code's task. Raise
+    /// each reservation to the helper's live phys_footprint before planning a
+    /// switch. MLX keeps the projected reservation because its weights may be
+    /// mapped but not resident until a later first generation.
+    private func refreshExternalReservations() async {
+        for (modelID, engine) in engines {
+            guard let measured = await engine.externalResidentMemoryBytes,
+                  var resident = residents[modelID]
+            else { continue }
+            resident.reservedBytes = max(
+                resident.reservedBytes,
+                max(
+                    MemoryAdvisor.projectedFootprint(diskBytes: resident.diskBytes),
+                    measured))
+            residents[modelID] = resident
+        }
+    }
+
+    /// Applies the task-specific native function catalog to the active local
+    /// backend when it supports one (currently GGUF/llama-server).
+    func configureActiveNativeTools(_ tools: [NativeToolSpec]) {
+        guard let id = activeModelID,
+              let configurable = engines[id] as? any NativeToolConfigurable
+        else { return }
+        configurable.configureNativeTools(tools)
     }
 
     // MARK: Generation routing
@@ -203,6 +327,56 @@ actor EnginePool {
 
     func resetActive() async {
         await activeEngine?.reset()
+        lastContextPressureLevel = .none
+    }
+
+    func rebaseActiveConversation(to turns: [ChatTurn]) async -> SemanticRebaseResult {
+        guard let activeEngine else { return .unsupported }
+        return await activeEngine.rebaseConversation(to: turns)
+    }
+
+    func trimActiveTransientMemory() async {
+        await activeEngine?.trimTransientMemory()
+    }
+
+    /// Runs only before a generation begins. Idle engines are evicted LRU;
+    /// the active engine merely releases disposable allocator/workspace cache.
+    func prepareForGeneration(
+        contextTokens: Int,
+        contextWindow: Int,
+        physicalMemory: UInt64 = MemoryAdvisor.physicalMemory,
+        availableBudget: UInt64 = MemoryAdvisor.availableBudget
+    ) async {
+        guard let activeModelID, let activeEngine else { return }
+        if pressureModelID != activeModelID {
+            pressureModelID = activeModelID
+            lastContextPressureLevel = .none
+        }
+
+        let level = Planner.contextPressureLevel(
+            contextTokens: contextTokens,
+            contextWindow: contextWindow,
+            physicalMemory: physicalMemory,
+            availableBudget: availableBudget)
+        guard level.rawValue > lastContextPressureLevel.rawValue else {
+            // A successful compaction may lower the band; remember that so a
+            // later long-context climb can trigger reclamation once more.
+            lastContextPressureLevel = level
+            return
+        }
+
+        if level == .evictIdleAndTrim {
+            let idle = Planner.evictionCandidates(
+                residents: Array(residents.values),
+                activeModelID: activeModelID)
+            for resident in idle {
+                await evict(modelID: resident.modelID)
+            }
+        }
+        await activeEngine.trimTransientMemory()
+        lastContextPressureLevel = level
+        Log.memory.info(
+            "Context memory governor entered level \(level.rawValue) at \(contextTokens)/\(contextWindow) tokens")
     }
 
     func cancelActiveGeneration() async {
@@ -231,6 +405,8 @@ actor EnginePool {
         engines[modelID] = nil
         residents[modelID] = nil
         activeModelID = nil
+        pressureModelID = nil
+        lastContextPressureLevel = .none
     }
 
     /// Unloads every resident model (app quit / deactivate-all).
@@ -241,6 +417,8 @@ actor EnginePool {
         engines.removeAll()
         residents.removeAll()
         activeModelID = nil
+        pressureModelID = nil
+        lastContextPressureLevel = .none
     }
 
     /// Emergency: dump the largest idle resident first (most bytes back),

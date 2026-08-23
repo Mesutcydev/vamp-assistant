@@ -39,6 +39,8 @@ struct AgentTab: View {
                 }
             }
 
+            ExperimentalInferenceCard()
+
             SettingsCard(
                 title: "Memory & Context",
                 icon: "brain",
@@ -91,6 +93,101 @@ struct AgentTab: View {
             Stepper(label, value: value, in: range, step: step)
                 .labelsHidden()
         }
+    }
+}
+
+/// Isolated experimental inference surface. It observes live engine status
+/// without widening the invalidation scope of the ordinary generation card.
+private struct ExperimentalInferenceCard: View {
+    @EnvironmentObject private var appState: AppState
+    @ObservedObject private var settings = SettingsStore.shared
+
+    var body: some View {
+        SettingsCard(
+            title: "Experimental inference",
+            icon: "bolt.badge.clock",
+            footer: "Off by default and independently reversible. Reload the model after changing a setting. MLX prompt reuse keeps only an in-memory verified prefix; KV8 compresses eligible attention cache after 512 tokens without changing model files. Vision models are excluded. A failed MLX experiment retries with full replay and standard KV before showing an error."
+        ) {
+            SettingToggle(
+                label: "DFlash for Qwen3.5 9B GGUF",
+                isOn: $settings.experimentalDFlashEnabled)
+            SettingToggle(
+                label: "N-gram acceleration for other GGUF models",
+                isOn: $settings.experimentalNGramEnabled)
+            SettingToggle(
+                label: "Reuse verified MLX prompt prefixes",
+                isOn: $settings.experimentalMLXPromptCacheEnabled)
+            SettingToggle(
+                label: "Use 8-bit MLX KV cache after 512 tokens",
+                isOn: $settings.experimentalMLXQuantizedKVEnabled)
+
+            HStack(spacing: Spacing.sm) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 7, height: 7)
+                Text(statusText)
+                    .font(.callout)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private var statusText: LocalizedStringResource {
+        if appState.activeModel?.format == .mlx {
+            let promptCache = appState.lastEngineStats.mlxPromptCacheActive
+            let kv8 = appState.lastEngineStats.mlxQuantizedKVActive
+            if promptCache && kv8 {
+                return "Verified prompt reuse and 8-bit KV cache are active."
+            }
+            if promptCache {
+                return "Verified MLX prompt reuse is active."
+            }
+            if kv8 {
+                return "8-bit MLX KV cache is active."
+            }
+            if settings.experimentalMLXPromptCacheEnabled
+                || settings.experimentalMLXQuantizedKVEnabled
+            {
+                return "MLX experiments are enabled; reload the model to apply or retry them."
+            }
+            return "Standard MLX prompt replay and KV cache are active."
+        }
+
+        switch appState.lastEngineStats.acceleration {
+        case .dflash:
+            return "DFlash is active for the loaded model."
+        case .mtp:
+            return settings.experimentalDFlashEnabled
+                ? "The loaded model is using the MTP fallback."
+                : "The loaded model is using built-in MTP."
+        case .ngram:
+            return "N-gram speculative decoding is active for the loaded model."
+        case .standard:
+            if !anyExperimentEnabled {
+                return "Standard decoding is active."
+            }
+            return "Experiments are enabled; select and reload a compatible model."
+        }
+    }
+
+    private var statusColor: Color {
+        switch appState.lastEngineStats.acceleration {
+        case .dflash: Theme.success
+        case .mtp: Theme.info
+        case .ngram: Theme.info
+        case .standard:
+            anyExperimentEnabled
+                ? Theme.warning : Theme.textTertiary
+        }
+    }
+
+    private var anyExperimentEnabled: Bool {
+        settings.experimentalDFlashEnabled
+            || settings.experimentalNGramEnabled
+            || settings.experimentalMLXPromptCacheEnabled
+            || settings.experimentalMLXQuantizedKVEnabled
     }
 }
 

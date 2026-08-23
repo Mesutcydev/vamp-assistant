@@ -59,6 +59,7 @@ struct BeetCodeApp: App {
                 // Apply the accent palette at launch and on every change —
                 // Theme's palette-driven colors resolve live.
                 .task(id: settings.accentPalette) { Theme.applyPalette(settings.accentPalette) }
+                .task(id: settings.textSize) { Theme.applyTextSize(settings.textSize) }
                 .task {
                     DiagnosticsCenter.shared.record(
                         .system, "App launched",
@@ -98,6 +99,11 @@ struct BeetCodeApp: App {
                     NotificationCenter.default.post(name: .openModelManager, object: nil)
                 }
                 .keyboardShortcut("M", modifiers: [.command, .shift])
+                Divider()
+                Button("Search Chats") {
+                    NotificationCenter.default.post(name: .focusChatSearch, object: nil)
+                }
+                .keyboardShortcut("f", modifiers: [.command])
             }
             CommandGroup(after: .help) {
                 Button("System Readiness…") {
@@ -133,4 +139,5 @@ extension Notification.Name {
     static let sessionTitleChanged = Notification.Name("com.beetcode.sessionTitleChanged")
     static let openWorkspace = Notification.Name("com.beetcode.openWorkspace")
     static let openSystemReadiness = Notification.Name("com.beetcode.openSystemReadiness")
+    static let focusChatSearch = Notification.Name("com.beetcode.focusChatSearch")
 }

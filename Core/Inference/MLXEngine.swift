@@ -5,6 +5,37 @@ import MLXLMCommon
 import MLXNN
 import MLXVLM
 
+/// Pure correctness boundary for in-memory prompt reuse. MLX already holds
+/// the generated assistant tokens in its KV cache; Beet Code may omit the
+/// assistant echo on the next request only when it is byte-for-byte the same
+/// after harmless edge-whitespace trimming and another turn follows it.
+enum MLXPromptCachePlanner {
+    enum Plan: Equatable {
+        case fullReplay
+        case incremental([ChatTurn])
+    }
+
+    static func plan(
+        newTurns: [ChatTurn],
+        expectedAssistantEcho: String?,
+        enabled: Bool
+    ) -> Plan {
+        guard enabled,
+              let expectedAssistantEcho,
+              newTurns.count > 1,
+              let first = newTurns.first,
+              first.role == .assistant,
+              canonical(first.content) == canonical(expectedAssistantEcho)
+        else { return .fullReplay }
+
+        return .incremental(Array(newTurns.dropFirst()))
+    }
+
+    static func canonical(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 /// MLX-backed engine. Runs in-process on the app's own GPU context.
 ///
 /// All `ChatSession`/Metal access is funneled through `GenerationGate` —
@@ -19,9 +50,18 @@ public final class MLXEngine: LLMEngine, @unchecked Sendable {
     /// Metal work with every other resident model — MLX permits only one
     /// command buffer in flight per process, regardless of how many models
     /// are resident. Standalone engines own their gate.
-    public init(gate: GenerationGate = GenerationGate()) {
+    public init(
+        gate: GenerationGate = GenerationGate(),
+        experimentalPromptCacheEnabled: Bool = false,
+        experimentalQuantizedKVEnabled: Bool = false
+    ) {
         self.gate = gate
+        self.configuredPromptCacheEnabled = experimentalPromptCacheEnabled
+        self.configuredQuantizedKVEnabled = experimentalQuantizedKVEnabled
     }
+
+    private let configuredPromptCacheEnabled: Bool
+    private let configuredQuantizedKVEnabled: Bool
 
     // Only accessed inside gate.run closures. `nonisolated(unsafe)` documents
     // that the gate — not the type system — guarantees exclusive access.
@@ -32,18 +72,19 @@ public final class MLXEngine: LLMEngine, @unchecked Sendable {
     private nonisolated(unsafe) var compatibilityDirectory: URL?
     private nonisolated(unsafe) var statsState = EngineStats()
     private nonisolated(unsafe) var loading = false
+    /// Per-load runtime state. Any experimental failure turns both off until
+    /// the next reload, while the persisted switches remain unchanged.
+    private nonisolated(unsafe) var runtimePromptCacheEnabled = false
+    private nonisolated(unsafe) var runtimeQuantizedKVEnabled = false
+    private nonisolated(unsafe) var expectedAssistantEcho: String?
     /// The active stream task. Retaining it lets Stop cancel the running
     /// generation instead of only invalidating queued gate work.
     private nonisolated(unsafe) var generationTask: Task<Void, Never>?
     private nonisolated(unsafe) var generationID: UUID?
     private let generationLock = NSLock()
-    /// Conversation replayed in full on every generation. ChatSession's KV
-    /// reuse across calls is deliberately NOT used: the agent loop re-feeds
-    /// assistant turns the session already generated (thinking-stripped), so
-    /// incremental rendering would duplicate content and corrupt the chat
-    /// template. Full replay — the same contract the remote and GGUF engines
-    /// implement — keeps the context provably correct at the cost of a
-    /// re-prefill per turn.
+    /// Canonical conversation. It remains the source of truth even when the
+    /// optional prompt cache is active, so every mismatch can clear MLX state
+    /// and replay a correct transcript immediately.
     private nonisolated(unsafe) var history: [ChatTurn] = []
 
     public var loadedModelID: String? {
@@ -83,8 +124,10 @@ public final class MLXEngine: LLMEngine, @unchecked Sendable {
                     loadDirectory = directory
                 }
 
+                let isVisionLanguageModel = MLXModelInspector.isVisionLanguageModel(
+                    at: loadDirectory)
                 let container: ModelContainer
-                if MLXModelInspector.isVisionLanguageModel(at: loadDirectory) {
+                if isVisionLanguageModel {
                     Log.engine.info("Detected multimodal MLX checkpoint; loading through the VLM factory")
                     container = try await VLMModelFactory.shared.loadContainer(
                         from: loadDirectory,
@@ -99,9 +142,20 @@ public final class MLXEngine: LLMEngine, @unchecked Sendable {
                 // and paged in on demand; a large cache would double-count RAM.
                 MLX.Memory.cacheLimit = 128 * 1024 * 1024
 
+                // Text-only first: VLM cache shapes vary widely and are not a
+                // useful first target for these deliberately risky switches.
+                self.runtimePromptCacheEnabled =
+                    self.configuredPromptCacheEnabled && !isVisionLanguageModel
+                self.runtimeQuantizedKVEnabled =
+                    self.configuredQuantizedKVEnabled && !isVisionLanguageModel
+                self.expectedAssistantEcho = nil
+
                 self.session = ChatSession(
                     container,
-                    generateParameters: MLXEngine.makeParameters(temperature: 0.6, maxTokens: nil),
+                    generateParameters: MLXEngine.makeParameters(
+                        temperature: 0.6,
+                        maxTokens: nil,
+                        quantizedKVEnabled: self.runtimeQuantizedKVEnabled),
                     // Qwen 3.5's chat template enables its hidden thinking
                     // channel by default. BeetCode already owns a separate
                     // reasoning surface, so leave the template in direct-
@@ -109,7 +163,9 @@ public final class MLXEngine: LLMEngine, @unchecked Sendable {
                     // whole budget before emitting visible text.
                     additionalContext: ["enable_thinking": false])
                 self.loadedID = modelID
-                self.statsState = EngineStats()
+                self.statsState = EngineStats(
+                    mlxPromptCacheActive: self.runtimePromptCacheEnabled,
+                    mlxQuantizedKVActive: self.runtimeQuantizedKVEnabled)
                 self.history.removeAll()
 
                 // Do not synchronously page the whole model during activation.
@@ -123,6 +179,10 @@ public final class MLXEngine: LLMEngine, @unchecked Sendable {
             } catch {
                 self.session = nil
                 self.loadedID = nil
+                self.runtimePromptCacheEnabled = false
+                self.runtimeQuantizedKVEnabled = false
+                self.expectedAssistantEcho = nil
+                self.statsState = EngineStats()
                 self.removeCompatibilityDirectory()
                 throw EngineError.loadFailed(String(describing: error))
             }
@@ -134,6 +194,9 @@ public final class MLXEngine: LLMEngine, @unchecked Sendable {
             self.session = nil
             self.loadedID = nil
             self.statsState = EngineStats()
+            self.runtimePromptCacheEnabled = false
+            self.runtimeQuantizedKVEnabled = false
+            self.expectedAssistantEcho = nil
             self.removeCompatibilityDirectory()
         }
         await gate.clearCacheWhenIdle {
@@ -144,8 +207,28 @@ public final class MLXEngine: LLMEngine, @unchecked Sendable {
     public func reset() async {
         _ = try? await gate.run {
             self.history.removeAll()
+            self.expectedAssistantEcho = nil
             await self.session?.clear()
         }
+    }
+
+    public func rebaseConversation(to turns: [ChatTurn]) async -> SemanticRebaseResult {
+        let result: SemanticRebaseResult? = try? await gate.run {
+            if self.history == turns {
+                return SemanticRebaseResult(
+                    installedHistory: true,
+                    preservedCachePrefixTurns: turns.count)
+            }
+
+            // ChatSession does not expose a safe rewind-to-turn-boundary API.
+            // Keep the rebuilt transcript canonical, but clear its opaque KV
+            // state and let the next request replay correctly.
+            self.history = turns
+            self.expectedAssistantEcho = nil
+            await self.session?.clear()
+            return SemanticRebaseResult(installedHistory: true)
+        }
+        return result ?? .unsupported
     }
 
     public func stream(
@@ -161,51 +244,105 @@ public final class MLXEngine: LLMEngine, @unchecked Sendable {
                     try await self.gate.run {
                         guard let session = self.session else { throw EngineError.notLoaded }
 
-                        // Full replay (see `history`): fresh KV, complete
-                        // conversation rendered through the chat template.
                         self.history.append(contentsOf: turns)
-                        await session.clear()
+                        let started = Date()
+                        var emitted = 0
 
-                        let messages = self.history.map { turn -> Chat.Message in
-                            switch turn.role {
-                            case .system: return Chat.Message.system(turn.content)
-                            case .user: return Chat.Message.user(turn.content)
-                            case .assistant: return Chat.Message.assistant(turn.content)
-                            case .tool: return Chat.Message.tool(turn.content)
+                        func consume(_ messages: [Chat.Message]) async throws
+                            -> (tokens: Int, wireOutput: String, info: GenerateCompletionInfo?)
+                        {
+                            var tokens = 0
+                            var wireOutput = ""
+                            var completionInfo: GenerateCompletionInfo?
+                            // streamDetails, NOT streamResponse: MLXLMCommon
+                            // parses tool calls into generations whose chunk is
+                            // nil. Re-serialize them for Beet Code's parser.
+                            for try await generation in session.streamDetails(to: messages) {
+                                if Task.isCancelled { throw CancellationError() }
+                                switch generation {
+                                case .chunk(let chunk):
+                                    continuation.yield(chunk)
+                                    wireOutput += chunk
+                                    tokens += 1
+                                    emitted += 1
+                                case .toolCall(let call):
+                                    let wire = MLXEngine.serializeToolCall(call)
+                                    continuation.yield(wire)
+                                    wireOutput += wire
+                                    emitted += 1
+                                case .info(let info):
+                                    completionInfo = info
+                                }
                             }
+                            return (tokens, wireOutput, completionInfo)
+                        }
+
+                        let plan = MLXPromptCachePlanner.plan(
+                            newTurns: turns,
+                            expectedAssistantEcho: self.expectedAssistantEcho,
+                            enabled: self.runtimePromptCacheEnabled)
+                        let messages: [Chat.Message]
+                        switch plan {
+                        case .incremental(let incremental):
+                            messages = MLXEngine.messages(from: incremental)
+                        case .fullReplay:
+                            await session.clear()
+                            messages = MLXEngine.messages(from: self.history)
                         }
 
                         session.generateParameters = MLXEngine.makeParameters(
                             temperature: temperature ?? 0.6,
-                            maxTokens: maxTokens)
+                            maxTokens: maxTokens,
+                            quantizedKVEnabled: self.runtimeQuantizedKVEnabled)
 
-                        var tokens = 0
-                        let started = Date()
-                        // streamDetails, NOT streamResponse: MLXLMCommon parses
-                        // `<tool_call>` blocks (and bare {"name":…} JSON) into
-                        // `.toolCall` generations whose `chunk` is nil —
-                        // streamResponse drops them silently, so the agent's
-                        // ToolParser never saw local tool calls at all. Here
-                        // they are re-serialized into the wire text the
-                        // ToolParser recognizes.
-                        for try await generation in session.streamDetails(to: messages) {
-                            if Task.isCancelled { break }
-                            switch generation {
-                            case .chunk(let chunk):
-                                continuation.yield(chunk)
-                                tokens += 1
-                            case .toolCall(let call):
-                                continuation.yield(MLXEngine.serializeToolCall(call))
-                            case .info:
-                                break
+                        let result: (
+                            tokens: Int,
+                            wireOutput: String,
+                            info: GenerateCompletionInfo?
+                        )
+                        do {
+                            result = try await consume(messages)
+                        } catch {
+                            let hadExperiment = self.runtimePromptCacheEnabled
+                                || self.runtimeQuantizedKVEnabled
+                            self.expectedAssistantEcho = nil
+                            self.runtimePromptCacheEnabled = false
+                            self.runtimeQuantizedKVEnabled = false
+                            await session.clear()
+
+                            // A pre-token experimental failure is safe to
+                            // retry once from the canonical transcript. Once
+                            // output was emitted, retrying would duplicate it.
+                            guard hadExperiment, emitted == 0, !Task.isCancelled else {
+                                self.statsState = EngineStats()
+                                throw error
                             }
+                            Log.engine.error(
+                                "MLX experiment failed; retrying this model with full replay and standard KV")
+                            session.generateParameters = MLXEngine.makeParameters(
+                                temperature: temperature ?? 0.6,
+                                maxTokens: maxTokens,
+                                quantizedKVEnabled: false)
+                            result = try await consume(MLXEngine.messages(from: self.history))
                         }
+
+                        self.expectedAssistantEcho = self.runtimePromptCacheEnabled
+                            ? MLXEngine.assistantEcho(from: result.wireOutput)
+                            : nil
 
                         let elapsed = Date().timeIntervalSince(started)
                         if elapsed > 0.2 {
+                            let generatedTokens = result.info?.generationTokenCount
+                                ?? result.tokens
+                            let nextSerial = self.statsState.usageSerial + 1
                             self.statsState = EngineStats(
-                                tokensPerSecond: Double(tokens) / elapsed,
-                                generatedTokens: tokens)
+                                tokensPerSecond: result.info?.tokensPerSecond
+                                    ?? Double(result.tokens) / elapsed,
+                                generatedTokens: generatedTokens,
+                                promptTokens: result.info?.promptTokenCount ?? 0,
+                                usageSerial: nextSerial,
+                                mlxPromptCacheActive: self.runtimePromptCacheEnabled,
+                                mlxQuantizedKVActive: self.runtimeQuantizedKVEnabled)
                         }
                     }
                     continuation.finish()
@@ -227,6 +364,8 @@ public final class MLXEngine: LLMEngine, @unchecked Sendable {
                 let saved = (try? await self.gate.run { () -> [ChatTurn] in
                     let old = self.history
                     self.history = []
+                    self.expectedAssistantEcho = nil
+                    await self.session?.clear()
                     return old
                 }) ?? []
                 do {
@@ -239,7 +378,13 @@ public final class MLXEngine: LLMEngine, @unchecked Sendable {
                 } catch {
                     continuation.finish(throwing: error)
                 }
-                _ = try? await self.gate.run { self.history = saved }
+                _ = try? await self.gate.run {
+                    self.history = saved
+                    // The isolated replay used the same ChatSession, so drop
+                    // its cache. The next parent request safely full-replays.
+                    self.expectedAssistantEcho = nil
+                    await self.session?.clear()
+                }
             }
             continuation.onTermination = { _ in task.cancel() }
         }
@@ -275,6 +420,19 @@ public final class MLXEngine: LLMEngine, @unchecked Sendable {
 
     /// Frees Metal buffer cache once any in-flight generation finishes.
     public func clearCaches() async {
+        _ = try? await gate.run {
+            self.expectedAssistantEcho = nil
+            await self.session?.clear()
+        }
+        await gate.clearCacheWhenIdle {
+            MLX.Memory.clearCache()
+        }
+    }
+
+    /// Drops only MLX's disposable allocation cache. The ChatSession and its
+    /// KV state remain intact, so proactive memory control does not force a
+    /// long prompt replay.
+    public func trimTransientMemory() async {
         await gate.clearCacheWhenIdle {
             MLX.Memory.clearCache()
         }
@@ -295,6 +453,9 @@ public final class MLXEngine: LLMEngine, @unchecked Sendable {
             self.session = nil
             self.loadedID = nil
             self.statsState = EngineStats()
+            self.runtimePromptCacheEnabled = false
+            self.runtimeQuantizedKVEnabled = false
+            self.expectedAssistantEcho = nil
             self.removeCompatibilityDirectory()
             return id
         }) ?? nil
@@ -305,7 +466,11 @@ public final class MLXEngine: LLMEngine, @unchecked Sendable {
         return wasLoaded != nil
     }
 
-    private static func makeParameters(temperature: Double, maxTokens: Int?) -> GenerateParameters {
+    static func makeParameters(
+        temperature: Double,
+        maxTokens: Int?,
+        quantizedKVEnabled: Bool = false
+    ) -> GenerateParameters {
         var params = GenerateParameters()
         params.temperature = Float(temperature)
         // Qwen-recommended sampling for the local catalog: nucleus + top-k
@@ -318,7 +483,32 @@ public final class MLXEngine: LLMEngine, @unchecked Sendable {
             params.repetitionPenalty = 1.05
         }
         params.maxTokens = maxTokens
+        if quantizedKVEnabled {
+            // 8-bit is the conservative experiment: roughly half the eligible
+            // attention-cache storage of fp16, with a much smaller quality
+            // risk than 4-bit. Keep the first 512 tokens unquantized.
+            params.kvBits = 8
+            params.kvGroupSize = 64
+            params.quantizedKVStart = 512
+        }
         return params
+    }
+
+    private static func messages(from turns: [ChatTurn]) -> [Chat.Message] {
+        turns.map { turn in
+            switch turn.role {
+            case .system: Chat.Message.system(turn.content)
+            case .user: Chat.Message.user(turn.content)
+            case .assistant: Chat.Message.assistant(turn.content)
+            case .tool: Chat.Message.tool(turn.content)
+            }
+        }
+    }
+
+    static func assistantEcho(from wireOutput: String) -> String {
+        MLXPromptCachePlanner.canonical(
+            ToolParser.strippingEmptyCallWrappers(
+                from: PromptBuilder.cleaningGeneratedText(wireOutput)))
     }
 
     /// Re-serializes a parsed tool call into the `<tool_call>` wire text the

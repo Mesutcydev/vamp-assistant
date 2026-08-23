@@ -51,6 +51,14 @@ final class RemoteLLMEngine: LLMEngine, NativeToolConfigurable, @unchecked Senda
         withLock { accumulated.removeAll() }
     }
 
+    func rebaseConversation(to turns: [ChatTurn]) async -> SemanticRebaseResult {
+        withLock { accumulated = turns }
+        // Remote providers receive the rebuilt transcript in full. They may
+        // cache it server-side, but Beet Code cannot truthfully claim a local
+        // cache prefix was retained.
+        return SemanticRebaseResult(installedHistory: true)
+    }
+
     func stream(
         adding turns: [ChatTurn],
         maxTokens: Int?,
@@ -183,7 +191,8 @@ final class RemoteLLMEngine: LLMEngine, NativeToolConfigurable, @unchecked Senda
             return statsState.usageSerial
         }
         updateStats(EngineStats(
-            tokensPerSecond: elapsed > 0 && completion > 0 ? Double(completion) / elapsed : nil,
+            tokensPerSecond: usage.tokensPerSecond
+                ?? (elapsed > 0 && completion > 0 ? Double(completion) / elapsed : nil),
             generatedTokens: completion,
             promptTokens: prompt,
             usageSerial: serial))
@@ -274,6 +283,7 @@ final class EngineRouter: LLMEngine, NativeToolConfigurable, @unchecked Sendable
             nativeTools = tools
             currentRemote?.configureNativeTools(tools)
         }
+        (local as? any NativeToolConfigurable)?.configureNativeTools(tools)
     }
 
     func useLocal() {
@@ -355,6 +365,29 @@ final class EngineRouter: LLMEngine, NativeToolConfigurable, @unchecked Sendable
         }
     }
 
+    func rebaseConversation(to turns: [ChatTurn]) async -> SemanticRebaseResult {
+        if let remote = withLock({ currentRemote }) {
+            return await remote.rebaseConversation(to: turns)
+        }
+        if let pool {
+            return await pool.rebaseActiveConversation(to: turns)
+        }
+        return await local.rebaseConversation(to: turns)
+    }
+
+    func prepareForGeneration(contextTokens: Int, contextWindow: Int) async {
+        guard withLock({ currentRemote == nil }) else { return }
+        if let pool {
+            await pool.prepareForGeneration(
+                contextTokens: contextTokens,
+                contextWindow: contextWindow)
+        } else {
+            await local.prepareForGeneration(
+                contextTokens: contextTokens,
+                contextWindow: contextWindow)
+        }
+    }
+
     func stream(
         adding turns: [ChatTurn],
         maxTokens: Int?,
@@ -366,9 +399,11 @@ final class EngineRouter: LLMEngine, NativeToolConfigurable, @unchecked Sendable
         if let pool {
             // The pool is an actor: resolve the active engine with a hop,
             // then relay the inner stream chunk-by-chunk.
+            let tools = withLock { nativeTools }
             return AsyncThrowingStream { continuation in
                 let task = Task {
                     do {
+                        await pool.configureActiveNativeTools(tools)
                         let inner = try await pool.stream(
                             adding: turns, maxTokens: maxTokens, temperature: temperature)
                         for try await chunk in inner {
@@ -391,9 +426,11 @@ final class EngineRouter: LLMEngine, NativeToolConfigurable, @unchecked Sendable
             return remote.streamReplay(turns, maxTokens: maxTokens, temperature: temperature)
         }
         if let pool {
+            let tools = withLock { nativeTools }
             return AsyncThrowingStream { continuation in
                 let task = Task {
                     do {
+                        await pool.configureActiveNativeTools(tools)
                         let inner = try await pool.streamReplay(
                             turns, maxTokens: maxTokens, temperature: temperature)
                         for try await chunk in inner {
@@ -426,6 +463,15 @@ final class EngineRouter: LLMEngine, NativeToolConfigurable, @unchecked Sendable
             await pool.clearCaches()
         } else {
             await local.clearCaches()
+        }
+    }
+
+    func trimTransientMemory() async {
+        guard withLock({ currentRemote == nil }) else { return }
+        if let pool {
+            await pool.trimActiveTransientMemory()
+        } else {
+            await local.trimTransientMemory()
         }
     }
 

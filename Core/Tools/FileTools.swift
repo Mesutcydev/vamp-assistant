@@ -47,7 +47,7 @@ struct ReadFileTool: AgentTool {
         let url = try context.workspace.resolve(path)
 
         guard FileManager.default.fileExists(atPath: url.path) else {
-            return "error: file not found: \(path)"
+            throw ToolError.fileNotFound(path)
         }
 
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
