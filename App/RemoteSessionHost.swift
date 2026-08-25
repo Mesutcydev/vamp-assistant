@@ -3,6 +3,7 @@ import AppKit
 import Darwin
 import Security
 import CryptoKit
+@preconcurrency import ScreenCaptureKit
 
 enum RemoteNetworkKind: String, Equatable, Sendable {
     case tailscale
@@ -436,6 +437,9 @@ final class RemoteSessionHost {
         case ("GET", "/api/control"):
             guard authorized(request) else { return unauthorized() }
             return .response(json(macControlStatusFields()))
+        case ("GET", "/api/control/apps"):
+            guard authorized(request) else { return unauthorized() }
+            return await macControlApplications()
         case ("GET", "/api/control/screen"):
             guard authorized(request) else { return unauthorized() }
             return await macControlScreen(request)
@@ -793,6 +797,56 @@ final class RemoteSessionHost {
         .response(json(["error": .string(reason)], status: 403))
     }
 
+    private func macControlApplications() async -> LocalAPIServer.RouteResult {
+        guard macControlAllowedHandler?() ?? false else {
+            return macControlDenied("Mac Control is off on this Mac. Enable it in Remote Sessions.")
+        }
+        guard ComputerPermission.screenRecordingGranted else {
+            return macControlDenied("Screen Recording permission is required to list streamable apps.")
+        }
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
+            let selfBundleID = Bundle.main.bundleIdentifier
+            var largestWindowByBundleID: [String: SCWindow] = [:]
+            for window in content.windows {
+                guard window.isOnScreen,
+                      window.windowLayer == 0,
+                      window.frame.width >= 160,
+                      window.frame.height >= 120,
+                      let app = window.owningApplication else { continue }
+                let bundleID = app.bundleIdentifier
+                guard !bundleID.isEmpty,
+                      bundleID != selfBundleID else { continue }
+                let area = window.frame.width * window.frame.height
+                let previousArea = largestWindowByBundleID[bundleID].map { $0.frame.width * $0.frame.height } ?? 0
+                if area > previousArea { largestWindowByBundleID[bundleID] = window }
+            }
+            let sortedWindows = largestWindowByBundleID.values.sorted {
+                ($0.owningApplication?.applicationName ?? "")
+                    .localizedCaseInsensitiveCompare($1.owningApplication?.applicationName ?? "") == .orderedAscending
+            }
+            var applications: [LFJSONValue] = []
+            applications.reserveCapacity(sortedWindows.count)
+            for window in sortedWindows {
+                let app = window.owningApplication
+                let bundleValue: LFJSONValue = app.map { .string($0.bundleIdentifier) } ?? .null
+                let titleValue: LFJSONValue = window.title.map(LFJSONValue.string) ?? .null
+                let fields: [String: LFJSONValue] = [
+                    "windowID": .number(Double(window.windowID)),
+                    "bundleIdentifier": bundleValue,
+                    "name": .string(app?.applicationName ?? window.title ?? "Mac app"),
+                    "windowTitle": titleValue,
+                    "width": .number(window.frame.width),
+                    "height": .number(window.frame.height),
+                ]
+                applications.append(.object(fields))
+            }
+            return .response(json(["applications": .array(applications)]))
+        } catch {
+            return .response(json(["error": .string(error.localizedDescription)], status: 500))
+        }
+    }
+
     private func macControlScreen(_ request: LocalAPIServer.Request) async -> LocalAPIServer.RouteResult {
         guard macControlAllowedHandler?() ?? false else {
             return macControlDenied("Mac Control is off on this Mac. Enable it in Remote Sessions.")
@@ -814,7 +868,8 @@ final class RemoteSessionHost {
             return macControlDenied("Mac Control is off on this Mac. Enable it in Remote Sessions.")
         }
         let displayID = request.query["display"].flatMap(UInt32.init)
-        let config = screenCaptureConfig(from: request, displayID: displayID)
+        let windowID = request.query["window"].flatMap(UInt32.init)
+        let config = screenCaptureConfig(from: request, displayID: displayID, windowID: windowID)
         // Multipart H.264 (AVCC) — Vamp-style live video, no JPEG/MJPEG.
         let boundary = "beetframe"
         let lines = AsyncStream<Data>(bufferingPolicy: .bufferingNewest(2)) { continuation in
@@ -858,11 +913,13 @@ final class RemoteSessionHost {
 
     private func screenCaptureConfig(
         from request: LocalAPIServer.Request,
-        displayID: CGDirectDisplayID?
+        displayID: CGDirectDisplayID?,
+        windowID: CGWindowID?
     ) -> RemoteMacScreenCapture.Config {
         let profile = RemoteStreamProfile(resolution: RemoteStreamResolution.resolve(request.query["resolution"]))
         return RemoteMacScreenCapture.Config(
             displayID: displayID,
+            windowID: windowID,
             maxWidth: profile.maxWidth,
             averageBitrate: profile.averageBitrate,
             framesPerSecond: profile.framesPerSecond)

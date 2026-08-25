@@ -15,17 +15,20 @@ final class RemoteMacScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate, 
 
     struct Config: Equatable, Sendable {
         var displayID: CGDirectDisplayID?
+        var windowID: CGWindowID?
         var maxWidth: Int?
         var averageBitrate: Int
         var framesPerSecond: Int
 
         init(
             displayID: CGDirectDisplayID? = nil,
+            windowID: CGWindowID? = nil,
             maxWidth: Int? = RemoteStreamResolution.high.maxWidth,
             averageBitrate: Int = RemoteStreamResolution.high.averageBitrate,
             framesPerSecond: Int = RemoteStreamResolution.high.framesPerSecond
         ) {
             self.displayID = displayID
+            self.windowID = windowID
             self.maxWidth = maxWidth
             self.averageBitrate = max(averageBitrate, 250_000)
             self.framesPerSecond = min(max(framesPerSecond, 5), 60)
@@ -38,7 +41,7 @@ final class RemoteMacScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate, 
         var stream: SCStream?
         var starting = false
         var config = Config()
-        var activeDisplayID: CGDirectDisplayID = CGMainDisplayID()
+        var activeBounds = CGDisplayBounds(CGMainDisplayID())
         var latest: Frame?
         var continuations: [UUID: AsyncStream<Frame>.Continuation] = [:]
         var captureWidth = 0
@@ -112,9 +115,22 @@ final class RemoteMacScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate, 
         let config = state.withLock { $0.config }
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            let targetWindow = config.windowID.flatMap { requestedID in
+                content.windows.first { $0.windowID == requestedID && $0.isOnScreen }
+            }
+            if config.windowID != nil, targetWindow == nil {
+                finishListeners()
+                return
+            }
             let display: SCDisplay
             if let displayID = config.displayID,
                let match = content.displays.first(where: { $0.displayID == displayID }) {
+                display = match
+            } else if let targetWindow,
+                      let match = content.displays.max(by: {
+                          CGDisplayBounds($0.displayID).intersection(targetWindow.frame).area
+                              < CGDisplayBounds($1.displayID).intersection(targetWindow.frame).area
+                      }) {
                 display = match
             } else if let first = content.displays.first {
                 display = first
@@ -123,10 +139,23 @@ final class RemoteMacScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate, 
                 return
             }
 
-            // SCDisplay width/height are pixels — matching Vamp's capture path.
-            let pixelWidth = max(display.width, 1)
-            let pixelHeight = max(display.height, 1)
-            let filter = SCContentFilter(display: display, excludingWindows: [])
+            let displayBounds = CGDisplayBounds(display.displayID)
+            let filter: SCContentFilter
+            let captureBounds: CGRect
+            let pixelWidth: Int
+            let pixelHeight: Int
+            if let targetWindow {
+                filter = SCContentFilter(desktopIndependentWindow: targetWindow)
+                captureBounds = targetWindow.frame
+                let backingScale = max(Double(display.width) / max(displayBounds.width, 1), 1)
+                pixelWidth = max(Int((targetWindow.frame.width * backingScale).rounded()), 1)
+                pixelHeight = max(Int((targetWindow.frame.height * backingScale).rounded()), 1)
+            } else {
+                filter = SCContentFilter(display: display, excludingWindows: [])
+                captureBounds = displayBounds
+                pixelWidth = max(display.width, 1)
+                pixelHeight = max(display.height, 1)
+            }
             let streamConfig = SCStreamConfiguration()
             streamConfig.showsCursor = true
             streamConfig.queueDepth = 2
@@ -171,7 +200,7 @@ final class RemoteMacScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate, 
                     state.starting = false
                     guard !state.continuations.isEmpty else { return false }
                     state.stream = fallback
-                    state.activeDisplayID = display.displayID
+                    state.activeBounds = captureBounds
                     state.captureWidth = width
                     state.captureHeight = height
                     return true
@@ -185,7 +214,7 @@ final class RemoteMacScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate, 
                 state.starting = false
                 guard !state.continuations.isEmpty else { return false }
                 state.stream = next
-                state.activeDisplayID = display.displayID
+                state.activeBounds = captureBounds
                 state.captureWidth = width
                 state.captureHeight = height
                 return true
@@ -234,8 +263,7 @@ final class RemoteMacScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate, 
     }
 
     private func publish(encoded: RemoteH264Encoder.EncodedFrame) {
-        let displayID = state.withLock { $0.activeDisplayID }
-        let quartz = CGDisplayBounds(displayID)
+        let bounds = state.withLock { $0.activeBounds }
         let frame = Frame(
             payload: .h264(
                 data: encoded.data,
@@ -243,10 +271,10 @@ final class RemoteMacScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate, 
                 parameterSets: encoded.parameterSets),
             imageWidth: encoded.width,
             imageHeight: encoded.height,
-            displayX: quartz.origin.x,
-            displayY: quartz.origin.y,
-            displayWidth: quartz.width,
-            displayHeight: quartz.height)
+            displayX: bounds.origin.x,
+            displayY: bounds.origin.y,
+            displayWidth: bounds.width,
+            displayHeight: bounds.height)
         let listeners = state.withLock { state -> [AsyncStream<Frame>.Continuation] in
             state.latest = frame
             return Array(state.continuations.values)
@@ -267,4 +295,8 @@ final class RemoteMacScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate, 
         guard CGImageDestinationFinalize(destination) else { return nil }
         return data as Data
     }
+}
+
+private extension CGRect {
+    var area: CGFloat { isNull || isEmpty ? 0 : width * height }
 }

@@ -489,6 +489,11 @@ final class RemoteSessionTests: XCTestCase {
         XCTAssertNotNil(status.json.objectValue?["tokenExpiresAt"]?.numberValue)
         XCTAssertNotNil(status.json.objectValue?["phase"]?.stringValue)
 
+        let unauthorizedApps = try await request(baseURL, path: "/api/control/apps")
+        XCTAssertEqual(unauthorizedApps.status, 401)
+        let disabledApps = try await request(baseURL, path: "/api/control/apps", token: token)
+        XCTAssertEqual(disabledApps.status, 403)
+
         let remoteModels = try await request(baseURL, path: "/api/models", token: token)
         XCTAssertEqual(remoteModels.status, 200)
         let accountModel = try XCTUnwrap(remoteModels.json.objectValue?["models"]?.arrayValue?.first?.objectValue)
