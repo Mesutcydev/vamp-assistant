@@ -340,6 +340,54 @@ enum RemoteMacControl {
             displayHeight: quartz.height)
     }
 
+    /// One-shot still JPEG for a selected application window. The returned
+    /// coordinate space remains the Mac's global Quartz space so input events
+    /// map to the same pixels as the live window stream.
+    @MainActor
+    static func captureWindowJPEG(
+        windowID: CGWindowID,
+        maxWidth: Int? = RemoteStreamResolution.high.maxWidth,
+        quality: Double = 0.88
+    ) async throws -> Frame {
+        guard ComputerPermission.screenRecordingGranted else {
+            throw ComputerUseError.screenRecordingNotGranted
+        }
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        guard let window = content.windows.first(where: { $0.windowID == windowID && $0.isOnScreen }) else {
+            throw ComputerUseError.noFocusedApp
+        }
+        let bounds = window.frame
+        let display = content.displays.max {
+            CGDisplayBounds($0.displayID).intersection(bounds).area
+                < CGDisplayBounds($1.displayID).intersection(bounds).area
+        }
+        let displayBounds = display.map { CGDisplayBounds($0.displayID) } ?? bounds
+        let backingScale = display.map {
+            max(Double($0.width) / max(displayBounds.width, 1), 1)
+        } ?? 1
+        let pixelWidth = max(Int((bounds.width * backingScale).rounded()), 1)
+        let pixelHeight = max(Int((bounds.height * backingScale).rounded()), 1)
+        let scale = maxWidth.map { min(1, Double($0) / Double(pixelWidth)) } ?? 1
+        let config = SCStreamConfiguration()
+        config.showsCursor = true
+        config.width = max(2, Int((Double(pixelWidth) * scale).rounded(.down) / 2) * 2)
+        config.height = max(2, Int((Double(pixelHeight) * scale).rounded(.down) / 2) * 2)
+        config.scalesToFit = true
+        let filter = SCContentFilter(desktopIndependentWindow: window)
+        let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+        guard let jpeg = RemoteMacScreenCapture.jpegData(from: image, quality: quality) else {
+            throw ToolError.commandFailed(exitCode: 1)
+        }
+        return Frame(
+            payload: .jpeg(jpeg),
+            imageWidth: image.width,
+            imageHeight: image.height,
+            displayX: bounds.origin.x,
+            displayY: bounds.origin.y,
+            displayWidth: bounds.width,
+            displayHeight: bounds.height)
+    }
+
     private static func normalizedButton(_ button: String?) -> String {
         switch button?.lowercased() {
         case "right": "right"
@@ -348,4 +396,8 @@ enum RemoteMacControl {
         }
     }
 
+}
+
+private extension CGRect {
+    var area: CGFloat { isNull || isEmpty ? 0 : width * height }
 }

@@ -852,11 +852,19 @@ final class RemoteSessionHost {
             return macControlDenied("Mac Control is off on this Mac. Enable it in Remote Sessions.")
         }
         let displayID = request.query["display"].flatMap(UInt32.init)
+        let windowID = request.query["window"].flatMap(UInt32.init)
         do {
             let profile = RemoteStreamProfile(resolution: RemoteStreamResolution.resolve(request.query["resolution"]))
-            let frame = try await RemoteMacControl.captureDisplayJPEG(
-                displayID: displayID,
-                maxWidth: profile.maxWidth)
+            let frame: RemoteMacControl.Frame
+            if let windowID {
+                frame = try await RemoteMacControl.captureWindowJPEG(
+                    windowID: windowID,
+                    maxWidth: profile.maxWidth)
+            } else {
+                frame = try await RemoteMacControl.captureDisplayJPEG(
+                    displayID: displayID,
+                    maxWidth: profile.maxWidth)
+            }
             return .response(screenJPEGResponse(frame, displayID: displayID))
         } catch {
             return .response(json(["error": .string(error.localizedDescription)], status: 403))
@@ -870,11 +878,14 @@ final class RemoteSessionHost {
         let displayID = request.query["display"].flatMap(UInt32.init)
         let windowID = request.query["window"].flatMap(UInt32.init)
         let config = screenCaptureConfig(from: request, displayID: displayID, windowID: windowID)
+        // Each HTTP stream owns its capture pipeline. A display viewer and an
+        // app-window viewer must never restart or retarget one another.
+        let capture = RemoteMacScreenCapture()
         // Multipart H.264 (AVCC) — Vamp-style live video, no JPEG/MJPEG.
         let boundary = "beetframe"
         let lines = AsyncStream<Data>(bufferingPolicy: .bufferingNewest(2)) { continuation in
             let task = Task.detached {
-                for await frame in RemoteMacScreenCapture.shared.frames(config: config) {
+                for await frame in capture.frames(config: config) {
                     try Task.checkCancellation()
                     guard case .h264(let data, let keyframe, let parameterSets) = frame.payload else { continue }
                     let params = (keyframe ? parameterSets : nil) ?? Data()
@@ -1599,7 +1610,6 @@ final class RemoteSessionHost {
     }
 
     private static let publicImages: [String: String] = [
-        "/assets/beetlogo.png": "BeetLogo",
         "/assets/vamp-backdrop.png": "WindowAtmosphere",
         "/assets/vamp-icon.png": "VampBackdrop",
         "/assets/bot-builder-light.png": "BotBuilderLight",
@@ -2002,10 +2012,12 @@ enum RemoteNetworkEndpointDiscovery {
 
 /// Stores only SHA-256 token digests and expiry dates. The bearer token stays
 /// on the paired device, while the Mac can still recognize it after the host
-/// is restarted. Revoking paired devices removes this record immediately.
+/// is restarted. These values are identifiers, not credentials, so keeping
+/// them in app preferences avoids Keychain ACL prompts after an ad-hoc update.
+/// The legacy Keychain item is intentionally left untouched for upgrade
+/// compatibility, but is no longer read during launch.
 private enum RemotePairedClientStore {
-    private static let service = "com.beetcode.remote.host"
-    private static let account = "paired-client-digests"
+    private static let defaultsKey = "remote.paired-client-digests.v2"
     private static let cacheLock = NSLock()
     nonisolated(unsafe) private static var cached: [String: Date]?
 
@@ -2016,17 +2028,7 @@ private enum RemotePairedClientStore {
             return cached
         }
         cacheLock.unlock()
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip,
-        ]
-        var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data,
+        guard let data = UserDefaults.standard.data(forKey: defaultsKey),
               let values = try? JSONDecoder().decode([String: Double].self, from: data) else {
             cacheLock.lock()
             cached = [:]
@@ -2050,22 +2052,10 @@ private enum RemotePairedClientStore {
         cacheLock.unlock()
         let values = tokens.mapValues(\.timeIntervalSince1970)
         guard let data = try? JSONEncoder().encode(values) else { return }
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip,
-        ]
         if tokens.isEmpty {
-            SecItemDelete(query as CFDictionary)
+            UserDefaults.standard.removeObject(forKey: defaultsKey)
             return
         }
-        if SecItemUpdate(query as CFDictionary,
-                         [kSecValueData as String: data] as CFDictionary) == errSecSuccess { return }
-        var insert = query
-        insert.removeValue(forKey: kSecUseAuthenticationUI as String)
-        insert[kSecValueData as String] = data
-        insert[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        SecItemAdd(insert as CFDictionary, nil)
+        UserDefaults.standard.set(data, forKey: defaultsKey)
     }
 }
