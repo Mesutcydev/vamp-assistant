@@ -1,0 +1,51 @@
+name: iOS IPA
+
+# Produces the unsigned, sideloadable IPA (Payload/Vamp Assistant.app) on a
+# macOS runner. Re-sign it with AltStore, SideStore or Sideloadly to install.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+    paths:
+      - 'iOSApp/**'
+      - 'Core/**'
+      - 'App/Assets.xcassets/**'
+      - 'project.yml'
+      - 'scripts/package-beetcode-remote-ios.sh'
+      - '.github/workflows/ios-ipa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  ipa:
+    name: Package unsigned IPA
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Build and package
+        run: scripts/package-beetcode-remote-ios.sh
+
+      - name: Report the artifact
+        run: |
+          ls -lh dist
+          cat dist/*.sha256
+
+      - name: Upload the IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: vamp-assistant-ios-unsigned
+          path: |
+            dist/*.ipa
+            dist/*.ipa.sha256
+          if-no-files-found: error
+          retention-days: 30
