@@ -150,15 +150,18 @@ struct RemoteAPIClient {
         return avcStream(path: "api/control/screen/stream", queryItems: queryItems)
     }
 
-    func sendControl(_ body: [String: Any]) async throws -> RemoteAcceptedResponse {
+    // The command dictionaries are built fresh at each call site and handed
+    // over wholesale, so they transfer into the nonisolated client rather than
+    // being shared with the main actor.
+    func sendControl(_ body: sending [String: Any]) async throws -> RemoteAcceptedResponse {
         try await controlRequest("api/control/input", body: body)
     }
 
-    func sendControlBatch(_ commands: [[String: Any]]) async throws -> RemoteAcceptedResponse {
+    func sendControlBatch(_ commands: sending [[String: Any]]) async throws -> RemoteAcceptedResponse {
         try await controlRequest("api/control/input", body: ["commands": commands])
     }
 
-    private func controlRequest(_ path: String, body: [String: Any]) async throws -> RemoteAcceptedResponse {
+    private func controlRequest(_ path: String, body: sending [String: Any]) async throws -> RemoteAcceptedResponse {
         var request = try authorizedRequest(url: baseURL.appending(path: path), method: "POST")
         request.timeoutInterval = 2
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
