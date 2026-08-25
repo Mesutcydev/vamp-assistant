@@ -57,7 +57,7 @@ struct SimulatorPanelView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         // Theme surface, not .bar material: Beet mode must tint this too.
-        .background(Theme.surface)
+        .background(.thinMaterial)
     }
 
     /// The device list lives in a menu: in a 380–560 pt docked column a

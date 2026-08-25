@@ -88,14 +88,12 @@ struct SidebarView: View {
                 }
             }
             .listStyle(.sidebar)
-            // The system list material is neutral; the explicit background
-            // keeps the sidebar in the same visual world as Beet mode while
-            // the rows themselves provide the elevation and selection cues.
+            // Let the window atmosphere show through the neutral sidebar.
             .scrollContentBackground(.hidden)
-            .background(Theme.bg)
+            .background(Color.clear)
             sidebarFooter
         }
-        .background(Theme.bg)
+        .background(.ultraThinMaterial)
         .onExitCommand {
             guard showsCloseButton else { return }
             dismiss()
@@ -147,7 +145,7 @@ struct SidebarView: View {
             }
         }
         .padding(8)
-        .background(Theme.bg)
+        .background(.ultraThinMaterial)
         .overlay(alignment: .top) {
             Rectangle().fill(Theme.hairline).frame(height: 1)
         }
@@ -1047,7 +1045,7 @@ private struct SidebarPrimaryDestinations: View {
             destination("Bots", icon: "person.3.sequence.fill", action: onBots)
         }
         .padding(10)
-        .background(Theme.bg)
+        .background(.ultraThinMaterial)
     }
 
     private func destination(
@@ -1220,7 +1218,7 @@ struct SidebarHeaderView: View {
         .padding(.horizontal, showsCloseButton ? 18 : 12)
         .padding(.top, showsCloseButton ? 14 : 12)
         .padding(.bottom, 11)
-        .background(Theme.bg)
+        .background(.ultraThinMaterial)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.hairline).frame(height: 1)
         }

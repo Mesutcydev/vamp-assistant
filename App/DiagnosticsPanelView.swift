@@ -21,7 +21,7 @@ struct DiagnosticsPanelView: View {
             timeline
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.bg)
+        .background(.ultraThinMaterial)
     }
 
     // MARK: Header
@@ -57,7 +57,7 @@ struct DiagnosticsPanelView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(Theme.surface)
+        .background(.thinMaterial)
     }
 
     // MARK: System snapshot

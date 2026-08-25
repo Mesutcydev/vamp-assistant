@@ -34,8 +34,7 @@ struct SettingsCard<Content: View>: View {
         }
         .padding(Spacing.lg)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // Opaque elevated card — matches the main window's surfaces; the
-        // translucent lfGlass look is reserved for overlay chrome.
+        // Neutral glass: atmosphere supplies depth without a colored tint.
         .lfCard()
     }
 }
@@ -167,7 +166,7 @@ struct TabScroll<Content: View>: View {
             }
             .padding(Spacing.lg)
         }
-        .background(Theme.bg)
+        .background(Color.clear)
     }
 }
 

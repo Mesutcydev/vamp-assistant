@@ -16,7 +16,7 @@ struct StatusBarView: View {
         .font(.caption)
         .foregroundStyle(Theme.textSecondary)
         .lineLimit(1)
-        .background(Theme.bg)
+        .background(.ultraThinMaterial)
     }
 
     @ViewBuilder

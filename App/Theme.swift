@@ -238,9 +238,9 @@ extension View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         return self
             .modifier(LFGlassModifier(shape: shape, contentLegibility: contentLegibility))
-            .overlay(shape.strokeBorder(.white.opacity(0.10), lineWidth: 0.5)
+            .overlay(shape.strokeBorder(Theme.hairline.opacity(0.78), lineWidth: 0.75)
                 .allowsHitTesting(false))
-            .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
+            .shadow(color: Theme.cardShadow.opacity(0.72), radius: 10, y: 4)
             .brightness(hovering ? 0.025 : 0)
     }
 }

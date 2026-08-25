@@ -40,7 +40,7 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
-            .background(Theme.bg)
+            .background(.ultraThinMaterial)
             .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 260)
         } detail: {
             VStack(spacing: 0) {
@@ -57,7 +57,7 @@ struct SettingsView: View {
                 }
                 .padding(.horizontal, 24)
                 .padding(.vertical, 18)
-                .background(Theme.surface)
+                .background(.thinMaterial)
                 .overlay(alignment: .bottom) { Rectangle().fill(Theme.hairline).frame(height: 1) }
 
                 Group {
@@ -73,7 +73,7 @@ struct SettingsView: View {
             }
         }
         .frame(minWidth: 820, minHeight: 620)
-        .background(Theme.bg)
+        .background { AtmosphereBackground(intensity: .conversation) }
         .tint(Theme.accent)
         .onReceive(NotificationCenter.default.publisher(for: .openProviderSettings)) { _ in
             tab = .providers

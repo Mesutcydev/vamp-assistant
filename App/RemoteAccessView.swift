@@ -31,7 +31,7 @@ struct RemoteAccessView: View {
         }
         .padding(24)
         .frame(minWidth: 560, minHeight: 560)
-        .background(Theme.bg)
+        .background { AtmosphereBackground(intensity: .conversation) }
         .task {
             while !Task.isCancelled {
                 appState.refreshRemoteSessionStatus()
@@ -336,7 +336,7 @@ struct RemoteAccessConsentView: View {
         }
         .padding(24)
         .frame(width: 520)
-        .background(Theme.bg)
+        .background(.ultraThinMaterial)
     }
 
     private func capabilityRow(

@@ -33,7 +33,7 @@ struct ModelManagerView: View {
                 .padding(Spacing.lg)
             }
         }
-        .background(Theme.bg)
+        .background { AtmosphereBackground(intensity: .conversation) }
         // Re-sync with reality every open: models imported/copied/deleted
         // outside the registry (or left unregistered by an interrupted
         // import) must not show stale Download/Load states.
