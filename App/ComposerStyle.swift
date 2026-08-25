@@ -3,21 +3,6 @@ import SwiftUI
 /// The SwiftUI palette for each composer flow preset. The enum itself lives
 /// in Core (ComposerFlow.swift) so SettingsStore and the CLI can see it
 /// without importing the UI layer.
-extension ComposerFlow {
-    /// Colors for the animated border gradient. Each palette wraps (first
-    /// color repeated last) so the rotating sweep is seamless.
-    var colors: [Color] {
-        switch self {
-        case .aurora: [.purple, .pink, .orange, .purple]
-        case .ember: [.orange, .red, .yellow, .orange]
-        case .ocean: [.teal, .blue, .cyan, .teal]
-        // .primary adapts: near-black in light mode, near-white in dark, so
-        // the graphite shimmer stays visible under either appearance.
-        case .graphite: [.gray, .secondary, Color.primary.opacity(0.5), .gray]
-        }
-    }
-}
-
 /// The state the composer renders for: drives color intensity and the
 /// animated border's meaning.
 enum ComposerPhase: Equatable {
@@ -73,17 +58,51 @@ struct ComposerBorder: ViewModifier {
                     }
                 }
             }
-            .overlay {
-                shape.strokeBorder(
-                    borderColor,
-                    lineWidth: 1)
-                    .allowsHitTesting(false)
-            }
+            .overlay { interactionBorder.allowsHitTesting(false) }
             .shadow(
                 color: phase == .idle ? .clear : stateTint.opacity(animated ? 0.055 : 0.035),
                 radius: phase == .idle ? 0 : 5)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: phase)
             .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private var interactionBorder: some View {
+        if !animated || reduceMotion || flow == .graphite {
+            shape.strokeBorder(borderColor, lineWidth: 1)
+        } else {
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+                let progress = timeline.date.timeIntervalSinceReferenceDate
+                    .truncatingRemainder(dividingBy: flow.cycleSeconds) / flow.cycleSeconds
+                let angle = Angle.degrees(progress * 360)
+                switch flow {
+                case .aurora:
+                    shape.strokeBorder(
+                        AngularGradient(
+                            colors: [Theme.hairline, stateTint.opacity(0.28),
+                                     Theme.textPrimary.opacity(0.82), stateTint.opacity(0.28),
+                                     Theme.hairline],
+                            center: .center, angle: angle),
+                        lineWidth: 1.35)
+                case .ember:
+                    shape.strokeBorder(
+                        AngularGradient(
+                            gradient: Gradient(stops: [
+                                .init(color: Theme.hairline.opacity(0.45), location: 0.00),
+                                .init(color: Theme.hairline.opacity(0.45), location: 0.68),
+                                .init(color: Theme.textPrimary.opacity(0.95), location: 0.82),
+                                .init(color: Theme.hairline.opacity(0.45), location: 0.94),
+                                .init(color: Theme.hairline.opacity(0.45), location: 1.00),
+                            ]), center: .center, angle: angle),
+                        lineWidth: 1.5)
+                case .ocean:
+                    let pulse = 0.36 + 0.34 * (0.5 + 0.5 * sin(progress * .pi * 2))
+                    shape.strokeBorder(stateTint.opacity(pulse), lineWidth: 1.4)
+                case .graphite:
+                    shape.strokeBorder(borderColor, lineWidth: 1)
+                }
+            }
+        }
     }
 
     private var borderColor: Color {

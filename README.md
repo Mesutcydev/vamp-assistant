@@ -36,7 +36,7 @@ The [Vamp Assistant site](https://mesutcydev.github.io/vamp-assistant/) has the 
 
 The repository includes a native SwiftUI companion app that connects to the Mac app's existing private Remote Sessions endpoint. It supports camera QR pairing, one-tap reconnection, secure token storage, session browsing, new local/API sessions, live responses, prompts, stop controls, approvals/questions, and permission-gated clipboard and file exchange.
 
-[Download the latest unsigned iPhone/iPad IPA](https://github.com/Mesutcydev/vamp-assistant/releases/download/ios-v0.1.28/Vamp-Assistant-iOS-0.1.28-build-42-unsigned.ipa)
+[Download the latest unsigned iPhone/iPad IPA](https://github.com/Mesutcydev/vamp-assistant/releases/download/ios-v0.1.29/Vamp-Assistant-iOS-0.1.29-build-43-unsigned.ipa)
 
 Build an unsigned sideloadable IPA:
 

@@ -93,7 +93,7 @@ struct SidebarView: View {
             .background(Color.clear)
             sidebarFooter
         }
-        .background(.ultraThinMaterial)
+        .background(Color.clear)
         .onExitCommand {
             guard showsCloseButton else { return }
             dismiss()
@@ -145,7 +145,7 @@ struct SidebarView: View {
             }
         }
         .padding(8)
-        .background(.ultraThinMaterial)
+        .background(Color.clear)
         .overlay(alignment: .top) {
             Rectangle().fill(Theme.hairline).frame(height: 1)
         }
@@ -1045,7 +1045,7 @@ private struct SidebarPrimaryDestinations: View {
             destination("Bots", icon: "person.3.sequence.fill", action: onBots)
         }
         .padding(10)
-        .background(.ultraThinMaterial)
+        .background(Color.clear)
     }
 
     private func destination(
@@ -1218,7 +1218,7 @@ struct SidebarHeaderView: View {
         .padding(.horizontal, showsCloseButton ? 18 : 12)
         .padding(.top, showsCloseButton ? 14 : 12)
         .padding(.bottom, 11)
-        .background(.ultraThinMaterial)
+        .background(Color.clear)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.hairline).frame(height: 1)
         }

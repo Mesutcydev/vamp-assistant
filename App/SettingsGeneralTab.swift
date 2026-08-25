@@ -11,9 +11,9 @@ struct GeneralTab: View {
 
     var body: some View {
         TabScroll {
-            SettingsCard(title: "Composer", icon: "text.cursor", footer: "The border traces the selected flow. Response style is used in the agent’s final handoff.") {
-                SettingRow(label: "Style") {
-                    Picker("Composer style", selection: $settings.composerFlow) {
+            SettingsCard(title: "Composer", icon: "text.cursor", footer: "Motion reflects interaction state and automatically stops when Reduce Motion is enabled. Response style controls the agent’s final handoff.") {
+                SettingRow(label: "Border motion", value: settings.composerFlow.help) {
+                    Picker("Border motion", selection: $settings.composerFlow) {
                         ForEach(ComposerFlow.allCases) { flow in
                             Text(flow.label).tag(flow)
                         }
@@ -28,7 +28,7 @@ struct GeneralTab: View {
                     }
                     .labelsHidden()
                 }
-                SettingToggle(label: "Animated border", isOn: $settings.composerBorderAnimation)
+                SettingToggle(label: "Animate interaction border", isOn: $settings.composerBorderAnimation)
             }
 
             SettingsCard(title: "Keyboard", icon: "keyboard", footer: "Shortcuts accept readable forms such as cmd+return. Esc always stops a running agent, and ⇧⌘M opens Model Manager.") {

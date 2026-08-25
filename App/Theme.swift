@@ -237,10 +237,10 @@ extension View {
     ) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         return self
-            .modifier(LFGlassModifier(shape: shape, contentLegibility: contentLegibility))
-            .overlay(shape.strokeBorder(Theme.hairline.opacity(0.78), lineWidth: 0.75)
+            .modifier(LFGlassModifier(shape: shape))
+            .overlay(shape.strokeBorder(.white.opacity(0.14), lineWidth: 0.5)
                 .allowsHitTesting(false))
-            .shadow(color: Theme.cardShadow.opacity(0.72), radius: 10, y: 4)
+            .shadow(color: .black.opacity(0.08), radius: 4, y: 1)
             .brightness(hovering ? 0.025 : 0)
     }
 }
@@ -249,7 +249,6 @@ extension View {
 /// #available dance lives in exactly one place.
 private struct LFGlassModifier<S: InsettableShape>: ViewModifier {
     let shape: S
-    let contentLegibility: Bool
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     @ViewBuilder
@@ -265,20 +264,18 @@ private struct LFGlassModifier<S: InsettableShape>: ViewModifier {
                     GeometryReader { proxy in
                         Color.clear
                             .frame(width: proxy.size.width, height: proxy.size.height)
-                            .glassEffect(
-                                contentLegibility ? .regular : .clear,
-                                in: shape)
+                            .glassEffect(.clear, in: shape)
                             .allowsHitTesting(false)
                     }
                 }
             } else {
                 content.background(
-                    contentLegibility ? AnyShapeStyle(.thinMaterial) : AnyShapeStyle(.ultraThinMaterial),
+                    AnyShapeStyle(.ultraThinMaterial),
                     in: shape)
             }
 #else
             content.background(
-                contentLegibility ? AnyShapeStyle(.thinMaterial) : AnyShapeStyle(.ultraThinMaterial),
+                AnyShapeStyle(.ultraThinMaterial),
                 in: shape)
 #endif
         }

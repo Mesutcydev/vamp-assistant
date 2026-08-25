@@ -151,8 +151,10 @@ final class ReasoningTests: XCTestCase {
 
     func testComposerFlowPresets() {
         XCTAssertEqual(ComposerFlow.allCases.count, 4)
+        XCTAssertEqual(Set(ComposerFlow.allCases.map(\.label)).count, 4)
         for flow in ComposerFlow.allCases {
-            XCTAssertGreaterThan(flow.colors.count, 1)
+            XCTAssertFalse(flow.label.isEmpty)
+            XCTAssertFalse(flow.help.isEmpty)
             XCTAssertGreaterThan(flow.cycleSeconds, 0)
         }
     }

@@ -38,22 +38,22 @@ struct AtmosphereBackground: View {
     private var artOpacity: Double {
         switch (intensity, settings.appearance) {
         case (.home, .light): 0.18
-        case (.home, .beet): 0.12
-        case (.home, .dark), (.home, .system): 0.10
-        case (.conversation, .light): 0.05
-        case (.conversation, .beet): 0.04
-        case (.conversation, .dark), (.conversation, .system): 0.025
+        case (.home, .beet): 0.24
+        case (.home, .dark), (.home, .system): 0.22
+        case (.conversation, .light): 0.09
+        case (.conversation, .beet): 0.15
+        case (.conversation, .dark), (.conversation, .system): 0.13
         }
     }
 
     private var washOpacity: Double {
         switch (intensity, settings.appearance) {
         case (.home, .light): 0.28
-        case (.home, .beet): 0.62
-        case (.home, .dark), (.home, .system): 0.68
-        case (.conversation, .light): 0.62
-        case (.conversation, .beet): 0.74
-        case (.conversation, .dark), (.conversation, .system): 0.78
+        case (.home, .beet): 0.34
+        case (.home, .dark), (.home, .system): 0.38
+        case (.conversation, .light): 0.48
+        case (.conversation, .beet): 0.48
+        case (.conversation, .dark), (.conversation, .system): 0.52
         }
     }
 

@@ -7,6 +7,13 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var settings = SettingsStore.shared
+    private let onClose: () -> Void
+
+    init(onClose: @escaping () -> Void = {
+        NotificationCenter.default.post(name: .openAssistantHome, object: nil)
+    }) {
+        self.onClose = onClose
+    }
 
     enum Tab: String, CaseIterable, Identifiable {
         case general = "General"
@@ -31,15 +38,30 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(Tab.allCases, selection: $tab) { option in
-                Label(option.rawValue, systemImage: option.icon)
-                    .font(.body.weight(.medium))
-                    .padding(.vertical, 7)
-                    .tag(option)
+            VStack(spacing: 0) {
+                Button(action: onClose) {
+                    Label("Back to Assistant", systemImage: "chevron.left")
+                        .font(.callout.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(12)
+                .help("Return to Vamp Assistant")
+                .keyboardShortcut(.cancelAction)
+
+                Divider().overlay(Theme.hairline)
+
+                List(Tab.allCases, selection: $tab) { option in
+                    Label(option.rawValue, systemImage: option.icon)
+                        .font(.body.weight(.medium))
+                        .padding(.vertical, 7)
+                        .tag(option)
+                }
+                .listStyle(.sidebar)
+                .scrollContentBackground(.hidden)
             }
             .navigationTitle("Settings")
-            .listStyle(.sidebar)
-            .scrollContentBackground(.hidden)
             .background(.ultraThinMaterial)
             .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 260)
         } detail: {
@@ -50,9 +72,9 @@ struct SettingsView: View {
                         Text(detailSubtitle).font(.callout).foregroundStyle(Theme.textSecondary)
                     }
                     Spacer()
-                    Button {
-                        NotificationCenter.default.post(name: .openAssistantHome, object: nil)
-                    } label: { Label("Done", systemImage: "xmark") }
+                    Button(action: onClose) {
+                        Label("Back to Assistant", systemImage: "chevron.backward")
+                    }
                     .buttonStyle(LFCapsuleButtonStyle())
                 }
                 .padding(.horizontal, 24)
@@ -75,6 +97,7 @@ struct SettingsView: View {
         .frame(minWidth: 820, minHeight: 620)
         .background { AtmosphereBackground(intensity: .conversation) }
         .tint(Theme.accent)
+        .onExitCommand(perform: onClose)
         .onReceive(NotificationCenter.default.publisher(for: .openProviderSettings)) { _ in
             tab = .providers
         }

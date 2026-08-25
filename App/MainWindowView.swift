@@ -97,7 +97,7 @@ struct MainWindowView: View {
     private var configuredLayout: some View {
         Group {
             if showSettings {
-                SettingsView()
+                SettingsView(onClose: { showSettings = false })
                     .environmentObject(appState)
             } else {
                 responsiveLayout
@@ -429,7 +429,7 @@ struct MainWindowView: View {
             HStack(spacing: 0) {
                 Group {
                     if showSettings {
-                        SettingsView().environmentObject(appState)
+                        SettingsView(onClose: { showSettings = false }).environmentObject(appState)
                     } else if showBotsDashboard {
                         BotDashboardView()
                             .environmentObject(appState)
@@ -509,7 +509,7 @@ struct MainWindowView: View {
             }
 
             if showSettings {
-                SettingsView().environmentObject(appState)
+                SettingsView(onClose: { showSettings = false }).environmentObject(appState)
             } else if showBotsDashboard {
                 BotDashboardView()
                     .environmentObject(appState)
