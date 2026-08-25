@@ -5,6 +5,31 @@ import XCTest
 @MainActor
 final class RemoteSessionTests: XCTestCase {
 
+    func testPortraitViewportResizeFitsEntireMacDisplay() {
+        let frame = RemoteControlApplicationRegistry.targetWindowFrame(
+            current: CGRect(x: 1_100, y: 180, width: 1_280, height: 800),
+            display: CGRect(x: 0, y: 0, width: 1_920, height: 1_080),
+            aspect: 9.0 / 19.5)
+
+        XCTAssertGreaterThanOrEqual(frame.minX, 24)
+        XCTAssertGreaterThanOrEqual(frame.minY, 52)
+        XCTAssertLessThanOrEqual(frame.maxX, 1_896)
+        XCTAssertLessThanOrEqual(frame.maxY, 1_056)
+        XCTAssertEqual(frame.width / frame.height, 9.0 / 19.5, accuracy: 0.003)
+        XCTAssertLessThanOrEqual(frame.height, 800, "resizing must not create an off-screen portrait window")
+    }
+
+    func testLandscapeViewportResizeFitsEntireMacDisplay() {
+        let frame = RemoteControlApplicationRegistry.targetWindowFrame(
+            current: CGRect(x: 100, y: 100, width: 1_280, height: 900),
+            display: CGRect(x: 0, y: 0, width: 1_440, height: 900),
+            aspect: 19.5 / 9.0)
+
+        XCTAssertLessThanOrEqual(frame.maxX, 1_416)
+        XCTAssertLessThanOrEqual(frame.maxY, 876)
+        XCTAssertEqual(frame.width / frame.height, 19.5 / 9.0, accuracy: 0.003)
+    }
+
     func testRemoteNetworkPrefersTailscaleAddressRange() {
         XCTAssertTrue(RemoteNetworkEndpointDiscovery.isTailscale("100.64.0.1"))
         XCTAssertTrue(RemoteNetworkEndpointDiscovery.isTailscale("100.127.255.254"))
@@ -505,8 +530,21 @@ final class RemoteSessionTests: XCTestCase {
 
         let unauthorizedApps = try await request(baseURL, path: "/api/control/apps")
         XCTAssertEqual(unauthorizedApps.status, 401)
+        let unauthorizedResize = try await request(
+            baseURL,
+            path: "/api/control/apps/resize",
+            method: "POST",
+            body: Data(#"{"windowID":1,"clientViewportAspect":0.5625}"#.utf8))
+        XCTAssertEqual(unauthorizedResize.status, 401)
         let disabledApps = try await request(baseURL, path: "/api/control/apps", token: token)
         XCTAssertEqual(disabledApps.status, 403)
+        let disabledResize = try await request(
+            baseURL,
+            path: "/api/control/apps/resize",
+            method: "POST",
+            token: token,
+            body: Data(#"{"windowID":1,"clientViewportAspect":0.5625}"#.utf8))
+        XCTAssertEqual(disabledResize.status, 403)
 
         let remoteModels = try await request(baseURL, path: "/api/models", token: token)
         XCTAssertEqual(remoteModels.status, 200)

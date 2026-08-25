@@ -142,6 +142,7 @@ final class RemoteSessionHost {
     var applyModelHandler: ((String, String?) async -> String?)?
     var configureRunHandler: ((RemoteRunOptions) -> Void)?
     private var server: LocalAPIServer?
+    private let macControlApplicationRegistry = RemoteControlApplicationRegistry()
     private var tokens: [String: Date] = [:]
     /// Bumped to drop every live SSE loop when the host stops or all clients
     /// are revoked. Per-token revoke uses `revokedEventDigests` so other
@@ -443,6 +444,12 @@ final class RemoteSessionHost {
         case ("GET", "/api/control/apps"):
             guard authorized(request) else { return unauthorized() }
             return await macControlApplications()
+        case ("POST", "/api/control/apps/launch"):
+            guard authorized(request) else { return unauthorized() }
+            return await macControlLaunchApplication(request)
+        case ("POST", "/api/control/apps/resize"):
+            guard authorized(request) else { return unauthorized() }
+            return await macControlResizeApplication(request)
         case ("GET", "/api/control/screen"):
             guard authorized(request) else { return unauthorized() }
             return await macControlScreen(request)
@@ -807,47 +814,74 @@ final class RemoteSessionHost {
         guard ComputerPermission.screenRecordingGranted else {
             return macControlDenied("Screen Recording permission is required to list streamable apps.")
         }
-        do {
-            let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
-            let selfBundleID = Bundle.main.bundleIdentifier
-            var largestWindowByBundleID: [String: SCWindow] = [:]
-            for window in content.windows {
-                guard window.isOnScreen,
-                      window.windowLayer == 0,
-                      window.frame.width >= 160,
-                      window.frame.height >= 120,
-                      let app = window.owningApplication else { continue }
-                let bundleID = app.bundleIdentifier
-                guard !bundleID.isEmpty,
-                      bundleID != selfBundleID else { continue }
-                let area = window.frame.width * window.frame.height
-                let previousArea = largestWindowByBundleID[bundleID].map { $0.frame.width * $0.frame.height } ?? 0
-                if area > previousArea { largestWindowByBundleID[bundleID] = window }
-            }
-            let sortedWindows = largestWindowByBundleID.values.sorted {
-                ($0.owningApplication?.applicationName ?? "")
-                    .localizedCaseInsensitiveCompare($1.owningApplication?.applicationName ?? "") == .orderedAscending
-            }
-            var applications: [LFJSONValue] = []
-            applications.reserveCapacity(sortedWindows.count)
-            for window in sortedWindows {
-                let app = window.owningApplication
-                let bundleValue: LFJSONValue = app.map { .string($0.bundleIdentifier) } ?? .null
-                let titleValue: LFJSONValue = window.title.map(LFJSONValue.string) ?? .null
-                let fields: [String: LFJSONValue] = [
-                    "windowID": .number(Double(window.windowID)),
-                    "bundleIdentifier": bundleValue,
-                    "name": .string(app?.applicationName ?? window.title ?? "Mac app"),
-                    "windowTitle": titleValue,
-                    "width": .number(window.frame.width),
-                    "height": .number(window.frame.height),
-                ]
-                applications.append(.object(fields))
-            }
-            return .response(json(["applications": .array(applications)]))
-        } catch {
-            return .response(json(["error": .string(error.localizedDescription)], status: 500))
+        let applications = macControlApplicationRegistry.snapshot().map(Self.macControlApplicationJSON)
+        return .response(json(["applications": .array(applications)]))
+    }
+
+    private func macControlLaunchApplication(_ request: LocalAPIServer.Request) async -> LocalAPIServer.RouteResult {
+        guard macControlAllowedHandler?() ?? false else {
+            return macControlDenied("Mac Control is off on this Mac. Enable it in Remote Sessions.")
         }
+        guard ComputerPermission.screenRecordingGranted else {
+            return macControlDenied("Screen Recording permission is required to stream an application.")
+        }
+        guard let bundleIdentifier = request.bodyJSON?.objectValue?["bundleIdentifier"]?.stringValue,
+              !bundleIdentifier.isEmpty,
+              bundleIdentifier.utf8.count <= 512 else {
+            return .response(json(["error": .string("Choose an installed Mac application.")], status: 400))
+        }
+        do {
+            let aspect = request.bodyJSON?.objectValue?["clientViewportAspect"]?.numberValue
+            let application = try await macControlApplicationRegistry.launch(
+                bundleIdentifier: bundleIdentifier,
+                clientViewportAspect: aspect)
+            return .response(json(["application": Self.macControlApplicationJSON(application)]))
+        } catch {
+            return .response(json(["error": .string(error.localizedDescription)], status: 409))
+        }
+    }
+
+    private func macControlResizeApplication(_ request: LocalAPIServer.Request) async -> LocalAPIServer.RouteResult {
+        guard macControlAllowedHandler?() ?? false else {
+            return macControlDenied("Mac Control is off on this Mac. Enable it in Remote Sessions.")
+        }
+        guard ComputerPermission.screenRecordingGranted else {
+            return macControlDenied("Screen Recording permission is required to stream an application.")
+        }
+        guard ComputerPermission.accessibilityGranted else {
+            return macControlDenied("Accessibility permission is required to resize a streamed application.")
+        }
+        guard let windowValue = request.bodyJSON?.objectValue?["windowID"]?.numberValue,
+              windowValue >= 0,
+              windowValue <= Double(UInt32.max),
+              let windowID = UInt32(exactly: windowValue),
+              let aspect = request.bodyJSON?.objectValue?["clientViewportAspect"]?.numberValue else {
+            return .response(json(["error": .string("A valid window and viewport aspect are required.")], status: 400))
+        }
+        do {
+            let application = try await macControlApplicationRegistry.resize(
+                windowID: windowID,
+                clientViewportAspect: aspect)
+            return .response(json(["application": Self.macControlApplicationJSON(application)]))
+        } catch {
+            return .response(json(["error": .string(error.localizedDescription)], status: 409))
+        }
+    }
+
+    private static func macControlApplicationJSON(
+        _ application: RemoteControlApplicationRegistry.Application
+    ) -> LFJSONValue {
+        .object([
+            "windowID": application.windowID.map { .number(Double($0)) } ?? .null,
+            "bundleIdentifier": .string(application.bundleIdentifier),
+            "name": .string(application.name),
+            "windowTitle": application.windowTitle.map(LFJSONValue.string) ?? .null,
+            "width": .number(application.width),
+            "height": .number(application.height),
+            "isRunning": .bool(application.isRunning),
+            "isActive": .bool(application.isActive),
+            "iconPNGBase64": application.iconPNGBase64.map(LFJSONValue.string) ?? .null,
+        ])
     }
 
     private func macControlScreen(_ request: LocalAPIServer.Request) async -> LocalAPIServer.RouteResult {

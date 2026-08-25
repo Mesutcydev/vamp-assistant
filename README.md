@@ -191,7 +191,7 @@ Docs: [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) ·
   /health`, CORS for browser clients. The endpoint is **stateless**: every
   request resets the engine session and replays the full conversation, so
   Codex `--oss`, Claude Code, Aider, or any OpenAI-format client can drive
-  BeetCode's loaded model. Toggle it in Settings → General → Local API
+  Vamp Assistant's loaded model. Toggle it in Settings → General → Local API
   Server (port configurable, status dot, copy-curl-example), or run it
   headless with `lf serve [--port N] [--model <catalog-id>]`.
 - **Keychain deadlock chain eliminated (F9/F9b/F9c)**: session
@@ -254,10 +254,10 @@ Docs: [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) ·
 - **Chat history import**: Claude, Codex, and Cursor session history imports
   through a live parser with visible per-file status; imported transcripts
   keep their original structure (roles, tool calls, timestamps) so they read
-  like native BeetCode sessions. Streaming is bounded (16 MB per file /
+  like native Vamp Assistant sessions. Streaming is bounded (16 MB per file /
   512 KB per message) so a huge history can't wedge the app.
 - **Workspace history digest**: the agent's system prompt carries a bounded
-  digest of what earlier sessions in this workspace were about — BeetCode's
+  digest of what earlier sessions in this workspace were about — Vamp Assistant's
   own and imported ones alike.
 - **Plugins**: Settings gains a Plugins tab; external command plugins are
   discovered and runnable from the app.
@@ -342,7 +342,7 @@ Project policy reference: [`docs/PROJECT-POLICY.md`](docs/PROJECT-POLICY.md).
 
 ## v0.10.7 — Optional bots and in-chat models
 
-- iPhone and browser remotes can start a plain chat without a specialist bot; Beet is the default, and bots stay optional.
+- iPhone and browser remotes can start a plain Vamp Assistant chat without a specialist bot; Assistant is the default, and bots stay optional.
 - Existing chats can change the model for the next turn instead of staying locked to the session default.
 - Bot computers are no longer auto-attached; start/stop them and attach only when you want an isolated workspace.
 
@@ -370,7 +370,7 @@ Project policy reference: [`docs/PROJECT-POLICY.md`](docs/PROJECT-POLICY.md).
 
 ## v0.10.1 — Warm-plum home redesign
 
-- The home surface now centers the task composer beneath a calmer Beet identity, with a restrained ambient glow and reduced-motion support.
+- The home surface centers the task composer beneath the Vamp Assistant identity, with a restrained ambient glow and reduced-motion support.
 - Dark and light appearances use a warm-plum palette with clearer surface depth, softer status colors, and more comfortable contrast.
 - Chat history is text-first, with quieter selection, a stronger workspace switcher, and a prominent monochrome New Chat action.
 - Browser, Simulator, and Diagnostics are consolidated in the window toolbar; the sidebar footer now contains only Models and Settings.

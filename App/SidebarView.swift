@@ -87,8 +87,15 @@ struct SidebarView: View {
                     importedSections
                 }
             }
-            .listStyle(.sidebar)
-            // Let the window atmosphere show through the neutral sidebar.
+            // NavigationSplitView already owns the sidebar silhouette. A
+            // nested `.sidebar` list adds its own inset border and rounded
+            // bottom corners on current macOS, which leaves a doubled frame
+            // that cannot follow the window corners. Plain keeps native list
+            // selection and keyboard behavior without introducing a second
+            // container shape.
+            .listStyle(.plain)
+            // Let the window atmosphere show through the single native
+            // NavigationSplitView sidebar surface.
             .scrollContentBackground(.hidden)
             .background(Color.clear)
             sidebarFooter
@@ -1219,9 +1226,6 @@ struct SidebarHeaderView: View {
         .padding(.top, showsCloseButton ? 14 : 12)
         .padding(.bottom, 11)
         .background(Color.clear)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Theme.hairline).frame(height: 1)
-        }
     }
 
     private var identityRow: some View {

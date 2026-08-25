@@ -36,6 +36,7 @@ final class FakeLLMEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendabl
     // Runtime state.
     private var cancelRequested = false
     private var holdContinuation: CheckedContinuation<Void, Never>?
+    private var releasePending = false
     private var loadedID: String?
     private var statsState = EngineStats()
     private var loadCounter = 0
@@ -58,13 +59,22 @@ final class FakeLLMEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendabl
     /// When true, the next stream(adding:) call blocks until release() is
     /// called — giving tests a deterministic point at which to cancel.
     func holdNextStream() {
-        withLock { holdsNextStream = true }
+        withLock {
+            holdsNextStream = true
+            releasePending = false
+        }
     }
 
     func release() {
         let continuation = withLock { () -> CheckedContinuation<Void, Never>? in
             let held = holdContinuation
             holdContinuation = nil
+            if held == nil {
+                // `streamCallCount` is incremented before the stream task installs
+                // its continuation. Remember an early release so tests cannot lose
+                // the signal in that small scheduling window.
+                releasePending = true
+            }
             return held
         }
         continuation?.resume()
@@ -200,7 +210,8 @@ final class FakeLLMEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendabl
                 if shouldHold {
                     _ = await withCheckedContinuation { inner in
                         let resumeNow = withLock { () -> Bool in
-                            if cancelRequested {
+                            if cancelRequested || releasePending {
+                                releasePending = false
                                 return true
                             }
                             holdContinuation = inner
