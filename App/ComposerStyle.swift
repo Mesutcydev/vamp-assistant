@@ -62,8 +62,7 @@ struct ComposerBorder: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .background(Theme.surface, in: shape)
-            .shadow(color: Theme.cardShadow, radius: 10, y: 4)
+            .lfGlass(radius: cornerRadius, contentLegibility: true, hovering: isHovering)
             .contentShape(shape)
             .onHover { hovering in
                 if reduceMotion {

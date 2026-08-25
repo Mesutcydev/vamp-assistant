@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -48,6 +49,7 @@ struct MainWindowView: View {
     @State private var showChangedFilesReview = false
     @State private var showReadiness = false
     @State private var readinessIsOnboarding = false
+    @State private var showBotsDashboard = false
 
     private var dockedPanelOpen: Bool {
         showSimulator || showBrowser || showDiagnostics
@@ -93,18 +95,15 @@ struct MainWindowView: View {
 
     private var configuredLayout: some View {
         responsiveLayout
-            .navigationTitle(sessions.workspaceURL?.lastPathComponent ?? "Beet Code")
+            .navigationTitle(showBotsDashboard ? "Bots" : (sessions.workspaceURL?.lastPathComponent ?? "Vamp Assistant"))
             .toolbar {
                 if #available(macOS 26.0, *) {
-                    ToolbarItem(placement: .automatic) { workspaceModeSwitcher }
-                        .sharedBackgroundVisibility(.hidden)
                     ToolbarItemGroup(placement: .primaryAction) {
                         topToolCluster
                         moreActionsMenu
                     }
                     .sharedBackgroundVisibility(.hidden)
                 } else {
-                    ToolbarItem(placement: .automatic) { workspaceModeSwitcher }
                     ToolbarItemGroup(placement: .primaryAction) {
                         topToolCluster
                         moreActionsMenu
@@ -124,7 +123,7 @@ struct MainWindowView: View {
                                                     detail: reason, level: .error)
                 }
             }
-            .toolbarBackground(Theme.bg, for: .windowToolbar)
+            .toolbarBackground(.ultraThinMaterial, for: .windowToolbar)
             .toolbarBackground(.visible, for: .windowToolbar)
             .background(Theme.bg)
             .onChange(of: showCompactSidebar) { _, on in
@@ -137,33 +136,6 @@ struct MainWindowView: View {
             }
     }
 
-    private var workspaceModeSwitcher: some View {
-        HStack(spacing: 2) {
-            workspaceModeButton(
-                "Chat",
-                icon: "bubble.left.and.bubble.right",
-                selected: sessions.workspaceURL == nil
-            ) {
-                // Clicking the already-selected tab is selection, not a
-                // destructive "new chat" shortcut.
-                guard sessions.workspaceURL != nil else { return }
-                Task { await sessions.switchToChatOnly() }
-            }
-            workspaceModeButton(
-                "Code",
-                icon: "chevron.left.forwardslash.chevron.right",
-                selected: sessions.workspaceURL != nil
-            ) {
-                if sessions.workspaceURL == nil { chooseWorkspace() }
-            }
-        }
-        .padding(2)
-        .background(Theme.surfaceInset.opacity(0.42),
-                    in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-            .strokeBorder(Theme.hairline.opacity(0.42), lineWidth: 0.75))
-    }
-
     private var topToolCluster: some View {
         HStack(spacing: 2) {
             topToolButton("Browser", icon: "safari", active: showBrowser) {
@@ -172,12 +144,15 @@ struct MainWindowView: View {
             topToolButton("Simulator", icon: "iphone", active: showSimulator) {
                 toggleToolPanel(.simulator)
             }
+            topToolButton("Remote", icon: "iphone.gen3.radiowaves.left.and.right", active: appState.remoteSessionRunning) {
+                requestRemoteAccess()
+            }
             topToolButton("Diagnostics", icon: "waveform.path.ecg", active: showDiagnostics) {
                 toggleToolPanel(.diagnostics)
             }
         }
         .padding(2)
-        .background(Theme.surfaceInset.opacity(0.42),
+        .background(.ultraThinMaterial,
                     in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
             .strokeBorder(Theme.hairline.opacity(0.42), lineWidth: 0.75))
@@ -196,10 +171,10 @@ struct MainWindowView: View {
             }
         } label: {
             Image(systemName: "ellipsis")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.textSecondary)
                 .frame(width: 32, height: 32)
-                .background(Theme.surfaceInset.opacity(0.42),
+                .background(.ultraThinMaterial,
                             in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .strokeBorder(Theme.hairline.opacity(0.42), lineWidth: 0.75))
@@ -216,7 +191,7 @@ struct MainWindowView: View {
     ) -> some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 13, weight: .medium, design: .serif))
                 .foregroundStyle(active ? Theme.rose : Theme.textSecondary)
                 .frame(width: 30, height: 28)
                 .background(active ? Theme.surfaceInset : Color.clear,
@@ -226,31 +201,6 @@ struct MainWindowView: View {
         .lfHoverLift()
         .help(title)
         .accessibilityLabel(title)
-    }
-
-    private func workspaceModeButton(
-        _ title: String,
-        icon: String,
-        selected: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: icon)
-                    .font(.system(size: 10.5, weight: .semibold))
-                Text(title)
-                    .font(.system(size: 11.5, weight: selected ? .semibold : .medium))
-            }
-            .foregroundStyle(selected ? Theme.textPrimary : Theme.textTertiary)
-            .padding(.horizontal, 9)
-            .frame(height: 26)
-            .background(selected ? Theme.surface : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? [.isSelected] : [])
-        .help(title == "Chat" ? "Chat without project tools" : "Work in a project folder")
     }
 
     private var presentationView: some View {
@@ -295,65 +245,55 @@ struct MainWindowView: View {
                     onComplete: completeWelcome)
                 .environmentObject(appState)
             }
-            .task {
-                let isTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
-                guard !isTestHost, !AppPreferencesStore.shared.current.hasCompletedWelcome else { return }
-                readinessIsOnboarding = true
-                showReadiness = true
-            }
+            .task { presentWelcomeIfNeeded() }
     }
 
     private var notificationView: some View {
-        presentationView
-            .onReceive(NotificationCenter.default.publisher(for: .openModelManager)) { _ in
-                showModelManager = true
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .openWorkspace)) { _ in
-                chooseWorkspace()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .openSystemReadiness)) { _ in
-                readinessIsOnboarding = false
-                showReadiness = true
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .openRemoteAccess)) { _ in
-                requestRemoteAccess()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .openBrowserPanel)) { _ in
-                presentToolPanel(.browser)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .toggleBrowserPanel)) { _ in
-                toggleToolPanel(.browser)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .toggleSimulatorPanel)) { _ in
-                toggleToolPanel(.simulator)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .toggleDiagnosticsPanel)) { _ in
-                toggleToolPanel(.diagnostics)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .gitStatus)) { _ in
-                sessions.gitStatus()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .gitDiff)) { _ in
-                showChangedFilesReview = sessions.workspaceURL != nil
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .undoCheckpoint)) { _ in
-                sessions.undoLastCheckpoint()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .exportChatMarkdown)) { _ in
-                exportCurrentChat(format: .markdown)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .exportChatJSON)) { _ in
-                exportCurrentChat(format: .json)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .exportTaskBundle)) { _ in
-                exportCurrentTaskBundle()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .newChat)) { _ in
-                sessions.newSession()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .stopAgent)) { _ in
-                sessions.stop()
-            }
+        AnyView(presentationView)
+            .onReceive(appNotifications, perform: handleAppNotification)
+    }
+
+    private var appNotifications: AnyPublisher<Notification, Never> {
+        Publishers.MergeMany([
+            .openModelManager, .openWorkspace, .openSystemReadiness, .openRemoteAccess,
+            .openBrowserPanel, .openBotsDashboard, .openAssistantHome,
+            .toggleBrowserPanel, .toggleSimulatorPanel, .toggleDiagnosticsPanel,
+            .gitStatus, .gitDiff, .undoCheckpoint, .exportChatMarkdown,
+            .exportChatJSON, .exportTaskBundle, .newChat, .stopAgent,
+        ].map { NotificationCenter.default.publisher(for: $0) })
+        .eraseToAnyPublisher()
+    }
+
+    private func handleAppNotification(_ notification: Notification) {
+        switch notification.name {
+        case .openModelManager: showModelManager = true
+        case .openWorkspace: chooseWorkspace()
+        case .openSystemReadiness:
+            readinessIsOnboarding = false
+            showReadiness = true
+        case .openRemoteAccess: requestRemoteAccess()
+        case .openBrowserPanel: presentToolPanel(.browser)
+        case .openBotsDashboard:
+            showBotsDashboard = true
+            showBrowser = false
+            showSimulator = false
+            showDiagnostics = false
+        case .openAssistantHome: showBotsDashboard = false
+        case .toggleBrowserPanel: toggleToolPanel(.browser)
+        case .toggleSimulatorPanel: toggleToolPanel(.simulator)
+        case .toggleDiagnosticsPanel: toggleToolPanel(.diagnostics)
+        case .gitStatus: sessions.gitStatus()
+        case .gitDiff: showChangedFilesReview = sessions.workspaceURL != nil
+        case .undoCheckpoint: sessions.undoLastCheckpoint()
+        case .exportChatMarkdown: exportCurrentChat(format: .markdown)
+        case .exportChatJSON: exportCurrentChat(format: .json)
+        case .exportTaskBundle: exportCurrentTaskBundle()
+        case .newChat:
+            showBotsDashboard = false
+            Task { await sessions.switchToChatOnly() }
+        case .stopAgent: sessions.stop()
+        default: break
+        }
     }
 
     private func requestRemoteAccess() {
@@ -362,6 +302,13 @@ struct MainWindowView: View {
         } else {
             showRemoteAccessConsent = true
         }
+    }
+
+    private func presentWelcomeIfNeeded() {
+        let isTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        guard !isTestHost, !AppPreferencesStore.shared.current.hasCompletedWelcome else { return }
+        readinessIsOnboarding = true
+        showReadiness = true
     }
 
     /// Export the active conversation even when the sidebar is collapsed. The
@@ -435,6 +382,7 @@ struct MainWindowView: View {
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         Task {
+            showBotsDashboard = false
             await sessions.switchWorkspace(to: url)
             if case .failed = appState.enginePhase { appState.enginePhase = .idle }
             var preferences = AppPreferencesStore.shared.current
@@ -462,7 +410,15 @@ struct MainWindowView: View {
                 .navigationSplitViewColumnWidth(min: 240, ideal: 292, max: 380)
         } detail: {
             HStack(spacing: 0) {
-                chatColumn
+                Group {
+                    if showBotsDashboard {
+                        BotDashboardView()
+                            .environmentObject(appState)
+                            .environmentObject(sessions)
+                    } else {
+                        chatColumn
+                    }
+                }
                     .frame(minWidth: chatMinWidth, maxWidth: .infinity, maxHeight: .infinity)
                 if showSimulator {
                     Divider()
@@ -520,7 +476,7 @@ struct MainWindowView: View {
                 .lfHoverLift()
                 .help("New chat")
                 Spacer()
-                Text(sessions.workspaceURL?.lastPathComponent ?? "Beet Code")
+                Text(showBotsDashboard ? "Bots" : (sessions.workspaceURL?.lastPathComponent ?? "Vamp Assistant"))
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
@@ -533,7 +489,13 @@ struct MainWindowView: View {
                 Rectangle().fill(Theme.hairline).frame(height: 1)
             }
 
-            chatColumn
+            if showBotsDashboard {
+                BotDashboardView()
+                    .environmentObject(appState)
+                    .environmentObject(sessions)
+            } else {
+                chatColumn
+            }
         }
         .background(Theme.bg)
         .sheet(isPresented: $showCompactSidebar) {

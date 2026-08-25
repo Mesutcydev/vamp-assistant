@@ -1,42 +1,42 @@
-# Beet Code
+# Vamp Assistant
 
-A lightweight, native, **Apple Silicon-only macOS coding agent**. Beet Code runs MLX models in-process through Metal, downloads them directly from Hugging Face with pause/resume, and gives a local coding agent safe, reviewable tools.
+A native, assistant-first **Apple Silicon macOS companion**. Vamp Assistant runs local MLX models through Metal, supports remote providers, controls browser and Mac workflows with approval, and opens Code only when a project is needed.
 
-[![Download Beet Code 0.10.7](https://img.shields.io/badge/Download-Beet%20Code%200.10.7%20ZIP-7A1F3D?style=for-the-badge)](https://github.com/Mesutcydev/beet-code/releases/download/v0.10.7/BeetCode-0.10.7.zip)
+[![Download Vamp Assistant](https://img.shields.io/badge/Download-Vamp%20Assistant-222222?style=for-the-badge)](https://github.com/Mesutcydev/vamp-assistant/releases/latest)
 [![Open source](https://img.shields.io/badge/Open%20source-7A1F3D?style=for-the-badge)](LICENSE)
 
 <p align="center">
-  <img src="docs/screenshots/app.jpg" alt="Beet Code — chats, composer, and faded window atmosphere" width="960">
+  <img src="docs/screenshots/app.png" alt="Vamp Assistant — chats, composer, and faded window atmosphere" width="960">
 </p>
 
 <p align="center">
-  <a href="https://mesutcydev.github.io/beet-code/">Explore the promo page</a> ·
-  <a href="https://github.com/Mesutcydev/beet-code/releases/latest">Download the latest release</a>
+  <a href="https://mesutcydev.github.io/vamp-assistant/">Explore Vamp Assistant</a> ·
+  <a href="https://github.com/Mesutcydev/vamp-assistant/releases/latest">Download the latest release</a>
 </p>
 
 ## Product previews
 
-Beet Code keeps your project, model, chats, browser, and iOS Simulator in one simple Mac app.
+Vamp Assistant keeps chats, specialist bots, browser and Mac control together, with projects, shell, files, and Simulator available through the optional Code capability.
 
 | Homepage | Imported chats |
 | --- | --- |
-| <img src="docs/previews/homepage.jpg" alt="Beet Code homepage in Beet Red" width="480"> | <img src="docs/previews/imported-chats.jpg" alt="Collapsed imported chat groups" width="480"> |
+| <img src="docs/previews/homepage.jpg" alt="Vamp Assistant homepage" width="480"> | <img src="docs/previews/imported-chats.jpg" alt="Collapsed imported chat groups" width="480"> |
 
 | iOS Simulator | In-app browser |
 | --- | --- |
-| <img src="docs/previews/simulator.jpg" alt="Beet Code iOS Simulator panel" width="480"> | <img src="docs/previews/browser.jpg" alt="Beet Code browser panel" width="480"> |
+| <img src="docs/previews/simulator.jpg" alt="Vamp Assistant iOS Simulator panel" width="480"> | <img src="docs/previews/browser.jpg" alt="Vamp Assistant browser panel" width="480"> |
 
 | Remote sessions |
 | --- |
-| <img src="docs/previews/remote-pairing.jpg" alt="Beet Code remote sessions pairing view" width="480"> |
+| <img src="docs/previews/remote-pairing.jpg" alt="Vamp Assistant remote sessions pairing view" width="480"> |
 
-The [GitHub Pages site](https://mesutcydev.github.io/beet-code/) has the full preview gallery, light/dark mode, and app details.
+The [Vamp Assistant site](https://mesutcydev.github.io/vamp-assistant/) has the full preview gallery, light/dark mode, and app details.
 
-## BeetCode Remote for iPhone and iPad
+## Vamp Assistant for iPhone and iPad
 
 The repository includes a native SwiftUI companion app that connects to the Mac app's existing private Remote Sessions endpoint. It supports camera QR pairing, one-tap reconnection, secure token storage, session browsing, new local/API sessions, live responses, prompts, stop controls, approvals/questions, and permission-gated clipboard and file exchange.
 
-[Download the latest unsigned iPhone/iPad IPA](https://github.com/Mesutcydev/beet-code/releases/download/ios-v0.1.8/BeetCode-Remote-iOS-0.1.8-build-21-unsigned.ipa)
+[Download the latest unsigned iPhone/iPad IPA](https://github.com/Mesutcydev/vamp-assistant/releases/download/ios-v0.1.28/Vamp-Assistant-iOS-0.1.28-build-42-unsigned.ipa)
 
 Build an unsigned sideloadable IPA:
 
@@ -44,11 +44,11 @@ Build an unsigned sideloadable IPA:
 ./scripts/package-beetcode-remote-ios.sh
 ```
 
-The resulting `BeetCode-Remote-iOS-*-unsigned.ipa` can be re-signed with AltStore, SideStore, Sideloadly, or a personal Apple development profile. Keep both devices on the same Tailscale network, then paste the address or QR URL shown by **Beet Code → Remote Sessions**.
+The resulting `Vamp-Assistant-iOS-*-unsigned.ipa` can be re-signed with AltStore, SideStore, Sideloadly, or a personal Apple development profile. Keep both devices on the same Tailscale network, then paste the address or QR URL shown by **Vamp Assistant → Remote Sessions**.
 
-**Install:** download the [ZIP](https://github.com/Mesutcydev/beet-code/releases/download/v0.10.7/BeetCode-0.10.7.zip), extract it, and move **Beet Code.app** to Applications. Apple Silicon + macOS 15+.
+**Install:** download the latest macOS build from [Releases](https://github.com/Mesutcydev/vamp-assistant/releases), extract it, and move **Vamp Assistant.app** to Applications. Apple Silicon + macOS 15+.
 
-> Gatekeeper will warn — this build is Apple Development–signed, **not notarized** (Developer ID certs are revoked). Right-click → Open, or `xattr -dr com.apple.quarantine "/path/to/Beet Code.app"`.
+> Gatekeeper will warn — this build is Apple Development–signed, **not notarized** (Developer ID certs are revoked). Right-click → Open, or `xattr -dr com.apple.quarantine "/path/to/Vamp Assistant.app"`.
 
 > Phase 1 deliberately focuses on one polished path: MLX + MLX-quantized safetensors + core coding tools. GGUF/llama.cpp has since shipped (v0.2+, see the GGUF entries in the model catalog).
 
@@ -317,6 +317,29 @@ Docs: [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) ·
 
 Project policy reference: [`docs/PROJECT-POLICY.md`](docs/PROJECT-POLICY.md).
 
+## v0.10.10 — Remote folders, bots, and safer sessions
+
+- Creating a Code folder from the phone works even when `Documents/BeetCode` does not exist yet, including iCloud Desktop & Documents.
+- Remote Auto / Full Access apply only to that phone run and no longer rewrite Mac Settings.
+- Sensitive home trees (`.ssh`, Library except iCloud documents, Trash) cannot be opened as a remote workspace.
+- Linux micro-VMs run the bot’s shell via `container exec`; Navigator enables computer control for that run only.
+- One bot computer per Builder, Reviewer, Navigator, and Researcher; the phone can prepare them on the Mac.
+- Each specialist bot has a private in-app browser (cookies and logins stay with that bot).
+- Follow-ups can Queue or Steer while a run is in progress.
+
+## v0.10.9 — Remote Chat/Code workspaces
+
+- Vamp Assistant can start Chat (no folder) or Code (one Mac project folder), matching the Mac toolbar.
+- Code mode lists recent folders, opens a path under home, or creates a new folder in `Documents/BeetCode`.
+- The Mac Remote host exposes `/api/workspaces` and starts sessions in the chosen folder.
+
+## v0.10.8 — Gemini compatibility and Remote reliability
+
+- Native Gemini requests now match Google's current `generateContent` contract, including live model IDs, tool calls, and thought signatures.
+- Saved Gemini 3.7 choices remap at launch so a valid key is not rejected for a retired model id.
+- Vamp Assistant stays on sessions when the Mac drops, with a reconnect banner, disabled composer, and specific error titles.
+- Browser tools keep load state and navigation policy even when the docked panel is closed.
+
 ## v0.10.7 — Optional bots and in-chat models
 
 - iPhone and browser remotes can start a plain chat without a specialist bot; Beet is the default, and bots stay optional.
@@ -386,7 +409,7 @@ Project policy reference: [`docs/PROJECT-POLICY.md`](docs/PROJECT-POLICY.md).
 
 ## v0.9.6 — Chat without a project
 
-- Beet Code can now start and restore ordinary chats without opening a project folder.
+- Vamp Assistant can now start and restore ordinary chats without opening a project folder.
 - Chat-only sessions expose no files, terminal, build tools, workspace context, project instructions, memory, hooks, checkpoints, MCP tools, or subagents.
 - The welcome screen, composer, empty state, and sidebar clearly distinguish chat-only conversations from project work.
 - Opening a project restores the complete coding workflow, while leaving a project starts a fresh isolated chat.
@@ -406,7 +429,7 @@ Project policy reference: [`docs/PROJECT-POLICY.md`](docs/PROJECT-POLICY.md).
 - A one-screen welcome and readiness assistant takes users directly from a project folder to a working local, Codex, or API-backed coding model.
 - The composer has a calmer native hierarchy, premium capsule actions, focused intent controls, and a dedicated Signing & Device Delivery setup.
 - Ship Center verifies and archives macOS or iOS projects, signs with valid identities already in Keychain, exports IPAs, installs on a connected iPhone or iPad, or uploads an App Store Connect archive through Xcode.
-- Chat history separates Beet Code tasks from imported tools, groups imported conversations by project, and imports current Claude, Codex, and Cursor histories.
+- Chat history separates Vamp Assistant tasks from imported tools, groups imported conversations by project, and imports current Claude, Codex, and Cursor histories.
 - Skills and declarative plugins can be discovered from Claude Code, Codex, Cursor, Copilot, Windsurf, OpenCode, Agent Skills, or a user-connected IDE folder without executing installers or hooks.
 - Model, remote-session, history, and empty-state actions now share one accessible native button language, with direct recovery actions instead of menu-only instructions.
 
@@ -432,7 +455,7 @@ Project policy reference: [`docs/PROJECT-POLICY.md`](docs/PROJECT-POLICY.md).
 
 ## v0.9.0 — ChatGPT account access and provider surfaces
 
-- OpenAI account sign-in uses the official local Codex app-server browser/device-code flow; Beet Code never stores ChatGPT refresh tokens or treats account access as an API key.
+- OpenAI account sign-in uses the official local Codex app-server browser/device-code flow; Vamp Assistant never stores ChatGPT refresh tokens or treats account access as an API key.
 - Live account model discovery appears beside local and BYOK API models in the composer picker.
 - Account-backed turns reuse the native transcript, reasoning, approvals, MCP/tool events, persisted thread continuity, and a working Stop/interrupt path.
 - Settings now gives account access its own card and keeps API-key providers independent.
@@ -589,12 +612,12 @@ picker; the format and architecture are selected from the model metadata.
 
 ## Current limitations
 
-- OpenCode configuration is imported into Beet Code's native runtime; provider
+- OpenCode configuration is imported into Vamp Assistant's native runtime; provider
   SDK plugins that depend on JavaScript-only middleware still need a native
   endpoint or a custom OpenAI-compatible gateway.
 - OpenAI API access uses an OpenAI Platform API key. A ChatGPT web
   subscription is a separate product and is not silently converted into API
-  credits; Beet Code does not use private ChatGPT session cookies.
+  credits; Vamp Assistant does not use private ChatGPT session cookies.
 - GGUF models require a system `llama-server` (`brew install llama.cpp`); the
   in-process MLX engine has no such dependency.
 - Multi-model residency is bounded by the memory advisor; on smaller tiers

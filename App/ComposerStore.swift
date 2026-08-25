@@ -389,6 +389,7 @@ final class ComposerStore {
         }
 
         guard let controller, canSend else { return false }
+        controller.clearRemoteRunOptions()
         let composed = IntentComposer.compose(selection: selection, draft: text) { [weak self] source in
             self?.resolvedFocus(source) ?? ""
         }

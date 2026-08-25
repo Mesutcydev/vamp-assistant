@@ -6,39 +6,56 @@ import Foundation
 enum RemoteSessionPage {
     static let html = #"""
 <!doctype html>
-<html lang="en" data-theme="beet">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#7A1F3D">
-<title>Beet Code Remote</title>
+<meta name="theme-color" content="#101010">
+<title>Vamp Assistant</title>
 <style>
 :root {
   color-scheme: dark;
-  --bg: #111113;
-  --panel: #19191d;
-  --panel-strong: #222229;
-  --line: #34343e;
-  --text: #f4f1f3;
-  --muted: #a7a1a6;
-  --accent: #d14775;
-  --accent-bright: #f08bab;
-  --accent-wash: #34232b;
-  --danger: #f06b78;
-  --warning: #f0b85a;
-  --success: #5ee1a6;
-  --tool: #20252a;
+  --bg: #111111;
+  --panel: #191919;
+  --panel-strong: #222222;
+  --line: #343434;
+  --text: #f4f4f4;
+  --muted: #a7a7a7;
+  --accent: #686868;
+  --accent-bright: #b8b8b8;
+  --accent-wash: #292929;
+  --danger: #eeeeee;
+  --warning: #c4c4c4;
+  --success: #d8d8d8;
+  --tool: #252525;
   --radius: 14px;
   --ease-out: cubic-bezier(.23,1,.32,1);
+  --glass-blur: blur(24px) saturate(145%);
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body {
   margin: 0;
-  background: radial-gradient(circle at 8% 0, #321928 0, transparent 34%), var(--bg);
+  background: var(--bg);
   color: var(--text);
   font: 15px -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   overflow: hidden;
+}
+body::before, body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+body::before {
+  z-index: 0;
+  background: url('/assets/vamp-backdrop.png') center / cover no-repeat;
+  opacity: var(--art-opacity, .28);
+  filter: var(--art-filter, saturate(.72) contrast(1.04));
+}
+body::after {
+  z-index: 0;
+  background: var(--art-scrim, linear-gradient(180deg, rgba(8,8,8,.48), rgba(8,8,8,.88)));
 }
 button, input, textarea { font: inherit; }
 button { border: 0; color: inherit; cursor: pointer; }
@@ -48,12 +65,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
   outline-offset: 2px;
 }
 button:not(:disabled):active { transform: scale(.98); }
-.shell { display: grid; grid-template-columns: 304px minmax(0, 1fr); height: 100vh; }
+.shell { position: relative; z-index: 1; display: grid; grid-template-columns: 304px minmax(0, 1fr); height: 100vh; }
 .sidebar {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  background: rgba(17,17,19,.88);
+  background: color-mix(in srgb, var(--chrome) 62%, transparent);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
   border-right: 1px solid var(--line);
 }
 .brand { padding: 22px 20px 16px; border-bottom: 1px solid var(--line); }
@@ -62,7 +81,7 @@ button:not(:disabled):active { transform: scale(.98); }
   width: 28px; height: 28px; border-radius: 9px;
   display: grid; place-items: center;
   background: linear-gradient(135deg, var(--accent-bright), var(--accent));
-  color: #1b1015; font-weight: 900;
+  color: #111111; font-weight: 900;
 }
 .brand h1 { font-size: 17px; margin: 0; letter-spacing: -.02em; }
 .brand p { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
@@ -112,7 +131,9 @@ button:not(:disabled):active { transform: scale(.98); }
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
   min-height: 70px; padding: 0 22px;
-  background: rgba(17,17,19,.58); border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--chrome) 48%, transparent); border-bottom: 1px solid var(--line);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
 }
 .title-block { min-width: 0; }
 .topbar h2 {
@@ -129,24 +150,24 @@ button:not(:disabled):active { transform: scale(.98); }
   display: flex; align-items: center; gap: 7px;
   color: var(--muted); font-size: 12px; white-space: nowrap;
 }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: #7a7880; }
-.dot.live { background: var(--success); box-shadow: 0 0 0 4px rgba(94,225,166,.12); }
-.dot.busy { background: var(--warning); box-shadow: 0 0 0 4px rgba(240,184,90,.12); }
-.dot.error { background: var(--danger); box-shadow: 0 0 0 4px rgba(240,107,120,.12); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: #7a7a7a; }
+.dot.live { background: var(--success); box-shadow: 0 0 0 4px rgba(216,216,216,.12); }
+.dot.busy { background: var(--warning); box-shadow: 0 0 0 4px rgba(196,196,196,.12); }
+.dot.error { background: var(--danger); box-shadow: 0 0 0 4px rgba(238,238,238,.12); }
 .notice {
   display: none; margin: 12px auto 0; width: min(900px, calc(100% - 36px));
   padding: 10px 13px; border: 1px solid var(--line); border-radius: 10px;
   color: var(--muted); background: var(--panel); font-size: 13px;
 }
 .notice.visible { display: block; }
-.notice.error { border-color: rgba(240,107,120,.48); color: #ffc5c9; }
+.notice.error { border-color: rgba(210,210,210,.48); color: #e8e8e8; }
 .messages {
   flex: 1; min-height: 0; overflow: auto;
   padding: 24px max(18px, calc((100% - 900px) / 2));
   scroll-behavior: smooth;
 }
 .empty { height: 100%; display: grid; place-items: center; color: var(--muted); text-align: center; }
-.empty.home-empty { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 22px; padding: 8px 0 18px; }
+.empty.home-empty { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 22px; min-height: 100%; height: auto; box-sizing: border-box; padding: 8px 0 18px; }
 .empty-card { max-width: 420px; line-height: 1.5; }
 .empty-card h3 { margin: 0 0 8px; color: var(--text); font-size: 24px; letter-spacing: -.03em; }
 .bubble {
@@ -154,11 +175,11 @@ button:not(:disabled):active { transform: scale(.98); }
   border: 1px solid var(--line); border-radius: 16px; background: var(--panel);
   overflow-wrap: anywhere; line-height: 1.48; white-space: pre-wrap;
 }
-.bubble.user { background: var(--accent-wash); border-color: #613b4c; }
-.bubble.live { border-color: rgba(227, 91, 136, .58); box-shadow: 0 0 0 3px rgba(227, 91, 136, .08); }
+.bubble.user { background: var(--accent-wash); border-color: #666666; }
+.bubble.live { border-color: rgba(184,184,184,.58); box-shadow: 0 0 0 3px rgba(184,184,184,.08); }
 .bubble.live .role { color: var(--accent-bright); }
 .bubble.tool {
-  background: var(--tool); color: #c5d0d4;
+  background: var(--tool); color: #cdcdcd;
   font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .bubble .role {
@@ -168,8 +189,8 @@ button:not(:disabled):active { transform: scale(.98); }
 }
 .interaction {
   width: min(900px, calc(100% - 36px)); margin: 0 auto 12px;
-  padding: 14px 16px; border: 1px solid rgba(240,184,90,.48);
-  border-radius: var(--radius); background: rgba(61,47,28,.52);
+  padding: 14px 16px; border: 1px solid rgba(196,196,196,.48);
+  border-radius: var(--radius); background: rgba(48,48,48,.52);
 }
 .interaction.hidden { display: none; }
 .interaction-head { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
@@ -179,7 +200,7 @@ button:not(:disabled):active { transform: scale(.98); }
 .preview {
   max-height: 170px; overflow: auto; margin: 0 0 12px; padding: 10px;
   border: 1px solid var(--line); border-radius: 9px;
-  background: rgba(17,17,19,.56); color: #d7d0d4;
+  background: rgba(17,17,17,.56); color: #d4d4d4;
   font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
@@ -189,10 +210,10 @@ button:not(:disabled):active { transform: scale(.98); }
   border-radius: 10px; background: var(--panel-strong); color: var(--text);
   font-weight: 650; transition: background 160ms var(--ease-out), transform 160ms var(--ease-out);
 }
-.button:hover { background: #2d2d36; }
+.button:hover { background: #303030; }
 .button.primary { border-color: transparent; background: var(--accent); color: white; }
-.button.primary:hover { background: #e05b86; }
-.button.danger { border-color: transparent; background: var(--danger); color: #241014; }
+.button.primary:hover { background: #707070; }
+.button.danger { border-color: transparent; background: var(--danger); color: #111111; }
 .button.ghost { border-color: transparent; background: transparent; color: var(--muted); }
 .interaction input {
   flex: 1; min-width: 160px; min-height: 36px; padding: 0 11px;
@@ -200,7 +221,7 @@ button:not(:disabled):active { transform: scale(.98); }
 }
 .composer-wrap {
   padding: 14px max(18px, calc((100% - 900px) / 2));
-  border-top: 1px solid var(--line); background: rgba(17,17,19,.9);
+  border-top: 1px solid var(--line); background: rgba(17,17,17,.9);
 }
 .composer {
   display: flex; align-items: flex-end; gap: 10px;
@@ -217,8 +238,8 @@ textarea {
   width: 42px; height: 42px; border-radius: 11px;
   font-weight: 800; transition: transform 160ms var(--ease-out), opacity 160ms var(--ease-out);
 }
-.send { background: linear-gradient(135deg, var(--accent-bright), var(--accent)); color: #1b1015; }
-.stop { background: var(--danger); color: #241014; }
+.send { background: linear-gradient(135deg, var(--accent-bright), var(--accent)); color: #111111; }
+.stop { background: var(--danger); color: #111111; }
 .send.hidden, .stop.hidden { display: none; }
 .hint { padding: 7px 3px 0; color: var(--muted); font-size: 11px; }
 .run-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 8px 3px 0; }
@@ -229,7 +250,7 @@ textarea {
   border: 1px solid var(--line); border-radius: 9px;
   background: var(--panel); color: var(--text); font-size: 12px;
 }
-.bubble.error { border-color: rgba(255,95,110,.36); background: rgba(255,95,110,.09); }
+.bubble.error { border-color: rgba(220,220,220,.36); background: rgba(220,220,220,.09); }
 .bubble.error .role { color: var(--danger); }
 .share-overlay {
   position: fixed; inset: 0; z-index: 8; display: grid; place-items: center;
@@ -241,14 +262,21 @@ textarea {
   padding: 22px; background: var(--overlay);
 }
 .bots-overlay.hidden { display: none; }
+.bots-overlay .share-card { width: min(640px, 100%); }
 .bot-rail { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; width: min(720px, 100%); }
-.bot-tile { flex: 0 0 108px; display: flex; flex-direction: column; align-items: center; gap: 7px; min-height: 132px; padding: 12px 10px 14px; border: 1px solid var(--line); border-radius: 18px; background: linear-gradient(145deg,var(--panel),var(--panel-strong)); transition: transform 160ms var(--ease-out),border-color 160ms var(--ease-out),box-shadow 160ms var(--ease-out); }
+.bot-tile { flex: 0 0 108px; display: flex; flex-direction: column; align-items: center; gap: 7px; min-height: 132px; padding: 12px 10px 14px; border: 1px solid var(--line); border-radius: 18px; background: linear-gradient(145deg,var(--panel),var(--panel-strong)); transition: transform 160ms var(--ease-out),border-color 160ms var(--ease-out),box-shadow 160ms var(--ease-out); scroll-snap-align: start; touch-action: manipulation; }
 .bot-tile:hover { transform: translateY(-1px); border-color: color-mix(in srgb,var(--accent-bright) 48%,var(--line)); box-shadow: 0 10px 26px var(--panel-shadow); }
 .bot-tile[aria-pressed="true"] { border-color: var(--accent-bright); box-shadow: inset 0 0 0 1px color-mix(in srgb,var(--accent-bright) 42%,transparent),0 10px 28px var(--panel-shadow); }
 .bot-thumb { width: 64px; height: 64px; border-radius: 16px; object-fit: cover; background: #000; }
 .bot-tile strong { display: block; font-size: 13px; }
 .bot-tile .bot-detail { color: var(--muted); font-size: 11px; line-height: 1.35; }
 .bot-field { width: 100%; min-height: 42px; margin-top: 10px; padding: 10px 11px; border: 1px solid var(--line); border-radius: 11px; background: var(--bg); color: var(--text); }
+.bot-runs { display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap: 10px; margin-bottom: 14px; }
+.bot-run { padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg); }
+.bot-run-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 7px; }
+.bot-run-state { color: var(--muted); font-size: 11px; font-weight: 750; text-transform: uppercase; }
+.bot-run p { margin: 0 0 9px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.bot-run-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .share-card {
   width: min(520px, 100%); max-height: min(720px, calc(100dvh - 32px)); overflow: auto;
   padding: 20px; border: 1px solid var(--line); border-radius: 20px;
@@ -259,7 +287,14 @@ textarea {
 .share-head h2 { margin: 0; font-size: 21px; letter-spacing: -.03em; }
 .share-head p { margin: 5px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
 .share-section + .share-section { margin-top: 20px; }
+.bot-section { margin-bottom: 18px; }
+.bot-section .bot-rail { justify-content: flex-start; width: 100%; flex-wrap: nowrap; overflow-x: auto; padding: 2px 1px 12px; scroll-snap-type: x proximity; scrollbar-width: none; }
+.bot-section .bot-rail::-webkit-scrollbar { display: none; }
 .share-label { margin-bottom: 9px; color: var(--muted); font-size: 11px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
+.starter-rail { display: flex; gap: 8px; width: 100%; overflow-x: auto; padding: 2px 1px 4px; scroll-snap-type: x proximity; scrollbar-width: none; }
+.starter-rail::-webkit-scrollbar { display: none; }
+.starter-chip { flex: 0 0 auto; min-height: 34px; padding: 0 12px; border: 1px solid color-mix(in srgb,var(--accent-bright) 24%,var(--line)); border-radius: 999px; background: var(--panel-strong); color: var(--muted); font-size: 12px; font-weight: 700; white-space: nowrap; touch-action: manipulation; }
+.starter-chip:hover { background: var(--button-hover); color: var(--text); }
 .share-clipboard {
   width: 100%; min-height: 92px; max-height: 180px; padding: 12px;
   border: 1px solid var(--line); border-radius: 13px; resize: vertical;
@@ -293,7 +328,7 @@ textarea {
   border-radius: 10px; background: var(--bg); color: var(--text);
   font-size: 23px; font-weight: 700; letter-spacing: .24em; text-align: center;
 }
-.error { margin-top: 12px; color: #ffc5c9; font-size: 13px; }
+.error { margin-top: 12px; color: #e8e8e8; font-size: 13px; }
 .error.hidden { display: none; }
 @media (max-width: 720px) {
   body { overflow: hidden; }
@@ -325,94 +360,71 @@ textarea {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0ms !important; }
 }
 
-/* Beet Code's web surface follows the native app's three appearance choices.
-   Keep the page's chrome fixed; only the transcript and session list scroll. */
+/* The background artwork is shared with the native companion. Light and dark
+   modes tune their materials to the artwork while keeping text contrast stable. */
 html[data-theme="light"] {
   color-scheme: light;
-  --bg: #F6F7F9;
-  --panel: #FFFFFF;
-  --panel-strong: #E3E6EB;
-  --line: #E1E4EA;
-  --text: #14161A;
-  --muted: #5B616E;
-  --muted-strong: #8A909C;
-  --accent: #7A1F3D;
-  --accent-bright: #8A2647;
-  --accent-wash: #F3E5EA;
-  --user: #F6EAF0;
-  --user-line: #C68EA6;
-  --danger: #DC3B4B;
-  --warning: #C77700;
-  --success: #1EA672;
-  --tool: #EEF0F3;
-  --tool-text: #414752;
-  --input: #FFFFFF;
-  --chrome: rgba(246,247,249,.94);
-  --body-wash: radial-gradient(circle at 8% 0, rgba(122,31,61,.10) 0, transparent 34%);
-  --overlay: rgba(20,22,26,.42);
-  --button-hover: #F0F2F5;
-  --panel-shadow: rgba(20,22,26,.12);
-  --accent-ring: rgba(122,31,61,.16);
-  --warning-surface: #FFF4DB;
-  --warning-line: rgba(199,119,0,.42);
+  --bg: #F7F7F7;
+  --panel: rgba(255,255,255,.54);
+  --panel-strong: rgba(240,240,240,.64);
+  --line: #E4E4E4;
+  --text: #161616;
+  --muted: #616161;
+  --muted-strong: #909090;
+  --accent: #303030;
+  --accent-bright: #505050;
+  --accent-wash: #E8E8E8;
+  --user: #EEEEEE;
+  --user-line: #A0A0A0;
+  --danger: #202020;
+  --warning: #555555;
+  --success: #404040;
+  --tool: #F0F0F0;
+  --tool-text: #474747;
+  --input: rgba(255,255,255,.58);
+  --chrome: rgba(246,246,246,.48);
+  --body-wash: linear-gradient(rgba(248,248,248,.64), rgba(248,248,248,.82));
+  --art-opacity: .30;
+  --art-filter: grayscale(1) saturate(0) contrast(.92) brightness(1.12);
+  --art-scrim: linear-gradient(180deg, rgba(255,255,255,.55), rgba(250,250,250,.86));
+  --overlay: rgba(22,22,22,.42);
+  --button-hover: #F2F2F2;
+  --panel-shadow: rgba(22,22,22,.12);
+  --accent-ring: rgba(48,48,48,.18);
+  --warning-surface: #EAEAEA;
+  --warning-line: rgba(85,85,85,.42);
 }
 html[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0C0E14;
-  --panel: #181C26;
-  --panel-strong: #232837;
-  --line: #343B4E;
-  --text: #F2F4F8;
-  --muted: #A3AABB;
-  --muted-strong: #717889;
-  --accent: #D14775;
-  --accent-bright: #E06C92;
-  --accent-wash: #3A1D2A;
-  --user: #3A1D2A;
-  --user-line: #70425A;
-  --danger: #FF6B78;
-  --warning: #F5B23D;
-  --success: #35D6A0;
-  --tool: #20252A;
-  --tool-text: #C5D0D4;
-  --input: #0C0E14;
-  --chrome: rgba(12,14,20,.92);
-  --body-wash: radial-gradient(circle at 8% 0, rgba(209,71,117,.22) 0, transparent 34%);
+  --bg: #101010;
+  --panel: rgba(24,24,24,.56);
+  --panel-strong: rgba(40,40,40,.64);
+  --line: #3A3A3A;
+  --text: #F4F4F4;
+  --muted: #AAAAAA;
+  --muted-strong: #787878;
+  --accent: #686868;
+  --accent-bright: #B8B8B8;
+  --accent-wash: #292929;
+  --user: #242424;
+  --user-line: #666666;
+  --danger: #EEEEEE;
+  --warning: #C4C4C4;
+  --success: #D8D8D8;
+  --tool: #252525;
+  --tool-text: #CCCCCC;
+  --input: rgba(12,12,12,.58);
+  --chrome: rgba(12,12,12,.50);
+  --body-wash: linear-gradient(rgba(8,8,8,.48), rgba(8,8,8,.84));
+  --art-opacity: .34;
+  --art-filter: grayscale(1) saturate(0) contrast(1.08) brightness(.72);
+  --art-scrim: linear-gradient(180deg, rgba(6,6,6,.46), rgba(4,4,4,.88));
   --overlay: rgba(0,0,0,.74);
-  --button-hover: #2D3445;
+  --button-hover: #343434;
   --panel-shadow: rgba(0,0,0,.45);
-  --accent-ring: rgba(209,71,117,.18);
-  --warning-surface: #3D2F1C;
-  --warning-line: rgba(245,178,61,.48);
-}
-html[data-theme="beet"] {
-  color-scheme: dark;
-  --bg: #7A1F3D;
-  --panel: #90304E;
-  --panel-strong: #5E1630;
-  --line: #A84668;
-  --text: #FDF2F6;
-  --muted: #E7B8C8;
-  --muted-strong: #C08CA0;
-  --accent: #D14775;
-  --accent-bright: #E06C92;
-  --accent-wash: #A84462;
-  --user: #A84462;
-  --user-line: #C45A7C;
-  --danger: #FF6B78;
-  --warning: #F5B23D;
-  --success: #35D6A0;
-  --tool: #5E1630;
-  --tool-text: #F5DDE5;
-  --input: #5E1630;
-  --chrome: rgba(94,22,48,.94);
-  --body-wash: radial-gradient(circle at 8% 0, rgba(255,174,202,.18) 0, transparent 36%);
-  --overlay: rgba(20,3,9,.70);
-  --button-hover: #A84462;
-  --panel-shadow: rgba(31,5,15,.34);
-  --accent-ring: rgba(240,139,171,.20);
-  --warning-surface: #6D4325;
-  --warning-line: rgba(245,178,61,.52);
+  --accent-ring: rgba(184,184,184,.20);
+  --warning-surface: #303030;
+  --warning-line: rgba(196,196,196,.48);
 }
 html, body { width: 100%; min-width: 0; min-height: 100%; -webkit-text-size-adjust: 100%; }
 body {
@@ -432,9 +444,11 @@ body {
 .sidebar {
   overflow: hidden;
   background: var(--chrome);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
   box-shadow: 10px 0 30px var(--panel-shadow);
 }
-.brand { background: var(--chrome); }
+.brand { background: transparent; }
 .brand-logo {
   display: block;
   flex: 0 0 auto;
@@ -443,17 +457,18 @@ body {
   object-fit: cover;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #0C0E14;
+  background: #101010;
   box-shadow: 0 4px 14px var(--panel-shadow);
 }
 .card .brand-logo { width: 40px; height: 40px; border-radius: 12px; }
 .main {
   overflow: hidden;
-  background: var(--bg);
+  background: transparent;
 }
 .topbar {
   flex: 0 0 70px;
   background: var(--chrome);
+  -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: blur(18px) saturate(140%);
 }
 .top-actions { min-width: 0; }
@@ -506,6 +521,15 @@ body {
   background: var(--chrome);
   backdrop-filter: blur(18px) saturate(140%);
   padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+}
+.composer, .bubble, .interaction, .notice, .card, .share-card, .bot-tile,
+.bot-run, .appearance-switcher, .shared-files {
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 1px rgba(255,255,255,.08), 0 14px 34px var(--panel-shadow);
+}
+.card, .share-card {
+  border-color: color-mix(in srgb, white 12%, var(--line));
 }
 .composer {
   height: 62px;
@@ -677,6 +701,18 @@ textarea {
   .status #status-text { display: none; }
   .status .dot { width: 9px; height: 9px; }
   .messages { padding: 10px 10px 14px; }
+  .empty.home-empty { justify-content: flex-start; gap: 18px; padding: 28px 0 calc(36px + env(safe-area-inset-bottom, 0px)); }
+  .home-empty .empty-card { width: min(100%, 360px); }
+  .home-empty .bot-rail,
+  .bots-overlay .bot-rail { width: 100%; justify-content: flex-start; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; padding: 2px 2px 12px; scroll-snap-type: x proximity; scrollbar-width: none; }
+  .home-empty .bot-rail::-webkit-scrollbar,
+  .bots-overlay .bot-rail::-webkit-scrollbar { display: none; }
+  .home-empty .bot-tile,
+  .bots-overlay .bot-tile { flex: 0 0 108px; }
+  .bots-overlay { place-items: end center; padding: 0; }
+  .bots-overlay .share-card { width: 100%; max-height: min(88dvh, 720px); padding: 18px 16px calc(20px + env(safe-area-inset-bottom, 0px)); border-radius: 22px 22px 0 0; }
+  .bots-overlay .share-head { position: sticky; top: -18px; z-index: 1; margin: -18px -16px 18px; padding: 18px 16px 12px; background: linear-gradient(var(--panel) 78%, transparent); }
+  .bots-overlay .bot-section { margin-top: 0; }
   .bubble { padding: 13px 14px; margin-bottom: 10px; font-size: 16px; line-height: 1.52; }
   .interaction, .notice { width: calc(100% - 24px); }
   .composer-wrap { padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px)); }
@@ -700,6 +736,7 @@ textarea {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  z-index: 12;
 }
 .card {
   width: min(430px, calc(100vw - 32px));
@@ -747,9 +784,9 @@ textarea {
 <body>
 <div id="pairing" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="pair-title">
   <div class="card">
-    <div class="brand-row"><img class="brand-logo" src="/assets/beetlogo.png" alt="Beet Code logo"><h1>Beet Code Remote</h1></div>
+    <div class="brand-row"><span class="brand-logo" aria-hidden="true"></span><h1>Vamp Assistant</h1></div>
     <h2 id="pair-title">Continue a session</h2>
-    <p>Pair this browser with your Mac, then choose a saved Beetcode session. Your existing workspace, transcript, and safety settings stay in place.</p>
+    <p>Pair this browser with your Mac, then choose a saved Vamp Assistant session. Your existing workspace, transcript, and safety settings stay in place.</p>
     <div class="code">
       <input id="pair-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="000000" aria-label="Six-digit pairing code">
       <button id="pair-button" class="button primary" type="button">Pair</button>
@@ -764,9 +801,16 @@ textarea {
       <div class="share-head-copy"><h2 id="bots-title">New session</h2><p id="bots-sub">Choose a model and first task.</p></div>
       <button id="bots-close" class="icon-button" type="button" aria-label="Close bots">×</button>
     </div>
+    <section class="share-section bot-section">
+      <div class="share-label">Bot</div>
+      <div id="bot-choice-panel" class="bot-rail" role="listbox" aria-label="Choose a bot"></div>
+    </section>
+    <div class="share-label">Runs</div>
+    <div id="bot-runs" class="bot-runs" aria-live="polite"></div>
+    <div id="bot-starters" class="starter-rail" aria-label="Suggested tasks"></div>
     <select id="bot-model" class="bot-field" aria-label="Bot model"><option value="">Loading models…</option></select>
     <textarea id="bot-prompt" class="bot-field" rows="4" placeholder="What should this bot work on?" aria-label="First bot task"></textarea>
-    <div class="share-actions"><button id="bot-start" class="button primary" type="button">Start session</button></div>
+    <div class="share-actions"><button id="bot-workflow" class="button" type="button">Adaptive workflow</button><button id="bot-start" class="button primary" type="button">Start session</button></div>
   </div>
 </div>
 
@@ -797,21 +841,20 @@ textarea {
   <button id="session-scrim" class="session-scrim" type="button" aria-label="Close sessions"></button>
   <aside class="sidebar" aria-label="Saved sessions">
     <div class="brand">
-      <div class="brand-row"><img class="brand-logo" src="/assets/beetlogo.png" alt="Beet Code logo"><h1>Beet Code</h1></div>
-      <p>Remote session control</p>
+      <div class="brand-row"><span class="brand-logo" aria-hidden="true"></span><h1>Vamp Assistant</h1></div>
+      <p>Assistant and bot control</p>
     </div>
     <div class="sessions">
       <div class="sessions-heading">
         <button id="sessions-toggle" class="sessions-toggle" type="button" aria-expanded="true" aria-controls="session-list" aria-label="Sessions">Sessions</button>
         <button id="refresh" class="icon-button" type="button" aria-label="Refresh sessions" title="Refresh sessions">↻</button>
       </div>
-      <div id="session-list" role="listbox" aria-label="Saved Beetcode sessions"></div>
+      <div id="session-list" role="listbox" aria-label="Saved Vamp Assistant sessions"></div>
     </div>
     <div class="mobile-sheet-footer">
       <div class="appearance-switcher" role="group" aria-label="Appearance">
         <button class="appearance-option" type="button" data-theme-choice="light" aria-label="Light appearance" aria-pressed="false"><span class="appearance-glyph" aria-hidden="true">☼</span><span class="appearance-label">Light</span></button>
         <button class="appearance-option" type="button" data-theme-choice="dark" aria-label="Dark appearance" aria-pressed="false"><span class="appearance-glyph" aria-hidden="true">☾</span><span class="appearance-label">Dark</span></button>
-        <button class="appearance-option" type="button" data-theme-choice="beet" aria-label="Beet appearance" aria-pressed="true"><span class="appearance-glyph" aria-hidden="true">B</span><span class="appearance-label">Beet</span></button>
       </div>
       <button id="revoke-mobile" class="footer-revoke" type="button">Revoke browser</button>
     </div>
@@ -823,7 +866,7 @@ textarea {
       <button id="mobile-sessions" class="mobile-sessions-button" type="button" aria-label="Show sessions" aria-expanded="false">☰</button>
       <div class="title-block">
         <h2 id="session-title">Choose a session</h2>
-        <div id="session-sub" class="sub">Your saved Beetcode sessions appear here.</div>
+        <div id="session-sub" class="sub">Your saved Vamp Assistant sessions appear here.</div>
       </div>
       <div class="top-actions">
         <button id="bots-open" class="button ghost" type="button" aria-label="Start a new session">New</button>
@@ -832,7 +875,6 @@ textarea {
         <div class="appearance-switcher" role="group" aria-label="Appearance">
           <button class="appearance-option" type="button" data-theme-choice="light" aria-label="Light appearance" aria-pressed="false"><span class="appearance-glyph" aria-hidden="true">☼</span><span class="appearance-label">Light</span></button>
           <button class="appearance-option" type="button" data-theme-choice="dark" aria-label="Dark appearance" aria-pressed="false"><span class="appearance-glyph" aria-hidden="true">☾</span><span class="appearance-label">Dark</span></button>
-          <button class="appearance-option" type="button" data-theme-choice="beet" aria-label="Beet appearance" aria-pressed="true"><span class="appearance-glyph" aria-hidden="true">B</span><span class="appearance-label">Beet</span></button>
         </div>
         <div class="status" role="status"><span id="status-dot" class="dot"></span><span id="status-text">Not paired</span></div>
       </div>
@@ -840,7 +882,7 @@ textarea {
     <div id="notice" class="notice" role="status" aria-live="polite"></div>
     <section id="messages" class="messages" aria-live="polite" aria-label="Session transcript">
       <div class="empty home-empty">
-        <div class="empty-card"><h3>Start a chat, or pick a bot.</h3><div>Bots are optional specialists. New sessions stay focused on the model and first task.</div></div>
+        <div class="empty-card"><h3>Start with Vamp Assistant, or open Bots.</h3><div>Browse, control your Mac with permission, or dispatch an isolated specialist.</div></div>
         <div id="bot-choice" class="bot-rail" role="listbox" aria-label="Optional bots"></div>
       </div>
     </section>
@@ -849,7 +891,7 @@ textarea {
       <div class="composer">
         <textarea id="composer" rows="1" placeholder="Continue this coding task…" disabled aria-label="Next prompt"></textarea>
         <button id="send" class="send" type="button" disabled aria-label="Send prompt">↑</button>
-        <button id="stop" class="stop hidden" type="button" aria-label="Stop Beetcode">■</button>
+        <button id="stop" class="stop hidden" type="button" aria-label="Stop Vamp Assistant">■</button>
       </div>
       <div class="run-controls" role="group" aria-label="Run controls">
         <select id="chat-model" class="chat-model" aria-label="Model" disabled><option value="">Model</option></select>
@@ -868,13 +910,13 @@ const CURRENT_SESSION_KEY = 'beetcode.remote.currentSession';
 const AUTO_MODE_KEY = 'beetcode.remote.autoMode';
 const FULL_ACCESS_KEY = 'beetcode.remote.fullAccess';
 const BOTS = [
-  { id: 'general', name: 'Beet', detail: 'Balanced assistant', image: '/assets/beetlogo.png', instruction: '' },
-  { id: 'builder', name: 'Builder', detail: 'Build and fix', image: '/assets/bot-builder.png', instruction: 'Work as a focused software builder. Inspect the existing project, implement the request completely, preserve unrelated work, and verify the result.' },
-  { id: 'reviewer', name: 'Reviewer', detail: 'Diff and risks', image: '/assets/bot-reviewer.png', instruction: 'Work as a careful code reviewer. Identify concrete bugs and regressions first. Do not edit unless asked.' },
-  { id: 'navigator', name: 'Navigator', detail: 'Browser control', image: '/assets/bot-navigator.png', instruction: 'Work as a browser navigator. Use the available browser tools directly and keep actions scoped to the request.' },
-  { id: 'researcher', name: 'Researcher', detail: 'Sources and synthesis', image: '/assets/bot-researcher.png', instruction: 'Work as a technical researcher. Prefer primary sources and distinguish facts from inference.' }
+  { id: 'general', name: 'Assistant', detail: 'Balanced assistant', image: '/assets/vamp-icon.png', instruction: '', starters: ['Plan this task', 'Explain this project', 'Help me decide'] },
+  { id: 'builder', name: 'Builder', detail: 'Build and fix', image: '/assets/bot-builder', instruction: 'Work as a focused software builder. Inspect the existing project, implement the request completely, preserve unrelated work, and verify the result.', starters: ['Fix the current issue', 'Build this feature', 'Run the tests'] },
+  { id: 'reviewer', name: 'Reviewer', detail: 'Diff and risks', image: '/assets/bot-reviewer', instruction: 'Work as a careful code reviewer. Identify concrete bugs and regressions first. Do not edit unless asked.', starters: ['Review my changes', 'Check for regressions', 'Audit this diff'] },
+  { id: 'navigator', name: 'Navigator', detail: 'Browser control', image: '/assets/bot-navigator', instruction: 'Work as a browser navigator. Use the available browser tools directly and keep actions scoped to the request.', starters: ['Open and inspect this site', 'Test this web flow', 'Compare these pages'] },
+  { id: 'researcher', name: 'Researcher', detail: 'Sources and synthesis', image: '/assets/bot-researcher', instruction: 'Work as a technical researcher. Prefer primary sources and distinguish facts from inference.', starters: ['Research this topic', 'Compare the best options', 'Verify this claim'] }
 ];
-const THEMES = new Set(['light', 'dark', 'beet']);
+const THEMES = new Set(['light', 'dark']);
 const POLL_DELAY_MS = 1800;
 const HIDDEN_POLL_DELAY_MS = 5000;
 const MAX_RETRY_DELAY_MS = 15000;
@@ -895,7 +937,8 @@ const state = {
   autoMode: localStorage.getItem(AUTO_MODE_KEY) !== 'false',
   fullAccess: localStorage.getItem(FULL_ACCESS_KEY) === 'true',
   streamController: null,
-  streamSessionID: null
+  streamSessionID: null,
+  dismissedError: null
   ,selectedBot: ''
 };
 const $ = id => document.getElementById(id);
@@ -905,13 +948,14 @@ $('auto-mode').checked = state.autoMode;
 $('full-access').checked = state.fullAccess;
 
 function applyAppearance(theme, persist = true) {
-  const value = THEMES.has(theme) ? theme : 'beet';
+  const value = THEMES.has(theme) ? theme : 'dark';
   document.documentElement.dataset.theme = value;
   document.querySelectorAll('[data-theme-choice]').forEach(button => {
     button.setAttribute('aria-pressed', button.dataset.themeChoice === value ? 'true' : 'false');
   });
-  const themeColors = { light: '#F6F7F9', dark: '#0C0E14', beet: '#7A1F3D' };
+  const themeColors = { light: '#F6F6F6', dark: '#101010' };
   document.querySelector('meta[name="theme-color"]').setAttribute('content', themeColors[value]);
+  renderBots();
   if (persist) localStorage.setItem(THEME_KEY, value);
 }
 
@@ -1058,8 +1102,29 @@ function selectedBot() {
   return BOTS.find(item => item.id === state.selectedBot) || null;
 }
 
-function renderBots() {
-  const root = $('bot-choice');
+function updateBotPanelCopy() {
+  const bot = selectedBot();
+  $('bots-title').textContent = bot ? 'Start with ' + bot.name : 'New session';
+  $('bots-sub').textContent = bot
+    ? bot.detail + '. Choose a model and first task.'
+    : 'Plain chat — no specialist bot. Choose a model and first task.';
+  const starters = $('bot-starters');
+  if (!starters) return;
+  starters.replaceChildren();
+  for (const starter of (bot?.starters || BOTS[0].starters)) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'starter-chip';
+    button.textContent = starter;
+    button.onclick = () => {
+      $('bot-prompt').value = starter;
+      $('bot-prompt').focus();
+    };
+    starters.append(button);
+  }
+}
+
+function renderBotRail(root) {
   if (!root) return;
   root.replaceChildren();
   for (const bot of BOTS) {
@@ -1069,10 +1134,17 @@ function renderBots() {
     button.dataset.bot = bot.id;
     button.setAttribute('role', 'option');
     button.setAttribute('aria-label', bot.name + ', ' + bot.detail);
-    const image = document.createElement('img');
+    const selected = bot.id === 'general' ? !state.selectedBot : state.selectedBot === bot.id;
+    button.setAttribute('aria-selected', String(selected));
+    button.setAttribute('aria-pressed', String(selected));
+    const image = document.createElement(bot.image ? 'img' : 'span');
     image.className = 'bot-thumb';
-    image.src = bot.image;
-    image.alt = '';
+    if (bot.image) {
+      image.src = bot.id === 'general'
+        ? bot.image
+        : bot.image + '-' + document.documentElement.dataset.theme + '.png';
+      image.alt = '';
+    }
     const name = document.createElement('strong');
     name.textContent = bot.name;
     const detail = document.createElement('span');
@@ -1081,10 +1153,17 @@ function renderBots() {
     button.append(image, name, detail);
     button.onclick = () => {
       state.selectedBot = bot.id === 'general' ? '' : bot.id;
-      void setBotsPanel(true);
+      renderBots();
+      updateBotPanelCopy();
+      if (root.id !== 'bot-choice-panel') void setBotsPanel(true);
     };
     root.append(button);
   }
+}
+
+function renderBots() {
+  renderBotRail($('bot-choice'));
+  renderBotRail($('bot-choice-panel'));
 }
 
 function renderHome() {
@@ -1112,11 +1191,9 @@ function renderHome() {
 async function setBotsPanel(open) {
   $('bots-panel').classList.toggle('hidden', !open);
   if (!open) return;
-  const bot = selectedBot();
-  $('bots-title').textContent = bot ? 'Start with ' + bot.name : 'New session';
-  $('bots-sub').textContent = bot
-    ? bot.detail + '. Choose a model and first task.'
-    : 'Plain chat — no specialist bot. Choose a model and first task.';
+  renderBots();
+  updateBotPanelCopy();
+  await loadBotRuns();
   try {
     const body = await api('/api/models');
     const select = $('bot-model'); select.replaceChildren();
@@ -1139,13 +1216,99 @@ async function startBotSession() {
   const message = prompt;
   $('bot-start').disabled = true;
   try {
-    const payload = { modelID, message, autoMode: state.autoMode, fullAccess: state.fullAccess };
-    if (bot) payload.botProfileID = bot.id;
-    const body = await api('/api/sessions', { method: 'POST', body: JSON.stringify(payload) });
-    $('bot-prompt').value = ''; await setBotsPanel(false); await loadSessions();
-    if (body.sessionID) await selectSession(body.sessionID);
+    if (bot) {
+      await api('/api/bot-runs', { method: 'POST', body: JSON.stringify({ profileID: bot.id, modelID, prompt: message }) });
+      $('bot-prompt').value = '';
+      await loadBotRuns();
+      showNotice(bot.name + ' started.');
+    } else {
+      const payload = { modelID, message, autoMode: state.autoMode, fullAccess: state.fullAccess };
+      const body = await api('/api/sessions', { method: 'POST', body: JSON.stringify(payload) });
+      $('bot-prompt').value = ''; await setBotsPanel(false); await loadSessions();
+      if (body.sessionID) await selectSession(body.sessionID);
+    }
   } catch (error) { showNotice(error.message, 'error'); }
   finally { $('bot-start').disabled = false; }
+}
+
+async function startBotWorkflow() {
+  const modelID = $('bot-model').value;
+  const prompt = $('bot-prompt').value.trim();
+  if (!modelID || !prompt) { showNotice('Choose a model and enter a workflow objective.', 'error'); return; }
+  $('bot-workflow').disabled = true;
+  try {
+    await api('/api/bot-workflows', { method:'POST', body:JSON.stringify({modelID, prompt}) });
+    $('bot-prompt').value = ''; state.selectedBot = ''; renderBots(); await loadBotRuns();
+    showNotice('Adaptive workflow started.');
+  } catch (error) { showNotice(error.message, 'error'); }
+  finally { $('bot-workflow').disabled = false; }
+}
+
+async function loadBotRuns() {
+  const root = $('bot-runs');
+  if (!root) return;
+  try {
+    const body = await api('/api/bot-runs');
+    const runs = Array.isArray(body.runs) ? body.runs : [];
+    root.replaceChildren();
+    if (!runs.length) {
+      const empty = document.createElement('div'); empty.className = 'shared-empty';
+      empty.textContent = 'No specialist runs yet.'; root.append(empty); return;
+    }
+    for (const run of runs.slice(0, 8)) {
+      const card = document.createElement('article'); card.className = 'bot-run';
+      const head = document.createElement('div'); head.className = 'bot-run-head';
+      const name = document.createElement('strong'); name.textContent = text(run.profileName);
+      const stateLabel = document.createElement('span'); stateLabel.className = 'bot-run-state';
+      stateLabel.textContent = run.queuePosition ? 'queue #' + run.queuePosition : text(run.phase || run.state);
+      head.append(name, stateLabel);
+      const copy = document.createElement('p');
+      copy.textContent = text(run.pendingInteraction || run.errorMessage || run.latestOutput || run.prompt);
+      const meta = document.createElement('p'); meta.className = 'bot-run-meta';
+      const metaParts = [text(run.resourceClass || 'remote')];
+      if (run.workflowID) metaParts.push('workflow ' + text(run.workflowID).slice(0, 8));
+      if (Array.isArray(run.dependencyRunIDs) && run.dependencyRunIDs.length) metaParts.push(run.dependencyRunIDs.length + ' dependencies');
+      if (run.retryCount) metaParts.push('retry ' + run.retryCount);
+      if (run.traceID) metaParts.push('trace ' + text(run.traceID).slice(-10));
+      if (Array.isArray(run.artifacts)) metaParts.push(run.artifacts.length + ' artifacts');
+      meta.textContent = metaParts.join(' · ');
+      const actions = document.createElement('div'); actions.className = 'bot-run-actions';
+      if (run.sessionID) {
+        const inspect = document.createElement('button'); inspect.className = 'button'; inspect.type = 'button'; inspect.textContent = 'Inspect';
+        inspect.onclick = async () => { await setBotsPanel(false); await selectSession(run.sessionID); };
+        actions.append(inspect);
+      }
+      if (!['completed','failed','stopped','interrupted'].includes(run.state)) {
+        if (run.state === 'recoverable') {
+          const resume = document.createElement('button'); resume.className = 'button primary'; resume.type = 'button'; resume.textContent = 'Resume';
+          resume.onclick = async () => { await api('/api/bot-runs/' + run.id + '/resume', { method:'POST', body:'{}' }); await loadBotRuns(); };
+          actions.append(resume);
+        } else if (run.state === 'needsApproval') {
+          for (const decision of ['approve','decline']) {
+            const button = document.createElement('button'); button.className = decision === 'approve' ? 'button primary' : 'button danger'; button.type = 'button'; button.textContent = decision === 'approve' ? 'Approve' : 'Decline';
+            button.onclick = async () => { await api('/api/bot-runs/' + run.id + '/' + decision, { method:'POST', body:'{}' }); await loadBotRuns(); };
+            actions.append(button);
+          }
+        } else if (run.state === 'needsInput') {
+          const answer = document.createElement('button'); answer.className = 'button primary'; answer.type = 'button'; answer.textContent = 'Answer';
+          answer.onclick = async () => { const value = window.prompt(run.pendingInteraction || 'Answer the specialist'); if (!value) return; await api('/api/bot-runs/' + run.id + '/answer', { method:'POST', body:JSON.stringify({answer:value}) }); await loadBotRuns(); };
+          actions.append(answer);
+        } else {
+          const steer = document.createElement('button'); steer.className = 'button'; steer.type = 'button'; steer.textContent = 'Steer';
+          steer.onclick = async () => { const message = window.prompt('New direction for ' + run.profileName); if (!message) return; await api('/api/bot-runs/' + run.id + '/steer', { method:'POST', body:JSON.stringify({message}) }); await loadBotRuns(); };
+          actions.append(steer);
+        }
+        const stop = document.createElement('button'); stop.className = 'button danger'; stop.type = 'button'; stop.textContent = 'Stop';
+        stop.onclick = async () => { await api('/api/bot-runs/' + run.id + '/stop', { method:'POST', body:'{}' }); await loadBotRuns(); };
+        actions.append(stop);
+      }
+      card.append(head, copy, meta, actions); root.append(card);
+    }
+  } catch (error) {
+    root.replaceChildren();
+    const unavailable = document.createElement('div'); unavailable.className = 'shared-empty';
+    unavailable.textContent = 'Bot runs are unavailable on this Mac.'; root.append(unavailable);
+  }
 }
 
 function fileSizeLabel(bytes) {
@@ -1161,7 +1324,7 @@ function renderSharedFiles(files) {
   if (!files.length) {
     const empty = document.createElement('div');
     empty.className = 'shared-empty';
-    empty.textContent = 'Files appear in Downloads › BeetCode Remote on your Mac.';
+    empty.textContent = 'Files appear in Downloads › BeetCode Remote on your Mac (legacy storage name).';
     root.append(empty);
     return;
   }
@@ -1252,7 +1415,7 @@ async function downloadSharedFile(name) {
 async function pair(rawCode) {
   const code = normalizedCode(rawCode);
   if (!code) {
-    showPairing('Enter the six-digit code shown in Beet Code.');
+    showPairing('Enter the six-digit code shown in Vamp Assistant.');
     return;
   }
   $('pair-button').disabled = true;
@@ -1301,7 +1464,7 @@ function renderSessions(items) {
   if (!items.length) {
     const empty = document.createElement('div');
     empty.className = 'empty-sidebar';
-    empty.textContent = 'No saved sessions yet. Start a task in Beet Code first.';
+    empty.textContent = 'No saved sessions yet. Start a task in Vamp Assistant first.';
     list.append(empty);
     updateSessionListMode();
     return;
@@ -1322,7 +1485,7 @@ function renderSessions(items) {
     if (item.isRunning) {
       const indicator = document.createElement('span');
       indicator.className = 'session-status';
-      indicator.title = 'Beet Code is ' + phaseLabel(item.phase);
+      indicator.title = 'Vamp Assistant is ' + phaseLabel(item.phase);
       meta.prepend(indicator);
     }
     button.append(title, meta);
@@ -1350,7 +1513,7 @@ async function loadSessions() {
     renderInteraction(null);
     updateComposer();
     $('session-title').textContent = 'Choose a session';
-    $('session-sub').textContent = 'Your saved Beetcode sessions appear here.';
+    $('session-sub').textContent = 'Your saved Vamp Assistant sessions appear here.';
     renderHome();
   }
   if (!state.current && sessions.length === 1) await selectSession(sessions[0].id);
@@ -1376,7 +1539,7 @@ function roleLabel(message) {
   const tool = text(message.toolName).replace(/^dynamic:/, '').replaceAll('_', ' ');
   if (message.role === 'toolResult') return tool || 'tool result';
   if (message.role === 'toolCall') return tool || 'tool call';
-  if (message.role === 'assistant') return 'Beet Code';
+  if (message.role === 'assistant') return 'Vamp Assistant';
   if (message.role === 'user') return 'You';
   return message.role || 'message';
 }
@@ -1406,8 +1569,9 @@ function renderMessages(record) {
   }
   root.replaceChildren();
   for (const message of messages) {
+    if (message.role === 'error') continue;
     const bubble = document.createElement('article');
-    bubble.className = 'bubble ' + (message.role === 'user' ? 'user' : (message.role === 'toolCall' || message.role === 'toolResult' ? 'tool' : (message.role === 'error' ? 'error' : '')));
+    bubble.className = 'bubble ' + (message.role === 'user' ? 'user' : (message.role === 'toolCall' || message.role === 'toolResult' ? 'tool' : ''));
     const role = document.createElement('div');
     role.className = 'role';
     role.textContent = roleLabel(message);
@@ -1419,16 +1583,16 @@ function renderMessages(record) {
   if (record.isRunning && liveText) {
     const bubble = document.createElement('article');
     bubble.className = 'bubble live';
-    bubble.setAttribute('aria-label', 'Live Beetcode response');
+    bubble.setAttribute('aria-label', 'Live Vamp Assistant response');
     const role = document.createElement('div');
     role.className = 'role';
-    role.textContent = 'Beet Code · ' + phaseLabel(record.phase);
+    role.textContent = 'Vamp Assistant · ' + phaseLabel(record.phase);
     const content = document.createElement('div');
     content.textContent = liveText;
     bubble.append(role, content);
     root.append(bubble);
   }
-  if (record.error && !messages.some(message => message.role === 'error')) {
+  if (record.error && text(record.error.message) !== state.dismissedError) {
     const bubble = document.createElement('article');
     bubble.className = 'bubble error';
     const role = document.createElement('div');
@@ -1436,7 +1600,13 @@ function renderMessages(record) {
     role.textContent = text(record.error.title || 'Chat failed');
     const content = document.createElement('div');
     content.textContent = text(record.error.message);
-    bubble.append(role, content);
+    const actions = document.createElement('div');
+    actions.className = 'interaction-actions';
+    actions.append(actionButton('Dismiss', 'ghost', () => {
+      state.dismissedError = text(record.error.message);
+      renderMessages(record);
+    }));
+    bubble.append(role, content, actions);
     root.append(bubble);
   }
   if (wasAtBottom) root.scrollTop = root.scrollHeight;
@@ -1523,8 +1693,10 @@ function matchChatModel(modelID) {
 
 function applySessionRecord(record) {
   if (!record || record.id !== state.current) return;
+  state.lastRecord = record;
+  state.lastErrorMessage = record.error ? text(record.error.message) : null;
   $('session-title').textContent = record.title || 'Session';
-  $('session-sub').textContent = text(record.workspace) + ' · ' + (record.modelID || 'Beet Code');
+  $('session-sub').textContent = text(record.workspace) + ' · ' + (record.modelID || 'Vamp Assistant');
   const select = $('chat-model');
   if (select && select.dataset.session !== record.id) {
     void loadChatModels().then(() => {
@@ -1535,7 +1707,7 @@ function applySessionRecord(record) {
   state.busy = Boolean(record.isRunning);
   state.phase = text(record.phase || (state.busy ? 'working' : 'idle'));
   updateComposer();
-  setStatus(state.busy ? 'Beet Code · ' + phaseLabel(state.phase) : 'Connected', state.busy ? 'busy' : 'live');
+  setStatus(state.busy ? 'Vamp Assistant · ' + phaseLabel(state.phase) : 'Connected', state.busy ? 'busy' : 'live');
   renderMessages(record);
   renderInteraction(record.pending);
 }
@@ -1585,6 +1757,7 @@ async function selectSession(id) {
   state.sessionsExpanded = false;
   localStorage.setItem(CURRENT_SESSION_KEY, id);
   state.interactionKey = null;
+  state.dismissedError = null;
   updateSessionListMode();
   document.querySelectorAll('.session').forEach(item => {
     const selected = item.dataset.id === id;
@@ -1608,7 +1781,7 @@ function renderInteraction(pending) {
   head.className = 'interaction-head';
   const kicker = document.createElement('span');
   kicker.className = 'interaction-kicker';
-  kicker.textContent = pending.kind === 'approval' ? 'Approval needed' : (pending.kind === 'question' ? 'Beet Code has a question' : 'Plan ready');
+  kicker.textContent = pending.kind === 'approval' ? 'Approval needed' : (pending.kind === 'question' ? 'Vamp Assistant has a question' : 'Plan ready');
   head.append(kicker);
   if (pending.toolName) {
     const tool = document.createElement('span');
@@ -1643,6 +1816,15 @@ function renderInteraction(pending) {
     question.className = 'interaction-summary';
     question.textContent = text(pending.content);
     root.append(question);
+    const options = Array.isArray(pending.options) ? pending.options.map(text).filter(Boolean) : [];
+    if (options.length) {
+      const chips = document.createElement('div');
+      chips.className = 'interaction-actions';
+      for (const option of options) {
+        chips.append(actionButton(option, '', () => resolveQuestion(pending, option)));
+      }
+      root.append(chips);
+    }
     const actions = document.createElement('div');
     actions.className = 'interaction-actions';
     const input = document.createElement('input');
@@ -1793,11 +1975,16 @@ $('pair-button').onclick = () => pair($('pair-code').value);
 $('pair-code').oninput = event => { event.target.value = event.target.value.replace(/[^0-9]/g, '').slice(0, 6); };
 $('pair-code').onkeydown = event => { if (event.key === 'Enter') pair(event.target.value); };
 $('send').onclick = send;
+$('chat-model').onchange = () => {
+  if (state.lastErrorMessage) state.dismissedError = state.lastErrorMessage;
+  if (state.lastRecord) renderMessages(state.lastRecord);
+};
 $('bots-open').onclick = () => {
   state.selectedBot = '';
   void setBotsPanel(true);
 };
 $('bots-close').onclick = () => void setBotsPanel(false);
+$('bot-workflow').onclick = () => void startBotWorkflow();
 $('bot-start').onclick = startBotSession;
 $('auto-mode').onchange = event => {
   state.autoMode = Boolean(event.target.checked);
@@ -1847,7 +2034,7 @@ async function revokeBrowser() {
     state.busy = false;
     updateSessionListMode();
     updateComposer();
-    showPairing('This browser was revoked. Pair it again from Beet Code.');
+    showPairing('This browser was revoked. Pair it again from Vamp Assistant.');
   } catch (error) { showNotice(error.message, 'error'); }
 }
 $('revoke').onclick = revokeBrowser;

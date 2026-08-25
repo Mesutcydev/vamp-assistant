@@ -1,12 +1,24 @@
 {
-  "images" : [
+  "images": [
     {
-      "filename" : "bot-navigator.png",
-      "idiom" : "universal"
+      "filename": "botnavigator-light.png",
+      "idiom": "universal",
+      "scale": "1x"
+    },
+    {
+      "appearances": [
+        {
+          "appearance": "luminosity",
+          "value": "dark"
+        }
+      ],
+      "filename": "botnavigator-dark.png",
+      "idiom": "universal",
+      "scale": "1x"
     }
   ],
-  "info" : {
-    "author" : "xcode",
-    "version" : 1
+  "info": {
+    "author": "xcode",
+    "version": 1
   }
 }

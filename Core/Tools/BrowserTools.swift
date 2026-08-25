@@ -13,6 +13,11 @@ import Foundation
 enum BrowserTools {
 
     @MainActor
+    private static func controller(in context: ToolContext) -> BrowserController {
+        BrowserController.controller(for: context.browserSession)
+    }
+
+    @MainActor
     private static func actionObservation(
         _ controller: BrowserController,
         elementLimit: Int = 30
@@ -43,7 +48,7 @@ enum BrowserTools {
             let what = call.string("what") ?? "text"
             let limit = call.integer("limit")
             return try await Task { @MainActor in
-                let controller = BrowserController.shared
+                let controller = BrowserTools.controller(in: context)
                 guard controller.hasOpenPage else {
                     return "The browser has no page open. Use browser_navigate first."
                 }
@@ -77,7 +82,7 @@ enum BrowserTools {
 
         func execute(_ call: ParsedToolCall, in context: ToolContext) async throws -> String {
             try await Task { @MainActor in
-                let controller = BrowserController.shared
+                let controller = BrowserTools.controller(in: context)
                 guard controller.hasOpenPage else {
                     return "The browser has no page open. Use browser_navigate first."
                 }
@@ -109,12 +114,11 @@ enum BrowserTools {
             let wait = call.boolean("wait") ?? true
             let captureAfter = BrowserTools.captureAfter(call)
             return try await Task { @MainActor in
-                let controller = BrowserController.shared
+                let controller = BrowserTools.controller(in: context)
                 let url = try controller.open(raw, filePolicy: .confined(context.workspace))
                 // Agent navigation may start before the docked panel exists.
-                // Reveal it so the user can see and continue using the same
-                // loaded page instead of believing the browser is broken.
-                NotificationCenter.default.post(name: .openBrowserPanel, object: nil)
+                // Reveal this bot's WebView so cookies stay on the right profile.
+                controller.reveal()
                 if wait { await controller.waitForLoad() }
                 let result = "opened \(url.absoluteString)"
                 return captureAfter
@@ -142,7 +146,7 @@ enum BrowserTools {
             let wait = call.boolean("wait") ?? true
             let captureAfter = BrowserTools.captureAfter(call)
             return try await Task { @MainActor in
-                let controller = BrowserController.shared
+                let controller = BrowserTools.controller(in: context)
                 let result: String
                 if let ref = call.string("ref") {
                     result = try await controller.click(ref: ref)
@@ -151,7 +155,7 @@ enum BrowserTools {
                 } else if let text = call.string("text") {
                     result = try await controller.clickByText(text)
                 } else {
-                    throw ToolError.missingArgument("selector or text")
+                    throw ToolError.missingArgument("ref, selector, or text")
                 }
                 if wait { await controller.waitForLoad(timeout: 6) }
                 return captureAfter
@@ -170,23 +174,55 @@ enum BrowserTools {
               "ref":{"type":"string","description":"Preferred: ref from browser_read what=elements"},
               "selector":{"type":"string"},
               "text":{"type":"string"},
+              "submit":{"type":"boolean","default":false,"description":"Press Enter / submit the enclosing form after typing"},
               "capture_after":{"type":"boolean","default":true,"description":"Return a fresh bounded element observation after the action"}
             },"required":["text"]}
             """
 
         func execute(_ call: ParsedToolCall, in context: ToolContext) async throws -> String {
             guard let text = call.string("text") else { throw ToolError.missingArgument("text") }
+            let submit = call.boolean("submit") ?? false
             let captureAfter = BrowserTools.captureAfter(call)
             return try await Task { @MainActor in
-                let controller = BrowserController.shared
+                let controller = BrowserTools.controller(in: context)
                 let result: String
                 if let ref = call.string("ref") {
-                    result = try await controller.type(text: text, intoRef: ref)
+                    result = try await controller.type(text: text, intoRef: ref, submit: submit)
                 } else if let selector = call.string("selector") {
-                    result = try await controller.type(text: text, into: selector)
+                    result = try await controller.type(text: text, into: selector, submit: submit)
                 } else {
                     throw ToolError.missingArgument("ref or selector")
                 }
+                return captureAfter
+                    ? result + "\n" + (try await BrowserTools.actionObservation(controller))
+                    : result + "\n" + controller.pageInfo()
+            }.value
+        }
+    }
+
+    struct ScrollTool: AgentTool {
+        let name = "browser_scroll"
+        let summary = "Scroll the page or a referenced element (negative dy scrolls up)"
+        let risk = ToolRisk.execute
+        let schemaText = """
+            {"type":"object","properties":{
+              "ref":{"type":"string","description":"Optional: ref from browser_read what=elements"},
+              "dx":{"type":"integer","description":"Horizontal scroll pixels. Default 0"},
+              "dy":{"type":"integer","description":"Vertical scroll pixels; negative = up, positive = down"},
+              "capture_after":{"type":"boolean","default":true,"description":"Return a fresh bounded element observation after the action"}
+            },"required":["dy"]}
+            """
+
+        func execute(_ call: ParsedToolCall, in context: ToolContext) async throws -> String {
+            guard let dy = call.integer("dy") else { throw ToolError.missingArgument("dy") }
+            let dx = call.integer("dx") ?? 0
+            let captureAfter = BrowserTools.captureAfter(call)
+            return try await Task { @MainActor in
+                let controller = BrowserTools.controller(in: context)
+                guard controller.hasOpenPage else {
+                    return "The browser has no page open. Use browser_navigate first."
+                }
+                let result = try await controller.scroll(dx: dx, dy: dy, ref: call.string("ref"))
                 return captureAfter
                     ? result + "\n" + (try await BrowserTools.actionObservation(controller))
                     : result + "\n" + controller.pageInfo()
@@ -209,7 +245,7 @@ enum BrowserTools {
             guard let script = call.string("script") else { throw ToolError.missingArgument("script") }
             let captureAfter = call.boolean("capture_after") ?? call.boolean("captureAfter") ?? false
             return try await Task { @MainActor in
-                let controller = BrowserController.shared
+                let controller = BrowserTools.controller(in: context)
                 let result = try await controller.evaluate(script)
                 let rendered = result.isEmpty ? "(empty result)" : String(result.prefix(12_000))
                 return captureAfter

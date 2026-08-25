@@ -76,6 +76,8 @@ actor AgentLoop {
     private let memory: AgentMemory?
     private let taskHint: String
     private let hooks: HookRunner
+    private let linuxContainer: LinuxContainerTarget?
+    private let browserSession: BrowserSession?
     /// Complete registry remains behind the executor/permission gate. This
     /// set is the compact surface advertised to the model for this task.
     private let advertisedToolNames: Set<String>
@@ -87,6 +89,7 @@ actor AgentLoop {
     private var record: SessionRecord
     private var pending: PendingRequest?
     private var cancelled = false
+    private var pendingSteer: String?
     private var isRunning = false
     private var hasFinished = false
     private var eventContinuation: AsyncStream<AgentEvent>.Continuation?
@@ -125,7 +128,9 @@ actor AgentLoop {
         repoIndex: RepoIndex? = nil,
         memory: AgentMemory? = nil,
         taskHint: String = "",
-        hooks: HookRunner? = nil
+        hooks: HookRunner? = nil,
+        linuxContainer: LinuxContainerTarget? = nil,
+        browserSession: BrowserSession? = nil
     ) {
         self.engine = engine
         self.workspace = workspace
@@ -137,6 +142,8 @@ actor AgentLoop {
             : HookRunner.load(
                 workspaceRoot: workspace.root,
                 includeWorkspace: WorkspaceTrust.isTrusted(workspace.root)))
+        self.linuxContainer = linuxContainer
+        self.browserSession = browserSession
         let projectPolicy = configuration.chatOnly
             ? nil
             : ProjectPolicy.load(workspaceRoot: workspace.root)
@@ -171,6 +178,8 @@ actor AgentLoop {
             }
         }
         let context = ToolContext(workspace: workspace)
+        context.linuxContainer = linuxContainer
+        context.browserSession = browserSession
         context.memory = memory
         self.executor = ToolExecutor(tools: allTools, context: context)
         let advertisedTools = ToolRouter.select(
@@ -179,6 +188,7 @@ actor AgentLoop {
             preserveFullRegistry: effectiveConfiguration.chatOnly)
         self.advertisedToolNames = Set(advertisedTools.map(\.name))
         var effectivePermissions = permissions
+        if linuxContainer != nil { effectivePermissions.guestShell = true }
         effectivePermissions.openCodePermissions = permissions.openCodePermissions.merged(
             with: projectPolicy?.openCodePermissions ?? .empty)
         self.permissionGate = effectivePermissions
@@ -194,7 +204,7 @@ actor AgentLoop {
         let historySection = effectiveConfiguration.chatOnly
             ? nil
             : WorkspaceHistory.section(workspacePath: workspace.root.path)
-        self.systemPrompt = PromptBuilder.systemPrompt(
+        var assembledPrompt = PromptBuilder.systemPrompt(
             tools: advertisedTools,
             workspace: workspace,
             repoIndex: effectiveConfiguration.leanPrompt ? nil : repoIndex,
@@ -210,6 +220,23 @@ actor AgentLoop {
             responseReserveTokens: effectiveConfiguration.maxTokensPerTurn,
             leanPrompt: effectiveConfiguration.leanPrompt,
             chatOnly: effectiveConfiguration.chatOnly)
+        if linuxContainer != nil {
+            assembledPrompt += """
+
+
+            ## Linux bot computer
+            `run_command` is a full POSIX shell inside this bot's Linux micro-VM. Working directory is `/workspace`. Pipes, env vars, package installs (`apk`), git, python3, node, npm, make, and compilers are available — use them. File tools still edit the mounted workspace on the Mac.
+            """
+        }
+        if let browser = browserSession {
+            assembledPrompt += """
+
+
+            ## Private browser
+            `browser_*` tools drive \(browser.name)'s private in-app browser. Cookies and logins stay with this bot and are not shared with other bots or the Mac user's browser.
+            """
+        }
+        self.systemPrompt = assembledPrompt
         (engine as? any NativeToolConfigurable)?.configureNativeTools(
             advertisedTools.map { NativeToolSpec(tool: $0) })
         if let seed = seedRecord {
@@ -256,6 +283,7 @@ actor AgentLoop {
 
         isRunning = true
         cancelled = false
+        pendingSteer = nil
         hasFinished = false
         pending = nil
         mutationGeneration = 0
@@ -313,11 +341,42 @@ actor AgentLoop {
         continuation.resume(returning: .revise(feedback))
     }
 
+    /// Redirects the current turn without stopping the run. The in-flight
+    /// generation is dropped; the next model step sees the new instruction.
+    @discardableResult
+    func steer(_ message: String) -> Bool {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isRunning, !cancelled, !trimmed.isEmpty else { return false }
+
+        if case .plan = pending {
+            eventContinuation?.yield(.userSteered(trimmed))
+            resolvePlanRevision(feedback: trimmed)
+            return true
+        }
+
+        if case .question(_, _, let continuation) = pending {
+            pending = nil
+            eventContinuation?.yield(.userSteered(trimmed))
+            continuation.resume(returning: trimmed)
+            return true
+        }
+
+        pendingSteer = pendingSteer.map { $0 + "\n\n" + trimmed } ?? trimmed
+        eventContinuation?.yield(.userSteered(trimmed))
+        if case .approval(_, let continuation) = pending {
+            pending = nil
+            continuation.resume(returning: false)
+        }
+        engineCancelTask = Task { await engine.cancelGeneration() }
+        return true
+    }
+
     /// Cancels the run. Engine cancellation is structured: the spawned task
     /// is retained on the actor and awaited by `finish`, so a cancellation
     /// can never race a later load/unload from another call site.
     func cancel() {
         cancelled = true
+        pendingSteer = nil
         executor.context.requestCancellation()
         // Unblock any pending interactive request as a decline.
         if case .approval(_, let continuation) = pending {
@@ -418,14 +477,17 @@ actor AgentLoop {
                     case .user:
                         return ChatTurn(role: .user, content: message.content)
                     case .assistant:
-                        return ChatTurn(role: .assistant, content: message.content)
+                        return ChatTurn(
+                            role: .assistant,
+                            content: message.content,
+                            thoughtSignature: message.thoughtSignature)
                     case .reasoning:
                         // Reasoning is transcript history only. Replaying it
                         // would inflate context and can expose provider
                         // summaries back to a model that did not ask for them.
                         return nil
                     case .toolResult:
-                        return ChatTurn(role: .tool, content: message.content)
+                        return ChatTurn(role: .tool, content: message.content, toolName: message.toolName)
                     case .system:
                         return ChatTurn(role: .system, content: message.content)
                     case .toolCall:
@@ -456,6 +518,9 @@ actor AgentLoop {
             await compactIfNeeded()
 
             while turns < configuration.maxTurns && !cancelled {
+                if applyPendingSteer() {
+                    await compactIfNeeded()
+                }
                 turns += 1
 
                 // 1. Generate. A provider can know a smaller effective
@@ -473,9 +538,16 @@ actor AgentLoop {
                     }
                     raw = try await generate()
                 }
+                let thoughtSignature = RemoteLLMClient.takeLastThoughtSignature()
                 // Cancellation arriving during generation must not be
                 // reported as a successful completion.
                 if cancelled { await finish(.cancelled); return }
+                if applyPendingSteer() {
+                    emptyReplyStreak = 0
+                    protocolFailureStreak = 0
+                    await compactIfNeeded()
+                    continue
+                }
                 let extractedReasoning = PromptBuilder.extractingThinking(raw)
                 if configuration.showReasoning,
                    let think = extractedReasoning,
@@ -514,8 +586,15 @@ actor AgentLoop {
                     history.append(ChatTurn(role: .tool, content: notice))
                     eventContinuation?.yield(.protocolError(notice))
                     if protocolFailureStreak >= 3 {
-                        await finish(.engineError(
-                            "The model produced three malformed tool calls in a row. No action was executed."))
+                        let prose = ToolParser.strippingCalls(from: visible)
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        let answer = prose.isEmpty
+                            ? "I couldn't issue a valid tool call after several tries. Send another message or switch models."
+                            : prose
+                        record.messages.append(
+                            SessionMessage(role: .assistant, content: answer, toolName: nil, timestamp: Date()))
+                        eventContinuation?.yield(.assistantMessage(answer))
+                        await finish(.completed(answer))
                         return
                     }
                     await compactIfNeeded()
@@ -573,7 +652,7 @@ actor AgentLoop {
                         // re-plans instead of silently discarding the text.
                         record.messages.append(
                             SessionMessage(role: .user, content: feedback, toolName: nil, timestamp: Date()))
-                        history.append(ChatTurn(role: .assistant, content: planText))
+                        history.append(ChatTurn(role: .assistant, content: planText, thoughtSignature: thoughtSignature))
                         history.append(ChatTurn(role: .user, content: feedback))
                         setPhase(.planning)
                         continue
@@ -582,7 +661,7 @@ actor AgentLoop {
                         setPhase(.working)
                         // Approved: the plan becomes an assistant turn in the
                         // model context so the acting turn builds on it.
-                        history.append(ChatTurn(role: .assistant, content: planText))
+                        history.append(ChatTurn(role: .assistant, content: planText, thoughtSignature: thoughtSignature))
                         continue
                     }
                 }
@@ -593,8 +672,8 @@ actor AgentLoop {
                         // Keep the rejected prose claim paired with the
                         // reliability observation in model history.
                         record.messages.append(
-                            SessionMessage(role: .assistant, content: visible, toolName: nil, timestamp: Date()))
-                        history.append(ChatTurn(role: .assistant, content: visible))
+                            SessionMessage(role: .assistant, content: visible, toolName: nil, timestamp: Date(), thoughtSignature: thoughtSignature))
+                        history.append(ChatTurn(role: .assistant, content: visible, thoughtSignature: thoughtSignature))
                         appendReliabilityNotice(notice)
                         await compactIfNeeded()
                         continue
@@ -605,8 +684,8 @@ actor AgentLoop {
                         // Pair the refusal with the assistant claim it
                         // answers, keeping the transcript well-formed.
                         record.messages.append(
-                            SessionMessage(role: .assistant, content: visible, toolName: nil, timestamp: Date()))
-                        history.append(ChatTurn(role: .assistant, content: visible))
+                            SessionMessage(role: .assistant, content: visible, toolName: nil, timestamp: Date(), thoughtSignature: thoughtSignature))
+                        history.append(ChatTurn(role: .assistant, content: visible, thoughtSignature: thoughtSignature))
                         let notice = "error: the task looks complete, but the verification checks are still failing. "
                             + "Address the diagnostics before declaring success."
                         record.messages.append(
@@ -628,8 +707,8 @@ actor AgentLoop {
                 // in the transcript and the model context. It precedes every
                 // tool observation so assistant/tool pairing is preserved.
                 record.messages.append(
-                    SessionMessage(role: .assistant, content: visible, toolName: nil, timestamp: Date()))
-                history.append(ChatTurn(role: .assistant, content: visible))
+                    SessionMessage(role: .assistant, content: visible, toolName: nil, timestamp: Date(), thoughtSignature: thoughtSignature))
+                history.append(ChatTurn(role: .assistant, content: visible, thoughtSignature: thoughtSignature))
 
                 // 3a. One tool call per reply. Multiple calls are a
                 // structured protocol error observation, never a bundled
@@ -644,8 +723,15 @@ actor AgentLoop {
                     history.append(ChatTurn(role: .tool, content: error))
                     eventContinuation?.yield(.protocolError(error))
                     if protocolFailureStreak >= 3 {
-                        await finish(.engineError(
-                            "The model violated the one-tool-per-turn protocol three times in a row. No bundled call was executed."))
+                        let prose = ToolParser.strippingCalls(from: visible)
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        let answer = prose.isEmpty
+                            ? "I couldn't follow the one-tool-per-turn protocol after several tries. Send another message or switch models."
+                            : prose
+                        record.messages.append(
+                            SessionMessage(role: .assistant, content: answer, toolName: nil, timestamp: Date()))
+                        eventContinuation?.yield(.assistantMessage(answer))
+                        await finish(.completed(answer))
                         return
                     }
                     await compactIfNeeded()
@@ -667,8 +753,15 @@ actor AgentLoop {
                     history.append(ChatTurn(role: .tool, content: notice))
                     eventContinuation?.yield(.protocolError(notice))
                     if protocolFailureStreak >= 3 {
-                        await finish(.engineError(
-                            "The model requested an unavailable tool three times in a row. Nothing outside the routed tool set was executed."))
+                        let prose = ToolParser.strippingCalls(from: visible)
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        let answer = prose.isEmpty
+                            ? "I couldn't pick an enabled tool after several tries. Send another message or switch models."
+                            : prose
+                        record.messages.append(
+                            SessionMessage(role: .assistant, content: answer, toolName: nil, timestamp: Date()))
+                        eventContinuation?.yield(.assistantMessage(answer))
+                        await finish(.completed(answer))
                         return
                     }
                     await compactIfNeeded()
@@ -714,8 +807,9 @@ actor AgentLoop {
                         await compactIfNeeded()
                         continue
                     }
-                    let question = call.string("question") ?? "Please answer."
-                    let answer = await askUser(question)
+                    let question = call.askUserQuestion()
+                    let choices = call.askUserChoices()
+                    let answer = await askUser(question, choices: choices)
                     if cancelled { await finish(.cancelled); return }
                     setPhase(.working)
                     let observation = "User answered: \(answer)"
@@ -785,6 +879,10 @@ actor AgentLoop {
                 case .needsApproval:
                     guard await requestApproval(for: call, invocation: invocation) != nil else {
                         if cancelled { await finish(.cancelled); return }
+                        if skipDeclinedActionAfterSteer(call: call, invocation: invocation) {
+                            await compactIfNeeded()
+                            continue
+                        }
                         let declined = "declined by user"
                         record.messages.append(
                             SessionMessage(role: .toolResult, content: declined, toolName: call.name, timestamp: Date()))
@@ -827,6 +925,10 @@ actor AgentLoop {
                     case .needsApproval:
                         guard await requestApproval(for: call, invocation: invocation) != nil else {
                             if cancelled { await finish(.cancelled); return }
+                            if skipDeclinedActionAfterSteer(call: call, invocation: invocation) {
+                                await compactIfNeeded()
+                                continue
+                            }
                             let declined = "declined by user"
                             record.messages.append(
                                 SessionMessage(role: .toolResult, content: declined, toolName: call.name, timestamp: Date()))
@@ -962,15 +1064,58 @@ actor AgentLoop {
         let maxTokens = configuration.thermalTokenCeiling.map {
             min(configuration.maxTokensPerTurn, $0)
         } ?? configuration.maxTokensPerTurn
-        let stream = engine.stream(
-            adding: unsent,
-            maxTokens: maxTokens,
-            temperature: configuration.temperature)
-        for try await chunk in stream {
-            result += chunk
-            eventContinuation?.yield(.tokenDelta(chunk))
+        do {
+            let stream = engine.stream(
+                adding: unsent,
+                maxTokens: maxTokens,
+                temperature: configuration.temperature)
+            for try await chunk in stream {
+                if cancelled || pendingSteer != nil { break }
+                result += chunk
+                eventContinuation?.yield(.tokenDelta(chunk))
+            }
+        } catch is CancellationError {
+            if cancelled { throw CancellationError() }
         }
         return result
+    }
+
+    /// Injects a pending steer as the next user turn. The visible transcript
+    /// keeps the user's words; the model sees an explicit redirect.
+    @discardableResult
+    private func applyPendingSteer() -> Bool {
+        guard let text = pendingSteer else { return false }
+        pendingSteer = nil
+        record.messages.append(
+            SessionMessage(role: .user, content: text, toolName: nil, timestamp: Date()))
+        history.append(ChatTurn(role: .user, content: Self.steeringInstruction(text)))
+        _ = persist()
+        return true
+    }
+
+    /// After a pending approval is declined because the user steered, skip
+    /// the tool and keep the run alive so the new instruction can run.
+    private func skipDeclinedActionAfterSteer(
+        call: ParsedToolCall,
+        invocation: ToolInvocation
+    ) -> Bool {
+        guard pendingSteer != nil else { return false }
+        let skipped = "skipped — the user steered this turn before this action ran"
+        record.messages.append(
+            SessionMessage(role: .toolResult, content: skipped, toolName: call.name, timestamp: Date()))
+        history.append(ChatTurn(role: .tool, content: skipped, toolName: call.name))
+        eventContinuation?.yield(.toolCallFinished(invocation, output: skipped, failed: true))
+        _ = applyPendingSteer()
+        setPhase(.working)
+        return true
+    }
+
+    static func steeringInstruction(_ message: String) -> String {
+        """
+        The user is steering this turn. Stop following the previous plan and follow this instruction instead:
+
+        \(message)
+        """
     }
 
     /// Context errors are recoverable only when the provider gives us a
@@ -1369,10 +1514,10 @@ actor AgentLoop {
         }
     }
 
-    private func askUser(_ question: String) async -> String {
+    private func askUser(_ question: String, choices: [String] = []) async -> String {
         let requestID = UUID()
         setPhase(.awaitingQuestion)
-        eventContinuation?.yield(.askUser(requestID, question))
+        eventContinuation?.yield(.askUser(requestID, question, choices))
         return await withCheckedContinuation { continuation in
             replacePending(.question(requestID, question, continuation))
         }
@@ -1568,7 +1713,9 @@ actor AgentLoop {
             commandPolicy: commandPolicy,
             modelID: record.modelID,
             sessionID: UUID(),
-            taskHint: prompt)
+            taskHint: prompt,
+            linuxContainer: linuxContainer,
+            browserSession: browserSession)
 
         var lastAnswer = "(subagent produced no answer)"
         let stream = await child.run(userMessage: prompt)

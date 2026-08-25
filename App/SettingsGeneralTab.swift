@@ -52,7 +52,7 @@ struct GeneralTab: View {
             SettingsCard(
                 title: "Appearance",
                 icon: "paintbrush",
-                footer: "Dark is the everyday default. Beet tints the whole window; use it as a theme, not the reading surface.") {
+                footer: "Choose the system appearance or a focused light or dark monochrome reading surface.") {
                 SettingRow(label: "Appearance") {
                     Picker("Appearance", selection: $settings.appearance) {
                         ForEach(AppAppearance.allCases) { appearance in
@@ -63,11 +63,6 @@ struct GeneralTab: View {
                     .labelsHidden()
                 }
 
-                SettingRow(label: "Accent palette", value: settings.accentPalette.label) {
-                    PaletteSwatchPicker(selection: Binding(
-                        get: { settings.accentPalette },
-                        set: { settings.accentPalette = $0 }))
-                }
                 SettingRow(label: "Text size", value: settings.textSize.label) {
                     Picker("Text size", selection: $settings.textSize) {
                         ForEach(AppTextSize.allCases) { size in
@@ -194,7 +189,7 @@ struct GeneralTab: View {
                 }
             }
 
-            SettingsCard(title: "Remote Beetcode Sessions", icon: "iphone", footer: "Off by default. Uses port \(RemoteSessionPorts.defaultPort) so it can run beside Vamp Host (9475). Tailscale is preferred; the QR is a one-time pairing code.") {
+            SettingsCard(title: "Remote Vamp Assistant Sessions", icon: "iphone", footer: "Off by default. Uses port \(RemoteSessionPorts.defaultPort) so it can run beside Vamp Host (9475). Tailscale is preferred; the QR is a one-time pairing code.") {
                 SettingToggle(label: "Enable remote session access", isOn: $settings.remoteSessionEnabled)
                 SettingRow(label: "Port") {
                     TextField("\(RemoteSessionPorts.defaultPort)", value: $settings.remoteSessionPort, format: .number)

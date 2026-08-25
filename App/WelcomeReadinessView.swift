@@ -101,14 +101,14 @@ struct WelcomeReadinessView: View {
 
     private var header: some View {
         HStack(spacing: 14) {
-            Image("BeetLogo")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
+            Image(systemName: "sparkles")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(Theme.rose)
                 .frame(width: 48, height: 48)
-                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
                 .shadow(color: Theme.accent.opacity(0.28), radius: 12, y: 4)
             VStack(alignment: .leading, spacing: 3) {
-                Text(isOnboarding ? "Welcome to Beet Code" : "System Readiness")
+                Text(isOnboarding ? "Welcome to Vamp Assistant" : "System Readiness")
                     .font(.title2.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
                 Text("Pick a model to chat. Open a project only when you want coding tools.")
@@ -214,7 +214,7 @@ struct WelcomeReadinessView: View {
     ) -> some View {
         HStack(spacing: 12) {
             Image(systemName: systemImage)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold, design: .serif))
                 .foregroundStyle(ready ? Theme.success : optional ? Theme.textTertiary : Theme.warning)
                 .frame(width: 32, height: 32)
                 .background(Theme.wash(ready ? Theme.success : optional ? Theme.textTertiary : Theme.warning), in: Circle())
@@ -288,7 +288,7 @@ struct WelcomeReadinessView: View {
 
     private var toolchainDetail: String {
         guard let snapshot = readiness.snapshot else { return "Checking Apple Silicon, macOS, and Xcode…" }
-        if !snapshot.isAppleSilicon { return "Beet Code requires an Apple Silicon Mac." }
+        if !snapshot.isAppleSilicon { return "Vamp Assistant requires an Apple Silicon Mac." }
         if !snapshot.supportedSystem { return "macOS 15 or newer is required." }
         return snapshot.xcodePath.map { "Xcode tools selected at \($0)." }
             ?? "Install Xcode, open it once, then select its command-line tools."

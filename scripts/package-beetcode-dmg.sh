@@ -1,32 +1,32 @@
 #!/usr/bin/env bash
-# Wrap the Release BeetCode.app into a UDZO DMG for GitHub download.
+# Wrap the Release Vamp Assistant.app into a UDZO DMG for distribution.
 # Does not rebuild — pass the app you just built with xcodebuild -configuration Release.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP="${1:-$ROOT/.derived/Build/Products/Release/BeetCode.app}"
+APP="${1:-$ROOT/.derived/Build/Products/Release/Vamp Assistant.app}"
 DIST="${ROOT}/dist"
 
 if [[ ! -d "$APP" ]]; then
   echo "missing app: $APP" >&2
-  echo "usage: $0 [/path/to/BeetCode.app]" >&2
+  echo "usage: $0 [/path/to/Vamp Assistant.app]" >&2
   exit 1
 fi
 
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
 BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
-NAME="BeetCode-${VERSION}"
+NAME="Vamp-Assistant-${VERSION}"
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/beetcode-dmg.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
 
 mkdir -p "$DIST" "$STAGE"
-ditto "$APP" "$STAGE/Beet Code.app"
+ditto "$APP" "$STAGE/Vamp Assistant.app"
 ln -s /Applications "$STAGE/Applications"
 
 DMG="${DIST}/${NAME}.dmg"
 rm -f "$DMG"
 hdiutil create \
-  -volname "Beet Code ${VERSION}" \
+  -volname "Vamp Assistant ${VERSION}" \
   -srcfolder "$STAGE" \
   -ov -format UDZO \
   "$DMG" >/dev/null

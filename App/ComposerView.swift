@@ -54,9 +54,9 @@ struct ComposerView: View {
         .frame(maxWidth: placement == .home ? 640 : ContentColumn.maxWidth, alignment: .leading)
         .frame(maxWidth: .infinity)
         .padding(.horizontal, placement == .home ? 0 : Spacing.xl)
-        .padding(.top, placement == .home ? 0 : 10)
-        .padding(.bottom, placement == .home ? 0 : 12)
-        .background(placement == .home ? Color.clear : Theme.bg)
+        .padding(.top, placement == .home ? 0 : 8)
+        .padding(.bottom, placement == .home ? 0 : 18)
+        .background(Color.clear)
         .onReceive(NotificationCenter.default.publisher(for: .sendMessage)) { _ in
             store.send()
         }
@@ -170,11 +170,11 @@ struct ComposerView: View {
 
     private var composerPlaceholder: LocalizedStringKey {
         if placement == .home {
-            return "Plan, build, or ask — / for skills, @ for context"
+            return "What's on your mind?"
         }
         return controller.workspaceURL == nil
-            ? "Message Beet Code…"
-            : "Ask Beet Code to build, fix, or explain…"
+            ? "Message Vamp Assistant…"
+            : "Ask Vamp Assistant to build, fix, or explain…"
     }
 
     private func acceptDroppedFiles(from providers: [NSItemProvider]) -> Bool {
@@ -317,9 +317,9 @@ private struct ComposerDropOverlay: View {
     var body: some View {
         VStack(spacing: Spacing.sm) {
             Image(systemName: "arrow.down.doc.fill")
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(size: 20, weight: .semibold, design: .serif))
             Text("Drop files to attach")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold, design: .serif))
         }
         .foregroundStyle(Theme.accent)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -415,7 +415,7 @@ private struct ComposerCommandMenu: View {
             .disabled(store.selection.isEmpty && store.attachments.isEmpty)
         } label: {
             Image(systemName: "ellipsis")
-                .font(.system(size: 13, weight: .bold))
+                .font(.system(size: 13, weight: .bold, design: .serif))
                 .foregroundStyle(Theme.textSecondary)
                 .frame(width: 28, height: 28)
                 .background(Theme.surfaceInset.opacity(0.44), in: Circle())
@@ -536,7 +536,7 @@ private struct AppleDeliverySetupView: View {
     private var header: some View {
         HStack(spacing: Spacing.md) {
             Image(systemName: "checkmark.shield.fill")
-                .font(.system(size: 24, weight: .semibold))
+                .font(.system(size: 24, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.accent)
                 .frame(width: 44, height: 44)
                 .background(Theme.washStrong(Theme.accent), in: Circle())
@@ -611,7 +611,7 @@ private struct AppleDeliverySetupView: View {
                     .foregroundStyle(Theme.textSecondary)
             }
 
-            Label("Beet Code never reads, copies, or stores your private key or certificate password.", systemImage: "lock.fill")
+            Label("Vamp Assistant never reads, copies, or stores your private key or certificate password.", systemImage: "lock.fill")
                 .font(.caption)
                 .foregroundStyle(Theme.textTertiary)
         }
@@ -810,11 +810,12 @@ private struct AccessoryRow: View {
                 AttachChip(store: store)
                 ModelSelectionPill()
                     .environmentObject(appState)
+                AssistantCapabilityMenu()
                 if controller.workspaceURL == nil {
-                    Label("Chat only", systemImage: "bubble.left.and.bubble.right")
+                    Label("Assistant", systemImage: "sparkles")
                         .lfComposerPill(active: true)
-                        .help("No project tools are available until you open a folder")
-                        .accessibilityLabel("Chat only mode")
+                        .help("Vamp Assistant can use its browser and optional Mac control without a project folder")
+                        .accessibilityLabel("Vamp Assistant mode")
                 } else {
                     IntentChipButton(store: store)
                     AgentSetupMenu()
@@ -829,6 +830,54 @@ private struct AccessoryRow: View {
     }
 }
 
+private struct AssistantCapabilityMenu: View {
+    @ObservedObject private var settings = SettingsStore.shared
+    @EnvironmentObject private var controller: AgentSessionController
+
+    var body: some View {
+        Menu {
+            Section("Vamp Assistant") {
+                Button("New Assistant Chat", systemImage: "square.and.pencil") {
+                    NotificationCenter.default.post(name: .newChat, object: nil)
+                }
+                Button("Open Project in Code…", systemImage: "folder.badge.gearshape") {
+                    NotificationCenter.default.post(name: .openWorkspace, object: nil)
+                }
+                Button("Bots Dashboard", systemImage: "person.3.sequence.fill") {
+                    NotificationCenter.default.post(name: .openBotsDashboard, object: nil)
+                }
+                Button("Browser", systemImage: "safari") {
+                    NotificationCenter.default.post(name: .openBrowserPanel, object: nil)
+                }
+            }
+            Section("Mac control") {
+                if settings.computerControlEnabled {
+                    Label("Available when requested", systemImage: "checkmark.shield.fill")
+                    Button("Turn Off Mac Control", role: .destructive) {
+                        settings.computerControlEnabled = false
+                    }
+                } else {
+                    Button("Enable When Requested", systemImage: "hand.raised.square") {
+                        settings.computerControlEnabled = true
+                    }
+                }
+            }
+            if controller.workspaceURL != nil {
+                Divider()
+                Button("Return to Assistant", systemImage: "arrow.uturn.backward") {
+                    NotificationCenter.default.post(name: .newChat, object: nil)
+                }
+            }
+        } label: {
+            Label("Vamp", systemImage: "sparkles")
+                .lfComposerPill(active: controller.workspaceURL == nil)
+        }
+        .menuStyle(.borderlessButton)
+        .help("Assistant capabilities")
+        .accessibilityLabel("Vamp Assistant capabilities")
+    }
+}
+
 /// Paperclip pill — opens the file picker and appends attachments.
 private struct AttachChip: View {
     let store: ComposerStore
@@ -838,7 +887,7 @@ private struct AttachChip: View {
             attachFiles()
         } label: {
             Image(systemName: "paperclip")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 12, weight: .medium, design: .serif))
                 .frame(width: 28, height: 28)
                 .contentShape(Circle())
                 .background(Theme.surfaceInset.opacity(0.44), in: Circle())
@@ -878,7 +927,7 @@ private struct IntentChipButton: View {
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: "target")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 11, weight: .medium, design: .serif))
                 Text("Context")
                 if count > 0 {
                     // A plain accent count — no badge-in-badge capsule.
@@ -957,7 +1006,7 @@ private struct AgentSetupMenu: View {
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: settings.agentMode.icon)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 11, weight: .medium, design: .serif))
                 Text(settings.agentMode.label)
                 if settings.planMode {
                     Image(systemName: "list.bullet.clipboard")
@@ -1093,7 +1142,7 @@ private struct SendStopButton: View {
             store.send()
         } label: {
             Image(systemName: "arrow.up")
-                .font(.system(size: 12, weight: .bold))
+                .font(.system(size: 12, weight: .bold, design: .serif))
         }
         .buttonStyle(LFIconButtonStyle(tone: .primary, size: 38))
         .lfHoverLift()

@@ -1,6 +1,6 @@
-# Beet Code Brand Kit
+# Vamp Assistant Brand Kit
 
-The single reference for how Beet Code looks. Code-level source of truth is
+The single reference for how Vamp Assistant looks. Code-level source of truth is
 `App/Theme.swift` — this document is the human-readable contract; when the two
 disagree, fix the code to match the intent written here, not the reverse.
 

@@ -241,7 +241,7 @@ private struct ComputerControlCard: View {
             HStack(spacing: Spacing.sm) {
                 HStack(spacing: 5) {
                     Circle()
-                        .fill(granted ? Color.green : Color.orange)
+                        .fill(granted ? Theme.accentBright : Theme.textTertiary)
                         .frame(width: 7, height: 7)
                     Text(granted ? "Granted" : "Not granted")
                         .font(.callout)

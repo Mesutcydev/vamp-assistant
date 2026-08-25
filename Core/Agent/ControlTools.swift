@@ -90,7 +90,9 @@ struct AskUserTool: AgentTool {
 
     let schemaText = """
         {"type":"object","properties":{
-          "question":{"type":"string","description":"The question to ask the user"}
+          "question":{"type":"string","description":"The question to ask the user"},
+          "choices":{"type":"array","items":{"type":"string"},"description":"Optional short answers the user can tap"},
+          "options":{"type":"array","items":{"type":"string"},"description":"Alias for choices"}
         },"required":["question"]}
         """
 

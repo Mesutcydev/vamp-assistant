@@ -41,12 +41,16 @@ final class AgentSessionController: ObservableObject {
     @Published private(set) var isRunning = false
     @Published private(set) var pendingApproval: ApprovalRequest?
     @Published private(set) var pendingQuestion: String?
+    @Published private(set) var pendingQuestionChoices: [String] = []
     private var pendingQuestionID: UUID?
     @Published private(set) var pendingPlan: String?
     private var pendingPlanID: UUID?
     @Published private(set) var currentPhase: AgentPhase = .idle
     @Published private(set) var finishReason: AgentFinish?
     @Published private(set) var persistenceError: String?
+    /// Follow-up used when a Codex (or other non-loop) run is interrupted so
+    /// the next turn can start immediately instead of waiting in the queue.
+    private var pendingSteerMessage: String?
     @Published private(set) var workspaceURL: URL?
     @Published private(set) var gitOutput: String?
     /// True when the open folder has project MCP/hooks the user has not trusted.
@@ -75,6 +79,7 @@ final class AgentSessionController: ObservableObject {
     /// visually continuous while leaving more CPU time for local inference.
     private var pendingTokenBuffer = ""
     private var tokenFlushTask: Task<Void, Never>?
+    private var pendingReasoningPublish = false
     /// Unfiltered stream accumulator — the source for display filtering
     /// (think-block removal happens on the accumulated text, not deltas).
     private var rawStreamingText = ""
@@ -91,6 +96,16 @@ final class AgentSessionController: ObservableObject {
     /// The directory exists only because engines require a working directory;
     /// chat-only prompts never expose it as a workspace or register tools.
     static var overrideChatRuntimeDirectory: URL?
+
+    /// Remote Auto / Full Access apply only to the current phone-started run.
+    /// Local Mac sends call `clearRemoteRunOptions()` so leftover remote
+    /// permissions never write Settings or YOLO a later composer turn.
+    private var remoteRunActive = false
+    private var remoteAutoMode = false
+    private var remoteFullAccess = false
+    private var remoteComputerControl = false
+    private var remoteLinuxContainer: LinuxContainerTarget?
+    private(set) var remoteBrowserSession: BrowserSession?
 
     // Account-backed OpenAI runs are hosted by Codex app-server rather than
     // AgentLoop. Keeping this state beside the existing loop lets the same
@@ -146,6 +161,58 @@ final class AgentSessionController: ObservableObject {
         self.thermal = thermal
     }
 
+    func applyRemoteRunOptions(autoMode: Bool, fullAccess: Bool) {
+        remoteRunActive = true
+        remoteAutoMode = autoMode
+        remoteFullAccess = fullAccess
+    }
+
+    func applyRemoteIsolation(
+        computerControl: Bool,
+        linuxContainer: LinuxContainerTarget?,
+        browser: BrowserSession? = nil
+    ) {
+        remoteComputerControl = computerControl
+        remoteLinuxContainer = linuxContainer
+        remoteBrowserSession = browser
+        if let browser {
+            BrowserController.controller(for: browser).reveal(openPanel: false)
+        }
+    }
+
+    func clearRemoteRunOptions() {
+        remoteRunActive = false
+        remoteAutoMode = false
+        remoteFullAccess = false
+        remoteComputerControl = false
+        remoteLinuxContainer = nil
+        remoteBrowserSession = nil
+        BrowserController.shared.reveal(openPanel: false)
+    }
+
+    private var effectiveAgentIsAuto: Bool {
+        remoteRunActive ? remoteAutoMode : settings.agentMode == .auto
+    }
+
+    private var effectiveAgentIsGoal: Bool {
+        remoteRunActive ? !remoteAutoMode : settings.agentMode == .goal
+    }
+
+    private var effectivePlanMode: Bool {
+        remoteRunActive ? !remoteAutoMode : settings.planMode
+    }
+
+    private var effectiveFullAccess: Bool {
+        if remoteRunActive {
+            return remoteFullAccess || remoteAutoMode
+        }
+        return settings.remoteFullAccessEnabled || settings.agentMode == .auto
+    }
+
+    private var effectiveComputerControl: Bool {
+        remoteRunActive ? remoteComputerControl : settings.computerControlEnabled
+    }
+
     // MARK: Task lifecycle
 
     func send(
@@ -168,6 +235,7 @@ final class AgentSessionController: ObservableObject {
         // HTTP requests can both pass the guard before the async MCP/model
         // preparation marks the loop as running.
         isRunning = true
+        runID = UUID()
         runStartedAt = Date()
         // A stale event task must never outlive the run it belongs to.
         eventTask?.cancel()
@@ -183,6 +251,7 @@ final class AgentSessionController: ObservableObject {
         codexReasoningText = ""
         pendingApproval = nil
         pendingQuestion = nil
+        pendingQuestionChoices = []
         pendingPlan = nil
         pendingPlanID = nil
         finishReason = nil
@@ -296,20 +365,30 @@ final class AgentSessionController: ObservableObject {
         }
         let tools: [any AgentTool] = chatOnly
             ? Self.sessionTools(
-                computerControlEnabled: settings.computerControlEnabled,
+                computerControlEnabled: effectiveComputerControl,
                 chatOnly: true)
             : constrainedLocalModel
             ? Self.constrainedLocalTools
-            : Self.sessionTools(computerControlEnabled: settings.computerControlEnabled)
+            : Self.sessionTools(
+                computerControlEnabled: effectiveComputerControl,
+                linuxGuest: remoteLinuxContainer != nil)
                 + mcpTools
 
         if constrainedLocalModel && !chatOnly {
             transcript.append(TranscriptItem(id: UUID(), kind: .notice(
                 "Memory-safe local mode: using a compact prompt and core coding tools so this model can answer without exhausting RAM.")))
         }
+        if let linux = remoteLinuxContainer {
+            transcript.append(TranscriptItem(id: UUID(), kind: .notice(
+                "Shell commands run as a full Linux shell inside micro-VM \(linux.containerName). Git, Python, Node, compilers, and pipes are available. Files stay in this bot’s workspace.")))
+        }
+        if let browser = remoteBrowserSession {
+            transcript.append(TranscriptItem(id: UUID(), kind: .notice(
+                "\(browser.name) has a private in-app browser. Cookies and logins stay with this bot.")))
+        }
 
-        let autoApproveEdits = settings.autoApproveEdits || settings.agentMode == .auto
-        let autoApproveCommands = settings.autoApproveCommands || settings.agentMode == .auto
+        let autoApproveEdits = settings.autoApproveEdits || effectiveAgentIsAuto
+        let autoApproveCommands = settings.autoApproveCommands || effectiveAgentIsAuto
         let maxTurns = settings.maxTurns
         let configuredMaxTokensPerTurn = min(
             settings.maxTokensPerTurn,
@@ -336,8 +415,8 @@ final class AgentSessionController: ObservableObject {
             ? nil
             : catalog.agent(named: preferredAgentName) ?? catalog.agent(named: "build")
         let planMode = !chatOnly
-            && (settings.planMode || selectedAgent?.name.caseInsensitiveCompare("plan") == .orderedSame)
-        let goalMode = !chatOnly && settings.agentMode == .goal
+            && (effectivePlanMode || selectedAgent?.name.caseInsensitiveCompare("plan") == .orderedSame)
+        let goalMode = !chatOnly && effectiveAgentIsGoal
         let outputStyle = projectPolicy?.outputStyle ?? settings.outputStyle
         let compatibilityPermissions = chatOnly
             ? .empty
@@ -348,8 +427,9 @@ final class AgentSessionController: ObservableObject {
         var permissions = PermissionGate(
             autoApproveEdits: autoApproveEdits,
             autoApproveCommands: autoApproveCommands,
-            fullAccess: settings.remoteFullAccessEnabled || settings.agentMode == .auto,
+            fullAccess: effectiveFullAccess,
             workspace: workspaceScope,
+            guestShell: remoteLinuxContainer != nil,
             overrides: runOverrides)
         permissions.openCodePermissions = compatibilityPermissions
         approvalOverrides = runOverrides
@@ -399,7 +479,9 @@ final class AgentSessionController: ObservableObject {
             memory: chatOnly || constrainedLocalModel || settings.memoryMode == .off
                 ? nil
                 : AgentMemory(workspacePath: workspace.path),
-            taskHint: modelText)
+            taskHint: modelText,
+            linuxContainer: remoteLinuxContainer,
+            browserSession: remoteBrowserSession)
         loop = agentLoop
         let runToken = runID
 
@@ -450,8 +532,9 @@ final class AgentSessionController: ObservableObject {
         record.modelID = "openai-codex:\(modelID)"
         record.source = .app
         let dynamicTools = Self.sessionTools(
-            computerControlEnabled: settings.computerControlEnabled,
-            chatOnly: true)
+            computerControlEnabled: effectiveComputerControl,
+            chatOnly: true,
+            linuxGuest: remoteLinuxContainer != nil)
         let dynamicToolNames = dynamicTools.map(\.name).sorted()
         var promptSeed = seed
         if (record.codexDynamicToolNames ?? []) != dynamicToolNames {
@@ -462,9 +545,12 @@ final class AgentSessionController: ObservableObject {
             promptSeed?.codexThreadID = nil
         }
         record.codexDynamicToolNames = dynamicToolNames
+        let codexContext = ToolContext(workspace: Workspace(root: workspace))
+        codexContext.linuxContainer = remoteLinuxContainer
+        codexContext.browserSession = remoteBrowserSession
         codexDynamicExecutor = ToolExecutor(
             tools: dynamicTools,
-            context: ToolContext(workspace: Workspace(root: workspace)))
+            context: codexContext)
         record.messages.append(SessionMessage(
             role: .user,
             content: displayText,
@@ -478,7 +564,7 @@ final class AgentSessionController: ObservableObject {
 
         let threadInput = Self.codexPrompt(seed: promptSeed, current: modelText)
         let stream = await codexAccount.client.events()
-        let autonomous = !chatOnly && (settings.agentMode == .auto || settings.remoteFullAccessEnabled)
+        let autonomous = !chatOnly && (effectiveAgentIsAuto || effectiveFullAccess)
 
         do {
             let threadID: String
@@ -509,7 +595,7 @@ final class AgentSessionController: ObservableObject {
                 text: chatOnly
                     ? Self.chatOnlyCodexPrompt(
                         threadInput,
-                        computerControlEnabled: settings.computerControlEnabled)
+                        computerControlEnabled: effectiveComputerControl)
                     : threadInput,
                 reasoningEffort: activeCodexReasoningEffortHandler(),
                 chatOnly: chatOnly,
@@ -572,13 +658,17 @@ final class AgentSessionController: ObservableObject {
             guard let delta = params["delta"]?.stringValue, !delta.isEmpty else { return }
             codexReasoningText += delta
             if settings.showReasoning {
-                liveReasoningText = codexReasoningText
-                isReasoningVisible = true
+                pendingReasoningPublish = true
+                scheduleTokenFlush()
             }
 
         case "item/plan/delta":
             guard let delta = params["delta"]?.stringValue, !delta.isEmpty else { return }
-            transcript.append(TranscriptItem(id: UUID(), kind: .reasoning(delta)))
+            codexReasoningText += delta
+            if settings.showReasoning {
+                pendingReasoningPublish = true
+                scheduleTokenFlush()
+            }
 
         case "item/started":
             if let item = params["item"]?.objectValue {
@@ -660,7 +750,7 @@ final class AgentSessionController: ObservableObject {
 
         switch method {
         case "item/commandExecution/requestApproval", "item/fileChange/requestApproval":
-            if settings.remoteFullAccessEnabled {
+            if effectiveFullAccess {
                 Task {
                     try? await codexAccount.client.respondToApproval(
                         requestID: requestID,
@@ -690,7 +780,7 @@ final class AgentSessionController: ObservableObject {
                 level: .warning)
 
         case "item/permissions/requestApproval":
-            if settings.remoteFullAccessEnabled {
+            if effectiveFullAccess {
                 let requested = params["permissions"] ?? .object([:])
                 Task {
                     try? await codexAccount.client.respondToPermissions(
@@ -723,6 +813,11 @@ final class AgentSessionController: ObservableObject {
             pendingQuestion = question?["question"]?.stringValue
                 ?? params["message"]?.stringValue
                 ?? "Codex needs more information."
+            pendingQuestionChoices = (question?["choices"] ?? question?["options"] ?? question?["answers"])?
+                .arrayValue?
+                .compactMap(\.stringValue)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty } ?? []
             currentPhase = .awaitingQuestion
 
         case "item/tool/call":
@@ -757,7 +852,9 @@ final class AgentSessionController: ObservableObject {
         let call = ParsedToolCall(name: toolName, arguments: arguments, index: 0)
         let invocation = ToolInvocation(call: call, summary: tool.summary)
 
-        if settings.remoteFullAccessEnabled || !tool.risk.requiresApprovalByDefault {
+        let computerAllowed = toolName.hasPrefix("computer_")
+            && approvalOverrides?.allowsComputer == true
+        if effectiveFullAccess || computerAllowed || !tool.risk.requiresApprovalByDefault {
             let client = codexAccount.client
             Task {
                 let outcome = await executor.execute(call)
@@ -891,6 +988,7 @@ final class AgentSessionController: ObservableObject {
         case .engineError(let message):
             DiagnosticsCenter.shared.record(.engine, "Codex engine error", detail: message, level: .error)
         }
+        startPendingSteerIfNeeded()
     }
 
     private func appendCodexMessage(
@@ -1029,7 +1127,7 @@ final class AgentSessionController: ObservableObject {
             return (message.role == .user ? "User" : "Assistant") + ": " + content
         }
         guard !history.isEmpty else { return current }
-        return "Previous Beet Code conversation context:\n\(history.joined(separator: "\n\n"))\n\nCurrent request:\n\(current)"
+        return "Previous Vamp Assistant conversation context:\n\(history.joined(separator: "\n\n"))\n\nCurrent request:\n\(current)"
     }
 
     private static func chatOnlyCodexPrompt(
@@ -1038,13 +1136,21 @@ final class AgentSessionController: ObservableObject {
     ) -> String {
         let computerBoundary = computerControlEnabled
             ? "The opt-in computer_* tools are also available for Mac UI tasks."
-            : "Mac computer control is off; do not attempt computer_* actions."
+            : "Mac computer control is off. For a concrete Mac task, call computer_request_access for only Accessibility or Screen Recording; continue only if the user approves and macOS grants it."
         return """
-        You are in Beet Code's chat-only mode. Answer the user directly. No
+        You are Vamp Assistant in project-free assistant mode. Answer the user directly. No
         project is connected. Do not inspect files, run commands, change code,
         or claim workspace access. The in-app browser_* tools are available.
         \(computerBoundary) Use only those app-owned tools in chat-only mode.
-        After any action, observe again before claiming success. If project
+        For Mac tasks, behave as a persistent computer-use agent:
+        - preserve the user's objective across short replies such as a number, yes, or continue;
+        - use computer_activate_app instead of Spotlight or menu detours to open an app;
+        - observe, choose one grounded action using a fresh ref, act, then inspect the returned fresh observation;
+        - if focus changes, reactivate the intended app rather than typing into the new frontmost app;
+        - continue until the requested outcome is reached, a destructive approval is required, or a concrete blocker is proven;
+        - never report success from an action alone; verify the expected window, label, value, or state.
+        If an observation is truncated, narrow the next action using visible labels instead of repeating the full tree.
+        If project
         access is needed, tell the user to open a project folder.
 
         User message:
@@ -1075,9 +1181,37 @@ final class AgentSessionController: ObservableObject {
             finishReason = .cancelled
             currentPhase = .finished
             clearPending()
+            startPendingSteerIfNeeded()
             return
         }
         Task { await loop.cancel() }
+    }
+
+    /// Redirects the current run. Native loops inject the instruction before
+    /// the next model step; Codex interrupts and sends it as the next turn.
+    @discardableResult
+    func steer(_ message: String) -> Bool {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isRunning, !trimmed.isEmpty else { return false }
+        if let loop {
+            Task { await loop.steer(trimmed) }
+            return true
+        }
+        pendingSteerMessage = trimmed
+        stop()
+        return true
+    }
+
+    func takePendingSteer() -> String? {
+        let value = pendingSteerMessage
+        pendingSteerMessage = nil
+        return value
+    }
+
+    private func startPendingSteerIfNeeded() {
+        guard let message = pendingSteerMessage else { return }
+        pendingSteerMessage = nil
+        send(message)
     }
 
     /// Starts the next turn of a persisted Beetcode session from the remote
@@ -1100,7 +1234,7 @@ final class AgentSessionController: ObservableObject {
     /// workspace's most recent session (if any) is restored. Undo and git
     /// controls then target the new project — never a stale checkpoint from
     /// the old one.
-    func switchWorkspace(to url: URL, sessionID: UUID? = nil) async {
+    func switchWorkspace(to url: URL, sessionID: UUID? = nil, restoreLatest: Bool = true) async {
         await stopAndWait()
         workspaceURL = url
         activeSessionID = nil
@@ -1119,6 +1253,7 @@ final class AgentSessionController: ObservableObject {
         Task.detached(priority: .utility) {
             _ = try? await WorkspaceIntelligence(workspaceRoot: url).update()
         }
+        guard restoreLatest else { return }
         if let sessionID,
            let record = SessionStore.shared.load(id: sessionID),
            record.workspacePath == url.path {
@@ -1130,7 +1265,7 @@ final class AgentSessionController: ObservableObject {
     }
 
     /// Leaves project mode and starts a fresh, project-free conversation.
-    /// The next turn uses the chat-only prompt and an empty tool registry.
+    /// The next turn uses the Assistant prompt and its project-free tools.
     func switchToChatOnly() async {
         await stopAndWait()
         workspaceURL = nil
@@ -1239,11 +1374,21 @@ final class AgentSessionController: ObservableObject {
         isReasoningVisible = false
         liveReasoningText = ""
         clearPending()
+        startPendingSteerIfNeeded()
+    }
+
+    /// Clears a leftover completion or error banner without starting a new run.
+    /// Model switches use this so an API/model failure does not stay pinned
+    /// after the user already picked a different engine.
+    func dismissFinish() {
+        guard !isRunning else { return }
+        finishReason = nil
     }
 
     private func clearPending() {
         pendingApproval = nil
         pendingQuestion = nil
+        pendingQuestionChoices = []
         pendingQuestionID = nil
         pendingPlan = nil
         pendingPlanID = nil
@@ -1276,7 +1421,7 @@ final class AgentSessionController: ObservableObject {
     private func scheduleTokenFlush() {
         guard tokenFlushTask == nil else { return }
         tokenFlushTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(50))
+            try? await Task.sleep(for: .milliseconds(120))
             guard let self else { return }
             self.tokenFlushTask = nil
             self.flushTokens()
@@ -1286,9 +1431,16 @@ final class AgentSessionController: ObservableObject {
     private func flushTokens() {
         tokenFlushTask?.cancel()
         tokenFlushTask = nil
-        guard !pendingTokenBuffer.isEmpty else { return }
-        rawStreamingText += pendingTokenBuffer
-        pendingTokenBuffer = ""
+        guard !pendingTokenBuffer.isEmpty || pendingReasoningPublish else { return }
+        if !pendingTokenBuffer.isEmpty {
+            rawStreamingText += pendingTokenBuffer
+            pendingTokenBuffer = ""
+        }
+        if pendingReasoningPublish {
+            pendingReasoningPublish = false
+            liveReasoningText = codexReasoningText
+            isReasoningVisible = true
+        }
         if exactAnswerOverride != nil {
             // The final assistant event publishes the exact requested text.
             // Suppress the raw generation path so filler cannot appear first.
@@ -1313,6 +1465,7 @@ final class AgentSessionController: ObservableObject {
         tokenFlushTask?.cancel()
         tokenFlushTask = nil
         pendingTokenBuffer = ""
+        pendingReasoningPublish = false
     }
 
     /// Turns attachments into part of the user message: files are quoted
@@ -1341,6 +1494,7 @@ final class AgentSessionController: ObservableObject {
         isRunning = false
         pendingApproval = nil
         pendingQuestion = nil
+        pendingQuestionChoices = []
         pendingQuestionID = nil
         pendingPlan = nil
         pendingPlanID = nil
@@ -1804,6 +1958,13 @@ final class AgentSessionController: ObservableObject {
     }
 
     private func applyAlwaysApproval(for request: ApprovalRequest) {
+        if request.invocation.name.hasPrefix("computer_") {
+            approvalOverrides?.allowComputer()
+            transcript.append(TranscriptItem(
+                id: UUID(),
+                kind: .notice("Computer actions approved for this run. Target restoration and verification remain active.")))
+            return
+        }
         let isCommand = request.invocation.name == "run_command"
             || request.invocation.name == "build_diagnostics"
         if isCommand {
@@ -1826,6 +1987,7 @@ final class AgentSessionController: ObservableObject {
         let codexRequestID = codexQuestionRequestID
         let codexID = codexQuestionID ?? "answer"
         pendingQuestion = nil
+        pendingQuestionChoices = []
         pendingQuestionID = nil
         transcript.append(TranscriptItem(id: UUID(), kind: .user(text)))
         if let codexRequestID {
@@ -1903,9 +2065,15 @@ final class AgentSessionController: ObservableObject {
                 detail: ByteFormatter.bytes(Int64(output.utf8.count)),
                 level: failed ? .error : .info)
 
-        case .askUser(let requestID, let question):
+        case .askUser(let requestID, let question, let choices):
+            flushTokens()
+            streamingText = ""
+            rawStreamingText = ""
+            isReasoningVisible = false
+            liveReasoningText = ""
             pendingQuestionID = requestID
             pendingQuestion = question
+            pendingQuestionChoices = choices
             diagnostics.record(.approval, "The agent asked a question",
                                detail: String(question.prefix(120)))
 
@@ -1963,6 +2131,17 @@ final class AgentSessionController: ObservableObject {
 
         case .phaseChanged(let phase):
             currentPhase = phase
+
+        case .userSteered(let text):
+            flushTokens()
+            streamingText = ""
+            rawStreamingText = ""
+            isReasoningVisible = false
+            liveReasoningText = ""
+            clearPending()
+            currentPhase = .working
+            transcript.append(TranscriptItem(id: UUID(), kind: .user(text)))
+            transcript.append(TranscriptItem(id: UUID(), kind: .notice("Steering this turn")))
 
         case .finished(let reason):
             flushTokens()
@@ -2082,15 +2261,18 @@ final class AgentSessionController: ObservableObject {
         BrowserTools.NavigateTool(),
         BrowserTools.ClickTool(),
         BrowserTools.TypeTool(),
+        BrowserTools.ScrollTool(),
         BrowserTools.EvalTool(),
     ]
 
     /// Drive other Mac apps. Off the default coding path; Settings → Agent
     /// → Computer control must be on before these enter the registry.
     static let computerControlTools: [any AgentTool] = [
+        ComputerRequestAccessTool(),
         ComputerStatusTool(),
         ComputerUITreeTool(),
         ComputerScreenshotTool(),
+        ComputerActivateAppTool(),
         ComputerClickTool(),
         ComputerTypeTool(),
         ComputerKeyTool(),
@@ -2106,12 +2288,43 @@ final class AgentSessionController: ObservableObject {
         BrowserTools.NavigateTool(),
         BrowserTools.ClickTool(),
         BrowserTools.TypeTool(),
+        BrowserTools.ScrollTool(),
+        BrowserTools.EvalTool(),
+    ]
+
+    static let botControlTools: [any AgentTool] = [
+        BotRunsTool(),
+        DelegateBotTool(),
+        OrchestrateBotsTool(),
+        BotSteerTool(),
+        BotStopTool(),
+        BotRespondTool(),
+    ]
+
+    static let linuxGuestTools: [any AgentTool] = [
+        ReadFileTool(),
+        WriteFileTool(),
+        MoveFileTool(),
+        ListDirectoryTool(),
+        SearchTool(),
+        FindFilesTool(),
+        FindFilesTool(name: "glob"),
+        WebFetchTool(),
+        ApplyPatchTool(),
+        RunCommandTool(),
+        BrowserTools.ReadTool(),
+        BrowserTools.ScreenshotTool(),
+        BrowserTools.NavigateTool(),
+        BrowserTools.ClickTool(),
+        BrowserTools.TypeTool(),
+        BrowserTools.ScrollTool(),
         BrowserTools.EvalTool(),
     ]
 
     static func sessionTools(
         computerControlEnabled: Bool,
-        chatOnly: Bool = false
+        chatOnly: Bool = false,
+        linuxGuest: Bool = false
     ) -> [any AgentTool] {
         if chatOnly {
             let statusTools: [any AgentTool] = [
@@ -2119,13 +2332,19 @@ final class AgentSessionController: ObservableObject {
                 DiskSpaceStatusTool(),
                 MacSystemStatusTool(),
             ]
+            // Assistant mode advertises the full computer family so a model
+            // can request least-privilege access in context. The request tool
+            // is approval-gated and TCC still enforces every OS capability.
+            return statusTools + browserControlTools + computerControlTools + botControlTools
+        }
+        if linuxGuest {
             return computerControlEnabled
-                ? statusTools + browserControlTools + computerControlTools
-                : statusTools + browserControlTools
+                ? linuxGuestTools + computerControlTools + botControlTools
+                : linuxGuestTools + botControlTools
         }
         return computerControlEnabled
-            ? defaultTools + computerControlTools
-            : defaultTools
+            ? defaultTools + computerControlTools + botControlTools
+            : defaultTools + botControlTools
     }
 
     /// The compact registry used when a local model is close to the machine's
@@ -2147,6 +2366,8 @@ final class AgentSessionController: ObservableObject {
         BrowserTools.ReadTool(),
         BrowserTools.ScreenshotTool(),
         BrowserTools.ClickTool(),
+        BrowserTools.TypeTool(),
+        BrowserTools.ScrollTool(),
         SimListDevicesTool(),
         SimBootDeviceTool(),
         SimLaunchAppTool(),

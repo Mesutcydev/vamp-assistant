@@ -30,6 +30,7 @@ final class AppState: ObservableObject {
     /// user's installed Codex CLI. No ChatGPT refresh token is held here.
     let codexAccount = CodexAccountStore.shared
     let botComputers = BotComputerManager()
+    let botRuns = BotRunCoordinator()
 
     /// Downloads run through here — the UI never touches the network layer.
     private(set) var downloadManager: ModelDownloadManager!
@@ -71,6 +72,10 @@ final class AppState: ObservableObject {
     private var remoteSessionSyncTask: Task<Void, Never>?
     private var remoteNetworkMonitorTask: Task<Void, Never>?
     private var cancellables: Set<AnyCancellable> = []
+    /// Each specialist owns a separate transcript/controller/engine router.
+    /// Keeping these runtimes out of the foreground session is what permits
+    /// remote API and Codex runs to execute concurrently.
+    private var botRuntimes: [UUID: BotRunRuntimeHandle] = [:]
 
     /// Local OpenAI-compatible API server (loopback-only). Lazily created when
     /// the user enables it; nil while disabled.
@@ -129,6 +134,25 @@ final class AppState: ObservableObject {
         remoteSessionHost.taskLookupHandler = { [weak self] sessionID in
             self?.taskQueue.loadAll().first { $0.sessionID == sessionID && !$0.state.isTerminal }
         }
+        remoteSessionHost.queuedTasksHandler = { [weak self] sessionID in
+            self?.taskQueue.loadAll().filter {
+                $0.sessionID == sessionID && $0.state == .queued
+            } ?? []
+        }
+        remoteSessionHost.removeQueuedTaskHandler = { [weak self] sessionID, taskID in
+            guard let self else { return false }
+            guard let task = self.taskQueue.load(id: taskID),
+                  task.sessionID == sessionID,
+                  task.state == .queued else { return false }
+            self.removeQueuedTask(taskID)
+            return true
+        }
+        remoteSessionHost.steerHandler = { [weak self] sessionID, message in
+            guard let self,
+                  self.sessions.activeSessionID == sessionID,
+                  self.sessions.isRunning else { return false }
+            return self.sessions.steer(message)
+        }
         remoteSessionHost.modelOptionsHandler = { [weak self] in
             self?.remoteStartModels() ?? []
         }
@@ -138,20 +162,99 @@ final class AppState: ObservableObject {
         remoteSessionHost.fileSharingAllowedHandler = {
             SettingsStore.shared.remoteFileSharingEnabled
         }
+        remoteSessionHost.macControlAllowedHandler = {
+            SettingsStore.shared.remoteMacControlEnabled
+        }
+        remoteSessionHost.botRunsHandler = { [weak self] in self?.botRuns.runs ?? [] }
+        remoteSessionHost.startBotRunHandler = { [weak self] profileID, modelID, prompt in
+            guard let self else { return (nil, "Vamp Assistant is no longer available.") }
+            guard let specialist = BotComputerService.specialists.first(where: { $0.id == profileID }) else {
+                return (nil, BotComputerError.unknownProfile.localizedDescription)
+            }
+            let models = self.remoteStartModels()
+            let resolvedModelID = modelID.flatMap { requested in
+                models.first(where: { $0.id == requested })?.id
+            } ?? self.defaultBotModelID(in: models)
+            guard let resolvedModelID else { return (nil, "No Assistant model is available for delegation.") }
+            switch self.botRuns.start(
+                profileID: specialist.id, profileName: specialist.name,
+                modelID: resolvedModelID, prompt: prompt
+            ) {
+            case .success(let id): return (id, nil)
+            case .failure(let error): return (nil, error.localizedDescription)
+            }
+        }
+        remoteSessionHost.steerBotRunHandler = { [weak self] id, message in
+            self?.botRuns.steer(runID: id, message: message) ?? false
+        }
+        remoteSessionHost.stopBotRunHandler = { [weak self] id in
+            self?.botRuns.stop(runID: id) ?? false
+        }
+        remoteSessionHost.orchestrateBotRunsHandler = { [weak self] modelID, prompt in
+            guard let self else { return (nil, "Vamp Assistant is no longer available.") }
+            let models = self.remoteStartModels()
+            let resolved = modelID.flatMap { requested in models.first(where: { $0.id == requested })?.id }
+                ?? self.defaultBotModelID(in: models)
+            guard let resolved else { return (nil, "No Assistant model is available for orchestration.") }
+            switch self.botRuns.orchestrate(prompt: prompt, modelID: resolved) {
+            case .success(let id): return (id, nil)
+            case .failure(let error): return (nil, error.localizedDescription)
+            }
+        }
+        remoteSessionHost.approveBotRunHandler = { [weak self] id, approved in
+            self?.botRuns.approve(runID: id, approved: approved) ?? false
+        }
+        remoteSessionHost.answerBotRunHandler = { [weak self] id, answer in
+            self?.botRuns.answer(runID: id, text: answer) ?? false
+        }
+        remoteSessionHost.resumeBotRunHandler = { [weak self] id in
+            self?.botRuns.resume(runID: id) ?? false
+        }
         remoteSessionHost.configureRunHandler = { [weak self] options in
-            SettingsStore.shared.agentMode = options.autoMode ? .auto : .goal
-            SettingsStore.shared.planMode = !options.autoMode
-            SettingsStore.shared.autoApproveEdits = options.fullAccess
-            SettingsStore.shared.autoApproveCommands = options.fullAccess
-            SettingsStore.shared.remoteFullAccessEnabled = options.fullAccess
+            self?.sessions.applyRemoteRunOptions(autoMode: options.autoMode, fullAccess: options.fullAccess)
             self?.applyRemoteReasoningEffort(options.reasoningEffort)
         }
         remoteSessionHost.startSessionHandler = { [weak self] modelID, message, options in
-            guard let self else { return .rejected("Beet Code is no longer available.") }
+            guard let self else { return .rejected("Vamp Assistant is no longer available.") }
             return await self.startRemoteSession(modelID: modelID, message: message, options: options)
         }
         remoteSessionHost.applyModelHandler = { [weak self] modelID, effort in
             await self?.activateRemoteStartModel(modelID: modelID, reasoningEffort: effort)
+        }
+        botRuns.startHandler = { [weak self] run in
+            guard let self else { return .rejected("Vamp Assistant is no longer available.") }
+            return await self.startBotRun(run)
+        }
+        botRuns.steerHandler = { [weak self] runID, message in
+            self?.botRuntimes[runID]?.controller.steer(message) ?? false
+        }
+        botRuns.stopHandler = { [weak self] runID in
+            guard let runtime = self?.botRuntimes[runID] else { return false }
+            runtime.controller.stop()
+            return true
+        }
+        botRuns.approvalHandler = { [weak self] runID, approved in
+            guard let controller = self?.botRuntimes[runID]?.controller else { return false }
+            if controller.pendingPlan != nil {
+                if approved { return controller.approvePlan() }
+                controller.stop()
+                return true
+            }
+            guard controller.pendingApproval != nil else { return false }
+            controller.approve(approved)
+            return true
+        }
+        botRuns.answerHandler = { [weak self] runID, answer in
+            guard let controller = self?.botRuntimes[runID]?.controller,
+                  controller.pendingQuestion != nil else { return false }
+            controller.answerQuestion(answer)
+            return true
+        }
+        Task { [weak self] in
+            await BotRunToolBridge.shared.configure { [weak self] command in
+                guard let self else { return "Vamp Assistant is no longer available." }
+                return await self.handleBotRunCommand(command)
+            }
         }
         sessions.activeModelIDHandler = { [weak self] in
             if let self, self.isCodexActive, let codex = self.activeCodexModelID {
@@ -198,6 +301,22 @@ final class AppState: ObservableObject {
             .sink { [weak self] reason in
                 guard let reason else { return }
                 self?.finishQueuedTask(reason)
+                guard let self else { return }
+                self.botRuns.sync(
+                    sessionID: self.sessions.activeSessionID,
+                    phase: self.sessions.currentPhase,
+                    finish: reason,
+                    output: self.sessions.streamingText)
+            }
+            .store(in: &cancellables)
+        sessions.$currentPhase
+            .sink { [weak self] phase in
+                guard let self else { return }
+                self.botRuns.sync(
+                    sessionID: self.sessions.activeSessionID,
+                    phase: phase,
+                    finish: nil,
+                    output: self.sessions.streamingText)
             }
             .store(in: &cancellables)
         // `/model <id>` slash command: resolve against the catalog and
@@ -295,6 +414,181 @@ final class AppState: ObservableObject {
         return local + chatGPT + api
     }
 
+    var botModelOptions: [RemoteStartModel] { remoteStartModels() }
+
+    private func startBotRun(_ run: BotRunRecord) async -> RemoteSessionStartOutcome {
+        let service = BotComputerService()
+        do {
+            var computer = try await service.prepareSpecialist(profileID: run.profileID)
+            if computer.state != .running {
+                computer = try await service.start(id: computer.id)
+            }
+            botComputers.reload()
+            let router = EngineRouter(pool: run.modelID.hasPrefix("local|") ? engine.enginePool : nil)
+            let parts = run.modelID.split(separator: "|", maxSplits: 2).map(String.init)
+            guard parts.count >= 2 else { return .rejected("That model selection is invalid.") }
+            var codexModelID: String?
+            var contextWindow: Int?
+            var maxTokens: Int?
+            switch parts[0] {
+            case "api":
+                let profiles = remoteAPIProfiles()
+                let profile = RemoteAPIModelCatalog.profile(matchingStartModelID: run.modelID, in: profiles)
+                let endpoint: RemoteEndpoint
+                if let profile {
+                    endpoint = profile.endpoint()
+                    contextWindow = profile.contextWindow
+                    maxTokens = profile.maxOutputTokens
+                } else if parts.count == 3, let provider = LLMProvider(rawValue: parts[1]) {
+                    endpoint = RemoteEndpoint(provider: provider, model: parts[2])
+                } else {
+                    return .rejected("That API model is no longer configured.")
+                }
+                guard router.useRemote(endpoint) else {
+                    return .rejected("The API model could not be activated.")
+                }
+            case "chatgpt":
+                guard codexAccount.isSignedIn,
+                      codexAccount.models.contains(where: { $0.id == parts[1] })
+                else { return .rejected("That ChatGPT model is no longer available.") }
+                codexModelID = parts[1]
+            case "local":
+                guard let model = ModelCatalog.model(id: parts[1]),
+                      let installed = modelStore.installedModel(id: model.id),
+                      modelStore.hasConfiguration(installed)
+                else { return .rejected("That local model is no longer installed.") }
+                router.useLocal()
+                try await router.load(
+                    directory: modelStore.directory(for: installed),
+                    modelID: model.id,
+                    diskBytes: installed.sizeBytes,
+                    format: modelStore.detectedFormat(installed),
+                    contextSize: model.contextWindow)
+                contextWindow = model.contextWindow
+            default:
+                return .rejected("That model source is not supported.")
+            }
+
+            let controller = AgentSessionController(
+                engine: router, settings: settings, thermal: thermal,
+                codexAccount: codexAccount)
+            controller.activeModelIDHandler = { run.modelID }
+            controller.activeCodexModelIDHandler = { codexModelID }
+            controller.activeCodexReasoningEffortHandler = { nil }
+            controller.contextWindowHandler = { contextWindow }
+            controller.maxTokensHandler = { maxTokens }
+            controller.openCodeCatalogHandler = { .empty }
+            controller.applyRemoteRunOptions(autoMode: true, fullAccess: false)
+            await controller.switchWorkspace(
+                to: URL(fileURLWithPath: computer.workspacePath, isDirectory: true),
+                restoreLatest: false)
+            controller.applyRemoteIsolation(
+                computerControl: run.profileID == "navigator",
+                linuxContainer: computer.backend == .appleContainer ? LinuxContainerTarget(
+                    executable: BotComputerService.containerCLI() ?? "",
+                    containerName: computer.containerName ?? "",
+                    hostWorkspacePath: computer.workspacePath) : nil,
+                browser: BrowserSession(id: computer.id, name: computer.name))
+
+            let sessionID = UUID()
+            let now = Date()
+            let session = SessionRecord(
+                id: sessionID,
+                title: remoteSessionTitle(from: run.prompt),
+                createdAt: now,
+                updatedAt: now,
+                workspacePath: computer.workspacePath,
+                modelID: Self.persistedRemoteModelID(from: run.modelID),
+                messages: [], checkpoints: [], source: .app,
+                schemaVersion: SessionRecord.currentSchemaVersion)
+            _ = SessionStore.shared.save(session)
+            SessionStore.shared.invalidateCache()
+
+            let runtime = BotRunRuntimeHandle(controller: controller)
+            runtime.bind(runID: run.id, coordinator: botRuns) { [weak self] id in
+                self?.botRuntimes[id] = nil
+            }
+            botRuntimes[run.id] = runtime
+            controller.send(
+                run.prompt,
+                seed: session,
+                modelInstruction: Self.remoteBotInstruction(id: run.profileID))
+            return .accepted(sessionID)
+        } catch {
+            return .rejected(error.localizedDescription)
+        }
+    }
+
+    private func handleBotRunCommand(_ command: BotRunCommand) async -> String {
+        switch command {
+        case .list:
+            guard !botRuns.runs.isEmpty else { return "No bot runs yet." }
+            return botRuns.runs.map { run in
+                let queue = run.queuePosition.map { " · queue #\($0)" } ?? ""
+                let gate = run.pendingInteraction.map { " · \($0)" } ?? ""
+                return "\(run.id.uuidString) · \(run.profileName) · \(run.state.rawValue)\(queue)\(gate) · \(run.phase)"
+            }.joined(separator: "\n")
+        case .start(let profileID, let requestedModelID, let prompt):
+            guard let specialist = BotComputerService.specialists.first(where: { $0.id == profileID }) else {
+                return BotComputerError.unknownProfile.localizedDescription
+            }
+            let models = remoteStartModels()
+            let modelID = requestedModelID.flatMap { requested in
+                models.first(where: { $0.id == requested })?.id
+            } ?? defaultBotModelID(in: models)
+            guard let modelID else { return "No Assistant model is available for delegation." }
+            switch botRuns.start(
+                profileID: specialist.id, profileName: specialist.name,
+                modelID: modelID, prompt: prompt
+            ) {
+            case .success(let id): return "Delegated to \(specialist.name). Run ID: \(id.uuidString)"
+            case .failure(let error): return error.localizedDescription
+            }
+        case .orchestrate(let requestedModelID, let prompt):
+            let models = remoteStartModels()
+            let modelID = requestedModelID.flatMap { requested in
+                models.first(where: { $0.id == requested })?.id
+            } ?? defaultBotModelID(in: models)
+            guard let modelID else { return "No Assistant model is available for orchestration." }
+            switch botRuns.orchestrate(prompt: prompt, modelID: modelID) {
+            case .success(let id): return "Workflow accepted. Workflow ID: \(id.uuidString)"
+            case .failure(let error): return error.localizedDescription
+            }
+        case .steer(let runID, let message):
+            return botRuns.steer(runID: runID, message: message)
+                ? "Steering delivered." : "That run cannot be steered right now."
+        case .stop(let runID):
+            return botRuns.stop(runID: runID)
+                ? "Run stopped." : "That run is already finished or cannot be stopped."
+        case .respond(let runID, let action, let value):
+            switch action {
+            case "approve": return botRuns.approve(runID: runID, approved: true) ? "Approval queued." : "No approval is pending."
+            case "decline": return botRuns.approve(runID: runID, approved: false) ? "Decline queued." : "No approval is pending."
+            case "answer":
+                guard let value else { return "An answer value is required." }
+                return botRuns.answer(runID: runID, text: value) ? "Answer queued." : "No answer is pending."
+            case "resume": return botRuns.resume(runID: runID) ? "Run queued for recovery." : "That run is not recoverable."
+            default: return "Unknown bot response action."
+            }
+        }
+    }
+
+    private func defaultBotModelID(in models: [RemoteStartModel]) -> String? {
+        if isCodexActive, let activeCodexModelID,
+           let model = models.first(where: { $0.id == "chatgpt|\(activeCodexModelID)" }) {
+            return model.id
+        }
+        if let endpoint = engine.activeRemoteEndpoint,
+           let model = models.first(where: { $0.id.contains(endpoint.model) }) {
+            return model.id
+        }
+        if let activeModelID,
+           let model = models.first(where: { $0.id == "local|\(activeModelID)" }) {
+            return model.id
+        }
+        return models.first?.id
+    }
+
     private func remoteAPIProfiles() -> [RemoteModelProfile] {
         RemoteAPIModelCatalog.profiles(
             configuredProviders: APIKeyStore.shared.configuredProviders,
@@ -376,14 +670,28 @@ final class AppState: ObservableObject {
         if let error = await activateRemoteStartModel(modelID: modelID, reasoningEffort: options.reasoningEffort) {
             return failedRemoteSession(id: sessionID, modelID: modelID, message: message, error: error)
         }
-        await sessions.switchToChatOnly()
+        if let path = options.resolvedWorkspacePath, !path.isEmpty {
+            let url = URL(fileURLWithPath: path, isDirectory: true)
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+                  isDirectory.boolValue else {
+                return .rejected("That folder is not on this Mac anymore.")
+            }
+            await sessions.switchWorkspace(to: url, restoreLatest: false)
+        } else {
+            await sessions.switchToChatOnly()
+        }
+        sessions.applyRemoteIsolation(
+            computerControl: options.botProfileID == "navigator",
+            linuxContainer: options.linuxContainer,
+            browser: options.botBrowser)
         let now = Date()
         let record = SessionRecord(
             id: sessionID,
             title: remoteSessionTitle(from: message),
             createdAt: now,
             updatedAt: now,
-            workspacePath: options.botWorkspacePath ?? "",
+            workspacePath: options.resolvedWorkspacePath ?? "",
             modelID: Self.persistedRemoteModelID(from: modelID),
             messages: [],
             checkpoints: [],
@@ -498,6 +806,11 @@ final class AppState: ObservableObject {
     /// model is unloaded, while the app is waiting for approval, or while a
     /// different workspace is active.
     func drainTaskQueue() {
+        if !sessions.isRunning, let steer = sessions.takePendingSteer() {
+            sessions.send(steer)
+            refreshTaskQueue()
+            return
+        }
         while activeQueuedTaskID == nil, !sessions.isRunning, isEngineReady {
             guard let next = taskQueue.loadAll().first(where: { $0.state == .queued }) else {
                 refreshTaskQueue()
@@ -628,20 +941,12 @@ final class AppState: ObservableObject {
         let preferences = preferences.current
         let isTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
-        // Workspace: must still exist and be a directory.
-        // Test hosts deliberately start without the user's persisted workspace:
-        // each test selects its own isolated fixture, and an asynchronous
-        // launch restore must never race that selection.
-        if !isTestHost, let workspace = self.preferences.validatedWorkspaceURL() {
-            let sessionID = preferences.lastSessionID
-            Task { await self.sessions.switchWorkspace(to: workspace, sessionID: sessionID) }
-            Log.app.info("Restored workspace \(workspace.path, privacy: .public)")
-        } else if !isTestHost,
-                  let sessionID = preferences.lastSessionID,
-                  let record = SessionStore.shared.load(id: sessionID),
-                  record.workspacePath.isEmpty {
-            _ = sessions.restore(record)
-            Log.app.info("Restored project-free chat")
+        // Vamp Assistant always cold-launches into a fresh, project-free chat.
+        // chat. The validated bookmark, last session id, and encrypted history
+        // remain untouched for explicit Code/history restoration.
+        if !isTestHost {
+            sessions.newSession()
+            Log.app.info("Started a fresh Vamp Assistant chat")
         }
 
         // Model: reload the last-used local model so the composer is ready
@@ -788,6 +1093,7 @@ final class AppState: ObservableObject {
         // An active agent must fully stop before its engine is swapped:
         // cancellation is awaited, so generation can never outlive the model.
         await sessions.stopAndWait()
+        sessions.dismissFinish()
         activeCodexModelID = nil
         // Remote endpoints do not own local weights, but EngineRouter keeps
         // the remote selection until explicitly returned to local. Clear it
@@ -845,6 +1151,7 @@ final class AppState: ObservableObject {
     func activateRemote(endpoint: RemoteEndpoint) async -> Bool {
         clearStaleLoadError()
         await sessions.stopAndWait()
+        sessions.dismissFinish()
         activeCodexModelID = nil
         if activeModelID != nil || engine.source != .localMLX {
             await engine.unload()
@@ -884,6 +1191,7 @@ final class AppState: ObservableObject {
     func deactivateRemote() {
         Task { [weak self] in
             await self?.sessions.stopAndWait()
+            self?.sessions.dismissFinish()
             self?.engine.useLocal()
             self?.activeModelID = nil
             self?.activeCodexModelID = nil
@@ -916,6 +1224,7 @@ final class AppState: ObservableObject {
             return false
         }
         await sessions.stopAndWait()
+        sessions.dismissFinish()
         if activeModelID != nil || engine.source != .localMLX {
             await engine.unload()
         }
@@ -932,6 +1241,7 @@ final class AppState: ObservableObject {
     func deactivate() async {
         clearStaleLoadError()
         await sessions.stopAndWait()
+        sessions.dismissFinish()
         await engine.unload()
         activeModelID = nil
         activeCodexModelID = nil

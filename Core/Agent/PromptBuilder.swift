@@ -32,7 +32,7 @@ enum PromptBuilder {
 
         var sections: [String] = []
         sections.append("""
-        You are Beet Code, an autonomous coding agent working inside the user's \
+        You are Vamp Assistant using the optional Code capability inside the user's \
         project directory: \(workspace.root.path)
 
         You accomplish tasks by using tools, one per message. Think briefly, then \
@@ -228,7 +228,7 @@ enum PromptBuilder {
     ) -> String {
         var sections = [
             """
-            You are Beet Code in chat-only mode. Have a helpful, direct
+            You are Vamp Assistant in project-free assistant mode. Have a helpful, direct
             conversation with the user. No project folder is connected. You
             cannot inspect or change project files, run shell commands, use
             project memory, or claim workspace access. If the user asks for
@@ -400,7 +400,7 @@ enum PromptBuilder {
                 ? "Use for bounded page text or API output; use `browser_navigate` when interaction or layout matters."
                 : "Use for bounded page text or API output.")
         add("In-app browser",
-            tools: ["browser_navigate", "browser_read", "browser_click", "browser_type", "browser_eval", "browser_screenshot"],
+            tools: ["browser_navigate", "browser_read", "browser_click", "browser_type", "browser_scroll", "browser_eval", "browser_screenshot"],
             guidance: names.contains("browser_navigate") && names.contains("browser_read")
                 ? "For web UI, navigate → browser_read what=elements → act with a fresh ref. Actions capture a bounded fresh observation by default; never reuse a ref after it changes."
                 : "Use only the listed browser operations and observe again after any interaction.")
@@ -410,9 +410,9 @@ enum PromptBuilder {
                 ? "Prefer `sim_build_run` for build → install → launch → screenshot → describe, then fix and repeat."
                 : "Use only the listed simulator controls and re-observe after interaction.")
         add("Mac computer control",
-            tools: ["computer_status", "computer_ui_tree", "computer_screenshot", "computer_click", "computer_type", "computer_key", "computer_scroll"],
+            tools: ["computer_request_access", "computer_status", "computer_ui_tree", "computer_screenshot", "computer_click", "computer_type", "computer_key", "computer_scroll"],
             guidance: names.contains("computer_status")
-                ? "Check permissions first, then observe with `computer_ui_tree` and prefer its fresh refs for clicks, typing, and scrolling. `computer_screenshot` automatically inspects pixels with an installed local SmolVLM sidecar. Actions capture a new bounded tree by default, invalidating older refs."
+                ? "Check `computer_status` first. If a required permission is missing, call approval-gated `computer_request_access` with only accessibility or screenRecording and a task-specific reason. Then observe with `computer_ui_tree` and prefer fresh refs for clicks, typing, and scrolling."
                 : "Always observe → act → re-observe; prefer fresh element refs because coordinates and old refs go stale after UI changes.")
         add("Vision",
             tools: ["describe_image"],
@@ -454,7 +454,7 @@ enum PromptBuilder {
             lines.append("- **Connected extensions** — \(visible.joined(separator: "; "))\(suffix).")
         }
 
-        lines.append("Writes, commands, and UI/network actions may pause for approval. Request them normally and let Beet Code enforce the boundary; never claim success without observing the result.")
+        lines.append("Writes, commands, and UI/network actions may pause for approval. Request them normally and let Vamp Assistant enforce the boundary; never claim success without observing the result.")
         return "# Runtime capability map\n\n" + lines.joined(separator: "\n")
     }
 
@@ -934,7 +934,7 @@ enum ToolRouter {
             recognized = true
             include([
                 "browser_navigate", "browser_read", "browser_screenshot",
-                "browser_click", "browser_type", "browser_eval",
+                "browser_click", "browser_type", "browser_scroll", "browser_eval",
             ])
         }
 
@@ -1053,7 +1053,7 @@ enum ToolRouter {
         "sim_boot_device", "sim_launch_app", "sim_tap", "sim_swipe", "sim_type",
         "sim_describe", "sim_screenshot", "describe_image", "sim_build_run",
         "browser_read", "browser_screenshot", "browser_navigate", "browser_click",
-        "browser_type", "browser_eval", "computer_status", "computer_ui_tree",
+        "browser_type", "browser_scroll", "browser_eval", "computer_status", "computer_ui_tree",
         "computer_screenshot", "computer_click", "computer_type", "computer_key",
         "computer_scroll", "task", "memory_add", "memory_delete", "ask_user",
         "attempt_completion", "tailscale_status", "disk_space_status",

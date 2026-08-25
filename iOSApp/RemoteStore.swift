@@ -8,7 +8,7 @@ struct PairedBeetCodeComputer: Codable, Identifiable, Equatable {
 
     init(id: UUID = UUID(), name: String? = nil, baseURL: URL) {
         self.id = id
-        self.name = name ?? baseURL.host ?? "BeetCode Mac"
+        self.name = name ?? baseURL.host ?? "Vamp Assistant Mac"
         self.baseURL = baseURL
     }
 }
@@ -19,13 +19,19 @@ final class RemoteStore {
     var sessions: [RemoteSessionSummary] = []
     var selectedSession: RemoteSessionDetail?
     var startModels: [RemoteStartModelOption] = []
+    var botRuns: [RemoteBotRun] = []
     var sharedFiles: [RemoteSharedFileItem] = []
     var isConnecting = false
     var isRefreshing = false
     var isSharing = false
     var errorMessage: String?
+    var errorTitle = "Couldn't complete that"
     var connectionLabel = "Disconnected"
     var autoMode = true
+    var sessionMode: RemoteSessionMode = .chat
+    var workspaces: [RemoteWorkspace] = []
+    var workspaceCreateParent: String?
+    var workspacesSupported = true
     var fullAccess = false
     var reasoningEffort: String?
     private(set) var pairedComputers: [PairedBeetCodeComputer] = []
@@ -54,6 +60,14 @@ final class RemoteStore {
 
     var hasSavedConnection: Bool { baseURL != nil && token != nil }
     var isConnected: Bool { hasSavedConnection && connectionAvailable }
+    var isMacReachable: Bool { isConnected }
+    var connectionSubtitle: String {
+        if isConnected { return "Private over Tailscale" }
+        if isConnecting || connectionLabel == "Reconnecting…" || connectionLabel == "Connecting…" {
+            return "Looking for \(activeComputerName)"
+        }
+        return "Tap to retry"
+    }
     var savedMacAddress: String? { baseURL?.absoluteString }
     var activeComputer: PairedBeetCodeComputer? {
         pairedComputers.first { $0.id == activeComputerID }
@@ -79,11 +93,14 @@ final class RemoteStore {
         } catch {
             connectionAvailable = false
             connectionLabel = "Mac unavailable"
-            if showFailure { errorMessage = "Your saved Mac is not reachable yet. Make sure Beet Code Remote Sessions and Tailscale are on, then try again." }
+            if showFailure {
+                errorTitle = "Mac unavailable"
+                errorMessage = "Your saved Mac is not reachable yet. Make sure Vamp Assistant Remote Sessions and Tailscale are on, then try again."
+            }
         }
     }
 
-    func connect(address: String, code: String) async {
+    func connect(address: String, code: String) async -> Bool {
         isConnecting = true
         errorMessage = nil
         defer { isConnecting = false }
@@ -106,8 +123,11 @@ final class RemoteStore {
             connectionAvailable = true
             connectionLabel = "Connected"
             startPolling()
+            await RemoteNotificationCenter.shared.requestPermission()
+            return true
         } catch {
-            errorMessage = error.localizedDescription
+            presentError("Couldn't pair", error)
+            return false
         }
     }
 
@@ -121,6 +141,9 @@ final class RemoteStore {
         connectionAvailable = true
         consecutivePollingFailures = 0
         sessions = nextList.sessions
+        // Bot runs were added after the original paired-session protocol;
+        // an older Mac must remain usable instead of failing the whole refresh.
+        botRuns = (try? await client.botRuns())?.runs ?? []
         RemoteNotificationCenter.shared.observeSessions(
             nextList.sessions,
             computerName: activeComputerName)
@@ -137,6 +160,84 @@ final class RemoteStore {
             selectedSession = nil
         }
         errorMessage = nil
+    }
+
+    func macControlStatus() async throws -> RemoteMacControlStatus {
+        guard let client else { throw RemoteClientError.notConnected }
+        return try await client.controlStatus()
+    }
+
+    func macControlFrame(
+        displayID: UInt32? = nil,
+        resolution: RemoteStreamResolution = .balanced
+    ) async throws -> RemoteMacControlFrame {
+        guard let client else { throw RemoteClientError.notConnected }
+        return try await client.controlScreen(displayID: displayID, resolution: resolution)
+    }
+
+    func macControlFrames(
+        displayID: UInt32? = nil,
+        resolution: RemoteStreamResolution = .balanced
+    ) -> AsyncThrowingStream<RemoteMacControlFrame, Error> {
+        guard let client else {
+            return AsyncThrowingStream { continuation in
+                continuation.finish(throwing: RemoteClientError.notConnected)
+            }
+        }
+        return client.controlScreenStream(displayID: displayID, resolution: resolution)
+    }
+
+    func sendMacControl(_ command: RemoteInputSender.Command) async throws {
+        guard let client else { throw RemoteClientError.notConnected }
+        _ = try await client.sendControl(Self.controlBody(for: command))
+    }
+
+    func sendMacControlBatch(_ commands: [RemoteInputSender.Command]) async throws -> RemoteAcceptedResponse {
+        guard let client else { throw RemoteClientError.notConnected }
+        guard !commands.isEmpty else { throw RemoteClientError.invalidResponse }
+        return try await client.sendControlBatch(commands.map(Self.controlBody(for:)))
+    }
+
+    static func controlBody(for command: RemoteInputCommand) -> [String: Any] {
+        command.wireBody()
+    }
+
+    func controlAudio() -> AsyncThrowingStream<RemoteMacAudioChunk, Error> {
+        guard let client else {
+            return AsyncThrowingStream { continuation in
+                continuation.finish(throwing: RemoteClientError.notConnected)
+            }
+        }
+        return client.controlAudio()
+    }
+
+    func openTerminal(cols: Int = 80, rows: Int = 24) async throws {
+        guard let client else { throw RemoteClientError.notConnected }
+        _ = try await client.openTerminal(cols: cols, rows: rows)
+    }
+
+    func sendTerminalInput(_ data: Data) async throws {
+        guard let client else { throw RemoteClientError.notConnected }
+        _ = try await client.sendTerminalInput(data)
+    }
+
+    func resizeTerminal(cols: Int, rows: Int) async throws {
+        guard let client else { throw RemoteClientError.notConnected }
+        _ = try await client.resizeTerminal(cols: cols, rows: rows)
+    }
+
+    func closeTerminal() async throws {
+        guard let client else { throw RemoteClientError.notConnected }
+        _ = try await client.closeTerminal()
+    }
+
+    func terminalOutput() -> AsyncThrowingStream<Data, Error> {
+        guard let client else {
+            return AsyncThrowingStream { continuation in
+                continuation.finish(throwing: RemoteClientError.notConnected)
+            }
+        }
+        return client.terminalOutput()
     }
 
     func select(_ session: RemoteSessionSummary) async {
@@ -156,13 +257,58 @@ final class RemoteStore {
             fullAccess = detail.fullAccess ?? false
             startSessionStream(id: sessionID)
         }
-        catch { errorMessage = error.localizedDescription }
+        catch { presentError("Couldn't open session", error) }
     }
 
     func loadStartModels() async {
         guard let client else { return }
         do { startModels = try await client.models().models }
-        catch { errorMessage = error.localizedDescription }
+        catch { presentError("Couldn't load models", error) }
+    }
+
+    func startBotRun(profileID: String, modelID: String?, prompt: String) async -> Bool {
+        guard let client else { return false }
+        do {
+            _ = try await client.startBotRun(profileID: profileID, modelID: modelID, prompt: prompt)
+            try await refresh()
+            return true
+        } catch { presentError("Couldn't start bot", error); return false }
+    }
+
+    func steerBotRun(_ id: UUID, message: String) async -> Bool {
+        guard let client else { return false }
+        do { _ = try await client.steerBotRun(id, message: message); try await refresh(); return true }
+        catch { presentError("Couldn't steer bot", error); return false }
+    }
+
+    func stopBotRun(_ id: UUID) async -> Bool {
+        guard let client else { return false }
+        do { _ = try await client.stopBotRun(id); try await refresh(); return true }
+        catch { presentError("Couldn't stop bot", error); return false }
+    }
+
+    func orchestrateBots(modelID: String?, prompt: String) async -> Bool {
+        guard let client else { return false }
+        do { _ = try await client.orchestrateBots(modelID: modelID, prompt: prompt); try await refresh(); return true }
+        catch { presentError("Couldn't start workflow", error); return false }
+    }
+
+    func approveBotRun(_ id: UUID, approved: Bool) async -> Bool {
+        guard let client else { return false }
+        do { _ = try await client.approveBotRun(id, approved: approved); try await refresh(); return true }
+        catch { presentError("Couldn't respond to approval", error); return false }
+    }
+
+    func answerBotRun(_ id: UUID, answer: String) async -> Bool {
+        guard let client else { return false }
+        do { _ = try await client.answerBotRun(id, answer: answer); try await refresh(); return true }
+        catch { presentError("Couldn't answer bot", error); return false }
+    }
+
+    func resumeBotRun(_ id: UUID) async -> Bool {
+        guard let client else { return false }
+        do { _ = try await client.resumeBotRun(id); try await refresh(); return true }
+        catch { presentError("Couldn't resume bot", error); return false }
     }
 
     func botComputers() async -> RemoteBotComputerEnvelope? {
@@ -178,31 +324,49 @@ final class RemoteStore {
                message.localizedCaseInsensitiveContains("bot computer endpoint") {
                 return nil
             }
-            errorMessage = error.localizedDescription
+            presentError("Couldn't load bots", error)
             return nil
         }
-        catch { errorMessage = error.localizedDescription; return nil }
+        catch { presentError("Couldn't load bots", error); return nil }
     }
 
     func saveAPIKey(providerID: String, key: String) async -> Bool {
         guard let client else { return false }
         do { _ = try await client.saveAPIKey(providerID: providerID, key: key); return true }
-        catch { errorMessage = error.localizedDescription; return false }
+        catch { presentError("Couldn't save key", error); return false }
     }
 
     func startBotComputer(_ id: UUID) async -> Bool {
         guard let client else { return false }
         do { _ = try await client.startBotComputer(id); return true }
-        catch { errorMessage = error.localizedDescription; return false }
+        catch { presentError("Couldn't start bot", error); return false }
     }
 
     func stopBotComputer(_ id: UUID) async -> Bool {
         guard let client else { return false }
         do { _ = try await client.stopBotComputer(id); return true }
-        catch { errorMessage = error.localizedDescription; return false }
+        catch { presentError("Couldn't stop bot", error); return false }
     }
 
-    func startSession(modelID: String, message: String, botProfileID: String? = nil, botComputerID: UUID? = nil) async -> UUID? {
+    func prepareBotComputers(profileID: String? = nil) async -> [RemoteBotComputer] {
+        guard let client else { return [] }
+        do {
+            let envelope = try await client.prepareBotComputers(profileID: profileID)
+            return envelope.computers
+        } catch {
+            presentError("Couldn't prepare bot computer", error)
+            return []
+        }
+    }
+
+    func startSession(
+        modelID: String,
+        message: String,
+        botProfileID: String? = nil,
+        botComputerID: UUID? = nil,
+        workspacePath: String? = nil,
+        chatOnly: Bool = false
+    ) async -> UUID? {
         guard let client else { return nil }
         do {
             let response = try await client.startSession(
@@ -212,18 +376,69 @@ final class RemoteStore {
                 fullAccess: fullAccess,
                 reasoningEffort: reasoningEffort,
                 botProfileID: botProfileID,
-                botComputerID: botComputerID)
+                botComputerID: botComputerID,
+                workspacePath: workspacePath,
+                chatOnly: chatOnly)
             guard let sessionID = response.sessionID else {
                 throw RemoteClientError.invalidResponse
             }
             try await refresh()
             await select(sessionID: sessionID)
             return sessionID
-        } catch { errorMessage = error.localizedDescription }
+        } catch { presentError("Couldn't start", error) }
         return nil
     }
 
-    func send(_ text: String, modelID: String? = nil) async -> Bool {
+    func loadWorkspaces() async {
+        guard let client else { return }
+        do {
+            let envelope = try await client.workspaces()
+            workspaces = envelope.workspaces
+            workspaceCreateParent = envelope.createParent
+            workspacesSupported = true
+        } catch let error as RemoteClientError {
+            if Self.isCancellation(error) { return }
+            if case .server(let message) = error,
+               message.localizedCaseInsensitiveContains("unknown endpoint") ||
+               message.contains("(404)") {
+                workspacesSupported = false
+                workspaces = []
+                return
+            }
+            presentError("Couldn't load folders", error)
+        } catch {
+            if Self.isCancellation(error) { return }
+            presentError("Couldn't load folders", error)
+        }
+    }
+
+    func createWorkspace(name: String) async -> RemoteWorkspace? {
+        guard let client else { return nil }
+        do {
+            let created = try await client.createWorkspace(name: name, parentPath: workspaceCreateParent)
+            await loadWorkspaces()
+            return workspaces.first(where: { $0.path == created.path })
+                ?? RemoteWorkspace(path: created.path, name: created.name, isCurrent: true)
+        } catch {
+            presentError("Couldn't create folder", error)
+            return nil
+        }
+    }
+
+    func openWorkspace(path: String) async -> RemoteWorkspace? {
+        guard let client else { return nil }
+        do {
+            let opened = try await client.openWorkspace(path: path)
+            await loadWorkspaces()
+            return workspaces.first(where: { $0.path == opened.path })
+                ?? RemoteWorkspace(path: opened.path, name: opened.name, isCurrent: true)
+        } catch {
+            presentError("Couldn't open folder", error)
+            return nil
+        }
+    }
+
+    func send(_ text: String, modelID: String? = nil, action: String? = nil) async -> Bool {
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty, let client, let id = selectedSession?.id else { return false }
         do {
@@ -233,18 +448,28 @@ final class RemoteStore {
                 autoMode: autoMode,
                 fullAccess: fullAccess,
                 reasoningEffort: reasoningEffort,
-                modelID: modelID)
+                modelID: modelID,
+                action: action)
             return true
         } catch {
-            errorMessage = error.localizedDescription
+            presentError("Couldn't send", error)
             return false
+        }
+    }
+
+    func cancelQueuedTask(_ taskID: UUID) async {
+        guard let client, let id = selectedSession?.id else { return }
+        do {
+            _ = try await client.cancelQueuedTask(taskID, sessionID: id) as RemoteAcceptedResponse
+        } catch {
+            presentError("Couldn't remove follow-up", error)
         }
     }
 
     func stop() async {
         guard let client, let id = selectedSession?.id else { return }
         do { _ = try await client.stop(id) as RemoteAcceptedResponse }
-        catch { errorMessage = error.localizedDescription }
+        catch { presentError("Couldn't stop", error) }
     }
 
     func resolvePending(_ value: String) async {
@@ -252,7 +477,7 @@ final class RemoteStore {
         do {
             try await client.resolve(pending, sessionID: detail.id, value: value)
             selectedSession = try await client.session(detail.id)
-        } catch { errorMessage = error.localizedDescription }
+        } catch { presentError("Couldn't continue", error) }
     }
 
     func revoke() async {
@@ -310,6 +535,7 @@ final class RemoteStore {
         sessions = []
         startModels = []
         sharedFiles = []
+        workspaces = []
         selectedSession = nil
         connectionLabel = "Disconnected"
         baseURL = nil
@@ -320,7 +546,7 @@ final class RemoteStore {
         isSharing = true
         defer { isSharing = false }
         do { sharedFiles = try await client.sharedFiles().files }
-        catch { errorMessage = error.localizedDescription }
+        catch { presentError("Couldn't load files", error) }
     }
 
     func copyMacClipboard() async -> String? {
@@ -328,7 +554,7 @@ final class RemoteStore {
         isSharing = true
         defer { isSharing = false }
         do { return try await client.clipboard().text }
-        catch { errorMessage = error.localizedDescription; return nil }
+        catch { presentError("Couldn't copy clipboard", error); return nil }
     }
 
     func sendClipboardToMac(_ text: String) async -> Bool {
@@ -336,7 +562,7 @@ final class RemoteStore {
         isSharing = true
         defer { isSharing = false }
         do { _ = try await client.setClipboard(text); return true }
-        catch { errorMessage = error.localizedDescription; return false }
+        catch { presentError("Couldn't send clipboard", error); return false }
     }
 
     func uploadFile(_ url: URL) async -> Bool {
@@ -354,7 +580,7 @@ final class RemoteStore {
             _ = try await client.uploadFile(data: data, name: url.lastPathComponent)
             sharedFiles = try await client.sharedFiles().files
             return true
-        } catch { errorMessage = error.localizedDescription; return false }
+        } catch { presentError("Couldn't upload", error); return false }
     }
 
     func downloadFile(_ file: RemoteSharedFileItem) async -> URL? {
@@ -369,7 +595,21 @@ final class RemoteStore {
             let destination = directory.appendingPathComponent(file.name, isDirectory: false)
             try data.write(to: destination, options: [.atomic])
             return destination
-        } catch { errorMessage = error.localizedDescription; return nil }
+        } catch { presentError("Couldn't download", error); return nil }
+    }
+
+    private func presentError(_ title: String, _ error: Error) {
+        if Self.isCancellation(error) { return }
+        errorTitle = title
+        errorMessage = error.localizedDescription
+    }
+
+    private static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        if (error as? URLError)?.code == .cancelled { return true }
+        let ns = error as NSError
+        if ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled { return true }
+        return error.localizedDescription.localizedCaseInsensitiveCompare("cancelled") == .orderedSame
     }
 
     private var client: RemoteAPIClient? {

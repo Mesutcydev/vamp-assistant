@@ -282,17 +282,16 @@ struct AnswerFooterRow: View {
     }
 }
 
-/// The agent's identity mark: the app's beet logo. Reused by assistant
-/// messages and the streaming card so output always has a face.
+/// Neutral identity slot used until the final Vamp icon pass.
 struct AssistantAvatar: View {
     var size: CGFloat = 26
 
     var body: some View {
-        Image("BeetLogo")
-            .resizable()
-            .aspectRatio(contentMode: .fit)
+        Image(systemName: "sparkles")
+            .font(.system(size: size * 0.46, weight: .semibold))
+            .foregroundStyle(Theme.rose)
             .frame(width: size, height: size)
-            .clipShape(RoundedRectangle(cornerRadius: size * 0.3, style: .continuous))
+            .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: size * 0.3, style: .continuous))
             .shadow(color: Theme.accent.opacity(0.35), radius: 6, y: 2)
             .accessibilityHidden(true)
     }
@@ -632,7 +631,7 @@ struct MarkdownBlockView: View {
     private func tableCell(_ source: String, emphasized: Bool) -> some View {
         inline(source)
             .font(.system(size: 13.5 * CGFloat(Theme.currentTextSize.scale),
-                          weight: emphasized ? .semibold : .regular))
+                          weight: emphasized ? .semibold : .regular, design: .serif))
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
             .frame(minWidth: 120, alignment: .leading)
@@ -653,9 +652,9 @@ struct MarkdownBlockView: View {
 
     private func headingFont(_ level: Int) -> Font {
         switch level {
-        case 1: .system(size: 22 * CGFloat(Theme.currentTextSize.scale), weight: .bold, design: .default)
+        case 1: .system(size: 22 * CGFloat(Theme.currentTextSize.scale), weight: .bold, design: .serif)
         case 2: AppFont.chatHeading
-        default: .system(size: 16 * CGFloat(Theme.currentTextSize.scale), weight: .semibold, design: .default)
+        default: .system(size: 16 * CGFloat(Theme.currentTextSize.scale), weight: .semibold, design: .serif)
         }
     }
 
@@ -665,7 +664,7 @@ struct MarkdownBlockView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 9) {
                     Text(numbered ? "\(index + 1)." : "•")
                         .font(.system(size: 16 * CGFloat(Theme.currentTextSize.scale),
-                                      weight: numbered ? .regular : .semibold))
+                                      weight: numbered ? .regular : .semibold, design: .serif))
                         .foregroundStyle(Theme.textSecondary)
                         .frame(width: 20, alignment: .trailing)
                     inline(item)
@@ -771,7 +770,7 @@ struct AgentActivityCard: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: hasFailure ? "exclamationmark.circle.fill" : "sparkles")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold, design: .serif))
                         .foregroundStyle(hasFailure ? Theme.danger : Theme.accent)
                         .frame(width: 22, height: 22)
                         .background(
@@ -1114,7 +1113,7 @@ struct TranscriptCardHeader: View {
     var body: some View {
         HStack(spacing: Spacing.sm) {
             Image(systemName: systemImage)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold, design: .serif))
                 .foregroundStyle(tint)
                 .frame(width: 30, height: 30)
                 .background(Theme.washStrong(tint),
@@ -1148,6 +1147,10 @@ struct ApprovalCard: View {
         request.invocation.name == "run_command"
             || request.invocation.name == "build_diagnostics"
             || request.invocation.name == "apple_ship"
+    }
+
+    private var isComputer: Bool {
+        request.invocation.name.hasPrefix("computer_")
     }
 
     var body: some View {
@@ -1246,13 +1249,16 @@ struct ApprovalCard: View {
         Button {
             onDecision(true, true)
         } label: {
-            Label(isCommand ? "Always allow safe commands" : "Always allow edits",
+            Label(isComputer ? "Allow computer actions this run"
+                    : (isCommand ? "Always allow safe commands" : "Always allow edits"),
                   systemImage: "checkmark.seal")
         }
         .buttonStyle(LFCapsuleButtonStyle())
-        .help(isCommand
-            ? "Approve this and auto-approve policy-safe commands for this run and future runs"
-            : "Approve this and auto-approve file edits for this run and future runs")
+        .help(isComputer
+            ? "Approve this and later computer actions for this run; target restoration and verification remain active"
+            : (isCommand
+                ? "Approve this and auto-approve policy-safe commands for this run and future runs"
+                : "Approve this and auto-approve file edits for this run and future runs"))
     }
 
     private var declineButton: some View {
@@ -1350,6 +1356,7 @@ struct DiffPreview: View {
 
 struct QuestionCard: View {
     let question: String
+    var choices: [String] = []
     let onAnswer: (String) -> Void
 
     @State private var answer = ""
@@ -1364,6 +1371,14 @@ struct QuestionCard: View {
                 .font(.callout)
                 .foregroundStyle(Theme.textPrimary)
                 .textSelection(.enabled)
+            if !choices.isEmpty {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    ForEach(choices, id: \.self) { choice in
+                        Button(choice) { onAnswer(choice) }
+                            .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
+                    }
+                }
+            }
             HStack(spacing: Spacing.sm) {
                 TextField("Your answer…", text: $answer)
                     .textFieldStyle(.roundedBorder)
@@ -1465,6 +1480,7 @@ struct FinishBanner: View {
     let reason: AgentFinish
     let summary: CompletionSnapshot
     let onNewChat: () -> Void
+    var onDismiss: (() -> Void)? = nil
 
     var body: some View {
         HStack {
@@ -1500,6 +1516,14 @@ struct FinishBanner: View {
                         .foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                Spacer(minLength: 8)
+                if let onDismiss {
+                    Button("Dismiss", action: onDismiss)
+                        .buttonStyle(.plain)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                        .accessibilityHint("Hides this error. You can change models or send another message.")
+                }
             }
             .padding(.horizontal, Spacing.md)
             .padding(.vertical, Spacing.sm)
@@ -1513,7 +1537,7 @@ struct FinishBanner: View {
     private var completionCard: some View {
         HStack(alignment: .center, spacing: Spacing.sm) {
             Image(systemName: summary.artifact == nil ? "checkmark.seal.fill" : "shippingbox.fill")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.success)
                 .frame(width: 30, height: 30)
                 .background(Theme.wash(Theme.success), in: Circle())

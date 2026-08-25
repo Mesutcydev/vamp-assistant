@@ -4,8 +4,10 @@
 
 # Xcode / build artifacts
 .derived/
+.derived-*/
 .derived-install/
 .derived-xcode27/
+.packaging-beetcode-remote-ios/
 DerivedData/
 build/
 dist/

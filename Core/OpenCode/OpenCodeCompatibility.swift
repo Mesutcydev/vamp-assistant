@@ -137,7 +137,7 @@ enum OpenCodeCompatibility {
         static let builtIns: [AgentProfile] = [
             AgentProfile(
                 name: "build",
-                description: "Build and modify the workspace with Beet Code's native approval flow.",
+                description: "Build and modify the workspace with Vamp Assistant's native approval flow.",
                 mode: .primary,
                 model: nil,
                 prompt: "Act as the Build agent. Implement the requested change, verify it, and keep working until the task is complete.",

@@ -63,7 +63,7 @@ final class WorkspaceHistoryTests: XCTestCase {
         let section = WorkspaceHistory.section(workspacePath: "/proj", store: store)
 
         XCTAssertNotNil(section)
-        XCTAssertTrue(section!.contains("1 Beet Code"))
+        XCTAssertTrue(section!.contains("1 Vamp Assistant"))
         XCTAssertTrue(section!.contains("1 Claude"))
         XCTAssertTrue(section!.contains("1 Codex"))
         XCTAssertTrue(section!.contains("bump the version to 1.7"))

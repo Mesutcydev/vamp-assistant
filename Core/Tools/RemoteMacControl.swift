@@ -1,0 +1,351 @@
+import AppKit
+import CoreGraphics
+import Foundation
+@preconcurrency import ScreenCaptureKit
+
+/// Phone-driven Mac control over the existing Remote Sessions host.
+/// Capture and input reuse the computer-use stack; pairing still gates every call.
+enum RemoteMacControl {
+    struct Frame: Equatable {
+        enum Payload: Equatable {
+            case h264(data: Data, keyframe: Bool, parameterSets: Data?)
+            case jpeg(Data) // stills only
+        }
+
+        let payload: Payload
+        let imageWidth: Int
+        let imageHeight: Int
+        let displayX: Double
+        let displayY: Double
+        let displayWidth: Double
+        let displayHeight: Double
+
+        var jpegData: Data? {
+            if case .jpeg(let data) = payload { return data }
+            return nil
+        }
+    }
+
+    enum Command: Equatable {
+        case click(x: Double?, y: Double?, button: String, count: Int)
+        case move(x: Double, y: Double)
+        case moveRelative(dx: Double, dy: Double)
+        case down(String)
+        case up(String)
+        case scroll(x: Double?, y: Double?, dx: Double, dy: Double)
+        case type(String)
+        case key(String, modifiers: [String])
+    }
+
+    enum ParseError: Error, Equatable, LocalizedError {
+        case message(String)
+        var errorDescription: String? {
+            switch self {
+            case .message(let text): text
+            }
+        }
+    }
+
+    static func parse(_ object: [String: LFJSONValue]) -> Result<Command, ParseError> {
+        parse(
+            action: object["action"]?.stringValue ?? "",
+            x: object["x"]?.numberValue,
+            y: object["y"]?.numberValue,
+            dx: object["dx"]?.numberValue,
+            dy: object["dy"]?.numberValue,
+            text: object["text"]?.stringValue,
+            key: object["key"]?.stringValue,
+            button: object["button"]?.stringValue,
+            count: object["count"]?.intValue,
+            modifiers: object["modifiers"]?.arrayValue?.compactMap(\.stringValue) ?? [])
+    }
+
+    static func parse(
+        action: String,
+        x: Double? = nil,
+        y: Double? = nil,
+        dx: Double? = nil,
+        dy: Double? = nil,
+        text: String? = nil,
+        key: String? = nil,
+        button: String? = nil,
+        count: Int? = nil,
+        modifiers: [String] = []
+    ) -> Result<Command, ParseError> {
+        switch action.lowercased() {
+        case "click":
+            return .success(.click(
+                x: x, y: y,
+                button: normalizedButton(button),
+                count: min(max(count ?? 1, 1), 3)))
+        case "move":
+            guard let x, let y else { return .failure(.message("Move needs x and y.")) }
+            return .success(.move(x: x, y: y))
+        case "rel":
+            guard let x, let y else { return .failure(.message("Relative move needs dx and dy.")) }
+            return .success(.moveRelative(dx: x, dy: y))
+        case "down":
+            return .success(.down(normalizedButton(button)))
+        case "up":
+            return .success(.up(normalizedButton(button)))
+        case "scroll":
+            return .success(.scroll(x: x, y: y, dx: dx ?? 0, dy: dy ?? 0))
+        case "type":
+            guard let text, !text.isEmpty else { return .failure(.message("Type needs text.")) }
+            guard text.count <= ComputerTypeTool.maxCharacters else {
+                return .failure(.message("Text is too long."))
+            }
+            return .success(.type(text))
+        case "key":
+            guard let key, !key.isEmpty else { return .failure(.message("Key needs a name.")) }
+            if ComputerKey.isBlocked(key: key, modifiers: modifiers) {
+                return .failure(.message("That shortcut is blocked."))
+            }
+            guard ComputerKey.keyCode(for: key) != nil else {
+                return .failure(.message("Unknown key '\(key)'."))
+            }
+            return .success(.key(key, modifiers: modifiers))
+        default:
+            return .failure(.message("Unknown control action."))
+        }
+    }
+
+    private static let inputExecutor = RemoteInputExecutor()
+
+    static func perform(_ command: Command) async throws {
+        try await inputExecutor.perform(command)
+    }
+
+    static func perform(_ commands: [Command]) async throws {
+        try await inputExecutor.perform(commands)
+    }
+
+    static func releaseAll() async {
+        await inputExecutor.releaseAll()
+    }
+
+    private actor RemoteInputExecutor {
+        private var heldButton: CGMouseButton?
+        private var scrollRemainderX = 0.0
+        private var scrollRemainderY = 0.0
+        /// Authoritative last-posted cursor for relative moves (Vamp Control pattern).
+        /// Re-reading the live cursor each event folds in external jitter.
+        private var lastPostedPoint: CGPoint?
+        private let eventSource = CGEventSource(stateID: .privateState)
+
+        func perform(_ commands: [Command]) throws {
+            for command in commands {
+                try perform(command)
+            }
+        }
+
+        func perform(_ command: Command) throws {
+            guard ComputerPermission.accessibilityGranted else {
+                throw ComputerUseError.accessibilityNotGranted
+            }
+
+            switch command {
+            case .click(let x, let y, let button, let count):
+                let point = resolvedPoint(x: x, y: y)
+                lastPostedPoint = point
+                postClick(at: point, button: mouseButton(button), clickCount: count)
+            case .move(let x, let y):
+                let point = ComputerEvents.clamped(x, y)
+                lastPostedPoint = point
+                postMove(to: point, dragging: heldButton)
+            case .moveRelative(let dx, let dy):
+                let anchor = lastPostedPoint ?? ComputerEvents.cursor()
+                let point = ComputerEvents.clamped(anchor.x + dx, anchor.y + dy)
+                lastPostedPoint = point
+                postMove(to: point, dragging: heldButton)
+            case .down(let button):
+                let mouse = mouseButton(button)
+                heldButton = mouse
+                let point = resolvedPoint(x: nil, y: nil)
+                lastPostedPoint = point
+                postButton(mouse, down: true, at: point)
+            case .up(let button):
+                let mouse = mouseButton(button)
+                heldButton = nil
+                let point = resolvedPoint(x: nil, y: nil)
+                lastPostedPoint = point
+                postButton(mouse, down: false, at: point)
+            case .scroll(let x, let y, let dx, let dy):
+                scrollRemainderX += dx
+                scrollRemainderY += dy
+                let wholeX = scrollRemainderX.rounded(.towardZero)
+                let wholeY = scrollRemainderY.rounded(.towardZero)
+                scrollRemainderX -= wholeX
+                scrollRemainderY -= wholeY
+                guard wholeX != 0 || wholeY != 0 else { return }
+                let point = resolvedPoint(x: x, y: y)
+                lastPostedPoint = point
+                postMove(to: point, dragging: nil)
+                CGEvent(
+                    scrollWheelEvent2Source: eventSource,
+                    units: .pixel,
+                    wheelCount: 2,
+                    wheel1: Int32(wholeY),
+                    wheel2: Int32(wholeX),
+                    wheel3: 0
+                )?.post(tap: .cghidEventTap)
+            case .type(let text):
+                ComputerEvents.postText(text)
+            case .key(let name, let modifiers):
+                guard let code = ComputerKey.keyCode(for: name) else {
+                    throw ComputerUseError.unknownKey(name)
+                }
+                ComputerEvents.postKey(code, modifiers: ComputerKey.modifiers(for: modifiers))
+            }
+        }
+
+        func releaseAll() {
+            guard let heldButton else { return }
+            self.heldButton = nil
+            let point = lastPostedPoint ?? ComputerEvents.cursor()
+            postButton(heldButton, down: false, at: point)
+        }
+
+        private func mouseButton(_ button: String) -> CGMouseButton {
+            switch button {
+            case "right": .right
+            case "middle": .center
+            default: .left
+            }
+        }
+
+        private func resolvedPoint(x: Double?, y: Double?) -> CGPoint {
+            if let x, let y {
+                let point = ComputerEvents.clamped(x, y)
+                lastPostedPoint = point
+                return point
+            }
+            if let lastPostedPoint { return ComputerEvents.clamped(lastPostedPoint.x, lastPostedPoint.y) }
+            let cursor = ComputerEvents.cursor()
+            return ComputerEvents.clamped(cursor.x, cursor.y)
+        }
+
+        private func postMove(to point: CGPoint, dragging button: CGMouseButton?) {
+            if let button {
+                let types = ComputerEvents.mouseTypes(button)
+                CGEvent(
+                    mouseEventSource: eventSource,
+                    mouseType: types.dragged,
+                    mouseCursorPosition: point,
+                    mouseButton: button
+                )?.post(tap: .cghidEventTap)
+            } else {
+                CGEvent(
+                    mouseEventSource: eventSource,
+                    mouseType: .mouseMoved,
+                    mouseCursorPosition: point,
+                    mouseButton: .left
+                )?.post(tap: .cghidEventTap)
+            }
+        }
+
+        private func postButton(_ button: CGMouseButton, down: Bool, at point: CGPoint) {
+            let types = ComputerEvents.mouseTypes(button)
+            CGEvent(
+                mouseEventSource: eventSource,
+                mouseType: down ? types.down : types.up,
+                mouseCursorPosition: point,
+                mouseButton: button
+            )?.post(tap: .cghidEventTap)
+        }
+
+        private func postClick(at point: CGPoint, button: CGMouseButton, clickCount: Int) {
+            let types = ComputerEvents.mouseTypes(button)
+            let count = max(1, clickCount)
+            let base = mach_absolute_time()
+            let step: UInt64 = 1_000_000
+            for state in 1...count {
+                guard let down = CGEvent(
+                    mouseEventSource: eventSource,
+                    mouseType: types.down,
+                    mouseCursorPosition: point,
+                    mouseButton: button
+                ), let up = CGEvent(
+                    mouseEventSource: eventSource,
+                    mouseType: types.up,
+                    mouseCursorPosition: point,
+                    mouseButton: button
+                ) else { continue }
+                down.setIntegerValueField(.mouseEventClickState, value: Int64(state))
+                up.setIntegerValueField(.mouseEventClickState, value: Int64(state))
+                // Mach timestamps (not usleep) keep multi-clicks inside the system window.
+                let offset = UInt64(state - 1) * step * 2
+                down.timestamp = base &+ offset
+                up.timestamp = base &+ offset &+ step
+                down.post(tap: .cghidEventTap)
+                up.post(tap: .cghidEventTap)
+            }
+        }
+    }
+
+    @MainActor
+    static func attachedDisplays() -> [(id: UInt32, name: String, x: Double, y: Double, width: Double, height: Double)] {
+        var result: [(id: UInt32, name: String, x: Double, y: Double, width: Double, height: Double)] = []
+        for screen in NSScreen.screens {
+            guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { continue }
+            let id = CGDirectDisplayID(number.uint32Value)
+            let bounds = CGDisplayBounds(id)
+            result.append((id, screen.localizedName, bounds.minX, bounds.minY, bounds.width, bounds.height))
+        }
+        return result
+    }
+
+    /// One-shot still JPEG for `/api/control/screen` — not used by the live H.264 stream.
+    @MainActor
+    static func captureDisplayJPEG(
+        displayID: CGDirectDisplayID? = nil,
+        maxWidth: Int? = RemoteStreamResolution.high.maxWidth,
+        quality: Double = 0.88
+    ) async throws -> Frame {
+        guard ComputerPermission.screenRecordingGranted else {
+            throw ComputerUseError.screenRecordingNotGranted
+        }
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        let display: SCDisplay
+        if let displayID, let match = content.displays.first(where: { $0.displayID == displayID }) {
+            display = match
+        } else if let first = content.displays.first {
+            display = first
+        } else {
+            throw ComputerUseError.noFocusedApp
+        }
+        let quartz = CGDisplayBounds(display.displayID)
+        let pixelWidth = max(display.width, 1)
+        let pixelHeight = max(display.height, 1)
+        let filter = SCContentFilter(display: display, excludingWindows: [])
+        let config = SCStreamConfiguration()
+        config.showsCursor = true
+        let scale = maxWidth.map { min(1, Double($0) / Double(pixelWidth)) } ?? 1
+        let width = max(2, Int((Double(pixelWidth) * scale).rounded(.down) / 2) * 2)
+        let height = max(2, Int((Double(pixelHeight) * scale).rounded(.down) / 2) * 2)
+        config.width = width
+        config.height = height
+        config.scalesToFit = true
+        let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+        guard let jpeg = RemoteMacScreenCapture.jpegData(from: image, quality: quality) else {
+            throw ToolError.commandFailed(exitCode: 1)
+        }
+        return Frame(
+            payload: .jpeg(jpeg),
+            imageWidth: image.width,
+            imageHeight: image.height,
+            displayX: quartz.origin.x,
+            displayY: quartz.origin.y,
+            displayWidth: quartz.width,
+            displayHeight: quartz.height)
+    }
+
+    private static func normalizedButton(_ button: String?) -> String {
+        switch button?.lowercased() {
+        case "right": "right"
+        case "middle", "center": "middle"
+        default: "left"
+        }
+    }
+
+}

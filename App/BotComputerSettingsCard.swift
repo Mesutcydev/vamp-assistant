@@ -13,7 +13,7 @@ struct BotComputerSettingsCard: View {
         SettingsCard(
             title: "Bot computers",
             icon: "square.stack.3d.up.fill",
-            footer: "Each bot gets private files and a browser profile. Linux micro-VMs use Apple's native container runtime and only start when you ask."
+            footer: "Builder, Reviewer, Navigator, and Researcher each get a private computer and in-app browser. Linux micro-VMs run a full guest shell (git, Python, Node, compilers) inside the container."
         ) {
             capabilityRow
 
@@ -35,9 +35,9 @@ struct BotComputerSettingsCard: View {
                 Button {
                     appState.botComputers.prepareDefault()
                 } label: {
-                    Label("Prepare bot computer", systemImage: "plus")
+                    Label("Prepare specialist computers", systemImage: "plus")
                 }
-                .disabled(appState.botComputers.isWorking)
+                .disabled(appState.botComputers.isWorking || specialistsPrepared)
 
                 if appState.botComputers.isWorking {
                     ProgressView().controlSize(.small)
@@ -54,7 +54,7 @@ struct BotComputerSettingsCard: View {
         VStack(alignment: .leading, spacing: 8) {
             Label("How bot spaces work", systemImage: "lock.square.stack.fill")
                 .font(.callout.weight(.semibold))
-            Text("Each Linux micro-VM is capped at 2 CPU cores and 2 GB RAM. Its workspace and browser profile are private to that bot. Stopping it releases the VM memory while keeping its files for the next run.")
+            Text("Each specialist bot (Builder, Reviewer, Navigator, Researcher) gets its own private files and in-app browser. Linux micro-VMs run a full guest shell inside the container. Stopping a VM keeps the files and browser logins for the next run.")
                 .font(.caption)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -104,18 +104,27 @@ struct BotComputerSettingsCard: View {
                     .truncationMode(.middle)
             }
             Spacer()
-            if computer.backend == .appleContainer {
-                if computer.state == .running {
-                    Button("Stop") { appState.botComputers.stop(computer) }
-                } else {
-                    Button("Start") { appState.botComputers.start(computer) }
-                        .help("The first start may download a small Linux image.")
-                }
+            if computer.state == .unavailable {
+                Text("Unavailable")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textTertiary)
+            } else if computer.state == .running {
+                Button("Stop") { appState.botComputers.stop(computer) }
+            } else {
+                Button("Start") { appState.botComputers.start(computer) }
+                    .help(computer.backend == .appleContainer
+                        ? "The first start may download a small Linux image."
+                        : "Marks this private workspace ready for a remote session.")
             }
         }
     }
 
     private var containerReady: Bool {
         appState.botComputers.capabilities?.appleContainerServiceRunning == true
+    }
+
+    private var specialistsPrepared: Bool {
+        let ids = Set(appState.botComputers.computers.map(\.profileID))
+        return BotComputerService.specialists.allSatisfy { ids.contains($0.id) }
     }
 }

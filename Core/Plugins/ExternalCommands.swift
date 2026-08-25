@@ -12,7 +12,7 @@ struct ExternalCommand: Sendable, Equatable, Identifiable {
         case copilot = "GitHub Copilot"
         case windsurf = "Windsurf"
         case agent = "Agent Skills"
-        case beetcode = "Beet Code"
+        case beetcode = "Vamp Assistant"
         case openCode = "OpenCode"
         case external = "Added Folder"
     }

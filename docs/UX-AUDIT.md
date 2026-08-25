@@ -1,4 +1,4 @@
-# Beet Code — UX Audit (2026-08-19)
+# Vamp Assistant — UX Audit (2026-08-19)
 
 Audit of the main window, Model Manager, Settings, and composer, driven by
 dark-mode screenshots plus a full read of the App layer. Each finding lists

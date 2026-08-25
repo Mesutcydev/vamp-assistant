@@ -165,7 +165,7 @@ struct SimulatorPanelView: View {
             } else {
                 VStack(spacing: 8) {
                     Image(systemName: "iphone")
-                        .font(.system(size: 40))
+                        .font(.system(size: 40, design: .serif))
                         .foregroundStyle(.tertiary)
                     Text("Boot a device to stream its screen.")
                         .font(.callout)

@@ -191,7 +191,7 @@ final class EventCollector: @unchecked Sendable {
 
     func questions() -> [(UUID, String)] {
         events { event in
-            if case .askUser(let id, let question) = event { return (id, question) }
+            if case .askUser(let id, let question, _) = event { return (id, question) }
             return nil
         }
     }

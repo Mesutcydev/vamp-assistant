@@ -180,8 +180,8 @@ enum VisionProvider {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 60
         if provider == .openRouter {
-            request.setValue("Beet Code", forHTTPHeaderField: "HTTP-Referer")
-            request.setValue("Beet Code", forHTTPHeaderField: "X-Title")
+            request.setValue("Vamp Assistant", forHTTPHeaderField: "HTTP-Referer")
+            request.setValue("Vamp Assistant", forHTTPHeaderField: "X-Title")
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -208,12 +208,11 @@ enum VisionProvider {
             ]],
         ]
         guard let base = LLMProvider.gemini.geminiBaseURL else { throw VisionError.noProvider }
-        let url = base
-            .appendingPathComponent("models/\(model):generateContent")
-            .appending(queryItems: [URLQueryItem(name: "key", value: apiKey)])
+        let url = RemoteLLMClient.geminiActionURL(base: base, model: model, action: "generateContent")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         request.timeoutInterval = 60
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -229,23 +228,43 @@ enum VisionProvider {
               let parts = candidates.first?["content"] as? [String: Any] ?? nil,
               let partList = parts["parts"] as? [[String: Any]]
         else { return "(empty response)" }
-        return partList.compactMap { $0["text"] as? String }.joined()
+        return visibleGeminiText(from: partList)
     }
 
-    private static func extractContent(from data: Data) throws -> String {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+    /// Visible answer text from an OpenAI-compatible vision completion.
+    /// `content` may be a string or an array of `{type,text}` parts.
+    static func visibleOpenAIText(from data: Data) throws -> String {
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw RemoteLLMError.badStatus(-1, "unparseable response")
         }
         if let choices = json["choices"] as? [[String: Any]],
-           let message = choices.first?["message"] as? [String: Any],
-           let content = message["content"] as? String {
-            return content
+           let message = choices.first?["message"] as? [String: Any] {
+            if let content = message["content"] as? String, !content.isEmpty {
+                return content
+            }
+            if let parts = message["content"] as? [[String: Any]] {
+                let text = parts.compactMap { $0["text"] as? String }.joined()
+                if !text.isEmpty { return text }
+            }
         }
         if let error = json["error"] as? [String: Any],
            let message = error["message"] as? String {
             throw RemoteLLMError.badStatus(-1, message)
         }
         return "(empty response)"
+    }
+
+    /// Gemini thought parts must not be concatenated into the vision answer.
+    static func visibleGeminiText(from parts: [[String: Any]]) -> String {
+        let text = parts.compactMap { part -> String? in
+            if part["thought"] as? Bool == true { return nil }
+            return part["text"] as? String
+        }.joined()
+        return text.isEmpty ? "(empty response)" : text
+    }
+
+    private static func extractContent(from data: Data) throws -> String {
+        try visibleOpenAIText(from: data)
     }
 }
 

@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible problem in Beet Code
+description: Report a reproducible problem in Vamp Assistant
 title: "[Bug] "
 labels: [bug]
 body:
@@ -11,7 +11,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: Beet Code version
+      label: Vamp Assistant version
       placeholder: "0.8.1 or commit SHA"
     validations:
       required: true

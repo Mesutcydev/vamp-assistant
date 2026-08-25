@@ -1,4 +1,4 @@
-# Beet Code — UI Polish Audit
+# Vamp Assistant — UI Polish Audit
 
 Generated 2026-08-18 by direct visual + code verification. Subagent attempts
 for this task hit API timeouts; this is written from what was actually seen

@@ -19,6 +19,9 @@ struct PermissionGate: Sendable {
     var fullAccess: Bool
     var commandPolicy: CommandPolicy
     var workspace: Workspace
+    /// When true, `run_command` runs inside an isolated Linux micro-VM. That
+    /// VM is the sandbox, so the host safe-command allowlist does not apply.
+    var guestShell: Bool
     /// Live mid-run overrides ("Always approve" tapped on an approval card).
     /// Consulted before the static flags; nil = no overrides in play.
     var overrides: ApprovalOverrides?
@@ -32,6 +35,7 @@ struct PermissionGate: Sendable {
         fullAccess: Bool = false,
         commandPolicy: CommandPolicy = CommandPolicy(),
         workspace: Workspace = Workspace(root: URL(fileURLWithPath: "/")),
+        guestShell: Bool = false,
         overrides: ApprovalOverrides? = nil,
         openCodePermissions: OpenCodeCompatibility.OpenCodePermissionSet = .empty
     ) {
@@ -40,6 +44,7 @@ struct PermissionGate: Sendable {
         self.fullAccess = fullAccess
         self.commandPolicy = commandPolicy
         self.workspace = workspace
+        self.guestShell = guestShell
         self.overrides = overrides
         self.openCodePermissions = openCodePermissions
     }
@@ -63,7 +68,16 @@ struct PermissionGate: Sendable {
             let liveEdits = overrides?.allowsEdits ?? false
             return (autoApproveEdits || liveEdits) ? .auto : .needsApproval
         case .execute:
-            guard let command = call.string("command") else { return .needsApproval }
+            if call.name.hasPrefix("computer_"), overrides?.allowsComputer == true {
+                return .auto
+            }
+            guard let command = call.string("command"),
+                  !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return .needsApproval
+            }
+            if guestShell, Self.isShellTool(call.name) {
+                return .auto
+            }
             let policy = commandPolicy.evaluate(command, workspace: workspace)
             // Auto-approval is a *safe-command policy*, never a blanket shell
             // bypass: even a policy-safe command asks by default, and enabling
@@ -72,6 +86,13 @@ struct PermissionGate: Sendable {
             let liveCommands = overrides?.allowsCommands ?? false
             return (autoApproveCommands || liveCommands) && policy.safeForAutoApproval
                 ? .auto : .needsApproval
+        }
+    }
+
+    private static func isShellTool(_ name: String) -> Bool {
+        switch name {
+        case "run_command", "shell", "bash": true
+        default: false
         }
     }
 

@@ -101,7 +101,7 @@ final class DiagnosticsCenter: ObservableObject {
     func exportText() -> String {
         let info = systemInfo
         var lines = [
-            "Beet Code diagnostics — exported \(Self.exportStamp.string(from: Date()))",
+            "Vamp Assistant diagnostics — exported \(Self.exportStamp.string(from: Date()))",
             "App \(info.appVersion) · \(info.macOSVersion) · \(info.physicalMemory) · thermal: \(info.thermalState) · uptime: \(info.uptime)",
             "",
         ]

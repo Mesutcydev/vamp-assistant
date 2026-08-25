@@ -176,6 +176,7 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(store.appearance, .dark)
         XCTAssertEqual(store.textSize, .comfortable)
         XCTAssertFalse(store.computerControlEnabled)
+        XCTAssertFalse(store.remoteMacControlEnabled)
         XCTAssertFalse(store.intelligenceInspectorEnabled)
         XCTAssertFalse(store.experimentalDFlashEnabled)
         XCTAssertFalse(store.experimentalNGramEnabled)
@@ -204,7 +205,8 @@ final class SettingsStoreTests: XCTestCase {
 
         migrated.appearance = .beet
         let reopened = SettingsStore(defaults: defaults)
-        XCTAssertEqual(reopened.appearance, .beet)
+        XCTAssertEqual(reopened.appearance, .dark)
+        XCTAssertFalse(AppAppearance.allCases.contains(.beet))
     }
 
     func testExperimentalDFlashPreferencePersistsWithoutChangingItsDefault() {

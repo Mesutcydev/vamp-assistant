@@ -55,7 +55,7 @@ struct ProvidersTab: View {
     private var keyRestoreBanner: some View {
         HStack(alignment: .top, spacing: Spacing.md) {
             Image(systemName: "key.fill")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.warning)
                 .frame(width: 30, height: 30)
                 .background(Theme.washStrong(Theme.warning),
@@ -118,7 +118,7 @@ struct CodexAccountCard: View {
         SettingsCard(
             title: "OpenAI account",
             icon: "person.crop.circle",
-            footer: "Sign in with ChatGPT to use the models available to your account. Beet Code never asks for or stores the ChatGPT refresh token; the installed Codex app-server owns browser login, refresh, logout, tools, MCP, and approvals.") {
+            footer: "Sign in with ChatGPT to use the models available to your account. Vamp Assistant never asks for or stores the ChatGPT refresh token; the installed Codex app-server owns browser login, refresh, logout, tools, MCP, and approvals.") {
             HStack(alignment: .top, spacing: Spacing.md) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(codex.isSignedIn ? "Connected to ChatGPT" : "Use OpenAI with your account")
@@ -169,7 +169,7 @@ struct CodexAccountCard: View {
             } else if codex.browserLogin != nil {
                 HStack(spacing: Spacing.sm) {
                     ProgressView().controlSize(.small)
-                    Text("Finish sign-in in your browser, then return to Beet Code.")
+                    Text("Finish sign-in in your browser, then return to Vamp Assistant.")
                         .font(.caption)
                         .foregroundStyle(Theme.textSecondary)
                     Spacer()

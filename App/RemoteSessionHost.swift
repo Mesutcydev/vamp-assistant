@@ -37,9 +37,30 @@ struct RemoteRunOptions: Sendable, Equatable {
     let botProfileID: String?
     let botComputerID: UUID?
     let botWorkspacePath: String?
+    let botContainerName: String?
+    let botContainerExecutable: String?
+    let workspacePath: String?
+    let botBrowser: BrowserSession?
+
+    var resolvedWorkspacePath: String? {
+        if let botWorkspacePath, !botWorkspacePath.isEmpty { return botWorkspacePath }
+        if let workspacePath, !workspacePath.isEmpty { return workspacePath }
+        return nil
+    }
+
+    var linuxContainer: LinuxContainerTarget? {
+        guard let botContainerExecutable, let botContainerName, let botWorkspacePath,
+              !botContainerExecutable.isEmpty, !botContainerName.isEmpty else { return nil }
+        return LinuxContainerTarget(
+            executable: botContainerExecutable,
+            containerName: botContainerName,
+            hostWorkspacePath: botWorkspacePath)
+    }
 
     static let standard = RemoteRunOptions(
-        autoMode: true, fullAccess: false, reasoningEffort: nil, botProfileID: nil, botComputerID: nil, botWorkspacePath: nil)
+        autoMode: true, fullAccess: false, reasoningEffort: nil, botProfileID: nil,
+        botComputerID: nil, botWorkspacePath: nil, botContainerName: nil,
+        botContainerExecutable: nil, workspacePath: nil, botBrowser: nil)
 }
 
 enum RemoteSessionStartOutcome: Sendable, Equatable {
@@ -59,8 +80,9 @@ final class RemoteSessionHost {
     nonisolated static let defaultPort = RemoteSessionPorts.defaultPort
     static let pairingLifetime: TimeInterval = 10 * 60
     /// Browser access survives normal phone/laptop use, while the QR itself
-    /// remains a short-lived, one-time approval. Revocation still takes
-    /// effect immediately and stopping the host clears every token.
+    /// remains a short-lived, one-time approval. Revocation takes effect
+    /// immediately. Stopping the host keeps paired tokens so the phone can
+    /// reconnect after a Mac sleep or Remote toggle.
     static let tokenLifetime: TimeInterval = 30 * 24 * 60 * 60
     static let maxMessageBytes = 20_000
     static let maxPairBodyBytes = 4 * 1024
@@ -83,7 +105,7 @@ final class RemoteSessionHost {
             case .noReachableAddress:
                 return "No reachable network address was found for remote sessions."
             case .portUnavailable:
-                return "Remote Sessions could not bind a free port. Vamp Host uses 9475; Beet Code uses \(RemoteSessionPorts.defaultPort)."
+                return "Remote Sessions could not bind a free port. Vamp Host uses 9475; Vamp Assistant uses \(RemoteSessionPorts.defaultPort)."
             }
         }
     }
@@ -98,9 +120,21 @@ final class RemoteSessionHost {
     /// the direct continuation behavior.
     var enqueueTaskHandler: ((UUID, String) -> QueuedAgentTask?)?
     var taskLookupHandler: ((UUID) -> QueuedAgentTask?)?
+    var queuedTasksHandler: ((UUID) -> [QueuedAgentTask])?
+    var removeQueuedTaskHandler: ((UUID, UUID) -> Bool)?
+    var steerHandler: ((UUID, String) -> Bool)?
     var modelOptionsHandler: (() -> [RemoteStartModel])?
     var clipboardSharingAllowedHandler: (() -> Bool)?
     var fileSharingAllowedHandler: (() -> Bool)?
+    var macControlAllowedHandler: (() -> Bool)?
+    var botRunsHandler: (() -> [BotRunRecord])?
+    var startBotRunHandler: ((String, String?, String) async -> (UUID?, String?))?
+    var orchestrateBotRunsHandler: ((String?, String) async -> (UUID?, String?))?
+    var steerBotRunHandler: ((UUID, String) -> Bool)?
+    var stopBotRunHandler: ((UUID) -> Bool)?
+    var approveBotRunHandler: ((UUID, Bool) -> Bool)?
+    var answerBotRunHandler: ((UUID, String) -> Bool)?
+    var resumeBotRunHandler: ((UUID) -> Bool)?
     /// Returns nil on success, or a user-facing error string.
     var startSessionHandler: ((String, String, RemoteRunOptions) async -> RemoteSessionStartOutcome)?
     /// Activates a start-model id for the next remote turn. Returns an error string, or nil.
@@ -108,6 +142,11 @@ final class RemoteSessionHost {
     var configureRunHandler: ((RemoteRunOptions) -> Void)?
     private var server: LocalAPIServer?
     private var tokens: [String: Date] = [:]
+    /// Bumped to drop every live SSE loop when the host stops or all clients
+    /// are revoked. Per-token revoke uses `revokedEventDigests` so other
+    /// phones keep their streams.
+    private var eventStreamGeneration = 0
+    private var revokedEventDigests: Set<String> = []
     /// Invalidates an in-flight bind when Settings changes or the host is
     /// stopped. LocalAPIServer.start awaits socket setup, so this guard keeps
     /// an older start from publishing itself after a newer request wins.
@@ -238,6 +277,9 @@ final class RemoteSessionHost {
 
     func stop() async {
         startGeneration &+= 1
+        cancelEventStreams(matching: nil)
+        await RemoteMacControl.releaseAll()
+        RemoteMacTerminal.close()
         await server?.stop()
         server = nil
         boundPort = nil
@@ -261,6 +303,7 @@ final class RemoteSessionHost {
     }
 
     func revokeAllClients() {
+        cancelEventStreams(matching: nil)
         tokens.removeAll()
         persistPairedClients()
         rotatePairingCode()
@@ -271,10 +314,10 @@ final class RemoteSessionHost {
     private func route(_ request: LocalAPIServer.Request) async -> LocalAPIServer.RouteResult {
         refreshPairingState()
         guard allowedPeer(request.remoteAddress) else {
-            return .response(json(["error": .string("This network path is not allowed for Beetcode remote sessions.")], status: 403))
+            return .response(json(["error": .string("This network path is not allowed for Vamp Assistant remote sessions.")], status: 403))
         }
         guard allowedOrigin(request) else {
-            return .response(json(["error": .string("This browser origin is not the Beetcode remote host.")], status: 403))
+            return .response(json(["error": .string("This browser origin is not the Vamp Assistant remote host.")], status: 403))
         }
 
         switch (request.method, request.path) {
@@ -289,7 +332,7 @@ final class RemoteSessionHost {
         case ("GET", "/api/status"):
             guard authorized(request) else { return unauthorized() }
             return .response(json([
-                "product": .string("Beet Code Remote"),
+                "product": .string("Vamp Assistant"),
                 "protocolVersion": .number(1),
                 "pairedClients": .number(Double(pairedClientCount)),
                 "networkKind": .string(networkKind?.rawValue ?? "unknown"),
@@ -298,10 +341,49 @@ final class RemoteSessionHost {
                 "isRunning": .bool(sessions.isRunning),
                 "phase": .string(sessions.currentPhase.rawValue),
                 "queuedTasks": .number(Double(taskQueueCount)),
+                "macControl": macControlStatusJSON(),
             ]))
         case ("GET", "/api/sessions"):
             guard authorized(request) else { return unauthorized() }
             return .response(json(["sessions": .array(sessionSummaries())]))
+        case ("GET", "/api/bot-runs"):
+            guard authorized(request) else { return unauthorized() }
+            return .response(json(["runs": .array((botRunsHandler?() ?? []).map(Self.botRunJSON))]))
+        case ("POST", "/api/bot-runs"):
+            guard authorized(request) else { return unauthorized() }
+            guard let object = request.bodyJSON?.objectValue,
+                  let profileID = object["profileID"]?.stringValue,
+                  let prompt = object["prompt"]?.stringValue,
+                  !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  prompt.utf8.count <= Self.maxMessageBytes,
+                  let startBotRunHandler else {
+                return .response(json(["error": .string("Choose a specialist and enter a task.")], status: 400))
+            }
+            let result = await startBotRunHandler(profileID, object["modelID"]?.stringValue, prompt)
+            if let id = result.0 {
+                return .response(json(["accepted": .bool(true), "runID": .string(id.uuidString)], status: 202))
+            }
+            return .response(json(["error": .string(result.1 ?? "The bot run could not start.")], status: 409))
+        case ("POST", "/api/bot-workflows"):
+            guard authorized(request) else { return unauthorized() }
+            guard let object = request.bodyJSON?.objectValue,
+                  let prompt = object["prompt"]?.stringValue,
+                  !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  prompt.utf8.count <= Self.maxMessageBytes,
+                  let orchestrateBotRunsHandler else {
+                return .response(json(["error": .string("Enter a workflow objective.")], status: 400))
+            }
+            let result = await orchestrateBotRunsHandler(object["modelID"]?.stringValue, prompt)
+            if let id = result.0 {
+                return .response(json(["accepted": .bool(true), "workflowID": .string(id.uuidString)], status: 202))
+            }
+            return .response(json(["error": .string(result.1 ?? "The workflow could not start.")], status: 409))
+        case ("GET", "/api/workspaces"):
+            guard authorized(request) else { return unauthorized() }
+            return .response(json(workspaceListJSON()))
+        case ("POST", "/api/workspaces"):
+            guard authorized(request) else { return unauthorized() }
+            return createOrOpenWorkspace(request)
         case ("GET", "/api/models"):
             guard authorized(request) else { return unauthorized() }
             let models = (modelOptionsHandler?() ?? []).map { model in
@@ -341,6 +423,9 @@ final class RemoteSessionHost {
             } catch {
                 return .response(json(["error": .string(error.localizedDescription)], status: 500))
             }
+        case ("POST", "/api/bot-computers"):
+            guard authorized(request) else { return unauthorized() }
+            return await prepareBotComputers(request)
         case ("POST", "/api/bot-computers/refresh"):
             guard authorized(request) else { return unauthorized() }
             do {
@@ -348,6 +433,27 @@ final class RemoteSessionHost {
             } catch {
                 return .response(json(["error": .string(error.localizedDescription)], status: 500))
             }
+        case ("GET", "/api/control"):
+            guard authorized(request) else { return unauthorized() }
+            return .response(json(macControlStatusFields()))
+        case ("GET", "/api/control/screen"):
+            guard authorized(request) else { return unauthorized() }
+            return await macControlScreen(request)
+        case ("GET", "/api/control/screen/stream"):
+            guard authorized(request) else { return unauthorized() }
+            return macControlScreenStream(request)
+        case ("POST", "/api/control/input"):
+            guard authorized(request) else { return unauthorized() }
+            return await macControlInput(request)
+        case ("GET", "/api/control/audio"):
+            guard authorized(request) else { return unauthorized() }
+            return macControlAudio()
+        case ("GET", "/api/control/terminal/output"):
+            guard authorized(request) else { return unauthorized() }
+            return macControlTerminalOutput()
+        case ("POST", "/api/control/terminal"):
+            guard authorized(request) else { return unauthorized() }
+            return macControlTerminal(request)
         case ("GET", "/api/clipboard"):
             guard authorized(request) else { return unauthorized() }
             guard clipboardSharingAllowedHandler?() ?? false else {
@@ -415,15 +521,34 @@ final class RemoteSessionHost {
             var options = runOptions(from: request)
             if let botID = options.botComputerID {
                 do {
-                    let record = try await botComputers.load().first(where: { $0.id == botID })
+                    var record = try await botComputers.load().first(where: { $0.id == botID })
+                    if let current = record, current.backend == .isolatedWorkspace, current.state != .running {
+                        record = try await botComputers.start(id: botID)
+                    }
                     guard let record, record.state == .running else {
                         return .response(json(["error": .string("Start the selected Bot Computer before creating a session.")], status: 409))
                     }
-                    options = RemoteRunOptions(autoMode: options.autoMode, fullAccess: options.fullAccess,
-                                               reasoningEffort: options.reasoningEffort, botProfileID: options.botProfileID,
-                                               botComputerID: botID, botWorkspacePath: record.workspacePath)
+                    options = RemoteRunOptions(
+                        autoMode: options.autoMode, fullAccess: options.fullAccess,
+                        reasoningEffort: options.reasoningEffort, botProfileID: options.botProfileID,
+                        botComputerID: botID, botWorkspacePath: record.workspacePath,
+                        botContainerName: record.backend == .appleContainer ? record.containerName : nil,
+                        botContainerExecutable: record.backend == .appleContainer
+                            ? BotComputerService.containerCLI() : nil,
+                        workspacePath: options.workspacePath,
+                        botBrowser: BrowserSession(id: record.id, name: record.name))
                 } catch {
                     return .response(json(["error": .string("The selected Bot Computer could not be loaded.")], status: 409))
+                }
+            }
+            if options.botComputerID == nil, let path = options.workspacePath, !path.isEmpty {
+                do {
+                    _ = try RemoteWorkspaceCatalog.resolveExisting(
+                        path,
+                        home: FileManager.default.homeDirectoryForCurrentUser,
+                        knownPaths: knownWorkspacePaths())
+                } catch {
+                    return .response(json(["error": .string(error.localizedDescription)], status: 400))
                 }
             }
             configureRunHandler?(options)
@@ -439,6 +564,7 @@ final class RemoteSessionHost {
         case ("POST", "/api/revoke"):
             guard authorized(request) else { return unauthorized() }
             guard let digest = tokenDigest(from: request) else { return unauthorized() }
+            cancelEventStreams(matching: digest)
             tokens.removeValue(forKey: digest)
             persistPairedClients()
             return .response(json(["ok": .bool(true), "revoked": .bool(true)]))
@@ -453,7 +579,64 @@ final class RemoteSessionHost {
             if request.path.hasPrefix("/api/bot-computers/") {
                 return await botComputerRoute(request)
             }
+            if request.path.hasPrefix("/api/bot-runs/") {
+                return botRunRoute(request)
+            }
             return await sessionRoute(request)
+        }
+    }
+
+    private func botRunRoute(_ request: LocalAPIServer.Request) -> LocalAPIServer.RouteResult {
+        let parts = request.path.split(separator: "/")
+        guard parts.count >= 3, let id = UUID(uuidString: String(parts[2])) else {
+            return .response(json(["error": .string("Unknown bot run endpoint.")], status: 404))
+        }
+        if request.method == "GET", parts.count == 3 {
+            guard let run = botRunsHandler?().first(where: { $0.id == id }) else {
+                return .response(json(["error": .string("That bot run was not found.")], status: 404))
+            }
+            return .response(json(["run": Self.botRunJSON(run)]))
+        }
+        guard request.method == "POST", parts.count == 4 else {
+            return .response(json(["error": .string("Use GET or a supported bot-run action.")], status: 405))
+        }
+        switch String(parts[3]) {
+        case "steer":
+            guard let message = request.bodyJSON?.objectValue?["message"]?.stringValue,
+                  !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  message.utf8.count <= Self.maxMessageBytes else {
+                return .response(json(["error": .string("Enter steering guidance.")], status: 400))
+            }
+            guard steerBotRunHandler?(id, message) == true else {
+                return .response(json(["error": .string("That run cannot be steered right now.")], status: 409))
+            }
+            return .response(json(["accepted": .bool(true)], status: 202))
+        case "stop":
+            guard stopBotRunHandler?(id) == true else {
+                return .response(json(["error": .string("That run is already finished or cannot be stopped.")], status: 409))
+            }
+            return .response(json(["accepted": .bool(true)]))
+        case "approve", "decline":
+            let approved = String(parts[3]) == "approve"
+            guard approveBotRunHandler?(id, approved) == true else {
+                return .response(json(["error": .string("That run has no pending approval.")], status: 409))
+            }
+            return .response(json(["accepted": .bool(true)], status: 202))
+        case "answer":
+            guard let answer = request.bodyJSON?.objectValue?["answer"]?.stringValue,
+                  !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  answer.utf8.count <= Self.maxMessageBytes,
+                  answerBotRunHandler?(id, answer) == true else {
+                return .response(json(["error": .string("That run has no pending question.")], status: 409))
+            }
+            return .response(json(["accepted": .bool(true)], status: 202))
+        case "resume":
+            guard resumeBotRunHandler?(id) == true else {
+                return .response(json(["error": .string("That run is not recoverable.")], status: 409))
+            }
+            return .response(json(["accepted": .bool(true)], status: 202))
+        default:
+            return .response(json(["error": .string("Unknown bot run action.")], status: 404))
         }
     }
 
@@ -478,6 +661,28 @@ final class RemoteSessionHost {
         }
     }
 
+    private func prepareBotComputers(_ request: LocalAPIServer.Request) async -> LocalAPIServer.RouteResult {
+        do {
+            let profileID = request.bodyJSON?.objectValue?["profileID"]?.stringValue?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let profileID, !profileID.isEmpty {
+                let record = try await botComputers.prepareSpecialist(profileID: profileID)
+                return .response(json([
+                    "accepted": .bool(true),
+                    "computer": Self.botComputerJSON(record),
+                    "computers": .array(try await botComputers.refresh().map(Self.botComputerJSON)),
+                ], status: 201))
+            }
+            let records = try await botComputers.prepareSpecialists()
+            return .response(json([
+                "accepted": .bool(true),
+                "computers": .array(records.map(Self.botComputerJSON)),
+            ], status: 201))
+        } catch {
+            return .response(json(["error": .string(error.localizedDescription)], status: 409))
+        }
+    }
+
     private static func botComputerJSON(_ record: BotComputerRecord) -> LFJSONValue {
         .object([
             "id": .string(record.id.uuidString),
@@ -489,6 +694,40 @@ final class RemoteSessionHost {
             "browserProfilePath": .string(record.browserProfilePath),
             "containerName": record.containerName.map { .string($0) } ?? .null,
             "updatedAt": .number(record.updatedAt.timeIntervalSince1970),
+        ])
+    }
+
+    private static func botRunJSON(_ run: BotRunRecord) -> LFJSONValue {
+        .object([
+            "id": .string(run.id.uuidString),
+            "profileID": .string(run.profileID),
+            "profileName": .string(run.profileName),
+            "modelID": .string(run.modelID),
+            "sessionID": run.sessionID.map { .string($0.uuidString) } ?? .null,
+            "prompt": .string(run.prompt),
+            "state": .string(run.state.rawValue),
+            "phase": .string(run.phase),
+            "queuePosition": run.queuePosition.map { .number(Double($0)) } ?? .null,
+            "pendingInteraction": run.pendingInteraction.map { .string($0) } ?? .null,
+            "latestOutput": .string(run.latestOutput),
+            "errorMessage": run.errorMessage.map { .string($0) } ?? .null,
+            "resourceClass": run.resourceClass.map { .string($0.rawValue) } ?? .null,
+            "retryCount": .number(Double(run.retryCount ?? 0)),
+            "workflowID": run.workflowID.map { .string($0.uuidString) } ?? .null,
+            "dependencyRunIDs": .array((run.dependencyRunIDs ?? []).map { .string($0.uuidString) }),
+            "traceID": run.traceID.map { .string($0) } ?? .null,
+            "checkpoint": run.checkpoint.map { checkpoint in .object([
+                "phase": .string(checkpoint.phase),
+                "sequence": .number(Double(checkpoint.sequence)),
+                "createdAt": .number(checkpoint.createdAt.timeIntervalSince1970),
+            ]) } ?? .null,
+            "artifacts": .array((run.artifacts ?? []).map { artifact in .object([
+                "id": .string(artifact.id.uuidString), "kind": .string(artifact.kind.rawValue),
+                "title": .string(artifact.title), "value": .string(artifact.value),
+                "createdAt": .number(artifact.createdAt.timeIntervalSince1970),
+            ]) }),
+            "createdAt": .number(run.createdAt.timeIntervalSince1970),
+            "updatedAt": .number(run.updatedAt.timeIntervalSince1970),
         ])
     }
 
@@ -506,6 +745,284 @@ final class RemoteSessionHost {
         .response(json([
             "error": .string("\(capability) is off on this Mac. Enable it in Remote Sessions."),
         ], status: 403))
+    }
+
+    private func macControlStatusJSON() -> LFJSONValue {
+        .object(macControlStatusFields())
+    }
+
+    private func macControlStatusFields() -> [String: LFJSONValue] {
+        let enabled = macControlAllowedHandler?() ?? false
+        let screen = ComputerPermission.screenRecordingGranted
+        let accessibility = ComputerPermission.accessibilityGranted
+        let ready = enabled && screen && accessibility
+        let bounds = ComputerEvents.quartzDisplayUnion()
+        let message: String?
+        if !enabled {
+            message = "Turn on Mac Control in Vamp Assistant → Remote Sessions."
+        } else if !screen || !accessibility {
+            message = "Grant Screen Recording and Accessibility for Vamp Assistant in System Settings."
+        } else {
+            message = nil
+        }
+        let displays: [LFJSONValue] = RemoteMacControl.attachedDisplays().map { display in
+            .object([
+                "id": .number(Double(display.id)),
+                "name": .string(display.name),
+                "x": .number(display.x),
+                "y": .number(display.y),
+                "width": .number(display.width),
+                "height": .number(display.height),
+            ])
+        }
+        return [
+            "enabled": .bool(enabled),
+            "screenRecording": .bool(screen),
+            "accessibility": .bool(accessibility),
+            "ready": .bool(ready),
+            "displayX": .number(bounds.minX),
+            "displayY": .number(bounds.minY),
+            "displayWidth": .number(max(bounds.width, 1)),
+            "displayHeight": .number(max(bounds.height, 1)),
+            "displays": .array(displays),
+            "message": message.map { .string($0) } ?? .null,
+        ]
+    }
+
+    private func macControlDenied(_ reason: String) -> LocalAPIServer.RouteResult {
+        .response(json(["error": .string(reason)], status: 403))
+    }
+
+    private func macControlScreen(_ request: LocalAPIServer.Request) async -> LocalAPIServer.RouteResult {
+        guard macControlAllowedHandler?() ?? false else {
+            return macControlDenied("Mac Control is off on this Mac. Enable it in Remote Sessions.")
+        }
+        let displayID = request.query["display"].flatMap(UInt32.init)
+        do {
+            let profile = RemoteStreamProfile(resolution: RemoteStreamResolution.resolve(request.query["resolution"]))
+            let frame = try await RemoteMacControl.captureDisplayJPEG(
+                displayID: displayID,
+                maxWidth: profile.maxWidth)
+            return .response(screenJPEGResponse(frame, displayID: displayID))
+        } catch {
+            return .response(json(["error": .string(error.localizedDescription)], status: 403))
+        }
+    }
+
+    private func macControlScreenStream(_ request: LocalAPIServer.Request) -> LocalAPIServer.RouteResult {
+        guard macControlAllowedHandler?() ?? false else {
+            return macControlDenied("Mac Control is off on this Mac. Enable it in Remote Sessions.")
+        }
+        let displayID = request.query["display"].flatMap(UInt32.init)
+        let config = screenCaptureConfig(from: request, displayID: displayID)
+        // Multipart H.264 (AVCC) — Vamp-style live video, no JPEG/MJPEG.
+        let boundary = "beetframe"
+        let lines = AsyncStream<Data>(bufferingPolicy: .bufferingNewest(2)) { continuation in
+            let task = Task.detached {
+                for await frame in RemoteMacScreenCapture.shared.frames(config: config) {
+                    try Task.checkCancellation()
+                    guard case .h264(let data, let keyframe, let parameterSets) = frame.payload else { continue }
+                    let params = (keyframe ? parameterSets : nil) ?? Data()
+                    let bodyCount = params.count + data.count
+                    var part = Data()
+                    part.append(contentsOf: "--\(boundary)\r\n".utf8)
+                    part.append(contentsOf: "Content-Type: video/avc\r\n".utf8)
+                    part.append(contentsOf: "Content-Length: \(bodyCount)\r\n".utf8)
+                    part.append(contentsOf: "X-Beet-Keyframe: \(keyframe ? 1 : 0)\r\n".utf8)
+                    part.append(contentsOf: "X-Beet-Params-Length: \(params.count)\r\n".utf8)
+                    part.append(contentsOf: "X-Beet-Image-Width: \(frame.imageWidth)\r\n".utf8)
+                    part.append(contentsOf: "X-Beet-Image-Height: \(frame.imageHeight)\r\n".utf8)
+                    part.append(contentsOf: "X-Beet-Display-X: \(frame.displayX)\r\n".utf8)
+                    part.append(contentsOf: "X-Beet-Display-Y: \(frame.displayY)\r\n".utf8)
+                    part.append(contentsOf: "X-Beet-Display-Width: \(frame.displayWidth)\r\n".utf8)
+                    part.append(contentsOf: "X-Beet-Display-Height: \(frame.displayHeight)\r\n".utf8)
+                    part.append(contentsOf: "\r\n".utf8)
+                    if !params.isEmpty { part.append(params) }
+                    part.append(data)
+                    part.append(contentsOf: "\r\n".utf8)
+                    continuation.yield(part)
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+        // Use multipart/mixed (not x-mixed-replace). URLSession on iOS special-cases
+        // x-mixed-replace and rewrites the response Content-Type to each part's type
+        // (video/avc), which breaks our boundary parser.
+        var response = LocalAPIServer.Response(
+            status: 200,
+            contentType: "multipart/mixed; boundary=\(boundary)")
+        response.headers = Self.securityHeaders
+        return .stream(response, lines: lines)
+    }
+
+    private func screenCaptureConfig(
+        from request: LocalAPIServer.Request,
+        displayID: CGDirectDisplayID?
+    ) -> RemoteMacScreenCapture.Config {
+        let profile = RemoteStreamProfile(resolution: RemoteStreamResolution.resolve(request.query["resolution"]))
+        return RemoteMacScreenCapture.Config(
+            displayID: displayID,
+            maxWidth: profile.maxWidth,
+            averageBitrate: profile.averageBitrate,
+            framesPerSecond: profile.framesPerSecond)
+    }
+
+    private func screenJPEGResponse(
+        _ frame: RemoteMacControl.Frame,
+        displayID: CGDirectDisplayID?
+    ) -> LocalAPIServer.Response {
+        let jpeg = frame.jpegData ?? Data()
+        return LocalAPIServer.Response(
+            status: 200,
+            contentType: "image/jpeg",
+            body: jpeg,
+            headers: Self.securityHeaders + [
+                ("X-Beet-Image-Width", "\(frame.imageWidth)"),
+                ("X-Beet-Image-Height", "\(frame.imageHeight)"),
+                ("X-Beet-Display-X", String(frame.displayX)),
+                ("X-Beet-Display-Y", String(frame.displayY)),
+                ("X-Beet-Display-Width", String(frame.displayWidth)),
+                ("X-Beet-Display-Height", String(frame.displayHeight)),
+                ("X-Beet-Display-ID", displayID.map(String.init) ?? ""),
+            ])
+    }
+
+    private func macControlAudio() -> LocalAPIServer.RouteResult {
+        guard macControlAllowedHandler?() ?? false else {
+            return macControlDenied("Mac Control is off on this Mac. Enable it in Remote Sessions.")
+        }
+        let lines = AsyncStream<Data>(bufferingPolicy: .bufferingNewest(12)) { continuation in
+            let task = Task.detached {
+                for await chunk in RemoteMacAudio.shared.outputStream() {
+                    try Task.checkCancellation()
+                    let payload = "{\"sr\":\(chunk.sampleRate),\"ch\":\(chunk.channels),\"pcm\":\"\(chunk.data.base64EncodedString())\"}"
+                    continuation.yield(Data("data: \(payload)\n\n".utf8))
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+        var response = LocalAPIServer.Response(status: 200, contentType: "text/event-stream; charset=utf-8")
+        response.headers = Self.securityHeaders
+        return .stream(response, lines: lines)
+    }
+
+    private func macControlTerminalOutput() -> LocalAPIServer.RouteResult {
+        guard macControlAllowedHandler?() ?? false else {
+            return macControlDenied("Mac Control is off on this Mac. Enable it in Remote Sessions.")
+        }
+        let lines = AsyncStream<Data>(bufferingPolicy: .bufferingNewest(32)) { continuation in
+            let task = Task.detached {
+                for await chunk in RemoteMacTerminal.outputStream() {
+                    try Task.checkCancellation()
+                    let snapshot = LFJSONValue.object([
+                        "data": .string(chunk.base64EncodedString()),
+                        "out": .string(String(decoding: chunk, as: UTF8.self))
+                    ]).encoded()
+                    continuation.yield(Data("event: out\ndata: \(snapshot)\n\n".utf8))
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+        var response = LocalAPIServer.Response(status: 200, contentType: "text/event-stream; charset=utf-8")
+        response.headers = Self.securityHeaders
+        return .stream(response, lines: lines)
+    }
+
+    private func macControlTerminal(_ request: LocalAPIServer.Request) -> LocalAPIServer.RouteResult {
+        guard macControlAllowedHandler?() ?? false else {
+            return macControlDenied("Mac Control is off on this Mac. Enable it in Remote Sessions.")
+        }
+        let object = request.bodyJSON?.objectValue
+        switch object?["action"]?.stringValue {
+        case "open":
+            let colsValue = object?["cols"]?.intValue ?? 80
+            let rowsValue = object?["rows"]?.intValue ?? 24
+            guard (1...240).contains(colsValue), (1...120).contains(rowsValue) else {
+                return .response(json(["error": .string("Terminal dimensions are out of range.")], status: 400))
+            }
+            do {
+                try RemoteMacTerminal.open(cols: UInt16(colsValue), rows: UInt16(rowsValue))
+                return .response(json(["accepted": .bool(true)]))
+            } catch {
+                return .response(json(["error": .string(error.localizedDescription)], status: 500))
+            }
+        case "input":
+            let data: Data?
+            if let raw = object?["data"]?.stringValue {
+                data = Data(base64Encoded: raw)
+            } else if let text = object?["text"]?.stringValue {
+                data = Data(text.utf8)
+            } else {
+                data = nil
+            }
+            guard let data, !data.isEmpty, data.count <= 16 * 1024 else {
+                return .response(json(["error": .string("Terminal input is missing, malformed, or too large.")], status: 400))
+            }
+            RemoteMacTerminal.input(data)
+            return .response(json(["accepted": .bool(true)]))
+        case "resize":
+            let cols = object?["cols"]?.intValue ?? 80
+            let rows = object?["rows"]?.intValue ?? 24
+            guard (1...240).contains(cols), (1...120).contains(rows) else {
+                return .response(json(["error": .string("Terminal dimensions are out of range.")], status: 400))
+            }
+            RemoteMacTerminal.resize(cols: UInt16(cols), rows: UInt16(rows))
+            return .response(json(["accepted": .bool(true)]) )
+        case "close":
+            RemoteMacTerminal.close()
+            return .response(json(["accepted": .bool(true)]))
+        default:
+            return .response(json(["error": .string("Unknown terminal action.")], status: 400))
+        }
+    }
+
+    private func macControlInput(_ request: LocalAPIServer.Request) async -> LocalAPIServer.RouteResult {
+        guard macControlAllowedHandler?() ?? false else {
+            return macControlDenied("Mac Control is off on this Mac. Enable it in Remote Sessions.")
+        }
+        guard let object = request.bodyJSON?.objectValue else {
+            return .response(json(["error": .string("A control command is required.")], status: 400))
+        }
+
+        let isBatch = object["commands"]?.arrayValue != nil
+        let commands: [RemoteMacControl.Command]
+        if let entries = object["commands"]?.arrayValue {
+            guard !entries.isEmpty, entries.count <= 64 else {
+                return .response(json(["error": .string("A control batch must contain 1 to 64 commands.")], status: 400))
+            }
+            var parsed: [RemoteMacControl.Command] = []
+            parsed.reserveCapacity(entries.count)
+            for entry in entries {
+                guard let commandObject = entry.objectValue else {
+                    return .response(json(["error": .string("Every control batch entry must be an object.")], status: 400))
+                }
+                switch RemoteMacControl.parse(commandObject) {
+                case .success(let command): parsed.append(command)
+                case .failure(let error):
+                    return .response(json(["error": .string(error.localizedDescription)], status: 400))
+                }
+            }
+            commands = parsed
+        } else {
+            switch RemoteMacControl.parse(object) {
+            case .success(let command): commands = [command]
+            case .failure(let error):
+                return .response(json(["error": .string(error.localizedDescription)], status: 400))
+            }
+        }
+
+        // Ack immediately so the phone can pipeline the next batch; execute
+        // serially on the input actor so relative moves stay ordered.
+        Task {
+            try? await RemoteMacControl.perform(commands)
+        }
+        if isBatch {
+            return .response(json(["accepted": .bool(true), "count": .number(Double(commands.count))]))
+        }
+        return .response(json(["accepted": .bool(true)]))
     }
 
     private func pair(_ request: LocalAPIServer.Request) -> LocalAPIServer.RouteResult {
@@ -531,6 +1048,7 @@ final class RemoteSessionHost {
         let tokenExpiresAt = Date().addingTimeInterval(Self.tokenLifetime)
         if tokens.count >= Self.maxPairedClients,
            let oldest = tokens.min(by: { $0.value < $1.value })?.key {
+            cancelEventStreams(matching: oldest)
             tokens.removeValue(forKey: oldest)
         }
         tokens[Self.tokenDigest(token)] = tokenExpiresAt
@@ -540,7 +1058,7 @@ final class RemoteSessionHost {
         return .response(json([
             "token": .string(token),
             "expiresAt": .number(tokenExpiresAt.timeIntervalSince1970),
-            "product": .string("Beet Code Remote"),
+            "product": .string("Vamp Assistant"),
         ]))
     }
 
@@ -564,7 +1082,8 @@ final class RemoteSessionHost {
             guard ownedRecord(id) != nil else {
                 return .response(json(["error": .string("Session not found.")], status: 404))
             }
-            return sessionEventStream(id: id)
+            guard let digest = tokenDigest(from: request) else { return unauthorized() }
+            return sessionEventStream(id: id, digest: digest)
         }
 
         if components.count == 4, components[3] == "messages", request.method == "POST" {
@@ -588,6 +1107,20 @@ final class RemoteSessionHost {
                     return .response(json(["error": .string(error)], status: 409))
                 }
             }
+            let action = request.bodyJSON?.objectValue?["action"]?.stringValue
+            if action == "steer" {
+                if sessions.activeSessionID == record.id, sessions.isRunning {
+                    if steerHandler?(record.id, message) == true {
+                        return .response(json([
+                            "accepted": .bool(true),
+                            "steered": .bool(true),
+                            "queued": .bool(false),
+                            "sessionID": .string(record.id.uuidString),
+                        ], status: 202))
+                    }
+                    return .response(json(["error": .string("Vamp Assistant could not steer this turn. Try again or stop the current task.")], status: 409))
+                }
+            }
             if let enqueueTaskHandler {
                 if let task = enqueueTaskHandler(record.id, message) {
                     return .response(json([
@@ -606,7 +1139,7 @@ final class RemoteSessionHost {
                 // An idle session can safely continue directly; only an
                 // already-busy agent still requires the durable queue.
                 guard !sessions.isRunning else {
-                    return .response(json(["error": .string("Beet Code is already working and the task queue is unavailable. Try again when the current task finishes.")], status: 409))
+                    return .response(json(["error": .string("Vamp Assistant is already working and the task queue is unavailable. Try again when the current task finishes.")], status: 409))
                 }
                 guard sessions.continuePersistedSession(id: record.id, message: message) else {
                     return .response(json(["error": .string("That session could not be resumed. Check that its workspace and model are available.")], status: 409))
@@ -619,7 +1152,7 @@ final class RemoteSessionHost {
                 ], status: 202))
             }
             guard !sessions.isRunning else {
-                return .response(json(["error": .string("Beet Code is already working on another prompt.")], status: 409))
+                return .response(json(["error": .string("Vamp Assistant is already working on another prompt.")], status: 409))
             }
             guard sessions.continuePersistedSession(id: record.id, message: message) else {
                 return .response(json(["error": .string("That session could not be resumed. Check that its workspace still exists.")], status: 409))
@@ -693,6 +1226,17 @@ final class RemoteSessionHost {
             return .response(json(["accepted": .bool(true)]))
         }
 
+        if components.count == 4, components[3] == "queue", request.method == "POST" {
+            guard let taskID = request.bodyJSON?.objectValue?["taskID"]?.stringValue.flatMap(UUID.init),
+                  request.bodyJSON?.objectValue?["action"]?.stringValue == "cancel" else {
+                return .response(json(["error": .string("Cancel a queued follow-up with taskID and action=cancel.")], status: 400))
+            }
+            guard removeQueuedTaskHandler?(id, taskID) == true else {
+                return .response(json(["error": .string("That follow-up is no longer queued.")], status: 409))
+            }
+            return .response(json(["accepted": .bool(true)]))
+        }
+
         return .response(json(["error": .string("Unknown endpoint.")], status: 404))
     }
 
@@ -706,6 +1250,8 @@ final class RemoteSessionHost {
                     "id": .string(record.id.uuidString),
                     "title": .string(Self.displayTitle(record)),
                     "workspace": .string(Self.workspaceName(record.workspacePath)),
+                    "workspacePath": record.workspacePath.isEmpty ? .null : .string(record.workspacePath),
+                    "mode": .string(record.workspacePath.isEmpty ? "chat" : "code"),
                     "messageCount": .number(Double(record.messages.count)),
                     "updatedAt": .number(record.updatedAt.timeIntervalSince1970),
                     "isCurrent": .bool(activeID == record.id),
@@ -730,6 +1276,8 @@ final class RemoteSessionHost {
             "id": .string(record.id.uuidString),
             "title": .string(Self.displayTitle(record)),
             "workspace": .string(Self.workspaceName(record.workspacePath)),
+            "workspacePath": record.workspacePath.isEmpty ? .null : .string(record.workspacePath),
+            "mode": .string(record.workspacePath.isEmpty ? "chat" : "code"),
             "modelID": .string(record.modelID),
             "updatedAt": .number(record.updatedAt.timeIntervalSince1970),
             "messages": .array(Array(messages)),
@@ -743,7 +1291,7 @@ final class RemoteSessionHost {
                     && SettingsStore.shared.autoApproveCommands),
         ]
         detail["pending"] = pendingInteraction(for: record.id)
-        detail["error"] = errorPresentation(for: record, messages: messages)
+        detail["error"] = errorPresentation(for: record)
         if let task = taskLookupHandler?(record.id) {
             detail["queue"] = .object([
                 "id": .string(task.id.uuidString),
@@ -752,6 +1300,15 @@ final class RemoteSessionHost {
                 "attempts": .number(Double(task.attempts)),
             ])
         }
+        let queued = queuedTasksHandler?(record.id) ?? []
+        detail["queued"] = .array(queued.map { task in
+            .object([
+                "id": .string(task.id.uuidString),
+                "message": .string(String(SessionStore.redact(task.message).prefix(240))),
+                "state": .string(task.state.rawValue),
+                "label": .string(task.phase ?? task.state.label),
+            ])
+        })
         return detail
     }
 
@@ -807,8 +1364,7 @@ final class RemoteSessionHost {
     }
 
     private func errorPresentation(
-        for record: SessionRecord,
-        messages: [LFJSONValue]
+        for record: SessionRecord
     ) -> LFJSONValue {
         if sessions.activeSessionID == record.id,
            case .engineError(let message)? = sessions.finishReason {
@@ -817,28 +1373,31 @@ final class RemoteSessionHost {
                 "message": .string(String(SessionStore.redact(message).prefix(16_000))),
             ])
         }
-        if let errorMessage = messages.reversed().compactMap({ value -> String? in
-            guard let object = value.objectValue,
-                  object["role"]?.stringValue == "error" else { return nil }
-            return object["content"]?.stringValue
-        }).first {
-            return .object([
-                "title": .string("Chat failed"),
-                "message": .string(errorMessage.replacingOccurrences(
-                    of: "error:", with: "", options: [.caseInsensitive, .anchored])
-                    .trimmingCharacters(in: .whitespacesAndNewlines)),
-            ])
-        }
         return .null
     }
 
-    private func sessionEventStream(id: UUID) -> LocalAPIServer.RouteResult {
+    private func cancelEventStreams(matching digest: String?) {
+        if let digest {
+            revokedEventDigests.insert(digest)
+        } else {
+            eventStreamGeneration &+= 1
+            revokedEventDigests.removeAll()
+        }
+    }
+
+    private func sessionEventStream(id: UUID, digest: String) -> LocalAPIServer.RouteResult {
+        let generation = eventStreamGeneration
         let lines = AsyncStream<Data>(bufferingPolicy: .bufferingNewest(8)) { continuation in
             let task = Task { @MainActor [weak self] in
                 var previousSnapshot = ""
                 var heartbeatTick = 0
                 while !Task.isCancelled {
-                    guard let self, let record = self.ownedRecord(id) else { break }
+                    guard let self,
+                          self.eventStreamGeneration == generation,
+                          !self.revokedEventDigests.contains(digest) else { break }
+                    self.pruneExpiredTokens()
+                    guard self.tokens[digest] != nil,
+                          let record = self.ownedRecord(id) else { break }
                     let snapshot = LFJSONValue.object(self.sessionDetail(record)).encoded()
                     if snapshot != previousSnapshot {
                         continuation.yield(Data("event: session\ndata: \(snapshot)\n\n".utf8))
@@ -879,6 +1438,8 @@ final class RemoteSessionHost {
 
     private func runOptions(from request: LocalAPIServer.Request) -> RemoteRunOptions {
         let object = request.bodyJSON?.objectValue
+        let chatOnly = object?["chatOnly"]?.boolValue == true
+        let workspacePath = chatOnly ? nil : object?["workspacePath"]?.stringValue
         return RemoteRunOptions(
             autoMode: object?["autoMode"]?.boolValue ?? true,
             fullAccess: object?["fullAccess"]?.boolValue ?? false,
@@ -889,7 +1450,11 @@ final class RemoteSessionHost {
                 return raw
             }(),
             botComputerID: object?["botComputerID"]?.stringValue.flatMap(UUID.init),
-            botWorkspacePath: nil)
+            botWorkspacePath: nil,
+            botContainerName: nil,
+            botContainerExecutable: nil,
+            workspacePath: workspacePath,
+            botBrowser: nil)
     }
 
     private var taskQueueCount: Int {
@@ -958,7 +1523,7 @@ final class RemoteSessionHost {
     }
 
     private func unauthorized() -> LocalAPIServer.RouteResult {
-        .response(json(["error": .string("Pair this browser with the code shown in Beet Code.")], status: 401))
+        .response(json(["error": .string("Pair this browser with the code shown in Vamp Assistant.")], status: 401))
     }
 
     private func json(_ fields: [String: LFJSONValue], status: Int = 200) -> LocalAPIServer.Response {
@@ -978,10 +1543,16 @@ final class RemoteSessionHost {
 
     private static let publicImages: [String: String] = [
         "/assets/beetlogo.png": "BeetLogo",
-        "/assets/bot-builder.png": "BotBuilder",
-        "/assets/bot-reviewer.png": "BotReviewer",
-        "/assets/bot-navigator.png": "BotNavigator",
-        "/assets/bot-researcher.png": "BotResearcher",
+        "/assets/vamp-backdrop.png": "WindowAtmosphere",
+        "/assets/vamp-icon.png": "VampBackdrop",
+        "/assets/bot-builder-light.png": "BotBuilderLight",
+        "/assets/bot-builder-dark.png": "BotBuilderDark",
+        "/assets/bot-reviewer-light.png": "BotReviewerLight",
+        "/assets/bot-reviewer-dark.png": "BotReviewerDark",
+        "/assets/bot-navigator-light.png": "BotNavigatorLight",
+        "/assets/bot-navigator-dark.png": "BotNavigatorDark",
+        "/assets/bot-researcher-light.png": "BotResearcherLight",
+        "/assets/bot-researcher-dark.png": "BotResearcherDark",
     ]
 
     private func imageResponse(named name: String) -> LocalAPIServer.Response {
@@ -1089,6 +1660,7 @@ final class RemoteSessionHost {
                 "kind": .string("question"),
                 "requestID": .string(requestID.uuidString),
                 "content": .string(String(question.prefix(12_000))),
+                "options": .array(sessions.pendingQuestionChoices.map { .string($0) }),
             ])
         }
         if let plan = sessions.pendingPlan {
@@ -1131,7 +1703,74 @@ final class RemoteSessionHost {
     }
 
     private static func workspaceName(_ path: String) -> String {
-        URL(fileURLWithPath: path).lastPathComponent.isEmpty ? "Project" : URL(fileURLWithPath: path).lastPathComponent
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "Chat" }
+        let name = URL(fileURLWithPath: trimmed).lastPathComponent
+        return name.isEmpty ? "Project" : name
+    }
+
+    private func workspaceListJSON() -> [String: LFJSONValue] {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let createParentURL = RemoteWorkspaceCatalog.defaultCreateParent(home: home)
+        try? FileManager.default.createDirectory(at: createParentURL, withIntermediateDirectories: true)
+        let createParent = createParentURL.path
+        let items = RemoteWorkspaceCatalog.list(
+            currentPath: sessions.workspaceURL?.path,
+            lastPath: AppPreferencesStore.shared.current.lastWorkspacePath,
+            records: SessionStore.shared.cachedAll(maxAge: 2).map {
+                (path: $0.workspacePath, updatedAt: $0.updatedAt)
+            },
+            home: home)
+        return [
+            "workspaces": .array(items.map { item in
+                .object([
+                    "path": .string(item.path),
+                    "name": .string(item.name),
+                    "isCurrent": .bool(item.isCurrent),
+                ])
+            }),
+            "createParent": .string(createParent),
+        ]
+    }
+
+    private func knownWorkspacePaths() -> [String] {
+        RemoteWorkspaceCatalog.list(
+            currentPath: sessions.workspaceURL?.path,
+            lastPath: AppPreferencesStore.shared.current.lastWorkspacePath,
+            records: SessionStore.shared.cachedAll(maxAge: 2).map {
+                (path: $0.workspacePath, updatedAt: $0.updatedAt)
+            }).map(\.path)
+    }
+
+    private func createOrOpenWorkspace(_ request: LocalAPIServer.Request) -> LocalAPIServer.RouteResult {
+        let object = request.bodyJSON?.objectValue
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let known = knownWorkspacePaths()
+        do {
+            let url: URL
+            if let path = object?["path"]?.stringValue,
+               !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                url = try RemoteWorkspaceCatalog.resolveExisting(path, home: home, knownPaths: known)
+            } else if let name = object?["name"]?.stringValue {
+                url = try RemoteWorkspaceCatalog.createFolder(
+                    name: name,
+                    parentPath: object?["parentPath"]?.stringValue,
+                    home: home,
+                    knownPaths: known)
+            } else {
+                return .response(json(["error": .string("Choose an existing folder or enter a name for a new one.")], status: 400))
+            }
+            var preferences = AppPreferencesStore.shared.current
+            preferences.lastWorkspacePath = url.path
+            preferences.workspaceBookmarkData = AppPreferencesStore.shared.bookmarkData(for: url)
+            AppPreferencesStore.shared.save(preferences)
+            return .response(json([
+                "path": .string(url.path),
+                "name": .string(url.lastPathComponent),
+            ], status: 201))
+        } catch {
+            return .response(json(["error": .string(error.localizedDescription)], status: 400))
+        }
     }
 
     private static func makePairingCode() -> String {
@@ -1310,27 +1949,48 @@ enum RemoteNetworkEndpointDiscovery {
 private enum RemotePairedClientStore {
     private static let service = "com.beetcode.remote.host"
     private static let account = "paired-client-digests"
+    private static let cacheLock = NSLock()
+    nonisolated(unsafe) private static var cached: [String: Date]?
 
     static func load() -> [String: Date] {
+        cacheLock.lock()
+        if let cached {
+            cacheLock.unlock()
+            return cached
+        }
+        cacheLock.unlock()
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip,
         ]
         var result: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
               let data = result as? Data,
-              let values = try? JSONDecoder().decode([String: Double].self, from: data) else { return [:] }
+              let values = try? JSONDecoder().decode([String: Double].self, from: data) else {
+            cacheLock.lock()
+            cached = [:]
+            cacheLock.unlock()
+            return [:]
+        }
         let now = Date()
-        return values.reduce(into: [:]) { result, item in
+        let loaded = values.reduce(into: [String: Date]()) { result, item in
             let expiration = Date(timeIntervalSince1970: item.value)
             if expiration > now { result[item.key] = expiration }
         }
+        cacheLock.lock()
+        cached = loaded
+        cacheLock.unlock()
+        return loaded
     }
 
     static func save(_ tokens: [String: Date]) {
+        cacheLock.lock()
+        cached = tokens
+        cacheLock.unlock()
         let values = tokens.mapValues(\.timeIntervalSince1970)
         guard let data = try? JSONEncoder().encode(values) else { return }
         let query: [String: Any] = [

@@ -19,6 +19,7 @@ final class ApprovalOverrides: @unchecked Sendable {
     private let lock = NSLock()
     private var editsAllowed = false
     private var commandsAllowed = false
+    private var computerAllowed = false
 
     var allowsEdits: Bool {
         lock.lock(); defer { lock.unlock() }
@@ -30,11 +31,20 @@ final class ApprovalOverrides: @unchecked Sendable {
         return commandsAllowed
     }
 
+    var allowsComputer: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return computerAllowed
+    }
+
     func allowEdits() {
         lock.lock(); editsAllowed = true; lock.unlock()
     }
 
     func allowCommands() {
         lock.lock(); commandsAllowed = true; lock.unlock()
+    }
+
+    func allowComputer() {
+        lock.lock(); computerAllowed = true; lock.unlock()
     }
 }

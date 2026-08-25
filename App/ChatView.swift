@@ -18,7 +18,6 @@ struct ChatView: View {
     @State private var composerStore = ComposerStore()
     @State private var sessionTitle = "New chat"
     @State private var homeVisible = false
-    @State private var glowExpanded = false
 
     private var isEmptyConversation: Bool {
         controller.transcript.isEmpty
@@ -46,12 +45,11 @@ struct ChatView: View {
                 if hasPendingGate {
                     pendingGate
                 }
-                Divider()
                 ComposerView(store: composerStore)
                     .environmentObject(controller)
             }
         }
-        .background { AtmosphereBackground() }
+        .background { AtmosphereBackground(intensity: isEmptyConversation ? .home : .conversation) }
         .task {
             composerStore.attach(controller: controller, appState: appState)
         }
@@ -121,6 +119,7 @@ struct ChatView: View {
     // MARK: Transcript
 
     @State private var isPinnedToBottom = true
+    @State private var cachedRows: [TranscriptRowModel] = []
 
     /// Cursor/ChatGPT-style transcript: a centered content column (never
     /// edge-to-edge prose), grouped tool steps, avatar-led assistant output.
@@ -131,7 +130,7 @@ struct ChatView: View {
                     if controller.transcript.isEmpty && controller.streamingText.isEmpty {
                         emptyState
                     }
-                    ForEach(displayRows) { row in
+                    ForEach(cachedRows) { row in
                         rowView(row)
                             .id(row.id)
                     }
@@ -150,7 +149,8 @@ struct ChatView: View {
                             reason: finish,
                             summary: CompletionSnapshot.make(
                                 transcript: controller.transcript),
-                            onNewChat: controller.newSession)
+                            onNewChat: controller.newSession,
+                            onDismiss: controller.dismissFinish)
                     }
                     Color.clear.frame(height: 8).id("bottom")
                 }
@@ -171,8 +171,14 @@ struct ChatView: View {
             } action: { _, pinned in
                 isPinnedToBottom = pinned
             }
-            .onChange(of: controller.transcript.count) { _, _ in
-                scrollToLatest(proxy, animated: true)
+            .onAppear {
+                cachedRows = Self.makeDisplayRows(controller.transcript)
+            }
+            .onChange(of: controller.transcript) { _, transcript in
+                cachedRows = Self.makeDisplayRows(transcript)
+                // Activity rows can arrive several times per second. Avoid
+                // animating the entire stack's height for every tool event.
+                scrollToLatest(proxy)
             }
             .onChange(of: controller.streamingText) { _, _ in
                 scrollToLatest(proxy)
@@ -238,115 +244,77 @@ struct ChatView: View {
 
     private var emptyState: some View {
         VStack(spacing: 0) {
-            Spacer(minLength: 32)
+            Spacer(minLength: 24)
 
-            ZStack {
-                Circle()
-                    .fill(Theme.accentBright.opacity(glowExpanded ? 0.22 : 0.10))
-                    .frame(width: 102, height: 102)
-                    .blur(radius: 18)
-                    .scaleEffect(glowExpanded ? 1.14 : 1)
-                if case .failed = appState.enginePhase {
-                    emptyStateTile(
-                        systemImage: "exclamationmark.triangle.fill",
-                        fill: AnyShapeStyle(Theme.danger),
-                        glow: Theme.danger)
-                } else {
-                    Image("BeetLogo")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 46, height: 46)
-                        .frame(width: 58, height: 58)
-                        .background(.black, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-                        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
-                        .shadow(color: Theme.accent.opacity(0.55), radius: 17, y: 7)
+            VStack(spacing: 16) {
+                VStack(spacing: 12) {
+                    Color.clear
+                        .frame(width: 76, height: 76)
+                        .accessibilityHidden(true)
+
+                    Text("VAMP ASSISTANT")
+                        .font(AppFont.homeWordmark)
+                        .tracking(2.4)
+                        .foregroundStyle(Theme.textPrimary)
+                        .minimumScaleFactor(0.55)
+                        .lineLimit(1)
+                        .accessibilityAddTraits(.isHeader)
+                }
+
+                Text("Ask anything, browse the web, control your Mac with permission, or open a project when you want Code.")
+                    .font(AppFont.homeInvitation)
+                    .foregroundStyle(Theme.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(4)
+                    .frame(maxWidth: 460)
+
+                if let status = homeStatus {
+                    Text(status)
+                        .font(.system(size: 13, design: .serif))
+                        .foregroundStyle(homeStatusTint)
+                        .padding(.top, 2)
                 }
             }
-            .padding(.bottom, 22)
 
-            Text(homeHeadline)
-                .font(.system(size: 27, weight: .semibold))
-                .tracking(-0.45)
-                .foregroundStyle(Theme.textPrimary)
-            Text(homeBody)
-                .font(.system(size: 13.5))
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-                .lineSpacing(3)
-                .frame(maxWidth: 420)
-                .padding(.top, 9)
-
-            homeActions
-                .padding(.top, 18)
+            Spacer(minLength: 28)
 
             ComposerView(store: composerStore, placement: .home)
                 .environmentObject(controller)
-                .padding(.top, 26)
-
-            if canSuggestPrompts {
-                VStack(spacing: 10) {
-                    suggestionRow(suggestions[0])
-                    suggestionRow(suggestions[1])
-                }
-                .padding(.top, 20)
-            }
+                .padding(.bottom, 36)
 
             Spacer(minLength: 0)
-
-            Text("Use /create-hook to extend the agent loop with custom scripts")
-                .font(.system(size: 11.5))
-                .foregroundStyle(Theme.textTertiary)
-                .padding(.bottom, 12)
+                .frame(maxHeight: 20)
         }
-        .padding(.horizontal, 36)
+        .padding(.horizontal, 48)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .opacity(homeVisible ? 1 : 0)
-        .offset(y: homeVisible || reduceMotion ? 0 : 10)
         .onAppear {
             if reduceMotion {
                 homeVisible = true
-                glowExpanded = false
             } else {
-                withAnimation(.easeOut(duration: 0.48)) { homeVisible = true }
-                withAnimation(.easeInOut(duration: 4.5).repeatForever(autoreverses: true)) {
-                    glowExpanded = true
-                }
+                withAnimation(.easeOut(duration: 0.28)) { homeVisible = true }
             }
         }
         .overlay(alignment: .bottomTrailing) {
             remoteSessionsCornerButton
-                .padding(.trailing, 22)
-                .padding(.bottom, 22)
+                .padding(.trailing, 18)
+                .padding(.bottom, 16)
         }
     }
 
-    private var homeActions: some View {
-        HStack(spacing: 10) {
-            if controller.workspaceURL == nil {
-                Button {
-                    NotificationCenter.default.post(name: .openWorkspace, object: nil)
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "folder.badge.plus")
-                            .font(.system(size: 13, weight: .semibold))
-                        Text("Open Project")
-                            .font(.system(size: 12.5, weight: .semibold))
-                    }
-                    .foregroundStyle(Theme.textSecondary)
-                    .padding(.horizontal, 15)
-                    .frame(height: 48)
-                    .background(Theme.surfaceInset.opacity(0.64),
-                                in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous)
-                        .strokeBorder(Theme.hairline.opacity(0.46), lineWidth: 0.75))
-                    .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .lfHoverLift()
-                .help("Open a project folder for coding tools")
-            }
+    private var homeStatus: String? {
+        if case .failed = appState.enginePhase {
+            return "The last model failed to load. Choose another in the composer."
         }
-        .frame(maxWidth: 460)
+        if case .loading = appState.enginePhase {
+            return "Loading model…"
+        }
+        return nil
+    }
+
+    private var homeStatusTint: Color {
+        if case .failed = appState.enginePhase { return Theme.danger }
+        return Theme.textTertiary
     }
 
     private var remoteSessionsCornerButton: some View {
@@ -355,14 +323,13 @@ struct ChatView: View {
         } label: {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "antenna.radiowaves.left.and.right")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 54, height: 54)
-                    .background(Theme.accentGradient,
-                                in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous)
-                        .strokeBorder(.white.opacity(0.18), lineWidth: 0.75))
-                    .shadow(color: Theme.accent.opacity(0.24), radius: 12, y: 5)
+                    .font(.system(size: 13, weight: .semibold, design: .serif))
+                    .foregroundStyle(Theme.textPrimary)
+                    .frame(width: 36, height: 36)
+                    .background(Theme.surface.opacity(0.92),
+                                in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Theme.hairline, lineWidth: 0.75))
 
                 Circle()
                     .fill(appState.remoteSessionRunning ? Theme.success : Theme.textTertiary)
@@ -370,192 +337,12 @@ struct ChatView: View {
                     .overlay(Circle().stroke(Theme.bg, lineWidth: 2))
                     .padding(5)
             }
-            .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(LFPlainPressButtonStyle())
         .lfHoverLift()
         .help("Remote Sessions")
         .accessibilityLabel("Open Remote Sessions")
-    }
-
-    private var homeHeadline: LocalizedStringKey {
-        if case .failed = appState.enginePhase { return "Model failed to load" }
-        if case .loading = appState.enginePhase { return "Loading model…" }
-        if !hasRunnableModel { return "Choose a model to begin" }
-        return "What should we build?"
-    }
-
-    private var homeBody: LocalizedStringKey {
-        if case .failed = appState.enginePhase {
-            return "Check the model or choose another engine, then try again."
-        }
-        if case .loading = appState.enginePhase {
-            return "The composer unlocks when the engine is ready."
-        }
-        if !hasRunnableModel {
-            return "Choose an API, Codex, or a downloaded local model to begin."
-        }
-        return "Describe a task in plain language. Reads run automatically — every edit and command is yours to approve."
-    }
-
-    private func emptyStateTile(
-        systemImage: String, fill: AnyShapeStyle, glow: Color
-    ) -> some View {
-        RoundedRectangle(cornerRadius: Radius.xl, style: .continuous)
-            .fill(fill)
-            .frame(width: 64, height: 64)
-            .overlay(
-                Image(systemName: systemImage)
-                    .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(.white))
-            .shadow(color: glow.opacity(0.35), radius: 18, y: 6)
-    }
-
-    /// Label (chip text) + prompt (what actually goes in the composer).
-    private struct Suggestion: Identifiable {
-        let label: String
-        let prompt: String
-        let glyph: String
-        var id: String { label }
-    }
-
-    private var suggestions: [[Suggestion]] {
-        if controller.workspaceURL == nil {
-            return [
-                [
-                    Suggestion(label: "Explain a concept",
-                               prompt: "Explain a concept to me clearly, with a short example.",
-                               glyph: "lightbulb"),
-                    Suggestion(label: "Brainstorm ideas",
-                               prompt: "Help me brainstorm ideas. Start by asking what outcome I want.",
-                               glyph: "sparkles"),
-                ],
-                [
-                    Suggestion(label: "Improve my writing",
-                               prompt: "Help me improve a piece of writing while keeping my voice.",
-                               glyph: "text.badge.checkmark"),
-                    Suggestion(label: "Ask anything",
-                               prompt: "I have a question I would like to think through with you.",
-                               glyph: "bubble.left.and.questionmark.bubble.right"),
-                ],
-            ]
-        }
-        if looksLikeAppleProject {
-            return [
-                [
-                    Suggestion(label: "Fix the failing build",
-                               prompt: "Detect this Xcode or Swift project, run the build or tests, and fix whatever fails. Explain each fix.",
-                               glyph: "wrench.and.screwdriver"),
-                    Suggestion(label: "Run in Simulator",
-                               prompt: "Build this iOS app, install it on a booted simulator, take a screenshot, and report what you see. Fix anything that fails.",
-                               glyph: "iphone"),
-                ],
-                [
-                    Suggestion(label: "Review recent changes",
-                               prompt: "Review the current git diff. Summarize what changed, flag risks, and propose a test plan. Do not edit files unless I ask.",
-                               glyph: "eye"),
-                    Suggestion(label: "Add a feature",
-                               prompt: "I want to add a new feature. First explore the codebase, then propose a plan before changing anything.",
-                               glyph: "wand.and.stars"),
-                ],
-            ]
-        }
-        return [
-            [
-                Suggestion(label: "Explain this codebase",
-                           prompt: "What does this project do? Walk me through the structure and the main entry points.",
-                           glyph: "doc.text.magnifyingglass"),
-                Suggestion(label: "Find bugs",
-                           prompt: "Review this project for likely bugs and correctness problems. Report the top issues with file locations.",
-                           glyph: "ladybug"),
-            ],
-            [
-                Suggestion(label: "Fix the failing build",
-                           prompt: "Run the build/tests and fix whatever fails. Explain each fix.",
-                           glyph: "wrench.and.screwdriver"),
-                Suggestion(label: "Add a feature",
-                           prompt: "I want to add a new feature. First explore the codebase, then propose a plan before changing anything.",
-                           glyph: "wand.and.stars"),
-            ],
-        ]
-    }
-
-    private var looksLikeAppleProject: Bool {
-        guard let root = controller.workspaceURL else { return false }
-        guard let items = try? FileManager.default.contentsOfDirectory(atPath: root.path) else {
-            return false
-        }
-        return items.contains { name in
-            name.hasSuffix(".xcodeproj")
-                || name.hasSuffix(".xcworkspace")
-                || name == "Package.swift"
-                || name == "project.yml"
-        }
-    }
-
-    /// Suggestion chips make sense only when a run could actually start.
-    private var hasRunnableModel: Bool {
-        appState.activeModel != nil || appState.isRemoteActive || appState.isCodexActive
-    }
-
-    private var canSuggestPrompts: Bool {
-        guard hasRunnableModel else { return false }
-        switch appState.enginePhase {
-        case .ready, .idle: return true
-        case .loading, .failed: return false
-        }
-    }
-
-    private var emptyHeadline: LocalizedStringKey {
-        if case .failed = appState.enginePhase { return "Model failed to load" }
-        if case .loading = appState.enginePhase { return "Loading model…" }
-        if !hasRunnableModel { return "Choose a model" }
-        if controller.workspaceURL == nil { return "Chat without a project" }
-        return "Describe a task"
-    }
-
-    private var emptyBody: LocalizedStringKey {
-        if case .failed = appState.enginePhase {
-            return "Check the model file or pick another engine in the composer, then try again."
-        }
-        if case .loading = appState.enginePhase {
-            return "The composer unlocks when the engine is ready."
-        }
-        if !hasRunnableModel {
-            return "Pick an API key, Codex, or a downloaded local model to begin chatting."
-        }
-        if controller.workspaceURL == nil {
-            return "Ask anything. Project files, commands, builds, and coding tools stay off until you open a folder."
-        }
-        return "Reads run automatically; every edit and command shows up here for approval."
-    }
-
-    @ViewBuilder
-    private func suggestionRow(_ items: [Suggestion]) -> some View {
-        HStack(spacing: 10) {
-            ForEach(items) { suggestion in
-                Button {
-                    composerStore.prompt = suggestion.prompt
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: suggestion.glyph)
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.accent)
-                        Text(suggestion.label)
-                            .font(.caption)
-                            .foregroundStyle(Theme.textPrimary)
-                            .lineLimit(1)
-                    }
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 7)
-                    .background(Theme.surface, in: Capsule())
-                    .overlay(Capsule().strokeBorder(Theme.hairline, lineWidth: 1))
-                }
-                .buttonStyle(LFPlainPressButtonStyle())
-                .lfHoverLift()
-                .help(suggestion.prompt)
-            }
-        }
     }
 
     private var hasPendingGate: Bool {
@@ -579,7 +366,10 @@ struct ChatView: View {
                 }
             }
             if let question = controller.pendingQuestion {
-                QuestionCard(question: question) { answer in
+                QuestionCard(
+                    question: question,
+                    choices: controller.pendingQuestionChoices
+                ) { answer in
                     controller.answerQuestion(answer)
                 }
             }
@@ -639,7 +429,7 @@ struct ChatView: View {
 /// One rendered transcript row. The agent's private work stream (reasoning,
 /// tool calls, and tool results) is one calm activity surface; user and final
 /// assistant messages remain the primary reading hierarchy.
-private enum TranscriptRowModel: Identifiable {
+private enum TranscriptRowModel: Identifiable, Equatable {
     case user(AgentSessionController.TranscriptItem)
     case assistant(AgentSessionController.TranscriptItem)
     case activity([AgentSessionController.TranscriptItem])
@@ -657,7 +447,9 @@ private enum TranscriptRowModel: Identifiable {
 
 private extension ChatView {
     /// Groups the flat transcript into display rows.
-    var displayRows: [TranscriptRowModel] {
+    static func makeDisplayRows(
+        _ transcript: [AgentSessionController.TranscriptItem]
+    ) -> [TranscriptRowModel] {
         var rows: [TranscriptRowModel] = []
         var buffer: [AgentSessionController.TranscriptItem] = []
         func flush() {
@@ -666,7 +458,7 @@ private extension ChatView {
                 buffer = []
             }
         }
-        for item in controller.transcript {
+        for item in transcript {
             switch item.kind {
             case .user:
                 flush(); rows.append(.user(item))

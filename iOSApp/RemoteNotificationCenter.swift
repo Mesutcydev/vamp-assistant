@@ -1,6 +1,10 @@
 import Foundation
 import UserNotifications
 
+extension Notification.Name {
+    static let openRemoteSession = Notification.Name("com.beetcode.openRemoteSession")
+}
+
 @MainActor
 final class RemoteNotificationCenter: NSObject, UNUserNotificationCenterDelegate {
     static let shared = RemoteNotificationCenter()
@@ -49,7 +53,7 @@ final class RemoteNotificationCenter: NSObject, UNUserNotificationCenterDelegate
         case "approval": title = "Approval needed on \(computerName)"
         case "question": title = "Question from \(computerName)"
         case "plan": title = "Plan ready on \(computerName)"
-        default: title = "BeetCode needs attention"
+        default: title = "Vamp Assistant needs attention"
         }
         post(
             id: "session-attention-\(detail.id.uuidString)-\(signature)",
@@ -73,5 +77,16 @@ final class RemoteNotificationCenter: NSObject, UNUserNotificationCenterDelegate
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
         [.banner, .sound, .list]
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        let info = response.notification.request.content.userInfo
+        guard let raw = info["sessionID"] as? String, let id = UUID(uuidString: raw) else { return }
+        await MainActor.run {
+            NotificationCenter.default.post(name: .openRemoteSession, object: id)
+        }
     }
 }

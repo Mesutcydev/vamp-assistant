@@ -46,7 +46,7 @@ enum SessionExporter {
                     from: PromptBuilder.cleaningGeneratedText(message.content))
                 guard !prose.isEmpty else { continue }
                 lines.append("")
-                lines.append("## \(record.source == .app ? "Beet Code" : record.source.label) · \(time.string(from: message.timestamp))")
+                lines.append("## \(record.source == .app ? "Vamp Assistant" : record.source.label) · \(time.string(from: message.timestamp))")
                 lines.append("")
                 lines.append(prose)
             case .reasoning:

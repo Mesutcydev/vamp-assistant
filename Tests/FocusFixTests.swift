@@ -127,4 +127,16 @@ final class ApprovalOverridesGateTests: XCTestCase {
         XCTAssertEqual(gate.decision(for: call("read_file"), risk: .read), .auto)
         XCTAssertEqual(gate.decision(for: call("mystery"), risk: .none), .needsApproval)
     }
+
+    func testComputerOverrideIsSessionScopedToComputerActions() {
+        let overrides = ApprovalOverrides()
+        let gate = PermissionGate(
+            workspace: Workspace(root: URL(fileURLWithPath: "/tmp/w")),
+            overrides: overrides)
+        XCTAssertEqual(
+            gate.decision(for: call("computer_click"), risk: .execute), .needsApproval)
+        overrides.allowComputer()
+        XCTAssertEqual(gate.decision(for: call("computer_click"), risk: .execute), .auto)
+        XCTAssertEqual(gate.decision(for: call("mcp_write"), risk: .execute), .needsApproval)
+    }
 }

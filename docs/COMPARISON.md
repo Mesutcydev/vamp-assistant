@@ -1,20 +1,20 @@
-# Beet Code competitive comparison
+# Vamp Assistant competitive comparison
 
 Updated 2026-08-21. This comparison uses the current product documentation for
-the mainstream agentic coding tools that most directly overlap Beet Code:
+the mainstream agentic coding tools that most directly overlap Vamp Assistant:
 [Codex](https://developers.openai.com/codex/use-cases),
 [Cursor](https://docs.cursor.com/chat/overview),
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code/cli-usage),
 [GitHub Copilot](https://docs.github.com/en/copilot/reference/customization-cheat-sheet),
 and [Windsurf](https://docs.windsurf.com/windsurf/cascade/memories).
 
-The goal is not visual imitation. Beet Code should take the interaction
+The goal is not visual imitation. Vamp Assistant should take the interaction
 patterns that improve completion, control, and review, while remaining a
 native Apple-silicon product.
 
 ## What the leaders get right
 
-| Product | Strongest useful pattern | Beet Code response |
+| Product | Strongest useful pattern | Vamp Assistant response |
 | --- | --- | --- |
 | Codex | Goal-oriented work that understands a codebase, builds, tests, reviews, and can preserve durable workflows. | Goal mode, project instructions, skills/commands, verification phase, and an Apple-app delivery template. |
 | Cursor | Clear Agent/Ask-style modes, parallel chat surfaces, automatic checkpoints, integrated diff review, and a compact grouped activity log. | Auto/Goal plus specialist profiles, task switchboard, git checkpoints, split/unified diff, and a single collapsible agent activity surface. |
@@ -24,7 +24,7 @@ native Apple-silicon product.
 
 ## Capability matrix
 
-| Capability | Beet Code | Codex | Cursor | Claude Code | Copilot | Windsurf |
+| Capability | Vamp Assistant | Codex | Cursor | Claude Code | Copilot | Windsurf |
 | --- | --- | --- | --- | --- | --- | --- |
 | Autonomous multi-file edits and commands | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Plan-before-edit workflow | ✅ | ✅ | ✅ mode | ✅ | ✅ custom agent | ✅ |

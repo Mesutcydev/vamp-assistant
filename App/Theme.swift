@@ -1,12 +1,11 @@
 import AppKit
 import SwiftUI
 
-/// Beet Code's single source of truth for color. Every surface, text tier and
+/// Vamp Assistant's single source of truth for color. Every surface, text tier and
 /// status color resolves through here so light and dark stay coherent by
 /// construction instead of per-view `colorScheme ? … : …` guesses.
 ///
-/// Aesthetic: calm, warm-plum and developer-native. Surfaces carry a subtle
-/// beet undertone while text and status colors stay restrained and legible.
+/// Aesthetic: monochrome black, white, and neutral gray.
 enum Theme {
     // The active accent palette — read at DRAW time by the dynamic colors
     // below, so a palette switch takes effect live without recreating views.
@@ -53,24 +52,19 @@ enum Theme {
     // full step darker than the page so inset wells + chips keep visible
     // separation (U9).
     //
-    // Beet mode anchors the ENTIRE ramp on the brand color — Pantone
-    // 19-2030 TCX Beet Red (#7A1F3D) is the window background itself, not
-    // a whisper of plum on black. Cards lift one step lighter, inset wells
-    // step darker, hairlines stay inside the beet family — one hue, four
-    // depths, so the whole window reads as solid beet.
-    static let bg           = Color.dynamic(light: 0xF5F3F6, dark: 0x151217, beet: 0x151217)
-    static let surface      = Color.dynamic(light: 0xFFFFFF, dark: 0x1D1A22, beet: 0x1D1A22)
-    static let surfaceInset = Color.dynamic(light: 0xECE8EC, dark: 0x26222D, beet: 0x26222D)
-    static let hairline     = Color.dynamic(light: 0xE4DEE6, dark: 0x332E39, beet: 0x332E39)
+    // The legacy `beet` arguments are decode-only compatibility values and
+    // intentionally resolve to the same neutral ramp as native dark mode.
+    static let bg           = Color.dynamic(light: 0xF5F5F5, dark: 0x000000, beet: 0x000000)
+    static let surface      = Color.dynamic(light: 0xFFFFFF, dark: 0x0A0A0A, beet: 0x0A0A0A)
+    static let surfaceInset = Color.dynamic(light: 0xECECEC, dark: 0x151515, beet: 0x151515)
+    static let hairline     = Color.dynamic(light: 0xDEDEDE, dark: 0x2A2A2A, beet: 0x2A2A2A)
 
     // Text tiers. Dark secondary/tertiary sit a touch brighter than the
-    // neutrals around them so captions stay legible on the lifted surfaces;
-    // beet tiers are warm pinks on Pantone 19-2030. Tertiary is ≥ 4.5:1
-    // for captions (WCAG AA).
-    static let textPrimary   = Color.dynamic(light: 0x241F28, dark: 0xECE7EC, beet: 0xECE7EC)
-    static let textSecondary = Color.dynamic(light: 0x6B6470, dark: 0xA59EA9, beet: 0xA59EA9)
-    static let textTertiary  = Color.dynamic(light: 0x9A93A0, dark: 0x726B76, beet: 0x726B76)
-    static let rose          = Color.dynamic(light: 0x93415E, dark: 0xB98298, beet: 0xB98298)
+    // neutrals around them so captions stay legible on the lifted surfaces.
+    static let textPrimary   = Color.dynamic(light: 0x181818, dark: 0xF2F2F2, beet: 0xF2F2F2)
+    static let textSecondary = Color.dynamic(light: 0x626262, dark: 0xB0B0B0, beet: 0xB0B0B0)
+    static let textTertiary  = Color.dynamic(light: 0x8A8A8A, dark: 0x7E7E7E, beet: 0x7E7E7E)
+    static let rose          = Color.dynamic(light: 0x303030, dark: 0xC8C8C8, beet: 0xC8C8C8)
 
     /// Elevation shadow: a whisper in light mode, much deeper in dark —
     /// after the surface lift above, the shadow is what separates a card
@@ -81,18 +75,16 @@ enum Theme {
             : NSColor.black.withAlphaComponent(0.12)
     })
 
-    // Accent — palette-driven. Default is Beet Red (Pantone 19-2030 TCX,
-    // #7A1F3D); switchable in Settings → Appearance. In dark mode every
-    // palette ships a same-hue lift so it stays vivid on black.
+    // Accent — storage-compatible palettes all resolve to monochrome.
     static var accent: Color { paletteColor(light: \.accentLight, dark: \.accentDark) }
     static var accentBright: Color { paletteColor(light: \.brightLight, dark: \.brightDark) }
     static var accentSoft: Color { accent.opacity(0.14) }
 
     // Status — tuned per mode so they never blow out on the deep dark.
-    static let success = Color.dynamic(light: 0x2E9E76, dark: 0x5BBE96)
-    static let warning = Color.dynamic(light: 0xB67E30, dark: 0xD9A45E)
-    static let danger  = Color.dynamic(light: 0xDC3B4B, dark: 0xFF6B78)
-    static let info    = Color.dynamic(light: 0x4E7FB8, dark: 0x7FA3D0)
+    static let success = Color.dynamic(light: 0x404040, dark: 0xD8D8D8)
+    static let warning = Color.dynamic(light: 0x555555, dark: 0xC4C4C4)
+    static let danger  = Color.dynamic(light: 0x202020, dark: 0xEEEEEE)
+    static let info    = Color.dynamic(light: 0x686868, dark: 0xB8B8B8)
 
     // Tint washes — the ONLY opacities views may use for tinted fills and
     // borders, so "washed" surfaces read identically everywhere in the app.
@@ -150,15 +142,19 @@ enum ContentColumn {
 /// native proportional face; code, diffs, and diagnostics keep monospaced
 /// typography in their dedicated surfaces.
 enum AppFont {
-    /// SF Pro remains the most legible native face on macOS. Explicit roles
-    /// keep chat prose comfortably larger than dense controls instead of
-    /// letting every view fall back to the compact macOS body size.
+    /// New York across the product. Code, diffs, and pairing tokens stay
+    /// monospaced at the call site.
     private static var scale: CGFloat { CGFloat(Theme.currentTextSize.scale) }
-    static var chatBody: Font { .system(size: 16 * scale, weight: .regular, design: .default) }
-    static var chatHeading: Font { .system(size: 18 * scale, weight: .semibold, design: .default) }
-    static var navigationTitle: Font { .system(size: 13.5 * scale, weight: .semibold, design: .default) }
-    static var navigationMeta: Font { .system(size: 11.5 * scale, weight: .regular, design: .default) }
-    static var editor: Font { .system(size: 15.5 * scale, weight: .regular, design: .default) }
+    static var chatBody: Font { .system(size: 16 * scale, weight: .regular, design: .serif) }
+    static var chatHeading: Font { .system(size: 18 * scale, weight: .semibold, design: .serif) }
+    /// Folder / project group in the sidebar — parent of chat rows.
+    static var navigationGroup: Font { .system(size: 13.5 * scale, weight: .semibold, design: .serif) }
+    /// Chat title inside a group — child of `navigationGroup`.
+    static var navigationTitle: Font { .system(size: 12 * scale, weight: .medium, design: .serif) }
+    static var navigationMeta: Font { .system(size: 11.5 * scale, weight: .regular, design: .serif) }
+    static var editor: Font { .system(size: 15.5 * scale, weight: .regular, design: .serif) }
+    static var homeWordmark: Font { .system(size: 80, weight: .bold, design: .serif) }
+    static var homeInvitation: Font { .system(size: 15 * scale, weight: .regular, design: .serif) }
 }
 
 /// Spacing — 4pt grid. Use these instead of ad-hoc padding literals.
@@ -204,9 +200,7 @@ extension Color {
 extension View {
     /// Standard elevated card: raised surface + hairline border.
     func lfCard(radius: CGFloat = Radius.lg) -> some View {
-        background(Theme.surface, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .strokeBorder(Theme.hairline, lineWidth: 1))
+        lfGlass(radius: radius, contentLegibility: true)
     }
 
     /// Cursor/ChatGPT-style hover affordance for small chips and accessory
@@ -260,10 +254,7 @@ private struct LFGlassModifier<S: InsettableShape>: ViewModifier {
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if reduceTransparency || Theme.currentAppearance == .beet {
-            // Beet mode tints EVERY surface — system materials are neutral
-            // gray-blue and would break the plum ramp, so glass falls back
-            // to the opaque themed surface there too.
+        if reduceTransparency {
             content
                 .background(Theme.surface, in: shape)
                 .overlay(shape.strokeBorder(Theme.hairline, lineWidth: 1))
@@ -361,7 +352,7 @@ struct LFCapsuleButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 11, weight: .semibold))
+            .font(.system(size: 11, weight: .semibold, design: .serif))
             .foregroundStyle(isEnabled ? tone.foreground : Theme.textTertiary)
             .padding(.horizontal, 12)
             .frame(minHeight: 30)
@@ -404,7 +395,7 @@ struct PanelCloseButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "xmark")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold, design: .serif))
         }
         .buttonStyle(LFIconButtonStyle(size: 26))
         .lfHoverLift()

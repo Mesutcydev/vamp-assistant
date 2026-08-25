@@ -508,7 +508,7 @@ private struct ModelGlyph: View {
 
     var body: some View {
         Image(systemName: format == .gguf ? "shippingbox" : (format == .coreAI ? "apple.intelligence" : "cpu"))
-            .font(.system(size: 16, weight: .semibold))
+            .font(.system(size: 16, weight: .semibold, design: .serif))
             .foregroundStyle(isActive ? Theme.accent : Theme.textSecondary)
             .frame(width: 38, height: 38)
             .background(isActive ? Theme.accentSoft : Theme.surfaceInset,
@@ -629,7 +629,7 @@ private struct ModelActions: View {
                 // them automatically when an image needs describing.
                 Label("Vision — runs automatically", systemImage: "eye")
                     .foregroundStyle(Theme.textSecondary)
-                    .help("Downloaded. Beet Code uses this model automatically to describe image attachments and screenshots.")
+                    .help("Downloaded. Vamp Assistant uses this model automatically to describe image attachments and screenshots.")
             } else if isActive {
                 Button("Unload") {
                     Task { await appState.deactivate() }
@@ -680,7 +680,7 @@ private struct ModelActions: View {
                 Button("Remove…", role: .destructive, action: removeInstalled)
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold, design: .serif))
                     .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
@@ -697,7 +697,7 @@ private struct ModelActions: View {
                     }
                 } label: {
                     Image(systemName: "ellipsis")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold, design: .serif))
                         .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
                 }
@@ -754,7 +754,7 @@ private struct RemoteSection: View {
                 if configured.isEmpty {
                     HStack(spacing: Spacing.md) {
                         Image(systemName: "key")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: 14, weight: .semibold, design: .serif))
                             .foregroundStyle(Theme.textSecondary)
                             .frame(width: 38, height: 38)
                             .background(Theme.surfaceInset,

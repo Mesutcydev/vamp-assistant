@@ -61,9 +61,9 @@ enum ComputerUseError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .accessibilityNotGranted:
-            return "Accessibility permission is not granted — enable BeetCode in System Settings → Privacy & Security → Accessibility (or the Settings → Agent → Computer control card), then retry."
+            return "Accessibility permission is not granted — ask for computer access or enable Vamp Assistant in System Settings → Privacy & Security → Accessibility, then retry."
         case .screenRecordingNotGranted:
-            return "Screen Recording permission is not granted — enable BeetCode in System Settings → Privacy & Security → Screen Recording (or the Settings → Agent → Computer control card), then retry."
+            return "Screen Recording permission is not granted — ask for computer access or enable Vamp Assistant in System Settings → Privacy & Security → Screen Recording, then retry."
         case .noFocusedApp:
             return "No focused application to inspect."
         case .unknownKey(let name):
@@ -133,6 +133,7 @@ enum ComputerKey {
             case "shift": flags.insert(.maskShift)
             case "alt", "option", "opt": flags.insert(.maskAlternate)
             case "ctrl", "control": flags.insert(.maskControl)
+            case "fn", "function": flags.insert(.maskSecondaryFn)
             default: break
             }
         }
@@ -176,26 +177,56 @@ enum ComputerEvents {
         clamped(x, y, quartzBounds: quartzDisplayUnion())
     }
 
+    static func cursor() -> CGPoint {
+        CGEvent(source: nil)?.location ?? .zero
+    }
+
+    static func mouseTypes(_ button: CGMouseButton) -> (down: CGEventType, up: CGEventType, dragged: CGEventType) {
+        switch button {
+        case .left: (.leftMouseDown, .leftMouseUp, .leftMouseDragged)
+        case .right: (.rightMouseDown, .rightMouseUp, .rightMouseDragged)
+        default: (.otherMouseDown, .otherMouseUp, .otherMouseDragged)
+        }
+    }
+
     static func postMouseClick(at point: CGPoint, button: CGMouseButton, clickCount: Int) {
-        let downType: CGEventType = button == .left ? .leftMouseDown : .rightMouseDown
-        let upType: CGEventType = button == .left ? .leftMouseUp : .rightMouseUp
+        let types = mouseTypes(button)
         let source = CGEventSource(stateID: .hidSystemState)
         for state in 1...max(1, clickCount) {
-            if let down = CGEvent(mouseEventSource: source, mouseType: downType, mouseCursorPosition: point, mouseButton: button),
-               let up = CGEvent(mouseEventSource: source, mouseType: upType, mouseCursorPosition: point, mouseButton: button) {
+            if let down = CGEvent(mouseEventSource: source, mouseType: types.down, mouseCursorPosition: point, mouseButton: button),
+               let up = CGEvent(mouseEventSource: source, mouseType: types.up, mouseCursorPosition: point, mouseButton: button) {
                 down.setIntegerValueField(.mouseEventClickState, value: Int64(state))
                 up.setIntegerValueField(.mouseEventClickState, value: Int64(state))
                 down.post(tap: .cghidEventTap)
                 up.post(tap: .cghidEventTap)
             }
-            usleep(60_000)
+            if state < max(1, clickCount) {
+                usleep(60_000)
+            }
         }
     }
 
-    static func postMouseMove(to point: CGPoint) {
+    static func postMouseButton(_ button: CGMouseButton, down: Bool, at point: CGPoint) {
+        let types = mouseTypes(button)
         let source = CGEventSource(stateID: .hidSystemState)
-        CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)?
-            .post(tap: .cghidEventTap)
+        CGEvent(
+            mouseEventSource: source,
+            mouseType: down ? types.down : types.up,
+            mouseCursorPosition: point,
+            mouseButton: button
+        )?.post(tap: .cghidEventTap)
+    }
+
+    static func postMouseMove(to point: CGPoint, dragging button: CGMouseButton? = nil) {
+        let source = CGEventSource(stateID: .hidSystemState)
+        if let button {
+            let types = mouseTypes(button)
+            CGEvent(mouseEventSource: source, mouseType: types.dragged, mouseCursorPosition: point, mouseButton: button)?
+                .post(tap: .cghidEventTap)
+        } else {
+            CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)?
+                .post(tap: .cghidEventTap)
+        }
     }
 
     /// Types text as Unicode keystrokes — handles any layout/emoji, unlike
@@ -270,6 +301,17 @@ enum AXTreeWalker {
         var nodes: [AXNodeInfo] = []
         walk(app, depth: 0, into: &nodes)
         return nodes
+    }
+
+    static func focusedApplicationPID() -> pid_t? {
+        let systemWide = AXUIElementCreateSystemWide()
+        var focusedRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            systemWide, kAXFocusedApplicationAttribute as CFString, &focusedRef) == .success,
+            let focusedRef else { return nil }
+        var pid: pid_t = 0
+        let app = focusedRef as! AXUIElement
+        return AXUIElementGetPid(app, &pid) == .success ? pid : nil
     }
 
     private static func walk(_ element: AXUIElement, depth: Int, into nodes: inout [AXNodeInfo]) {
@@ -371,31 +413,56 @@ enum AXTreeWalker {
 /// so a second observation invalidates every prior coordinate instead of
 /// letting the model unknowingly click a recycled index.
 enum AXReferenceStore {
+    struct Target {
+        var point: CGPoint
+        var pid: pid_t?
+    }
+
     private struct State {
         var generation = 0
-        var points: [String: CGPoint] = [:]
+        var targets: [String: Target] = [:]
+        var latestPID: pid_t?
     }
 
     private static let state = OSAllocatedUnfairLock(initialState: State())
 
     static func capture(_ nodes: [AXNodeInfo]) -> [Int: String] {
-        state.withLock { state in
+        let focusedPID = AXTreeWalker.focusedApplicationPID()
+        return state.withLock { state in
             state.generation += 1
-            state.points.removeAll(keepingCapacity: true)
+            state.targets.removeAll(keepingCapacity: true)
+            state.latestPID = focusedPID
             let prefix = "c\(state.generation)"
             var references: [Int: String] = [:]
             for (index, node) in nodes.enumerated()
             where node.enabled && node.frame != .zero {
                 let ref = "\(prefix):e\(index + 1)"
                 references[index] = ref
-                state.points[ref] = CGPoint(x: node.frame.midX, y: node.frame.midY)
+                state.targets[ref] = Target(
+                    point: CGPoint(x: node.frame.midX, y: node.frame.midY),
+                    pid: focusedPID)
             }
             return references
         }
     }
 
-    static func resolve(_ ref: String) -> CGPoint? {
-        state.withLock { $0.points[ref] }
+    static func resolve(_ ref: String) -> Target? {
+        state.withLock { $0.targets[ref] }
+    }
+
+    static var latestPID: pid_t? {
+        state.withLock { $0.latestPID }
+    }
+}
+
+enum ComputerTargetRestorer {
+    @MainActor
+    static func restore(_ pid: pid_t?) async {
+        guard let pid,
+              NSWorkspace.shared.frontmostApplication?.processIdentifier != pid,
+              let app = NSRunningApplication(processIdentifier: pid) else { return }
+        app.activate(options: [.activateAllWindows])
+        try? await Task.sleep(for: .milliseconds(180))
     }
 }
 
@@ -411,6 +478,45 @@ enum ComputerObservation {
 }
 
 // MARK: - Tools
+
+/// Contextual opt-in used only after the model identifies a concrete Mac UI
+/// task. It is an execute-risk tool, so the existing approval card explains
+/// the exact permission before any system prompt appears.
+struct ComputerRequestAccessTool: AgentTool {
+    let name = "computer_request_access"
+    let summary = "Ask the user to enable the least Mac permission needed for a concrete computer-use task"
+    let risk = ToolRisk.execute
+    let schemaText = """
+        {"type":"object","properties":{
+          "capability":{"type":"string","enum":["accessibility","screenRecording"],"description":"Accessibility reads UI and posts input; Screen Recording captures pixels"},
+          "reason":{"type":"string","description":"Short task-specific explanation shown in the approval card"}
+        },"required":["capability","reason"]}
+        """
+
+    func preview(_ call: ParsedToolCall, in context: ToolContext) -> ApprovalPreview {
+        .command("Enable \(call.string("capability") ?? "computer") access for \(call.string("reason") ?? "this task")")
+    }
+
+    func execute(_ call: ParsedToolCall, in context: ToolContext) async throws -> String {
+        guard let capability = call.string("capability") else {
+            throw ToolError.missingArgument("capability")
+        }
+        await MainActor.run {
+            SettingsStore.shared.computerControlEnabled = true
+            if capability == "screenRecording" {
+                ComputerPermission.requestScreenRecording()
+            } else {
+                ComputerPermission.requestAccessibility()
+            }
+        }
+        let granted = capability == "screenRecording"
+            ? ComputerPermission.screenRecordingGranted
+            : ComputerPermission.accessibilityGranted
+        return granted
+            ? "\(capability) access is enabled. Continue with the requested computer tool."
+            : "Vamp Assistant opened the macOS privacy prompt for \(capability). Wait for the user to grant it, then call computer_status before continuing."
+    }
+}
 
 struct ComputerStatusTool: AgentTool {
     let name = "computer_status"
@@ -553,6 +659,70 @@ struct ComputerScreenshotTool: AgentTool {
     }
 }
 
+struct ComputerActivateAppTool: AgentTool {
+    let name = "computer_activate_app"
+    let summary = "Open or activate a Mac app directly; optionally open a trusted system-settings or web URL"
+    let risk = ToolRisk.execute
+    let schemaText = """
+        {"type":"object","properties":{
+          "appName":{"type":"string","description":"Installed app name, such as System Settings or Finder"},
+          "bundleIdentifier":{"type":"string","description":"Optional exact bundle identifier"},
+          "url":{"type":"string","description":"Optional https:// or x-apple.systempreferences: URL"},
+          "capture_after":{"type":"boolean","default":true}
+        },"required":[]}
+        """
+
+    func preview(_ call: ParsedToolCall, in context: ToolContext) -> ApprovalPreview {
+        let target = call.string("url") ?? call.string("bundleIdentifier")
+            ?? call.string("appName") ?? "application"
+        return .command("Open or activate \(target)")
+    }
+
+    func execute(_ call: ParsedToolCall, in context: ToolContext) async throws -> String {
+        let appName = call.string("appName")?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let bundleID = call.string("bundleIdentifier")?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let requestedURL = call.string("url").flatMap(URL.init(string:))
+        guard appName?.isEmpty == false || bundleID?.isEmpty == false || requestedURL != nil else {
+            throw ToolError.missingArgument("appName, bundleIdentifier, or url")
+        }
+        if let requestedURL {
+            let scheme = requestedURL.scheme?.lowercased()
+            guard scheme == "https" || scheme == "x-apple.systempreferences" else {
+                throw ToolError.commandFailed(exitCode: 1)
+            }
+            _ = await MainActor.run { NSWorkspace.shared.open(requestedURL) }
+        } else {
+            try await Self.activate(appName: appName, bundleID: bundleID)
+        }
+        try? await Task.sleep(for: .milliseconds(350))
+        let target = requestedURL?.absoluteString ?? bundleID ?? appName ?? "application"
+        var result = "opened or activated \(target)"
+        if call.bool("capture_after") ?? true {
+            result += "\n" + ComputerObservation.capture()
+        }
+        return result
+    }
+
+    @MainActor
+    private static func activate(appName: String?, bundleID: String?) async throws {
+        if let running = NSWorkspace.shared.runningApplications.first(where: { app in
+            (bundleID != nil && app.bundleIdentifier == bundleID)
+                || (appName != nil && app.localizedName?.localizedCaseInsensitiveCompare(appName!) == .orderedSame)
+        }) {
+            running.activate(options: [.activateAllWindows])
+            return
+        }
+        let url: URL? = bundleID.flatMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }
+            ?? appName.flatMap { name in
+                NSWorkspace.shared.fullPath(forApplication: name).map(URL.init(fileURLWithPath:))
+            }
+        guard let url else { throw ToolError.commandFailed(exitCode: 1) }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        _ = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+    }
+}
+
 struct ComputerClickTool: AgentTool {
     let name = "computer_click"
     let summary = "Click a fresh computer_ui_tree ref or Mac screen coordinates"
@@ -581,11 +751,13 @@ struct ComputerClickTool: AgentTool {
         }
         let requestedRef = call.string("ref")
         let rawPoint: CGPoint
+        var targetPID: pid_t?
         if let requestedRef {
             guard let resolved = AXReferenceStore.resolve(requestedRef) else {
                 throw ComputerUseError.staleReference(requestedRef)
             }
-            rawPoint = resolved
+            rawPoint = resolved.point
+            targetPID = resolved.pid
         } else if let x = call.number("x"), let y = call.number("y") {
             rawPoint = CGPoint(x: x, y: y)
         } else {
@@ -593,6 +765,7 @@ struct ComputerClickTool: AgentTool {
         }
         let button: CGMouseButton = (call.string("button") == "right") ? .right : .left
         let count = min(max(call.int("clickCount") ?? 1, 1), 3)
+        await ComputerTargetRestorer.restore(targetPID)
         let point = await MainActor.run { ComputerEvents.clamped(rawPoint.x, rawPoint.y) }
         await Task.detached(priority: .userInitiated) {
             ComputerEvents.postMouseClick(at: point, button: button, clickCount: count)
@@ -638,10 +811,13 @@ struct ComputerTypeTool: AgentTool {
         }
         let requestedRef = call.string("ref")
         if let requestedRef {
-            guard let rawPoint = AXReferenceStore.resolve(requestedRef) else {
+            guard let target = AXReferenceStore.resolve(requestedRef) else {
                 throw ComputerUseError.staleReference(requestedRef)
             }
-            let point = await MainActor.run { ComputerEvents.clamped(rawPoint.x, rawPoint.y) }
+            await ComputerTargetRestorer.restore(target.pid)
+            let point = await MainActor.run {
+                ComputerEvents.clamped(target.point.x, target.point.y)
+            }
             await Task.detached(priority: .userInitiated) {
                 ComputerEvents.postMouseClick(at: point, button: .left, clickCount: 1)
             }.value
@@ -696,6 +872,7 @@ struct ComputerKeyTool: AgentTool {
             throw ComputerUseError.unknownKey(key)
         }
         let modifiers = ComputerKey.modifiers(for: modifierNames)
+        await ComputerTargetRestorer.restore(AXReferenceStore.latestPID)
         await Task.detached(priority: .userInitiated) {
             ComputerEvents.postKey(code, modifiers: modifiers)
         }.value
@@ -735,11 +912,13 @@ struct ComputerScrollTool: AgentTool {
         }
         let requestedRef = call.string("ref")
         let rawPoint: CGPoint
+        var targetPID: pid_t?
         if let requestedRef {
             guard let resolved = AXReferenceStore.resolve(requestedRef) else {
                 throw ComputerUseError.staleReference(requestedRef)
             }
-            rawPoint = resolved
+            rawPoint = resolved.point
+            targetPID = resolved.pid
         } else if let x = call.number("x"), let y = call.number("y") {
             rawPoint = CGPoint(x: x, y: y)
         } else {
@@ -747,6 +926,7 @@ struct ComputerScrollTool: AgentTool {
         }
         let dx = call.int("dx") ?? 0
         guard let dy = call.int("dy") else { throw ToolError.missingArgument("dy") }
+        await ComputerTargetRestorer.restore(targetPID)
         let point = await MainActor.run { ComputerEvents.clamped(rawPoint.x, rawPoint.y) }
         await Task.detached(priority: .userInitiated) {
             ComputerEvents.postScroll(at: point, dx: dx, dy: dy)

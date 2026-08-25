@@ -39,19 +39,23 @@ struct SessionMessage: Codable, Sendable, Equatable {
     var toolName: String?
     var timestamp: Date
     var answerMetrics: AnswerMetrics?
+    /// Echoed to Gemini on replay so function-calling turns do not 400.
+    var thoughtSignature: String? = nil
 
     init(
         role: Role,
         content: String,
         toolName: String?,
         timestamp: Date,
-        answerMetrics: AnswerMetrics? = nil
+        answerMetrics: AnswerMetrics? = nil,
+        thoughtSignature: String? = nil
     ) {
         self.role = role
         self.content = content
         self.toolName = toolName
         self.timestamp = timestamp
         self.answerMetrics = answerMetrics
+        self.thoughtSignature = thoughtSignature
     }
 }
 
@@ -69,11 +73,11 @@ enum SessionSource: String, Codable, Sendable, CaseIterable {
 
     var label: String {
         switch self {
-        case .app: "Beet Code"
+        case .app: "Vamp Assistant"
         case .claude: "Claude"
         case .codex: "Codex"
         case .cursor: "Cursor"
-        case .bundle: "Beet Code bundle"
+        case .bundle: "Vamp Assistant bundle"
         }
     }
 
@@ -171,6 +175,7 @@ enum SessionCrypto {
     private static let keyReadLock = NSLock()
     // All access happens under keyCacheLock.
     private static nonisolated(unsafe) var cachedKey: SymmetricKey?
+    private static nonisolated(unsafe) var nonInteractiveReadFailed = false
     /// Test seam: bypass the Keychain entirely (tests must be deterministic —
     //  and ad-hoc re-signs make Keychain ACLs re-prompt, which blocks).
     static nonisolated(unsafe) var overrideKey: SymmetricKey?
@@ -270,6 +275,10 @@ enum SessionCrypto {
             keyCacheLock.unlock()
             return cached
         }
+        if !interactionAllowed, nonInteractiveReadFailed {
+            keyCacheLock.unlock()
+            throw SessionCryptoError.keyStorageFailed(errSecInteractionNotAllowed)
+        }
         keyCacheLock.unlock()
 
         var query: [String: Any] = [
@@ -295,6 +304,9 @@ enum SessionCrypto {
             return key
         }
         if status == errSecInteractionNotAllowed {
+            keyCacheLock.lock()
+            nonInteractiveReadFailed = true
+            keyCacheLock.unlock()
             setNeedsInteractiveUnlock(true)
             throw SessionCryptoError.keyStorageFailed(status)
         }
@@ -311,7 +323,7 @@ enum SessionCrypto {
                 kSecAttrService as String: keychainService,
                 kSecAttrAccount as String: keychainAccount,
                 kSecValueData as String: newKey,
-                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
             ]
             let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
             guard addStatus == errSecSuccess else {
@@ -323,6 +335,9 @@ enum SessionCrypto {
             keyCacheLock.unlock()
             return key
         }
+        keyCacheLock.lock()
+        nonInteractiveReadFailed = true
+        keyCacheLock.unlock()
         throw SessionCryptoError.keyStorageFailed(status)
     }
 
@@ -330,6 +345,7 @@ enum SessionCrypto {
     static func resetCache() {
         keyCacheLock.lock()
         cachedKey = nil
+        nonInteractiveReadFailed = false
         keyCacheLock.unlock()
     }
 
@@ -355,7 +371,7 @@ final class SessionStore: @unchecked Sendable {
             case .encodingFailed(let detail):
                 "The conversation could not be encoded: \(detail)"
             case .encryptionUnavailable:
-                "The conversation encryption key is unavailable. Unlock Beet Code's Keychain item and retry."
+                "The conversation encryption key is unavailable. Unlock Vamp Assistant's Keychain item and retry."
             case .writeFailed(let detail):
                 "The encrypted conversation could not be written: \(detail)"
             case .permissionsFailed(let detail):

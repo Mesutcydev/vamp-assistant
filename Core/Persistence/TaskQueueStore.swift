@@ -109,10 +109,12 @@ final class TaskQueueStore: @unchecked Sendable {
     ) throws -> QueuedAgentTask {
         let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedMessage.isEmpty else { throw TaskQueueError.invalidMessage }
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: workspacePath, isDirectory: &isDirectory),
-              isDirectory.boolValue
-        else { throw TaskQueueError.invalidWorkspace }
+        if !workspacePath.isEmpty {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: workspacePath, isDirectory: &isDirectory),
+                  isDirectory.boolValue
+            else { throw TaskQueueError.invalidWorkspace }
+        }
 
         let existing = loadAll()
         let pending = existing.filter { !$0.state.isTerminal }
@@ -187,7 +189,7 @@ final class TaskQueueStore: @unchecked Sendable {
                 task.state = .queued
                 task.phase = nil
                 task.attempts += 1
-                task.lastError = "Requeued after Beet Code restarted."
+                task.lastError = "Requeued after Vamp Assistant restarted."
             }
             if let updated = load(id: task.id) { recovered.append(updated) }
         }

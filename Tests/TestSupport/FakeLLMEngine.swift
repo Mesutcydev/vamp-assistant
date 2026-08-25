@@ -185,6 +185,7 @@ final class FakeLLMEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendabl
         temperature: Double?
     ) -> AsyncThrowingStream<String, Error> {
         let (response, shouldHold) = withLock { () -> (Scripted, Bool) in
+            cancelRequested = false
             recordedTurns.append(turns)
             streamCount += 1
             let response: Scripted = script.isEmpty ? .empty : script.removeFirst()

@@ -6,10 +6,10 @@ enum AppIdentity {
     }
 
     static var userAgent: String {
-        "BeetCode/\(version) (macOS coding agent)"
+        "VampCode/\(version) (macOS assistant agent)"
     }
 
     static var browserUserAgent: String {
-        "BeetCode/\(version) (agent-controlled browser)"
+        "VampCode/\(version) (agent-controlled browser)"
     }
 }

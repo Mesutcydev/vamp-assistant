@@ -112,8 +112,8 @@ final class ComputerToolsTests: XCTestCase {
         let secondRef = try XCTUnwrap(secondRefs[0])
         XCTAssertNil(AXReferenceStore.resolve(firstRef))
         let resolved = try XCTUnwrap(AXReferenceStore.resolve(secondRef))
-        XCTAssertEqual(resolved.x, 130, accuracy: 0.5)
-        XCTAssertEqual(resolved.y, 215, accuracy: 0.5)
+        XCTAssertEqual(resolved.point.x, 130, accuracy: 0.5)
+        XCTAssertEqual(resolved.point.y, 215, accuracy: 0.5)
     }
 
     // MARK: strings accessor
@@ -205,6 +205,25 @@ final class ComputerToolsTests: XCTestCase {
         let point = ComputerEvents.clamped(99_999, -50, quartzBounds: bounds)
         XCTAssertEqual(point.x, 1439, accuracy: 0.5)
         XCTAssertEqual(point.y, 0, accuracy: 0.5)
+    }
+
+    func testRemoteMacControlParsesClickAndRejectsUnknown() {
+        let click = RemoteMacControl.parse(action: "click", x: 120, y: 80)
+        XCTAssertEqual(click, .success(.click(x: 120, y: 80, button: "left", count: 1)))
+        let typed = RemoteMacControl.parse(action: "type", text: "hello")
+        XCTAssertEqual(typed, .success(.type("hello")))
+        let unknown = RemoteMacControl.parse(action: "explode")
+        XCTAssertEqual(unknown, .failure(.message("Unknown control action.")))
+        let blocked = RemoteMacControl.parse(action: "key", key: "q", modifiers: ["cmd"])
+        XCTAssertEqual(blocked, .failure(.message("That shortcut is blocked.")))
+        let rel = RemoteMacControl.parse(action: "rel", x: 4, y: -2)
+        XCTAssertEqual(rel, .success(.moveRelative(dx: 4, dy: -2)))
+        let down = RemoteMacControl.parse(action: "down", button: "left")
+        XCTAssertEqual(down, .success(.down("left")))
+        let right = RemoteMacControl.parse(action: "click", button: "right")
+        XCTAssertEqual(right, .success(.click(x: nil, y: nil, button: "right", count: 1)))
+        let middle = RemoteMacControl.parse(action: "click", x: 10, y: 20, button: "middle", count: 2)
+        XCTAssertEqual(middle, .success(.click(x: 10, y: 20, button: "middle", count: 2)))
     }
 
     // MARK: Dangerous shortcuts

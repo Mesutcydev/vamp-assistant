@@ -46,6 +46,16 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            SidebarPrimaryDestinations(
+                onAssistant: {
+                    NotificationCenter.default.post(name: .openAssistantHome, object: nil)
+                    if showsCloseButton { dismiss() }
+                },
+                onBots: {
+                    NotificationCenter.default.post(name: .openBotsDashboard, object: nil)
+                    if showsCloseButton { dismiss() }
+                })
+            Divider().overlay(Theme.hairline)
             SidebarHeaderView(
                 workspaceURL: sessions.workspaceURL,
                 sidebarTab: sidebarTab,
@@ -148,9 +158,9 @@ struct SidebarView: View {
         Button(action: action) {
             HStack(spacing: 7) {
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold, design: .serif))
                 Text(title)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 12, weight: .medium, design: .serif))
                     .lineLimit(1)
             }
             .foregroundStyle(isActive ? Theme.rose : Theme.textSecondary)
@@ -235,13 +245,13 @@ struct SidebarView: View {
     private var ownHistoryEmptyState: some View {
         VStack(alignment: .leading, spacing: 9) {
             Image(systemName: "bubble.left.and.bubble.right")
-                .font(.system(size: 18, weight: .medium))
+                .font(.system(size: 18, weight: .medium, design: .serif))
                 .foregroundStyle(Theme.accent)
             Text("Your work will stay close")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.textPrimary)
             Text("Chats are saved locally and grouped by project as soon as you start a task.")
-                .font(.system(size: 11))
+                .font(.system(size: 11, design: .serif))
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -383,7 +393,7 @@ struct SidebarView: View {
                     ProgressView()
                         .controlSize(.small)
                     Text(importStatus)
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 11, weight: .medium, design: .serif))
                         .foregroundStyle(Theme.textSecondary)
                         .lineLimit(2)
                         .truncationMode(.middle)
@@ -448,20 +458,20 @@ struct SidebarView: View {
     private var importedEmptyState: some View {
         VStack(alignment: .leading, spacing: 8) {
             Image(systemName: "arrow.down.doc")
-                .font(.system(size: 18, weight: .medium))
+                .font(.system(size: 18, weight: .medium, design: .serif))
                 .foregroundStyle(Theme.accent)
             Text("Continue work from other tools")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.textPrimary)
             Text("Find Claude, Codex, and Cursor chats, then organize them by project. Everything stays on this Mac.")
-                .font(.system(size: 11))
+                .font(.system(size: 11, design: .serif))
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             Button {
                 runImport()
             } label: {
                 Label("Scan for chats", systemImage: "arrow.clockwise")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold, design: .serif))
             }
             .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
             .disabled(isImporting)
@@ -481,7 +491,7 @@ struct SidebarView: View {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(Theme.textTertiary)
             Text(message)
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 11, weight: .medium, design: .serif))
                 .foregroundStyle(Theme.textSecondary)
         }
         .padding(.vertical, 8)
@@ -757,7 +767,7 @@ struct SidebarView: View {
 
         let panel = NSOpenPanel()
         panel.title = "Import Task Bundle"
-        panel.message = "Choose a Beet Code task bundle to decrypt and rebind."
+        panel.message = "Choose a Vamp Assistant task bundle to decrypt and rebind."
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.allowsMultipleSelection = false
@@ -1027,6 +1037,34 @@ struct SidebarView: View {
     }
 }
 
+private struct SidebarPrimaryDestinations: View {
+    let onAssistant: () -> Void
+    let onBots: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            destination("Assistant", icon: "sparkles", action: onAssistant)
+            destination("Bots", icon: "person.3.sequence.fill", action: onBots)
+        }
+        .padding(10)
+        .background(Theme.bg)
+    }
+
+    private func destination(
+        _ title: LocalizedStringKey,
+        icon: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.callout.weight(.semibold))
+                .frame(maxWidth: .infinity, minHeight: 32)
+                .background(Theme.surfaceInset.opacity(0.5), in: RoundedRectangle(cornerRadius: 9))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 /// A session-list leaf with narrow display inputs, so updates to the sidebar
 /// header and other session groups do not re-evaluate every row's content.
 struct SessionHistoryRow: View {
@@ -1084,7 +1122,7 @@ struct SessionHistoryRow: View {
                         .monospacedDigit()
                     if pinned {
                         Image(systemName: "pin.fill")
-                            .font(.system(size: 8, weight: .semibold))
+                            .font(.system(size: 8, weight: .semibold, design: .serif))
                             .foregroundStyle(Theme.accent)
                             .accessibilityLabel("Pinned")
                     }
@@ -1095,7 +1133,7 @@ struct SessionHistoryRow: View {
                     if let statusTitle {
                         HStack(spacing: 3) {
                             Image(systemName: statusIcon)
-                                .font(.system(size: 8, weight: .semibold))
+                                .font(.system(size: 8, weight: .semibold, design: .serif))
                             Text(statusTitle)
                                 .lineLimit(1)
                         }
@@ -1193,11 +1231,11 @@ struct SidebarHeaderView: View {
             workspaceMark
             VStack(alignment: .leading, spacing: 2) {
                 Text("WORKSPACE")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.system(size: 9, weight: .bold, design: .serif))
                     .tracking(0.8)
                     .foregroundStyle(Theme.textTertiary)
                 Text(workspaceURL?.lastPathComponent ?? "Chat only")
-                    .font(.system(size: 13.5, weight: .semibold))
+                    .font(.system(size: 13.5, weight: .semibold, design: .serif))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -1227,7 +1265,7 @@ struct SidebarHeaderView: View {
     private var primaryActions: some View {
         Button(action: onNewSession) {
             Label("New chat", systemImage: "square.and.pencil")
-                .font(.system(size: 13.5, weight: .semibold))
+                .font(.system(size: 13.5, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.bg)
                 .frame(maxWidth: .infinity, minHeight: 38)
                 .background(Theme.textPrimary,
@@ -1262,9 +1300,9 @@ struct SidebarHeaderView: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: icon)
-                    .font(.system(size: 12.5, weight: .medium))
+                    .font(.system(size: 12.5, weight: .medium, design: .serif))
                     .frame(width: 16)
-                Text(title).font(.system(size: 13))
+                Text(title).font(.system(size: 13, design: .serif))
                 Spacer()
                 if let trailing {
                     Text(trailing)
@@ -1294,7 +1332,7 @@ struct SidebarHeaderView: View {
                     .aspectRatio(contentMode: .fit)
             } else {
                 Image(systemName: workspaceURL == nil ? "bubble.left.and.bubble.right.fill" : "folder.fill")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 13, weight: .medium, design: .serif))
                     .foregroundStyle(Theme.textSecondary)
             }
         }
@@ -1328,9 +1366,9 @@ struct SidebarHeaderView: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold, design: .serif))
                 Text(title)
-                    .font(.system(size: 13, weight: active ? .semibold : .medium))
+                    .font(.system(size: 13, weight: active ? .semibold : .medium, design: .serif))
                 if let count, count > 0 {
                     Text("\(min(count, 99))")
                         .font(.caption2.weight(.bold))
@@ -1354,16 +1392,16 @@ struct SidebarHeaderView: View {
     private var searchField: some View {
         HStack(spacing: 7) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.textTertiary)
             TextField("Search all history", text: $historySearch)
                 .textFieldStyle(.plain)
-                .font(.system(size: 13))
+                .font(.system(size: 13, design: .serif))
                 .focused($searchFocused)
             if !historySearch.isEmpty {
                 Button { historySearch = "" } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 11))
+                        .font(.system(size: 11, design: .serif))
                         .foregroundStyle(Theme.textTertiary)
                 }
                 .buttonStyle(.plain)
@@ -1387,10 +1425,10 @@ struct SidebarHeaderView: View {
         return VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 7) {
                 Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold, design: .serif))
                     .foregroundStyle(Theme.info)
                 Text(queuedTasks.count == 1 ? "1 task in queue" : "\(queuedTasks.count) tasks in queue")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold, design: .serif))
                     .foregroundStyle(Theme.textPrimary)
                 Spacer(minLength: 4)
                 Button("Run next", action: onRunNext)

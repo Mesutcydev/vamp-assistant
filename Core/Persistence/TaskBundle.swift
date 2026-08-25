@@ -55,7 +55,7 @@ enum TaskBundleError: LocalizedError, Equatable {
         case .passphraseTooShort:
             "Use a passphrase with at least 8 characters."
         case .invalidContainer:
-            "This file is not a Beet Code task bundle."
+            "This file is not a Vamp Assistant task bundle."
         case .unsupportedVersion(let version):
             "This task bundle uses an unsupported format version (\(version))."
         case .authenticationFailed:

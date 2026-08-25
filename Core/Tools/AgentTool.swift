@@ -249,10 +249,29 @@ struct Workspace: Sendable, Equatable {
         return (current, missing)
     }
 }
+
+struct LinuxContainerTarget: Sendable, Equatable {
+    var executable: String
+    var containerName: String
+    var hostWorkspacePath: String
+}
+
+/// Identifies a specialist bot's private in-app browser. Cookies and logins
+/// stay with this bot and are not shared with other bots or the Mac user.
+struct BrowserSession: Sendable, Equatable {
+    var id: UUID
+    var name: String
+}
+
 /// Execution context handed to tools. Knows which files were read this session
 /// (write-after-read enforcement) and truncates oversized observations.
 final class ToolContext: @unchecked Sendable {
     let workspace: Workspace
+    /// When set, `run_command` executes inside this Linux micro-VM instead of
+    /// the host shell. File tools still use the mounted host workspace.
+    var linuxContainer: LinuxContainerTarget?
+    /// When set, `browser_*` tools drive this bot's isolated WKWebView.
+    var browserSession: BrowserSession?
     /// Long-term memory for the current workspace (nil when disabled).
     var memory: AgentMemory?
     private let lock = NSLock()

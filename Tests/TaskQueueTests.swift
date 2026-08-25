@@ -36,7 +36,7 @@ final class TaskQueueTests: XCTestCase {
         XCTAssertEqual(recovered[0].id, task.id)
         XCTAssertEqual(recovered[0].state, .queued)
         XCTAssertEqual(recovered[0].attempts, 1)
-        XCTAssertEqual(recovered[0].lastError, "Requeued after Beet Code restarted.")
+        XCTAssertEqual(recovered[0].lastError, "Requeued after Vamp Assistant restarted.")
     }
 
     func testQueueRejectsMissingWorkspaceAndEmptyPrompt() throws {
@@ -52,5 +52,18 @@ final class TaskQueueTests: XCTestCase {
             message: "hello", modelID: "m")) { error in
             XCTAssertEqual(error as? TaskQueueError, .invalidWorkspace)
         }
+    }
+
+    func testQueueAllowsChatOnlyEmptyWorkspace() throws {
+        let (store, root, _) = isolatedQueue()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let task = try store.enqueue(
+            sessionID: UUID(),
+            workspacePath: "",
+            message: "Follow up after this chat turn",
+            modelID: "local-qwen")
+        XCTAssertEqual(task.workspacePath, "")
+        XCTAssertEqual(store.load(id: task.id)?.state, .queued)
     }
 }

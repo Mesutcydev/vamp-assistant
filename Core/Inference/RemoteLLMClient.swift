@@ -100,6 +100,28 @@ enum RemoteLLMClient {
                 var reasoning_content: String?
                 var reasoning: String?
                 var tool_calls: [ToolCallDelta]?
+
+                enum CodingKeys: String, CodingKey {
+                    case content, role, reasoning_content, reasoning, tool_calls
+                }
+
+                init(from decoder: Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    content = RemoteLLMClient.decodeOpenAITextField(container, forKey: .content)
+                    role = try container.decodeIfPresent(String.self, forKey: .role)
+                    reasoning_content = RemoteLLMClient.decodeOpenAITextField(container, forKey: .reasoning_content)
+                    reasoning = RemoteLLMClient.decodeOpenAITextField(container, forKey: .reasoning)
+                    tool_calls = try container.decodeIfPresent([ToolCallDelta].self, forKey: .tool_calls)
+                }
+
+                func encode(to encoder: Encoder) throws {
+                    var container = encoder.container(keyedBy: CodingKeys.self)
+                    try container.encodeIfPresent(content, forKey: .content)
+                    try container.encodeIfPresent(role, forKey: .role)
+                    try container.encodeIfPresent(reasoning_content, forKey: .reasoning_content)
+                    try container.encodeIfPresent(reasoning, forKey: .reasoning)
+                    try container.encodeIfPresent(tool_calls, forKey: .tool_calls)
+                }
             }
             struct ToolCallDelta: Codable, Sendable {
                 var index: Int?
@@ -130,12 +152,13 @@ enum RemoteLLMClient {
 
     struct GeminiRequest: Codable, Sendable {
         struct Content: Codable, Sendable {
-            var role: String
+            var role: String? = nil
             var parts: [Part]
         }
         struct Part: Codable, Sendable {
             var text: String?
             var functionCall: FunctionCall? = nil
+            var functionResponse: FunctionResponse? = nil
             /// Gemini thought summaries are marked on response parts. They
             /// must not be merged into the visible answer text.
             var thought: Bool? = nil
@@ -144,6 +167,10 @@ enum RemoteLLMClient {
             struct FunctionCall: Codable, Sendable {
                 var name: String?
                 var args: NativeToolBridge.JSONBox?
+            }
+            struct FunctionResponse: Codable, Sendable {
+                var name: String
+                var response: NativeToolBridge.JSONBox
             }
         }
         struct GenerationConfig: Codable, Sendable {
@@ -154,6 +181,7 @@ enum RemoteLLMClient {
             struct ThinkingConfig: Codable, Sendable {
                 var thinkingBudget: Int?
                 var thinkingLevel: String?
+                var includeThoughts: Bool? = nil
             }
         }
         var contents: [Content]
@@ -183,11 +211,12 @@ enum RemoteLLMClient {
     }
 
     struct GeminiErrorBody: Codable, Sendable {
-        struct Status: Codable, Sendable {
-            var message: String?
-        }
-        var status: Status?
         var message: String?
+        /// Google's error envelope uses a string status (`INVALID_ARGUMENT`),
+        /// not a nested object. Keep it a string so a valid 400 body still
+        /// decodes instead of falling through to a truncated raw dump.
+        var status: String?
+        var code: Int?
     }
 
     // MARK: Wire types (Anthropic Messages API)
@@ -268,32 +297,74 @@ enum RemoteLLMClient {
     }
 
     /// Gemini payload: system prompt in `systemInstruction` (not folded into
-    /// user text), user/model roles, tool results as marked user text, and
-    /// adjacent same-role turns merged — Gemini rejects non-alternating roles.
+    /// user text), user/model roles, native functionCall/functionResponse
+    /// parts, and adjacent same-role turns merged. Gemini rejects
+    /// non-alternating roles and 400s when a functionCall is echoed back as
+    /// plain text or a tool result is sent as `[tool result]` instead of
+    /// `functionResponse`.
     static func prepareGeminiPayload(_ turns: [ChatTurn]) -> (system: String?, contents: [GeminiRequest.Content]) {
         var systemText = ""
         var contents: [GeminiRequest.Content] = []
+        var pendingFunctionNames: [String] = []
         for turn in turns {
             switch turn.role {
             case .system:
                 systemText += turn.content + "\n"
             case .assistant:
-                appendMerged(role: "model", text: turn.content, into: &contents)
+                let calls = ToolParser.parse(turn.content)
+                pendingFunctionNames = calls.map(\.name)
+                let visible = ToolParser.strippingCalls(from: turn.content)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                var parts: [GeminiRequest.Part] = []
+                if !visible.isEmpty {
+                    parts.append(.init(
+                        text: visible,
+                        thoughtSignature: calls.isEmpty ? turn.thoughtSignature : nil))
+                }
+                for (index, call) in calls.enumerated() {
+                    parts.append(.init(
+                        functionCall: .init(
+                            name: call.name,
+                            args: NativeToolBridge.JSONBox.parse(call.argumentsJSON)),
+                        thoughtSignature: index == 0 ? turn.thoughtSignature : nil))
+                }
+                if parts.isEmpty {
+                    parts.append(.init(text: turn.content, thoughtSignature: turn.thoughtSignature))
+                }
+                appendMerged(role: "model", parts: parts, into: &contents)
+            case .tool:
+                let name = turn.toolName
+                    ?? (pendingFunctionNames.isEmpty ? nil : pendingFunctionNames.removeFirst())
+                    ?? "tool"
+                let response = NativeToolBridge.JSONBox.object([
+                    "output": .string(turn.content)
+                ])
+                appendMerged(
+                    role: "user",
+                    parts: [.init(functionResponse: .init(name: name, response: response))],
+                    into: &contents)
             default:
-                let text = turn.role == .tool ? "[tool result] " + turn.content : turn.content
-                appendMerged(role: "user", text: text, into: &contents)
+                pendingFunctionNames = []
+                appendMerged(role: "user", parts: [.init(text: turn.content)], into: &contents)
             }
+        }
+        if contents.first?.role != "user" {
+            contents.insert(.init(role: "user", parts: [.init(text: "(continue)")]), at: 0)
         }
         let system = systemText.trimmingCharacters(in: .whitespacesAndNewlines)
         return (system.isEmpty ? nil : system, contents)
     }
 
-    private static func appendMerged(role: String, text: String, into contents: inout [GeminiRequest.Content]) {
+    private static func appendMerged(
+        role: String,
+        parts: [GeminiRequest.Part],
+        into contents: inout [GeminiRequest.Content]
+    ) {
         if var last = contents.last, last.role == role {
-            last.parts.append(.init(text: "\n" + text))
+            last.parts.append(contentsOf: parts)
             contents[contents.count - 1] = last
         } else {
-            contents.append(.init(role: role, parts: [.init(text: text)]))
+            contents.append(.init(role: role, parts: parts))
         }
     }
 
@@ -361,7 +432,7 @@ enum RemoteLLMClient {
         if let openai = try? JSONDecoder().decode(OpenAIChunk.self, from: data),
            let message = openai.error?.message { return message }
         if let gemini = try? JSONDecoder().decode(GeminiChunk.self, from: data),
-           let message = gemini.error?.message ?? gemini.error?.status?.message { return message }
+           let message = gemini.error?.message { return message }
         if let anthropic = try? JSONDecoder().decode(AnthropicChunk.self, from: data),
            let message = anthropic.error?.message { return message }
         return nil
@@ -371,6 +442,64 @@ enum RemoteLLMClient {
         for (name, value) in headers where !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             request.setValue(value, forHTTPHeaderField: name)
         }
+    }
+
+    /// Gemini REST actions use `models/{id}:method`. `appendingPathComponent`
+    /// is fine on current Foundation, but building the colon form explicitly
+    /// keeps the URL identical to Google's documented path.
+    static func geminiActionURL(
+        base: URL,
+        model: String,
+        action: String,
+        query: [URLQueryItem] = []
+    ) -> URL {
+        let modelID = normalizedGeminiModelID(model)
+        let trimmed = base.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        var url = URL(string: "\(trimmed)/models/\(modelID):\(action)")
+            ?? base.appendingPathComponent("models/\(modelID):\(action)")
+        if !query.isEmpty {
+            url.append(queryItems: query)
+        }
+        return url
+    }
+
+    private static func applyCredential(
+        _ apiKey: String?,
+        protocol apiProtocol: RemoteAPIProtocol,
+        to request: inout URLRequest
+    ) {
+        guard let apiKey, !apiKey.isEmpty else { return }
+        if request.value(forHTTPHeaderField: "Authorization") != nil
+            || request.value(forHTTPHeaderField: "x-api-key") != nil
+            || request.value(forHTTPHeaderField: "x-goog-api-key") != nil {
+            return
+        }
+        switch apiProtocol {
+        case .gemini:
+            request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+        case .anthropicMessages:
+            request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        case .openAIChatCompletions, .openAIResponses:
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+    }
+
+    private static let thoughtSignatureLock = NSLock()
+    nonisolated(unsafe) private static var storedThoughtSignature: String?
+
+    static func takeLastThoughtSignature() -> String? {
+        thoughtSignatureLock.lock()
+        defer {
+            storedThoughtSignature = nil
+            thoughtSignatureLock.unlock()
+        }
+        return storedThoughtSignature
+    }
+
+    private static func rememberThoughtSignature(_ value: String) {
+        thoughtSignatureLock.lock()
+        storedThoughtSignature = value
+        thoughtSignatureLock.unlock()
     }
 
     /// Executes a streaming request with: one bounded retry on 429/503
@@ -617,8 +746,8 @@ enum RemoteLLMClient {
                 request.timeoutInterval = 120
                 // OpenRouter wants its app identity header for free-tier usage.
                 if provider == .openRouter {
-                    request.setValue("Beet Code", forHTTPHeaderField: "HTTP-Referer")
-                    request.setValue("Beet Code", forHTTPHeaderField: "X-Title")
+                    request.setValue("Vamp Assistant", forHTTPHeaderField: "HTTP-Referer")
+                    request.setValue("Vamp Assistant", forHTTPHeaderField: "X-Title")
                 }
                 request.httpBody = try JSONEncoder().encode(body)
                 return request
@@ -691,14 +820,15 @@ enum RemoteLLMClient {
     ) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream<String, Error>(bufferingPolicy: .unbounded) { continuation in
             let (system, contents) = prepareGeminiPayload(turns)
-            let modelID = normalizedGeminiModelID(model)
-            let url = baseURL
-                .appendingPathComponent("models/\(modelID):streamGenerateContent")
-                .appending(queryItems: [URLQueryItem(name: "alt", value: "sse")])
+            let url = geminiActionURL(
+                base: baseURL,
+                model: model,
+                action: "streamGenerateContent",
+                query: [URLQueryItem(name: "alt", value: "sse")])
             let body = GeminiRequest(
                 contents: contents,
                 tools: tools.isEmpty ? nil : NativeToolBridge.geminiTools(from: tools),
-                systemInstruction: system.map { .init(role: "user", parts: [.init(text: $0)]) },
+                systemInstruction: system.map { .init(parts: [.init(text: $0)]) },
                 generationConfig: .init(
                     temperature: temperature,
                     maxOutputTokens: maxTokens,
@@ -782,11 +912,17 @@ enum RemoteLLMClient {
             case "high", "xhigh", "max": budget = 24_576
             default: return nil
             }
-            return .init(thinkingBudget: budget, thinkingLevel: nil)
+            return .init(thinkingBudget: budget, thinkingLevel: nil, includeThoughts: budget > 0)
         }
         guard modelID.contains("gemini-3") else { return nil }
-        let level = effort.rawValue == "none" ? "minimal" : effort.rawValue
-        return .init(thinkingBudget: nil, thinkingLevel: level)
+        if effort.rawValue == "none" { return nil }
+        let level: String
+        switch effort.rawValue {
+        case "minimal", "low", "medium": level = effort.rawValue
+        case "high", "xhigh", "max": level = "high"
+        default: return nil
+        }
+        return .init(thinkingBudget: nil, thinkingLevel: level, includeThoughts: true)
     }
 
     /// Non-streaming connectivity probe used by the Settings "Test" button.
@@ -808,8 +944,7 @@ enum RemoteLLMClient {
         let request: URLRequest
         switch endpoint.effectiveProtocol {
         case .gemini:
-            let modelID = normalizedGeminiModelID(endpoint.model)
-            var r = URLRequest(url: base.appendingPathComponent("models/\(modelID):generateContent"))
+            var r = URLRequest(url: geminiActionURL(base: base, model: endpoint.model, action: "generateContent"))
             r.httpMethod = "POST"
             apply(endpoint.headers, to: &r)
             if !apiKey.isEmpty, r.value(forHTTPHeaderField: "x-goog-api-key") == nil {
@@ -907,8 +1042,7 @@ enum RemoteLLMClient {
             guard let base = provider.geminiBaseURL else {
                 throw RemoteLLMError.invalidConfiguration("no endpoint URL")
             }
-            let modelID = normalizedGeminiModelID(model)
-            let url = base.appendingPathComponent("models/\(modelID):generateContent")
+            let url = geminiActionURL(base: base, model: model, action: "generateContent")
             var r = URLRequest(url: url)
             r.httpMethod = "POST"
             r.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -954,8 +1088,8 @@ enum RemoteLLMClient {
             r.setValue(userAgent, forHTTPHeaderField: "User-Agent")
             r.timeoutInterval = 30
             if provider == .openRouter {
-                r.setValue("Beet Code", forHTTPHeaderField: "HTTP-Referer")
-                r.setValue("Beet Code", forHTTPHeaderField: "X-Title")
+                r.setValue("Vamp Assistant", forHTTPHeaderField: "HTTP-Referer")
+                r.setValue("Vamp Assistant", forHTTPHeaderField: "X-Title")
             }
             let body = OpenAIRequest(
                 model: model,
@@ -1007,15 +1141,20 @@ enum RemoteLLMClient {
         guard let base = endpoint.effectiveBaseURL else {
             throw RemoteLLMError.invalidConfiguration("no models endpoint")
         }
+        if endpoint.effectiveProtocol == .gemini {
+            return try await fetchGeminiModelProfiles(
+                base: base,
+                apiKey: apiKey,
+                headers: endpoint.headers,
+                session: session,
+                provider: endpoint.provider,
+                providerKey: endpoint.providerID,
+                providerDisplayName: endpoint.effectiveDisplayName)
+        }
         var request = URLRequest(url: base.appendingPathComponent("models"))
         request.timeoutInterval = 15
         apply(endpoint.headers, to: &request)
-        if let apiKey, !apiKey.isEmpty,
-           request.value(forHTTPHeaderField: "Authorization") == nil,
-           request.value(forHTTPHeaderField: "x-api-key") == nil,
-           request.value(forHTTPHeaderField: "x-goog-api-key") == nil {
-            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        }
+        applyCredential(apiKey, protocol: endpoint.effectiveProtocol, to: &request)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         let data = try await get(request, provider: endpoint.provider, session: session)
@@ -1023,25 +1162,7 @@ enum RemoteLLMClient {
         let profiles: [RemoteModelProfile]
         switch endpoint.effectiveProtocol {
         case .gemini:
-            let decoded = try JSONDecoder().decode(GeminiModels.self, from: data)
-            profiles = decoded.models.compactMap { entry in
-                guard let model = geminiModelID(from: entry) else { return nil }
-                return RemoteModelProfile(
-                    provider: endpoint.provider,
-                    model: model,
-                    displayName: entry.displayName,
-                    contextWindow: entry.inputTokenLimit,
-                    maxOutputTokens: entry.outputTokenLimit,
-                    supportsVision: entry.supportsVision,
-                    supportsTools: entry.supportedGenerationMethods.contains("generateContent"),
-                    supportsTemperature: true,
-                    providerKey: endpoint.providerID,
-                    providerDisplayName: endpoint.effectiveDisplayName,
-                    apiProtocol: endpoint.effectiveProtocol,
-                    baseURL: base.absoluteString,
-                    headers: endpoint.headers,
-                    apiKey: apiKey)
-            }
+            profiles = []
         case .anthropicMessages:
             let decoded = try JSONDecoder().decode(AnthropicModels.self, from: data)
             profiles = decoded.data.compactMap { model in
@@ -1096,39 +1217,11 @@ enum RemoteLLMClient {
             guard let base = provider.modelsURL else {
                 throw RemoteLLMError.invalidConfiguration("no Gemini models endpoint")
             }
-            var models: [RemoteModelProfile] = []
-            var pageToken: String?
-            // The API is paginated. A bounded loop prevents a malformed
-            // nextPageToken from turning Settings into an unbounded request.
-            for _ in 0..<10 {
-                var query = [URLQueryItem(name: "pageSize", value: "200")]
-                if let pageToken, !pageToken.isEmpty {
-                    query.append(URLQueryItem(name: "pageToken", value: pageToken))
-                }
-                var request = URLRequest(url: base.appending(queryItems: query))
-                request.timeoutInterval = 15
-                if let apiKey, !apiKey.isEmpty {
-                    request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
-                }
-                let data = try await get(request, provider: provider, session: session)
-                let decoded = try JSONDecoder().decode(GeminiModels.self, from: data)
-                models.append(contentsOf: decoded.models.compactMap { entry in
-                    guard let model = Self.geminiModelID(from: entry) else { return nil }
-                    return RemoteModelProfile(
-                        provider: provider,
-                        model: model,
-                        displayName: entry.displayName,
-                        contextWindow: entry.inputTokenLimit,
-                        maxOutputTokens: entry.outputTokenLimit,
-                        supportsVision: entry.supportsVision,
-                        supportsTools: entry.supportedGenerationMethods.contains("generateContent"),
-                        supportsReasoning: nil,
-                        supportsTemperature: true)
-                })
-                guard let next = decoded.nextPageToken, !next.isEmpty else { break }
-                pageToken = next
-            }
-            return deduplicatedProfiles(models)
+            return try await fetchGeminiModelProfiles(
+                base: base,
+                apiKey: apiKey,
+                session: session,
+                provider: provider)
         case .anthropic:
             guard let base = provider.modelsURL else {
                 throw RemoteLLMError.invalidConfiguration("no Anthropic models endpoint")
@@ -1157,8 +1250,8 @@ enum RemoteLLMClient {
             request.setValue("application/json", forHTTPHeaderField: "Accept")
             request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
             if provider == .openRouter {
-                request.setValue("Beet Code", forHTTPHeaderField: "HTTP-Referer")
-                request.setValue("Beet Code", forHTTPHeaderField: "X-Title")
+                request.setValue("Vamp Assistant", forHTTPHeaderField: "HTTP-Referer")
+                request.setValue("Vamp Assistant", forHTTPHeaderField: "X-Title")
             }
             let data = try await get(request, provider: provider, session: session)
             return deduplicatedProfiles(try compatibleModelProfiles(from: data, provider: provider))
@@ -1233,14 +1326,75 @@ enum RemoteLLMClient {
     /// Models returned by Gemini include capability metadata. Filtering on
     /// the name (the previous implementation required the literal word
     /// "gemini") drops valid aliases and future model families; the API's
-    /// `supportedGenerationMethods` field is the contract we actually need.
+    /// generation-method list is the contract we actually need. Google's
+    /// newer payloads use `supportedActions` in place of
+    /// `supportedGenerationMethods`.
     static func geminiModelID(from entry: GeminiModelEntry) -> String? {
         guard let name = entry.name else { return nil }
         let short = normalizedGeminiModelID(name)
-        guard !short.isEmpty,
-              entry.supportedGenerationMethods.contains("generateContent")
-        else { return nil }
+        guard !short.isEmpty else { return nil }
+        let blockedSubstrings = ["embedding", "imagen", "veo", "aqa", "lyria"]
+        let lower = short.lowercased()
+        if blockedSubstrings.contains(where: { lower.contains($0) }) { return nil }
+        if lower.hasPrefix("embed-") || lower.contains("-tts") || lower.contains("-image") { return nil }
+        let methods = entry.generationMethods
+        if !methods.isEmpty {
+            guard methods.contains("generateContent") else { return nil }
+        }
         return short
+    }
+
+    private static func fetchGeminiModelProfiles(
+        base: URL,
+        apiKey: String?,
+        headers: [String: String] = [:],
+        session: URLSession,
+        provider: LLMProvider,
+        providerKey: String? = nil,
+        providerDisplayName: String? = nil
+    ) async throws -> [RemoteModelProfile] {
+        var models: [RemoteModelProfile] = []
+        var pageToken: String?
+        let modelsBase = base.path.hasSuffix("/models") || base.lastPathComponent == "models"
+            ? base
+            : base.appendingPathComponent("models")
+        for _ in 0..<10 {
+            var query = [URLQueryItem(name: "pageSize", value: "200")]
+            if let pageToken, !pageToken.isEmpty {
+                query.append(URLQueryItem(name: "pageToken", value: pageToken))
+            }
+            var request = URLRequest(url: modelsBase.appending(queryItems: query))
+            request.timeoutInterval = 15
+            apply(headers, to: &request)
+            applyCredential(apiKey, protocol: .gemini, to: &request)
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+            let data = try await get(request, provider: provider, session: session)
+            let decoded = try JSONDecoder().decode(GeminiModels.self, from: data)
+            models.append(contentsOf: decoded.models.compactMap { entry in
+                guard let model = Self.geminiModelID(from: entry) else { return nil }
+                return RemoteModelProfile(
+                    provider: provider,
+                    model: model,
+                    displayName: entry.displayName,
+                    contextWindow: entry.inputTokenLimit,
+                    maxOutputTokens: entry.outputTokenLimit,
+                    supportsVision: entry.supportsVision,
+                    supportsTools: entry.generationMethods.contains("generateContent")
+                        || entry.generationMethods.isEmpty,
+                    supportsReasoning: nil,
+                    supportsTemperature: true,
+                    providerKey: providerKey,
+                    providerDisplayName: providerDisplayName,
+                    apiProtocol: .gemini,
+                    baseURL: base.absoluteString,
+                    headers: headers,
+                    apiKey: apiKey)
+            })
+            guard let next = decoded.nextPageToken, !next.isEmpty else { break }
+            pageToken = next
+        }
+        return deduplicatedProfiles(models)
     }
 
     /// The model catalog returns `models/foo`, while users often paste that
@@ -1259,8 +1413,14 @@ enum RemoteLLMClient {
         var description: String?
         var inputTokenLimit: Int?
         var outputTokenLimit: Int?
-        var supportedGenerationMethods: [String] = []
+        var supportedGenerationMethods: [String]? = nil
+        var supportedActions: [String]? = nil
         var supportsVision: Bool?
+
+        var generationMethods: [String] {
+            var seen = Set<String>()
+            return ((supportedGenerationMethods ?? []) + (supportedActions ?? [])).filter { seen.insert($0).inserted }
+        }
     }
 
     private struct GeminiModels: Codable, Sendable {
@@ -1304,6 +1464,18 @@ enum RemoteLLMClient {
         struct Choice: Codable, Sendable {
             struct Message: Codable, Sendable {
                 var content: String?
+
+                enum CodingKeys: String, CodingKey { case content }
+
+                init(from decoder: Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    content = RemoteLLMClient.decodeOpenAITextField(container, forKey: .content)
+                }
+
+                func encode(to encoder: Encoder) throws {
+                    var container = encoder.container(keyedBy: CodingKeys.self)
+                    try container.encodeIfPresent(content, forKey: .content)
+                }
             }
             var message: Message?
         }
@@ -1463,6 +1635,23 @@ enum RemoteLLMClient {
         var line: [UInt8] = []
         var done = false
         var toolAcc: [Int: (name: String, arguments: String)] = [:]
+        var lastAskUserQuestion = ""
+        func emitAskUserProgress() {
+            for (_, fragment) in toolAcc.sorted(by: { $0.key < $1.key }) {
+                guard let question = NativeToolBridge.askUserQuestionProgress(
+                    name: fragment.name, arguments: fragment.arguments)
+                else { continue }
+                if question.hasPrefix(lastAskUserQuestion) {
+                    let delta = String(question.dropFirst(lastAskUserQuestion.count))
+                    if !delta.isEmpty { onText(delta) }
+                    lastAskUserQuestion = question
+                } else if lastAskUserQuestion.isEmpty, !question.isEmpty {
+                    onText(question)
+                    lastAskUserQuestion = question
+                }
+                return
+            }
+        }
         for try await byte in bytes {
             clock.touch()
             if byte == 0x0A || byte == 0x0D {
@@ -1482,6 +1671,7 @@ enum RemoteLLMClient {
                             if let name, !name.isEmpty { current.name = name }
                             if let arguments { current.arguments += arguments }
                             toolAcc[index] = current
+                            emitAskUserProgress()
                         }
                     case .textAndToolFragment(let text, let index, let name, let arguments):
                         if !done {
@@ -1490,6 +1680,7 @@ enum RemoteLLMClient {
                             if let name, !name.isEmpty { current.name = name }
                             if let arguments { current.arguments += arguments }
                             toolAcc[index] = current
+                            emitAskUserProgress()
                         }
                     case .none: break
                     }
@@ -1512,15 +1703,18 @@ enum RemoteLLMClient {
                 if let name, !name.isEmpty { current.name = name }
                 if let arguments { current.arguments += arguments }
                 toolAcc[index] = current
+                emitAskUserProgress()
             case .textAndToolFragment(let text, let index, let name, let arguments):
                 onText(text)
                 var current = toolAcc[index] ?? ("", "")
                 if let name, !name.isEmpty { current.name = name }
                 if let arguments { current.arguments += arguments }
                 toolAcc[index] = current
+                emitAskUserProgress()
             case .none: break
             }
         }
+        emitAskUserProgress()
         if let fence = NativeToolBridge.serializeAccumulated(toolAcc) {
             onText(fence)
         }
@@ -1535,6 +1729,25 @@ enum RemoteLLMClient {
             var name: String?
             var arguments: String?
         }
+    }
+
+    /// OpenAI-compatible gateways sometimes send `content` as a string and
+    /// sometimes as an array of `{type,text}` parts. A strict String decode
+    /// drops the whole chunk or ping response.
+    private struct OpenAITextPart: Codable { var text: String? }
+
+    static func decodeOpenAITextField<Key: CodingKey>(
+        _ container: KeyedDecodingContainer<Key>,
+        forKey key: Key
+    ) -> String? {
+        if let text = try? container.decode(String.self, forKey: key) {
+            return text
+        }
+        if let parts = try? container.decode([OpenAITextPart].self, forKey: key) {
+            let text = parts.compactMap(\.text).joined()
+            return text.isEmpty ? nil : text
+        }
+        return nil
     }
 
     /// Extracts the content delta (and any usage report) from an OpenAI,
@@ -1598,7 +1811,13 @@ enum RemoteLLMClient {
             let parts = gemini.candidates?.first?.content?.parts ?? []
             var textParts: [String] = []
             var tool: Extracted.ToolFragment?
+            var thoughtSignature: String?
             for (index, part) in parts.enumerated() {
+                if thoughtSignature == nil,
+                   let signature = part.thoughtSignature,
+                   !signature.isEmpty {
+                    thoughtSignature = signature
+                }
                 if tool == nil, let functionCall = part.functionCall,
                    let name = functionCall.name, !name.isEmpty {
                     let arguments: String
@@ -1612,6 +1831,9 @@ enum RemoteLLMClient {
                 }
                 guard let text = part.text, !text.isEmpty else { continue }
                 textParts.append(part.thought == true ? "<think>\(text)</think>" : text)
+            }
+            if let thoughtSignature {
+                rememberThoughtSignature(thoughtSignature)
             }
             let text = textParts.joined()
             if !text.isEmpty || tool != nil {

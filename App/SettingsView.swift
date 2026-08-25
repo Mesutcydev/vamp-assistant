@@ -48,7 +48,7 @@ struct SettingsView: View {
                 .tabItem { Label("Plugins", systemImage: "puzzlepiece") }
                 .tag(Tab.plugins)
         }
-        .frame(minWidth: 640, idealWidth: 680, minHeight: 520)
+        .frame(minWidth: 780, idealWidth: 900, minHeight: 600, idealHeight: 680)
         .onReceive(NotificationCenter.default.publisher(for: .openProviderSettings)) { _ in
             tab = .providers
         }

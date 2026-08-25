@@ -29,6 +29,21 @@ final class NativeToolAndAppBuildTests: XCTestCase {
         let declarations = try XCTUnwrap(json[0]["functionDeclarations"] as? [[String: Any]])
         XCTAssertEqual(declarations[0]["name"] as? String, "read_file")
         XCTAssertNotNil(declarations[0]["parameters"] as? [String: Any])
+        XCTAssertNil((declarations[0]["parameters"] as? [String: Any])?["additionalProperties"])
+    }
+
+    func testGeminiFunctionSchemaStripsUnsupportedKeys() throws {
+        let spec = NativeToolSpec(
+            name: "disk_space_status",
+            description: "Disk",
+            schemaText: #"{"type":"object","properties":{},"additionalProperties":false,"$schema":"https://json-schema.org/draft/07/schema"}"#)
+        let data = try JSONEncoder().encode(NativeToolBridge.geminiTools(from: [spec]))
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        let parameters = try XCTUnwrap(
+            (json[0]["functionDeclarations"] as? [[String: Any]])?[0]["parameters"] as? [String: Any])
+        XCTAssertNil(parameters["additionalProperties"])
+        XCTAssertNil(parameters["$schema"])
+        XCTAssertEqual(parameters["type"] as? String, "object")
     }
 
     func testSerializeAccumulatedEmitsParserFence() {
@@ -77,6 +92,41 @@ final class NativeToolAndAppBuildTests: XCTestCase {
         let calls = ToolParser.parse(box.texts[0])
         XCTAssertEqual(calls.map(\.name), ["read_file"])
         XCTAssertEqual(calls.first?.string("path"), "X.swift")
+    }
+
+    func testConsumeSSEStreamsAskUserQuestionThenFence() async throws {
+        let raw = #"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"ask_user","arguments":""}}]}}]}"# + "\n"
+            + #"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"question\":\"Which port?"}}]}}]}"# + "\n"
+            + #"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"}"}}]}}]}"# + "\n"
+            + "data: [DONE]\n"
+        let stream = AsyncThrowingStream<UInt8, Error> { continuation in
+            for byte in Array(Data(raw.utf8)) { continuation.yield(byte) }
+            continuation.finish()
+        }
+        final class Box: @unchecked Sendable { var texts: [String] = [] }
+        let box = Box()
+        try await RemoteLLMClient.consumeSSE(bytes: stream, onText: { box.texts.append($0) }, onUsage: { _ in })
+        XCTAssertTrue(box.texts.joined().contains("Which port?"), box.texts.joined())
+        let calls = ToolParser.parse(box.texts.joined())
+        XCTAssertEqual(calls.map(\.name), ["ask_user"])
+        XCTAssertEqual(calls.first?.askUserQuestion(), "Which port?")
+    }
+
+    func testPartialJSONStringReadsUnclosedValue() {
+        XCTAssertEqual(
+            NativeToolBridge.partialJSONString(
+                in: #"{"question":"Hel"#,
+                keys: ["question"]),
+            "Hel")
+        XCTAssertEqual(
+            NativeToolBridge.askUserQuestionProgress(
+                name: "ask_user",
+                arguments: #"{"query":"Ship it?"}"#),
+            "Ship it?")
+        XCTAssertNil(
+            NativeToolBridge.askUserQuestionProgress(
+                name: "read_file",
+                arguments: #"{"path":"A.swift"}"#))
     }
 
     func testBuildDiagnosticsPicksXcodebuildForXcodeproj() throws {
@@ -164,5 +214,18 @@ final class NativeToolAndAppBuildTests: XCTestCase {
     func testReasoningHeuristicIncludesCodex() {
         XCTAssertTrue(RemoteLLMClient.usesMaxCompletionTokens("codex-mini"))
         XCTAssertTrue(RemoteLLMClient.usesMaxCompletionTokens("gpt-5.2"))
+    }
+
+    func testVisionOpenAIArrayContentIsVisibleText() throws {
+        let json = #"{"choices":[{"message":{"content":[{"type":"text","text":"a cat"}]}}]}"#
+        XCTAssertEqual(try VisionProvider.visibleOpenAIText(from: Data(json.utf8)), "a cat")
+    }
+
+    func testVisionGeminiSkipsThoughtParts() {
+        let parts: [[String: Any]] = [
+            ["thought": true, "text": "planning"],
+            ["text": "a red bicycle"],
+        ]
+        XCTAssertEqual(VisionProvider.visibleGeminiText(from: parts), "a red bicycle")
     }
 }

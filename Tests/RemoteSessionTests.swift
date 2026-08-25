@@ -55,8 +55,8 @@ final class RemoteSessionTests: XCTestCase {
             .stopped)
     }
 
-    func testRemotePageIsBeetCodeSessionSurface() {
-        XCTAssertTrue(RemoteSessionPage.html.contains("Beet Code Remote"))
+    func testRemotePageIsVampAssistantSessionSurface() {
+        XCTAssertTrue(RemoteSessionPage.html.contains("Vamp Assistant"))
         XCTAssertTrue(RemoteSessionPage.html.contains("Continue this coding task"))
         XCTAssertTrue(RemoteSessionPage.html.contains("/api/sessions/"))
         XCTAssertTrue(RemoteSessionPage.html.contains("id=\"session-list\""))
@@ -66,10 +66,12 @@ final class RemoteSessionTests: XCTestCase {
         XCTAssertTrue(RemoteSessionPage.html.contains("streamingText"))
         XCTAssertTrue(RemoteSessionPage.html.contains("phaseLabel"))
         XCTAssertTrue(RemoteSessionPage.html.contains("max-width: 720px"))
-        XCTAssertTrue(RemoteSessionPage.html.contains("/assets/beetlogo.png"))
+        XCTAssertFalse(RemoteSessionPage.html.contains("/assets/beetlogo.png"))
+        XCTAssertTrue(RemoteSessionPage.html.contains("class=\"brand-logo\""))
         XCTAssertTrue(RemoteSessionPage.html.contains("data-theme-choice=\"light\""))
         XCTAssertTrue(RemoteSessionPage.html.contains("data-theme-choice=\"dark\""))
-        XCTAssertTrue(RemoteSessionPage.html.contains("data-theme-choice=\"beet\""))
+        XCTAssertFalse(RemoteSessionPage.html.contains("data-theme-choice=\"beet\""))
+        XCTAssertTrue(RemoteSessionPage.html.contains("/assets/vamp-backdrop.png"))
         XCTAssertTrue(RemoteSessionPage.html.contains("querySelectorAll('[data-theme-choice]')"))
         XCTAssertFalse(RemoteSessionPage.html.contains("$('[data-theme-choice"))
         XCTAssertTrue(RemoteSessionPage.html.contains("height: 100svh"))
@@ -130,6 +132,60 @@ final class RemoteSessionTests: XCTestCase {
         XCTAssertFalse(RemoteSessionPorts.candidates(preferred: 9575).contains(where: RemoteSessionPorts.reservedForeignPorts.contains))
         XCTAssertEqual(RemoteSessionHost.tokenLifetime, 30 * 24 * 60 * 60)
         XCTAssertEqual(RemoteSessionHost.maxRemoteFileBytes, 20 * 1024 * 1024)
+    }
+
+    func testRemoteRunOptionsStayOnTheSessionAndDoNotWriteSettings() {
+        let settings = SettingsStore.shared
+        let previousMode = settings.agentMode
+        let previousFullAccess = settings.remoteFullAccessEnabled
+        let previousPlanMode = settings.planMode
+        let previousAutoEdits = settings.autoApproveEdits
+        let previousAutoCommands = settings.autoApproveCommands
+        settings.agentMode = .goal
+        settings.remoteFullAccessEnabled = false
+        settings.planMode = false
+        settings.autoApproveEdits = false
+        settings.autoApproveCommands = false
+        defer {
+            settings.agentMode = previousMode
+            settings.remoteFullAccessEnabled = previousFullAccess
+            settings.planMode = previousPlanMode
+            settings.autoApproveEdits = previousAutoEdits
+            settings.autoApproveCommands = previousAutoCommands
+        }
+
+        let controller = AgentSessionController(
+            engine: FakeLLMEngine(),
+            settings: settings,
+            thermal: ThermalMonitor())
+        controller.applyRemoteRunOptions(autoMode: true, fullAccess: true)
+        XCTAssertEqual(settings.agentMode, .goal)
+        XCTAssertFalse(settings.remoteFullAccessEnabled)
+        XCTAssertFalse(settings.planMode)
+        XCTAssertFalse(settings.autoApproveEdits)
+        XCTAssertFalse(settings.autoApproveCommands)
+        controller.clearRemoteRunOptions()
+        XCTAssertEqual(settings.agentMode, .goal)
+        XCTAssertFalse(settings.remoteFullAccessEnabled)
+    }
+
+    func testRemoteIsolationAttachesAPrivateBrowserForTheBot() {
+        let controller = AgentSessionController(
+            engine: FakeLLMEngine(),
+            settings: SettingsStore.shared,
+            thermal: ThermalMonitor())
+        let previous = BrowserPresentation.shared.controller
+        defer { BrowserPresentation.shared.controller = previous }
+        let session = BrowserSession(id: UUID(), name: "Builder")
+        controller.applyRemoteIsolation(
+            computerControl: false,
+            linuxContainer: nil,
+            browser: session)
+        XCTAssertEqual(controller.remoteBrowserSession, session)
+        XCTAssertEqual(BrowserPresentation.shared.controller.ownerLabel, "Builder")
+        controller.clearRemoteRunOptions()
+        XCTAssertNil(controller.remoteBrowserSession)
+        XCTAssertTrue(BrowserPresentation.shared.controller === BrowserController.shared)
     }
 
     func testRemoteSharingSanitizesAndKeepsFilesInsideExchangeFolder() throws {
@@ -351,6 +407,24 @@ final class RemoteSessionTests: XCTestCase {
                 source: "chatgpt",
                 detail: "ChatGPT account")]
         }
+        var botRun = BotRunRecord.queued(
+            profileID: "builder", profileName: "Builder",
+            modelID: "chatgpt|gpt-5.6-luna", prompt: "Build it")
+        botRun.state = .running
+        botRun.phase = "Working"
+        host.botRunsHandler = { [botRun] in [botRun] }
+        host.startBotRunHandler = { _, _, _ in (botRun.id, nil) }
+        host.orchestrateBotRunsHandler = { _, prompt in
+            if prompt == "Ship the feature" {
+                return (Optional(botRun.id), Optional<String>.none)
+            }
+            return (Optional<UUID>.none, Optional("Unexpected objective"))
+        }
+        host.steerBotRunHandler = { id, message in id == botRun.id && message == "Focus tests" }
+        host.approveBotRunHandler = { id, approved in id == botRun.id && approved }
+        host.answerBotRunHandler = { id, answer in id == botRun.id && answer == "Use option A" }
+        host.resumeBotRunHandler = { id in id == botRun.id }
+        host.stopBotRunHandler = { id in id == botRun.id }
         // A locked/unavailable encrypted queue must not turn a successfully
         // paired idle remote session into a read-only surface.
         host.enqueueTaskHandler = { _, _ in nil }
@@ -365,7 +439,7 @@ final class RemoteSessionTests: XCTestCase {
 
         let page = try await request(baseURL, path: "/")
         XCTAssertEqual(page.status, 200)
-        XCTAssertTrue(page.body.contains("Beet Code Remote"))
+        XCTAssertTrue(page.body.contains("Vamp Assistant"))
         XCTAssertTrue(page.body.contains("Start a chat, or pick a bot."))
         XCTAssertFalse(page.body.contains("Choose a bot to start."))
         XCTAssertNotNil(page.headers["Content-Security-Policy"])
@@ -373,6 +447,9 @@ final class RemoteSessionTests: XCTestCase {
         let logo = try await request(baseURL, path: "/assets/beetlogo.png")
         XCTAssertEqual(logo.status, 200)
         XCTAssertEqual(logo.headers["content-type"], "image/png")
+        let backdrop = try await request(baseURL, path: "/assets/vamp-backdrop.png")
+        XCTAssertEqual(backdrop.status, 200)
+        XCTAssertEqual(backdrop.headers["content-type"], "image/png")
         let builderThumb = try await request(baseURL, path: "/assets/bot-builder.png")
         XCTAssertEqual(builderThumb.status, 200)
         XCTAssertEqual(builderThumb.headers["content-type"], "image/png")
@@ -418,6 +495,41 @@ final class RemoteSessionTests: XCTestCase {
         XCTAssertEqual(accountModel["id"]?.stringValue, "chatgpt|gpt-5.6-luna")
         XCTAssertEqual(accountModel["source"]?.stringValue, "chatgpt")
 
+        let botRuns = try await request(baseURL, path: "/api/bot-runs", token: token)
+        XCTAssertEqual(botRuns.status, 200)
+        XCTAssertTrue(botRuns.body.contains(botRun.id.uuidString))
+        XCTAssertTrue(botRuns.body.contains("Builder"))
+        let startedBot = try await request(
+            baseURL, path: "/api/bot-runs", method: "POST", token: token,
+            body: Data(#"{"profileID":"builder","prompt":"Build it"}"#.utf8))
+        XCTAssertEqual(startedBot.status, 202)
+        XCTAssertEqual(startedBot.json.objectValue?["runID"]?.stringValue, botRun.id.uuidString)
+        let workflow = try await request(
+            baseURL, path: "/api/bot-workflows", method: "POST", token: token,
+            body: Data(#"{"prompt":"Ship the feature"}"#.utf8))
+        XCTAssertEqual(workflow.status, 202)
+        XCTAssertEqual(workflow.json.objectValue?["workflowID"]?.stringValue, botRun.id.uuidString)
+        let steeredBot = try await request(
+            baseURL, path: "/api/bot-runs/\(botRun.id.uuidString)/steer", method: "POST", token: token,
+            body: Data(#"{"message":"Focus tests"}"#.utf8))
+        XCTAssertEqual(steeredBot.status, 202)
+        let approvedBot = try await request(
+            baseURL, path: "/api/bot-runs/\(botRun.id.uuidString)/approve", method: "POST", token: token,
+            body: Data("{}".utf8))
+        XCTAssertEqual(approvedBot.status, 202)
+        let answeredBot = try await request(
+            baseURL, path: "/api/bot-runs/\(botRun.id.uuidString)/answer", method: "POST", token: token,
+            body: Data(#"{"answer":"Use option A"}"#.utf8))
+        XCTAssertEqual(answeredBot.status, 202)
+        let resumedBot = try await request(
+            baseURL, path: "/api/bot-runs/\(botRun.id.uuidString)/resume", method: "POST", token: token,
+            body: Data("{}".utf8))
+        XCTAssertEqual(resumedBot.status, 202)
+        let stoppedBot = try await request(
+            baseURL, path: "/api/bot-runs/\(botRun.id.uuidString)/stop", method: "POST", token: token,
+            body: Data("{}".utf8))
+        XCTAssertEqual(stoppedBot.status, 200)
+
         let deniedClipboard = try await request(baseURL, path: "/api/clipboard", token: token)
         XCTAssertEqual(deniedClipboard.status, 403)
         allowClipboard = true
@@ -452,6 +564,22 @@ final class RemoteSessionTests: XCTestCase {
         let sessions = try await request(baseURL, path: "/api/sessions", token: token)
         XCTAssertEqual(sessions.status, 200)
         XCTAssertTrue(sessions.body.contains(sessionID.uuidString))
+        XCTAssertTrue(sessions.body.contains("\"mode\""))
+        XCTAssertTrue(sessions.body.contains("\"workspacePath\""))
+
+        let workspaceList = try await request(baseURL, path: "/api/workspaces", token: token)
+        XCTAssertEqual(workspaceList.status, 200)
+        XCTAssertNotNil(workspaceList.json.objectValue?["workspaces"]?.arrayValue)
+        XCTAssertNotNil(workspaceList.json.objectValue?["createParent"]?.stringValue)
+        XCTAssertTrue(workspaceList.body.contains(workspace.url.lastPathComponent))
+
+        let rejectedFolder = try await request(
+            baseURL,
+            path: "/api/workspaces",
+            method: "POST",
+            token: token,
+            body: Data("{\"name\":\"../secret\"}".utf8))
+        XCTAssertEqual(rejectedFolder.status, 400)
 
         let liveSnapshot = try await firstSSEDataLine(
             baseURL,

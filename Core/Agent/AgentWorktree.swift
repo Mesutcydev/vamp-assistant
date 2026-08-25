@@ -148,12 +148,12 @@ struct AgentWorktree: Sendable {
 private extension AgentWorktree {
     static func temporaryCommit(tree: String, in workspace: URL) throws -> String {
         var environment = ShellRunner.sanitizedEnvironment()
-        environment["GIT_AUTHOR_NAME"] = "Beet Code"
+        environment["GIT_AUTHOR_NAME"] = "Vamp Assistant"
         environment["GIT_AUTHOR_EMAIL"] = "agent@beetcode.local"
-        environment["GIT_COMMITTER_NAME"] = "Beet Code"
+        environment["GIT_COMMITTER_NAME"] = "Vamp Assistant"
         environment["GIT_COMMITTER_EMAIL"] = "agent@beetcode.local"
 
-        var arguments = ["commit-tree", tree, "-m", "Beet Code isolated agent base"]
+        var arguments = ["commit-tree", tree, "-m", "Vamp Assistant isolated agent base"]
         let head = try git(["rev-parse", "--verify", "HEAD"], in: workspace)
         if head.exitCode == 0 {
             let parent = head.output.trimmingCharacters(in: .whitespacesAndNewlines)

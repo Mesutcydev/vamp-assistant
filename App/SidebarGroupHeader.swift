@@ -21,7 +21,7 @@ struct SidebarGroupHeader: View {
                 .frame(width: 9)
             headerGlyph
             Text(name)
-                .font(.system(size: 11, weight: .semibold))
+                .font(AppFont.navigationGroup)
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -50,13 +50,13 @@ struct SidebarGroupHeader: View {
                 .resizable()
                 .interpolation(.high)
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 15, height: 15)
+                .frame(width: 16, height: 16)
                 .clipShape(RoundedRectangle(cornerRadius: 3.5, style: .continuous))
         } else {
             Image(systemName: icon)
-                .font(.caption2.weight(.semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Theme.textTertiary)
-                .frame(width: 15, height: 15)
+                .frame(width: 16, height: 16)
         }
     }
 }

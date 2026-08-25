@@ -38,8 +38,8 @@ enum ExperimentalInferencePreferences {
 }
 
 /// App color appearance. `system` follows macOS; `light`/`dark` force it;
-/// `beet` is the identity theme — a dark appearance whose neutrals are
-/// tinted from Beet Red (Pantone 19-2030 TCX) instead of cool slate.
+/// `beet` is retained only to decode settings written by legacy builds and is
+/// migrated to `dark` before it reaches the interface.
 /// Dark is the default. Kept Foundation-only (no SwiftUI) so the CLI target
 /// can compile this file; the SwiftUI `ColorScheme` mapping lives in the app.
 enum AppAppearance: String, CaseIterable, Codable, Identifiable, Sendable {
@@ -48,6 +48,8 @@ enum AppAppearance: String, CaseIterable, Codable, Identifiable, Sendable {
     case dark
     case beet
 
+    static let allCases: [AppAppearance] = [.system, .light, .dark]
+
     var id: String { rawValue }
 
     var label: String {
@@ -55,7 +57,7 @@ enum AppAppearance: String, CaseIterable, Codable, Identifiable, Sendable {
         case .system: "System"
         case .light: "Light"
         case .dark: "Dark"
-        case .beet: "Beet"
+        case .beet: "Dark"
         }
     }
 }
@@ -117,7 +119,8 @@ enum AgentMode: String, CaseIterable, Codable, Identifiable, Sendable {
 
 /// Accent color palettes. Every entry ships a light+dark hex pair for both
 /// the accent and its brighter variant; `Theme` resolves them at draw time.
-/// `beetRed` is the calm warm-plum identity default.
+/// Old case names remain decodable for settings compatibility, but every case
+/// resolves to the single monochrome palette.
 /// Foundation-only (no SwiftUI) so the CLI target can compile this file;
 /// the SwiftUI swatch extension lives in App/Theme.swift.
 enum AccentPalette: String, CaseIterable, Codable, Identifiable, Sendable {
@@ -127,6 +130,8 @@ enum AccentPalette: String, CaseIterable, Codable, Identifiable, Sendable {
     case forest
     case amber
     case graphite
+
+    static var allCases: [AccentPalette] { [.graphite] }
 
     var id: String { rawValue }
 
@@ -139,36 +144,13 @@ enum AccentPalette: String, CaseIterable, Codable, Identifiable, Sendable {
 
     var label: String {
         switch self {
-        case .beetRed: "Beet Red"
-        case .indigo: "Indigo"
-        case .ocean: "Ocean"
-        case .forest: "Forest"
-        case .amber: "Amber"
-        case .graphite: "Graphite"
+        case .beetRed, .indigo, .ocean, .forest, .amber, .graphite: "Monochrome"
         }
     }
 
     var hexes: Hexes {
-        switch self {
-        case .beetRed:
-            Hexes(accentLight: 0x8A3556, accentDark: 0x7A2E48,
-                  brightLight: 0xA6486A, brightDark: 0x9A4562)
-        case .indigo:
-            Hexes(accentLight: 0x6C5CE7, accentDark: 0x8B7BFF,
-                  brightLight: 0x7C6CF7, brightDark: 0xA99BFF)
-        case .ocean:
-            Hexes(accentLight: 0x1E6FD9, accentDark: 0x5AA0FF,
-                  brightLight: 0x2B7FFF, brightDark: 0x7AB4FF)
-        case .forest:
-            Hexes(accentLight: 0x1E7A52, accentDark: 0x35D6A0,
-                  brightLight: 0x2A8F62, brightDark: 0x5CE0B4)
-        case .amber:
-            Hexes(accentLight: 0xB87400, accentDark: 0xF5B23D,
-                  brightLight: 0xD08A10, brightDark: 0xFFC861)
-        case .graphite:
-            Hexes(accentLight: 0x4A5060, accentDark: 0x9AA1B2,
-                  brightLight: 0x5B616E, brightDark: 0xB4BAC9)
-        }
+        Hexes(accentLight: 0x303030, accentDark: 0x686868,
+              brightLight: 0x505050, brightDark: 0x888888)
     }
 }
 
@@ -217,6 +199,7 @@ final class SettingsStore: ObservableObject {
             DefaultsKeys.remoteAccessConsentCompleted: false,
             DefaultsKeys.remoteClipboardSharingEnabled: false,
             DefaultsKeys.remoteFileSharingEnabled: false,
+            DefaultsKeys.remoteMacControlEnabled: false,
             DefaultsKeys.computerControlEnabled: false,
             DefaultsKeys.intelligenceInspectorEnabled: false,
             DefaultsKeys.enterSends: true,
@@ -262,26 +245,26 @@ final class SettingsStore: ObservableObject {
     /// Color appearance. Defaults to native Dark; `system` follows macOS.
     var appearance: AppAppearance {
         get {
-            AppAppearance(
+            let value = AppAppearance(
                 rawValue: defaults.string(forKey: DefaultsKeys.appearance)
                     ?? AppAppearance.dark.rawValue) ?? .dark
+            return value == .beet ? .dark : value
         }
         set {
-            defaults.set(newValue.rawValue, forKey: DefaultsKeys.appearance)
+            defaults.set((newValue == .beet ? AppAppearance.dark : newValue).rawValue,
+                         forKey: DefaultsKeys.appearance)
             objectWillChange.send()
         }
     }
 
-    /// Accent color palette. Defaults to Beet Red (the app identity).
+    /// Old stored palette values migrate to the single monochrome palette.
     /// `Theme.applyPalette` is invoked from the app layer on change.
     var accentPalette: AccentPalette {
         get {
-            AccentPalette(
-                rawValue: defaults.string(forKey: DefaultsKeys.accentPalette)
-                    ?? AccentPalette.beetRed.rawValue) ?? .beetRed
+            .graphite
         }
         set {
-            defaults.set(newValue.rawValue, forKey: DefaultsKeys.accentPalette)
+            defaults.set(AccentPalette.graphite.rawValue, forKey: DefaultsKeys.accentPalette)
             objectWillChange.send()
         }
     }
@@ -563,6 +546,16 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    /// Off by default. Paired phones can stream the Mac screen and send
+    /// clicks, keys, and scrolls only after this switch and TCC grants.
+    var remoteMacControlEnabled: Bool {
+        get { defaults.bool(forKey: DefaultsKeys.remoteMacControlEnabled) }
+        set {
+            defaults.set(newValue, forKey: DefaultsKeys.remoteMacControlEnabled)
+            objectWillChange.send()
+        }
+    }
+
     /// When true, Enter sends and Shift+Enter inserts a newline.
     /// When false, Enter inserts a newline and only ⌘↩ sends.
     var enterSends: Bool {
@@ -686,6 +679,7 @@ final class SettingsStore: ObservableObject {
         static let remoteAccessConsentCompleted = "remoteAccessConsentCompleted.v1"
         static let remoteClipboardSharingEnabled = "remoteClipboardSharingEnabled"
         static let remoteFileSharingEnabled = "remoteFileSharingEnabled"
+        static let remoteMacControlEnabled = "remoteMacControlEnabled"
         static let computerControlEnabled = "computerControlEnabled"
         static let intelligenceInspectorEnabled = "intelligenceInspectorEnabled"
         static let enterSends = "enterSends"

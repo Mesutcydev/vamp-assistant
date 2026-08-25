@@ -22,7 +22,7 @@ enum AgentEvent: Sendable, Equatable {
     case toolCallStarted(ToolInvocation)
     case awaitingApproval(ApprovalRequest)
     case toolCallFinished(ToolInvocation, output: String, failed: Bool)
-    case askUser(UUID, String)
+    case askUser(UUID, String, [String])
     case checkpointCreated(SessionCheckpoint)
     /// Checkpointing is unavailable for this workspace (for example, a fresh
     /// folder without Git). The approved mutation still executes, but undo is
@@ -45,6 +45,9 @@ enum AgentEvent: Sendable, Equatable {
     case planProposed(String)
     /// The task state machine advanced.
     case phaseChanged(AgentPhase)
+    /// The user redirected the current turn. The loop keeps running with this
+    /// instruction as the next user message.
+    case userSteered(String)
     case finished(AgentFinish)
 }
 

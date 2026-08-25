@@ -59,12 +59,12 @@ final class HFTokenStore: ObservableObject {
         return value
     }
 
-    /// Invalidates the in-memory token cache (e.g. after the user changes or
-    /// removes the token).
-    nonisolated static func invalidateTokenCache() {
+    /// Updates both value and loaded state so save/delete never cause an
+    /// immediate second Keychain read from SwiftUI's next render pass.
+    nonisolated static func cacheToken(_ token: String?) {
         tokenCacheLock.lock()
-        cachedToken = nil
-        tokenWasRead = false
+        cachedToken = token
+        tokenWasRead = true
         tokenCacheLock.unlock()
     }
     /// nil = unknown, false = no token, true = validated
@@ -83,15 +83,15 @@ final class HFTokenStore: ObservableObject {
     func saveToken(_ token: String) {
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        Keychain.write(trimmed, service: service, account: account)
-        Self.invalidateTokenCache()
+        guard Keychain.write(trimmed, service: service, account: account) else { return }
+        Self.cacheToken(trimmed)
         validated = nil
         username = nil
     }
 
     func deleteToken() {
         Keychain.delete(service: service, account: account)
-        Self.invalidateTokenCache()
+        Self.cacheToken(nil)
         validated = false
         username = nil
     }

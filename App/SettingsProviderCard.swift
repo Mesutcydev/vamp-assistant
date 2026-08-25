@@ -51,7 +51,7 @@ struct ProviderCard: View {
             // icon-header chrome every SettingsCard wears.
             HStack(spacing: Spacing.sm) {
                 Image(systemName: provider == .custom ? "server.rack" : "cloud.fill")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold, design: .serif))
                     .foregroundStyle(Theme.accent)
                 Text(provider.displayName)
                     .font(.callout.weight(.semibold))
@@ -352,6 +352,11 @@ struct ProviderCard: View {
                     refreshingModels = false
                     if profiles.isEmpty {
                         modelListError = "The provider returned no usable models — type a model id manually or check its account access."
+                    } else if !liveModels.contains(modelDraft) {
+                        modelDraft = liveModels.contains(provider.defaultModel)
+                            ? provider.defaultModel
+                            : liveModels[0]
+                        persistModelDraft()
                     }
                 }
             } catch {
@@ -505,7 +510,13 @@ struct ProviderCard: View {
                         liveProfiles = profiles
                         liveModels = profiles.map(\.model)
                         AppPreferencesStore.shared.saveRemoteModelProfiles(profiles)
-                        testState = .ok("Key accepted. \(model) is unavailable for this account; choose one of the \(profiles.count) available models.")
+                        if !liveModels.contains(modelDraft) {
+                            modelDraft = liveModels.contains(provider.defaultModel)
+                                ? provider.defaultModel
+                                : liveModels[0]
+                            persistModelDraft()
+                        }
+                        testState = .ok("Key accepted. \(model) is unavailable for this account; using \(modelDraft) from \(profiles.count) available models.")
                         return
                     }
                 }

@@ -146,8 +146,9 @@ final class ProviderAuditTests: XCTestCase {
         let (system, contents) = RemoteLLMClient.prepareGeminiPayload(turns)
         XCTAssertEqual(system, "be terse")
         XCTAssertEqual(contents.count, 3, "adjacent same-role turns must merge")
-        XCTAssertEqual(contents.map(\.role), ["user", "model", "user"])
-        XCTAssertTrue(contents[2].parts.contains { ($0.text ?? "").contains("[tool result] d") })
+        XCTAssertEqual(contents.compactMap(\.role), ["user", "model", "user"])
+        XCTAssertEqual(contents[2].parts.first?.functionResponse?.name, "tool")
+        XCTAssertFalse(contents[2].parts.contains { ($0.text ?? "").contains("[tool result]") })
         // No system text may leak into user content.
         XCTAssertFalse(contents[0].parts.contains { ($0.text ?? "").contains("be terse") })
     }
@@ -198,7 +199,9 @@ final class ProviderAuditTests: XCTestCase {
                        "https://api.longcat.chat/openai/v1")
         XCTAssertEqual(LLMProvider.longCat.modelsURL?.absoluteString,
                        "https://api.longcat.chat/openai/v1/models")
-        XCTAssertEqual(LLMProvider.gemini.defaultModel, "gemini-3.7-flash")
+        XCTAssertEqual(LLMProvider.gemini.defaultModel, "gemini-3.5-flash")
+        XCTAssertFalse(LLMProvider.openRouter.suggestedModels.contains("google/gemini-3.7-flash"))
+        XCTAssertTrue(LLMProvider.openRouter.suggestedModels.contains("google/gemini-3.5-flash"))
         XCTAssertEqual(LLMProvider.openCode.openAICompatibleBaseURL?.absoluteString,
                        "https://opencode.ai/zen/v1")
         XCTAssertEqual(LLMProvider.openCode.modelsURL?.absoluteString,
@@ -222,7 +225,7 @@ final class ProviderAuditTests: XCTestCase {
             RemoteModelCatalog.reasoningEfforts(provider: .openAI, model: "gpt-5.1").map(\.rawValue),
             ["none", "low", "medium", "high"])
         XCTAssertEqual(
-            RemoteModelCatalog.reasoningEfforts(provider: .gemini, model: "gemini-3.7-flash").map(\.rawValue),
+            RemoteModelCatalog.reasoningEfforts(provider: .gemini, model: "gemini-3.5-flash").map(\.rawValue),
             ["minimal", "low", "medium", "high"])
     }
 
@@ -457,6 +460,9 @@ final class ProviderAuditTests: XCTestCase {
         XCTAssertEqual(coder.supportsTools, true)
         XCTAssertEqual(coder.supportsVision, true)
         XCTAssertEqual(providerFixtureStore.snapshotRequests().count, 2)
+        XCTAssertEqual(
+            providerFixtureStore.snapshotRequests().first?.value(forHTTPHeaderField: "x-goog-api-key"),
+            "gemini-fixture")
     }
 
     func testProviderErrorFixturePreservesHTTPStatusAndMessage() async throws {
@@ -506,7 +512,7 @@ final class ProviderAuditTests: XCTestCase {
 
     func testGeminiModelFilteringUsesGenerationCapability() {
         let valid = RemoteLLMClient.GeminiModelEntry(
-            name: "models/gemini-3.7-flash",
+            name: "models/gemini-3.5-flash",
             supportedGenerationMethods: ["countTokens", "generateContent"])
         let validAlias = RemoteLLMClient.GeminiModelEntry(
             name: "models/future-coding-alias",
@@ -515,14 +521,14 @@ final class ProviderAuditTests: XCTestCase {
             name: "models/text-embedding-005",
             supportedGenerationMethods: ["embedContent"])
 
-        XCTAssertEqual(RemoteLLMClient.geminiModelID(from: valid), "gemini-3.7-flash")
+        XCTAssertEqual(RemoteLLMClient.geminiModelID(from: valid), "gemini-3.5-flash")
         XCTAssertEqual(RemoteLLMClient.geminiModelID(from: validAlias), "future-coding-alias")
         XCTAssertNil(RemoteLLMClient.geminiModelID(from: embedding))
     }
 
     func testGeminiModelIDsAcceptShortAndQualifiedForms() {
-        XCTAssertEqual(RemoteLLMClient.normalizedGeminiModelID("gemini-3.7-flash"), "gemini-3.7-flash")
-        XCTAssertEqual(RemoteLLMClient.normalizedGeminiModelID("models/gemini-3.7-flash"), "gemini-3.7-flash")
+        XCTAssertEqual(RemoteLLMClient.normalizedGeminiModelID("gemini-3.5-flash"), "gemini-3.5-flash")
+        XCTAssertEqual(RemoteLLMClient.normalizedGeminiModelID("models/gemini-3.5-flash"), "gemini-3.5-flash")
     }
 
     // MARK: P9 — usage wire types
@@ -551,6 +557,69 @@ final class ProviderAuditTests: XCTestCase {
         XCTAssertEqual(
             RemoteLLMClient.extractText(from: Data(json.utf8)),
             "<think>inspect the project</think>The answer")
+    }
+
+    func testGeminiFunctionCallPreservesThoughtSignatureForReplay() {
+        let json = #"{"candidates":[{"content":{"parts":[{"functionCall":{"name":"read_file","args":{"path":"A.swift"}},"thoughtSignature":"sig-1"}]}}]}"#
+        XCTAssertEqual(RemoteLLMClient.extract(from: Data(json.utf8))?.tool?.name, "read_file")
+        XCTAssertEqual(RemoteLLMClient.takeLastThoughtSignature(), "sig-1")
+        XCTAssertNil(RemoteLLMClient.takeLastThoughtSignature())
+    }
+
+    func testGeminiPayloadEmitsFunctionCallAndFunctionResponse() throws {
+        let fence = ToolCallText.serialize(name: "read_file", argumentsJSON: #"{"path":"A.swift"}"#)
+        let turns = [
+            ChatTurn(role: .user, content: "read it"),
+            ChatTurn(role: .assistant, content: "Sure.\n" + fence, thoughtSignature: "sig-1"),
+            ChatTurn(role: .tool, content: "file body", toolName: "read_file"),
+        ]
+        let (system, contents) = RemoteLLMClient.prepareGeminiPayload(turns)
+        XCTAssertNil(system)
+        XCTAssertEqual(contents.compactMap(\.role), ["user", "model", "user"])
+        XCTAssertEqual(contents[1].parts.last?.functionCall?.name, "read_file")
+        XCTAssertEqual(contents[1].parts.last?.thoughtSignature, "sig-1")
+        XCTAssertEqual(contents[2].parts.first?.functionResponse?.name, "read_file")
+
+        let encoded = try JSONEncoder().encode(
+            RemoteLLMClient.GeminiRequest(
+                contents: contents,
+                systemInstruction: .init(parts: [.init(text: "be terse")])))
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        let instruction = try XCTUnwrap(json["systemInstruction"] as? [String: Any])
+        XCTAssertNil(instruction["role"])
+        XCTAssertNotNil(json["contents"])
+    }
+
+    func testGeminiActionURLKeepsColonMethod() {
+        let base = URL(string: "https://generativelanguage.googleapis.com/v1beta")!
+        let url = RemoteLLMClient.geminiActionURL(
+            base: base, model: "models/gemini-3.5-flash", action: "streamGenerateContent")
+        XCTAssertEqual(
+            url.absoluteString,
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:streamGenerateContent")
+    }
+
+    func testGeminiModelFilteringAcceptsSupportedActionsAlias() {
+        let entry = RemoteLLMClient.GeminiModelEntry(
+            name: "models/gemini-3.5-flash",
+            supportedActions: ["generateContent"])
+        XCTAssertEqual(RemoteLLMClient.geminiModelID(from: entry), "gemini-3.5-flash")
+        let image = RemoteLLMClient.GeminiModelEntry(
+            name: "models/gemini-2.5-flash-image",
+            supportedGenerationMethods: ["generateContent"])
+        XCTAssertNil(RemoteLLMClient.geminiModelID(from: image))
+    }
+
+    func testGeminiErrorEnvelopeWithStringStatusDecodes() {
+        let body = #"{"error":{"code":400,"message":"Unknown name: thinkingLevel","status":"INVALID_ARGUMENT"}}"#
+        let decoded = try? JSONDecoder().decode(RemoteLLMClient.GeminiChunk.self, from: Data(body.utf8))
+        XCTAssertEqual(decoded?.error?.message, "Unknown name: thinkingLevel")
+        XCTAssertEqual(decoded?.error?.status, "INVALID_ARGUMENT")
+    }
+
+    func testOpenAIArrayContentDeltaStillStreamsText() {
+        let json = #"{"choices":[{"delta":{"content":[{"type":"text","text":"Hello"},{"type":"text","text":" world"}]}}]}"#
+        XCTAssertEqual(RemoteLLMClient.extractText(from: Data(json.utf8)), "Hello world")
     }
 
     func testOpenAIReasoningAndAnswerInOneDeltaAreBothPreserved() {
@@ -650,7 +719,8 @@ final class ProviderAuditTests: XCTestCase {
     func testBrowserControlSchemasExposeRefsAndPostActionCapture() throws {
         let tools: [any AgentTool] = [
             BrowserTools.ReadTool(), BrowserTools.NavigateTool(),
-            BrowserTools.ClickTool(), BrowserTools.TypeTool(), BrowserTools.EvalTool(),
+            BrowserTools.ClickTool(), BrowserTools.TypeTool(),
+            BrowserTools.ScrollTool(), BrowserTools.EvalTool(),
         ]
         for tool in tools {
             XCTAssertNoThrow(try JSONSerialization.jsonObject(with: Data(tool.schemaText.utf8)))
@@ -658,6 +728,8 @@ final class ProviderAuditTests: XCTestCase {
         XCTAssertTrue(BrowserTools.ReadTool().schemaText.contains("elements"))
         XCTAssertTrue(BrowserTools.ClickTool().schemaText.contains("\"ref\""))
         XCTAssertTrue(BrowserTools.TypeTool().schemaText.contains("\"ref\""))
+        XCTAssertTrue(BrowserTools.TypeTool().schemaText.contains("submit"))
+        XCTAssertTrue(BrowserTools.ScrollTool().schemaText.contains("\"dy\""))
         XCTAssertTrue(BrowserTools.ClickTool().schemaText.contains("capture_after"))
     }
 
@@ -737,5 +809,57 @@ final class ProviderAuditTests: XCTestCase {
         XCTAssertNotNil(usage.estimatedUSD(provider: .openAI))
         XCTAssertNil(usage.estimatedUSD(provider: .custom))
         XCTAssertTrue(usage.compactLabel(provider: .openAI).contains("tok"))
+    }
+
+    func testRetiredGeminiModelIDsRemapWithoutALiveFetch() {
+        XCTAssertEqual(LLMProvider.currentModelID(forSaved: "gemini-3.7-flash"), "gemini-3.5-flash")
+        XCTAssertEqual(
+            LLMProvider.currentModelID(forSaved: "google/gemini-3.7-flash"),
+            "google/gemini-3.5-flash")
+        XCTAssertEqual(LLMProvider.currentModelID(forSaved: "gemini-3.5-flash"), "gemini-3.5-flash")
+
+        var preferences = AppPreferences()
+        preferences.remoteModel["gemini"] = "gemini-3.7-flash"
+        preferences.remoteModel["openRouter"] = "google/gemini-3.7-flash"
+        preferences.remoteModel["openAI"] = "gpt-5.2"
+        XCTAssertTrue(preferences.migrateRetiredModelIDs())
+        XCTAssertEqual(preferences.remoteModel["gemini"], "gemini-3.5-flash")
+        XCTAssertEqual(preferences.remoteModel["openRouter"], "google/gemini-3.5-flash")
+        XCTAssertEqual(preferences.remoteModel["openAI"], "gpt-5.2")
+        XCTAssertFalse(preferences.migrateRetiredModelIDs())
+    }
+
+    func testOpenAICompletionArrayContentStillDecodes() throws {
+        let json = #"{"model":"gpt-5.2","choices":[{"message":{"content":[{"type":"text","text":"pong"}]}}]}"#
+        let decoded = try JSONDecoder().decode(RemoteLLMClient.OpenAICompletion.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.choices?.first?.message?.content, "pong")
+    }
+
+    @MainActor
+    func testBrowserControllerOwnsNavigationDelegateWithoutPanel() {
+        XCTAssertNotNil(BrowserController.shared.webView.navigationDelegate)
+    }
+
+    @MainActor
+    func testSpecialistBotsGetIsolatedWebsiteDataStores() {
+        let builder = BrowserSession(id: UUID(), name: "Builder")
+        let reviewer = BrowserSession(id: UUID(), name: "Reviewer")
+        let builderBrowser = BrowserController.controller(for: builder)
+        let reviewerBrowser = BrowserController.controller(for: reviewer)
+
+        XCTAssertTrue(builderBrowser !== reviewerBrowser)
+        XCTAssertTrue(builderBrowser !== BrowserController.shared)
+        XCTAssertEqual(builderBrowser.ownerLabel, "Builder")
+        XCTAssertEqual(reviewerBrowser.ownerLabel, "Reviewer")
+        XCTAssertEqual(builderBrowser.webView.configuration.websiteDataStore.identifier, builder.id)
+        XCTAssertEqual(reviewerBrowser.webView.configuration.websiteDataStore.identifier, reviewer.id)
+        XCTAssertNil(BrowserController.shared.webView.configuration.websiteDataStore.identifier)
+        XCTAssertTrue(builderBrowser.webView.navigationDelegate != nil)
+        XCTAssertTrue(reviewerBrowser.webView.navigationDelegate != nil)
+    }
+
+    @MainActor
+    func testControllerForNilSessionIsTheSharedBrowser() {
+        XCTAssertTrue(BrowserController.controller(for: nil as BrowserSession?) === BrowserController.shared)
     }
 }

@@ -79,7 +79,7 @@ enum NativeToolBridge {
             GeminiTool.FunctionDeclaration(
                 name: spec.name,
                 description: spec.description,
-                parameters: JSONBox.parse(spec.schemaText))
+                parameters: JSONBox.parse(spec.schemaText).geminiFunctionSchema())
         })]
     }
 
@@ -91,6 +91,66 @@ enum NativeToolBridge {
         let args = first.value.arguments.trimmingCharacters(in: .whitespacesAndNewlines)
         let json = args.isEmpty ? "{}" : args
         return ToolCallText.serialize(name: first.value.name, argumentsJSON: json)
+    }
+
+    /// Best-effort string value from a still-growing JSON object. Used to
+    /// stream `ask_user` questions while native `tool_calls` fragments arrive.
+    static func partialJSONString(in json: String, keys: [String]) -> String? {
+        for key in keys {
+            let needle = "\"\(key)\""
+            var search = json.startIndex
+            while let keyRange = json.range(of: needle, range: search..<json.endIndex) {
+                var index = keyRange.upperBound
+                while index < json.endIndex, json[index].isWhitespace {
+                    index = json.index(after: index)
+                }
+                guard index < json.endIndex, json[index] == ":" else {
+                    search = keyRange.upperBound
+                    continue
+                }
+                index = json.index(after: index)
+                while index < json.endIndex, json[index].isWhitespace {
+                    index = json.index(after: index)
+                }
+                guard index < json.endIndex, json[index] == "\"" else { return nil }
+                index = json.index(after: index)
+                var result = ""
+                var escaped = false
+                while index < json.endIndex {
+                    let character = json[index]
+                    if escaped {
+                        switch character {
+                        case "n": result.append("\n")
+                        case "t": result.append("\t")
+                        case "r": result.append("\r")
+                        case "\"": result.append("\"")
+                        case "\\": result.append("\\")
+                        default: result.append(character)
+                        }
+                        escaped = false
+                    } else if character == "\\" {
+                        escaped = true
+                    } else if character == "\"" {
+                        return result
+                    } else {
+                        result.append(character)
+                    }
+                    index = json.index(after: index)
+                }
+                return result.isEmpty ? nil : result
+            }
+        }
+        return nil
+    }
+
+    static func askUserQuestionProgress(
+        name: String,
+        arguments: String
+    ) -> String? {
+        guard name == "ask_user" else { return nil }
+        return partialJSONString(
+            in: arguments,
+            keys: ["question", "query", "prompt", "text", "message"])
     }
 
     /// Recursive JSON so we can embed a tool's schemaText as a real object,
@@ -111,6 +171,24 @@ enum NativeToolBridge {
                 return .object(["type": .string("object"), "properties": .object([:])])
             }
             return from(any)
+        }
+
+        /// Gemini's function-declaration schema is a subset of JSON Schema.
+        /// `additionalProperties` and `$schema` are the common 400 causes.
+        func geminiFunctionSchema() -> JSONBox {
+            switch self {
+            case .object(let object):
+                var cleaned: [String: JSONBox] = [:]
+                for (key, value) in object {
+                    if key == "additionalProperties" || key == "$schema" || key == "$id" { continue }
+                    cleaned[key] = value.geminiFunctionSchema()
+                }
+                return .object(cleaned)
+            case .array(let array):
+                return .array(array.map { $0.geminiFunctionSchema() })
+            default:
+                return self
+            }
         }
 
         static func from(_ any: Any) -> JSONBox {

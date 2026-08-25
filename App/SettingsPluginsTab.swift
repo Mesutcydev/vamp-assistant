@@ -17,7 +17,7 @@ struct PluginsTab: View {
         TabScroll {
             InfoBanner(
                 icon: "puzzlepiece.extension",
-                text: "Bring your coding setup with you. Beet Code finds compatible skills, commands, prompts and workflows, then makes them available as slash commands in the composer.")
+                text: "Bring your coding setup with you. Vamp Assistant finds compatible skills, commands, prompts and workflows, then makes them available as slash commands in the composer.")
 
             SettingsCard(
                 title: "Import from coding tools",
@@ -61,7 +61,7 @@ struct PluginsTab: View {
             SettingsCard(
                 title: "Connected folders",
                 icon: "folder.badge.plus",
-                footer: "Add a folder from any IDE or plugin pack. Beet Code reads SKILL.md files and Markdown commands, prompts and workflows in place, so updates remain in sync.") {
+                footer: "Add a folder from any IDE or plugin pack. Vamp Assistant reads SKILL.md files and Markdown commands, prompts and workflows in place, so updates remain in sync.") {
                 if externalRoots.isEmpty {
                     Text("No extra folders connected.")
                         .font(.callout)
@@ -141,7 +141,7 @@ struct PluginsTab: View {
                 SettingsCard(
                     title: "OpenCode compatibility",
                     icon: "arrow.triangle.branch",
-                    footer: "Build and Plan are native Beet Code profiles. Imported agents and MCP servers keep their source configuration and are applied through Beet Code's approval flow.") {
+                    footer: "Build and Plan are native Code profiles. Imported agents and MCP servers keep their source configuration and are applied through Vamp Assistant's approval flow.") {
                     if !appState.openCodeCatalog.agents.isEmpty {
                         SettingRow(label: "Agents", value: appState.openCodeCatalog.agents.map(\.name).joined(separator: " · ")) {
                             Image(systemName: "person.2.fill")

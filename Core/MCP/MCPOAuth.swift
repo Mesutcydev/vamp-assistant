@@ -265,7 +265,7 @@ actor MCPOAuthProvider {
             throw OAuthError.registrationFailed("no client id configured and no registration endpoint")
         }
         let body = LFJSONValue.object([
-            "client_name": .string("Beet Code"),
+            "client_name": .string("Vamp Assistant"),
             "redirect_uris": .array([.string("http://127.0.0.1:31280/callback")]),
             "grant_types": .array([.string("authorization_code"), .string("refresh_token")]),
             "response_types": .array([.string("code")]),
@@ -358,18 +358,45 @@ actor MCPOAuthProvider {
         "mcp-oauth-\(serverName)"
     }
 
+    private static let tokenCacheLock = NSLock()
+    nonisolated(unsafe) private static var tokenCache: [String: MCPOAuthTokens] = [:]
+    nonisolated(unsafe) private static var loadedTokenAccounts: Set<String> = []
+
     private static func loadTokens(serverName: String) -> MCPOAuthTokens? {
-        guard let raw = Keychain.read(service: "com.beetcode.mcp-oauth", account: tokensAccount(serverName: serverName)),
+        let account = tokensAccount(serverName: serverName)
+        tokenCacheLock.lock()
+        if loadedTokenAccounts.contains(account) {
+            let cached = tokenCache[account]
+            tokenCacheLock.unlock()
+            return cached
+        }
+        tokenCacheLock.unlock()
+        guard let raw = Keychain.read(service: "com.beetcode.mcp-oauth", account: account),
               let data = raw.data(using: .utf8)
-        else { return nil }
-        return try? JSONDecoder().decode(MCPOAuthTokens.self, from: data)
+        else {
+            tokenCacheLock.lock()
+            loadedTokenAccounts.insert(account)
+            tokenCacheLock.unlock()
+            return nil
+        }
+        let tokens = try? JSONDecoder().decode(MCPOAuthTokens.self, from: data)
+        tokenCacheLock.lock()
+        if let tokens { tokenCache[account] = tokens }
+        loadedTokenAccounts.insert(account)
+        tokenCacheLock.unlock()
+        return tokens
     }
 
     private static func saveTokens(_ tokens: MCPOAuthTokens, serverName: String) {
         guard let data = try? JSONEncoder().encode(tokens),
               let raw = String(data: data, encoding: .utf8)
         else { return }
-        Keychain.write(raw, service: "com.beetcode.mcp-oauth", account: tokensAccount(serverName: serverName))
+        let account = tokensAccount(serverName: serverName)
+        guard Keychain.write(raw, service: "com.beetcode.mcp-oauth", account: account) else { return }
+        tokenCacheLock.lock()
+        tokenCache[account] = tokens
+        loadedTokenAccounts.insert(account)
+        tokenCacheLock.unlock()
     }
 }
 

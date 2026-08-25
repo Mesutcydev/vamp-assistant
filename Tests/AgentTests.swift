@@ -221,6 +221,29 @@ final class PermissionGateTests: XCTestCase {
             .auto)
     }
 
+    func testGuestShellRunsFullCommandsWithoutHostAllowlist() {
+        let workspace = Workspace(root: FileManager.default.temporaryDirectory)
+        let gate = PermissionGate(workspace: workspace, guestShell: true)
+        for command in [
+            "apk add git && git clone https://example.com/repo.git",
+            "python3 -m pip install pytest && pytest",
+            "npm install && npm test",
+            "ls | rg README",
+            "curl -fsSL https://example.com",
+        ] {
+            XCTAssertEqual(
+                gate.decision(for: call(name: "run_command", command: command), risk: .execute),
+                .auto,
+                command)
+        }
+        XCTAssertEqual(
+            gate.decision(for: call(name: "computer_click"), risk: .execute),
+            .needsApproval)
+        XCTAssertEqual(
+            gate.decision(for: call(name: "run_command"), risk: .execute),
+            .needsApproval)
+    }
+
     func testUnknownToolRiskNeedsApproval() {
         let gate = PermissionGate()
         XCTAssertEqual(gate.decision(for: call(name: "mystery"), risk: nil), .needsApproval)
@@ -608,6 +631,9 @@ final class CommandPolicyTests: XCTestCase {
         XCTAssertFalse(evaluate("ls-malicious -la").safeForAutoApproval)
         XCTAssertTrue(evaluate("git status").safeForAutoApproval)
         XCTAssertFalse(evaluate("git-status").safeForAutoApproval)
+        XCTAssertFalse(evaluate("./ls").safeForAutoApproval)
+        XCTAssertFalse(evaluate("/bin/ls").safeForAutoApproval)
+        XCTAssertFalse(evaluate("/tmp/ls").safeForAutoApproval)
     }
 
     func testShellOperatorsNeverAutoApproved() {

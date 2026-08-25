@@ -80,11 +80,11 @@ struct QRScannerSheet: View {
                     ContentUnavailableView(
                         "Scanner unavailable",
                         systemImage: "qrcode.viewfinder",
-                        description: Text("Paste the Beet Code pairing address instead."))
+                        description: Text("Paste the Vamp Assistant pairing address instead."))
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                Text("Point the camera at the QR code shown by Beet Code on your Mac.")
+                Text("Point the camera at the QR code shown by Vamp Assistant on your Mac.")
                     .font(.callout.weight(.medium))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 22)
@@ -92,7 +92,7 @@ struct QRScannerSheet: View {
                     .frame(maxWidth: .infinity)
                     .background(.ultraThinMaterial)
             }
-            .navigationTitle("Scan Beet Code")
+            .navigationTitle("Scan Vamp Assistant")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

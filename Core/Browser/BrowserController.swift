@@ -6,12 +6,19 @@ extension Notification.Name {
     static let openBrowserPanel = Notification.Name("com.beetcode.openBrowserPanel")
 }
 
+/// Which WKWebView the docked panel is currently hosting.
+@MainActor
+final class BrowserPresentation: ObservableObject {
+    static let shared = BrowserPresentation()
+    @Published var controller = BrowserController.shared
+}
+
 /// In-app browser the agent can control.
 ///
-/// One shared WKWebView, hosted in the docked browser panel, driven by the
-/// `browser_*` agent tools through this controller. Every mutating action
-/// (navigate, click, type, eval) goes through the normal PermissionGate at
-/// the tool layer — the controller itself performs no authorization.
+/// Mac Chat/Code share one default WKWebView. Each specialist bot computer
+/// gets its own controller and persistent `WKWebsiteDataStore`, so cookies
+/// and logins never leak across bots or into the user's browser. Mutating
+/// actions still go through PermissionGate at the tool layer.
 ///
 /// Extraction helpers (`extractText`, `extractLinks`, `pageInfo`) are pure
 /// JavaScript snippets; the JS escaping in `jsLiteral` is the security
@@ -24,24 +31,45 @@ final class BrowserController: ObservableObject {
     /// through MainActor-isolated methods (tools hop via @MainActor Tasks).
     private static let sharedLock = NSLock()
     private static nonisolated(unsafe) var sharedInstance: BrowserController?
+    private static nonisolated(unsafe) var botInstances: [UUID: BrowserController] = [:]
 
     static var shared: BrowserController {
         sharedLock.lock()
         defer { sharedLock.unlock() }
         if let existing = sharedInstance { return existing }
-        let created = BrowserController()
+        let created = BrowserController(session: nil)
         sharedInstance = created
         return created
     }
 
+    static func controller(for session: BrowserSession) -> BrowserController {
+        sharedLock.lock()
+        defer { sharedLock.unlock() }
+        if let existing = botInstances[session.id] { return existing }
+        let created = BrowserController(session: session)
+        botInstances[session.id] = created
+        return created
+    }
+
+    static func controller(for session: BrowserSession?) -> BrowserController {
+        if let session { return controller(for: session) }
+        return shared
+    }
+
+    private let session: BrowserSession?
     private var storedWebView: WKWebView?
+    private var navigationRelay: NavigationRelay?
 
     var webView: WKWebView { ensureWebView() }
+
+    /// Shown in the docked panel chrome. Empty for the shared Mac browser.
+    var ownerLabel: String { session?.name ?? "" }
 
     @Published var currentURL: URL?
     @Published var title: String = ""
     @Published var isLoading = false
     @Published var lastError: String?
+    @Published var lastAgentAction: String?
 
     /// Active `file://` policy for in-page navigations. Agent `open` sets
     /// `.confined`; the user address bar sets `.allowAny`.
@@ -53,15 +81,31 @@ final class BrowserController: ObservableObject {
     /// WKWebView is MainActor-only on Xcode 26/27 SDKs. The singleton can be
     /// *referenced* off-main (lock-backed); the view is created the first
     /// time a MainActor method actually needs it.
-    nonisolated private init() {}
+    nonisolated private init(session: BrowserSession?) {
+        self.session = session
+    }
+
+    /// Makes this the panel's active WebView. Navigate also opens the panel.
+    func reveal(openPanel: Bool = true) {
+        BrowserPresentation.shared.controller = self
+        if openPanel {
+            NotificationCenter.default.post(name: .openBrowserPanel, object: nil)
+        }
+    }
 
     @MainActor
     private func ensureWebView() -> WKWebView {
         if let storedWebView { return storedWebView }
         let config = WKWebViewConfiguration()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
+        if let session {
+            config.websiteDataStore = WKWebsiteDataStore(forIdentifier: session.id)
+        }
         let view = WKWebView(frame: .zero, configuration: config)
         view.customUserAgent = AppIdentity.browserUserAgent
+        let relay = NavigationRelay(owner: self)
+        view.navigationDelegate = relay
+        navigationRelay = relay
         storedWebView = view
         return view
     }
@@ -90,9 +134,10 @@ final class BrowserController: ObservableObject {
     func waitForLoad(timeout: TimeInterval = 12) async {
         let deadline = Date().addingTimeInterval(timeout)
         while isLoading, Date() < deadline {
-            // The navigation delegate is attached by the SwiftUI panel. If
-            // an agent navigates before that panel is mounted, use the page's
-            // own readyState as a fallback so the tool still settles.
+            // Navigation events come from BrowserController's own delegate,
+            // so agent tools settle even when the docked panel is not mounted.
+            // readyState is a fallback for about:blank / cached loads that
+            // may not fire didStart.
             if let state = try? await webView.evaluateJavaScript("document.readyState") as? String,
                state == "interactive" || state == "complete" {
                 isLoading = false
@@ -277,6 +322,7 @@ final class BrowserController: ObservableObject {
     /// One-line summary of where the browser is.
     func pageInfo() -> String {
         var parts: [String] = []
+        if let session { parts.append("browser: \(session.name)") }
         if let url = currentURL ?? webView.url { parts.append("url: \(url.absoluteString)") }
         if !title.isEmpty { parts.append("title: \(title)") }
         if isLoading { parts.append("(still loading)") }
@@ -287,18 +333,23 @@ final class BrowserController: ObservableObject {
 
     /// Clicks the first element matching a CSS selector. Returns a
     /// human-readable confirmation (or throws when nothing matches).
+    /// Clicks the first element matching a CSS selector. Returns a
+    /// human-readable confirmation (or throws when nothing matches).
     func click(selector: String) async throws -> String {
         let js = """
         (() => {
+          \(Self.highlightPrelude)
           const el = document.querySelector(\(Self.jsLiteral(selector)));
           if (!el) return { clicked: false };
           el.scrollIntoView({ block: 'center' });
+          highlightBeetElement(el);
           el.click();
           return { clicked: true, tag: el.tagName.toLowerCase() };
         })()
         """
         let raw = try await evaluate(js)
         if raw.contains("\"clicked\":true") {
+            noteAgentAction("Clicked \(selector)")
             return "clicked element matching \(selector)"
         }
         throw BrowserError.noSuchElement(selector)
@@ -310,18 +361,20 @@ final class BrowserController: ObservableObject {
         let js = """
         (() => {
           \(Self.referenceRegistryPrelude)
+          \(Self.highlightPrelude)
           const requested = \(Self.jsLiteral(ref));
           if (!requested.startsWith(beetState.token + ':')) return { clicked: false, stale: true };
           const el = Array.from(document.querySelectorAll('*')).find(node => node[beetRefKey] === requested);
           if (!el || !el.isConnected) return { clicked: false, stale: true };
           if (el.disabled || el.getAttribute('aria-disabled') === 'true') return { clicked: false, disabled: true };
           el.scrollIntoView({ block: 'center', inline: 'nearest' });
+          highlightBeetElement(el);
           el.click();
           return { clicked: true, tag: el.tagName.toLowerCase() };
         })()
         """
         let raw = try await evaluate(js)
-        if raw.contains("\"clicked\":true") { return "clicked [\(ref)]" }
+        if raw.contains("\"clicked\":true") { noteAgentAction("Clicked [\(ref)]"); return "clicked [\(ref)]" }
         if raw.contains("\"disabled\":true") { throw BrowserError.disabledElement(ref) }
         throw BrowserError.staleReference(ref)
     }
@@ -331,12 +384,14 @@ final class BrowserController: ObservableObject {
     func clickByText(_ text: String) async throws -> String {
         let js = """
         (() => {
+          \(Self.highlightPrelude)
           const needle = \(Self.jsLiteral(text)).toLowerCase();
           const candidates = document.querySelectorAll('a, button, [role="button"], input[type="submit"], [onclick]');
           for (const el of candidates) {
             const label = (el.innerText || el.value || '').toLowerCase();
             if (label.includes(needle)) {
               el.scrollIntoView({ block: 'center' });
+              highlightBeetElement(el);
               el.click();
               return { clicked: true, tag: el.tagName.toLowerCase(), label: (el.innerText || el.value || '').slice(0, 80) };
             }
@@ -346,64 +401,100 @@ final class BrowserController: ObservableObject {
         """
         let raw = try await evaluate(js)
         if raw.contains("\"clicked\":true") {
+            noteAgentAction("Clicked “\(text)”")
             return "clicked element containing text: \(text)"
         }
         throw BrowserError.noSuchElement(text)
     }
 
     /// Types into the first field matching a CSS selector.
-    func type(text: String, into selector: String) async throws -> String {
+    func type(text: String, into selector: String, submit: Bool = false) async throws -> String {
         let js = """
         (() => {
+          \(Self.highlightPrelude)
+          \(Self.assignValuePrelude)
           const el = document.querySelector(\(Self.jsLiteral(selector)));
           if (!el) return { typed: false };
           el.focus();
-          el.value = \(Self.jsLiteral(text));
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
+          highlightBeetElement(el);
+          if (!assignBeetValue(el, \(Self.jsLiteral(text)))) return { typed: false, unsupported: true };
+          \(Self.submitPrelude(submit))
           return { typed: true };
         })()
         """
         let raw = try await evaluate(js)
         if raw.contains("\"typed\":true") {
-            return "typed into \(selector)"
+            noteAgentAction("Typed into \(selector)")
+            return submit ? "typed into \(selector) and submitted" : "typed into \(selector)"
         }
+        if raw.contains("\"unsupported\":true") { throw BrowserError.unsupportedElement(selector) }
         throw BrowserError.noSuchElement(selector)
     }
 
     /// Types into a document-scoped element reference. Uses the native value
     /// setter when available so controlled React-style inputs receive the same
     /// input/change events as selector-based typing.
-    func type(text: String, intoRef ref: String) async throws -> String {
+    func type(text: String, intoRef ref: String, submit: Bool = false) async throws -> String {
         let js = """
         (() => {
           \(Self.referenceRegistryPrelude)
+          \(Self.highlightPrelude)
+          \(Self.assignValuePrelude)
           const requested = \(Self.jsLiteral(ref));
           if (!requested.startsWith(beetState.token + ':')) return { typed: false, stale: true };
           const el = Array.from(document.querySelectorAll('*')).find(node => node[beetRefKey] === requested);
           if (!el || !el.isConnected) return { typed: false, stale: true };
           if (el.disabled || el.getAttribute('aria-disabled') === 'true') return { typed: false, disabled: true };
           el.focus();
-          const nextValue = \(Self.jsLiteral(text));
-          if (el.isContentEditable) {
-            el.textContent = nextValue;
-          } else if ('value' in el) {
-            const prototype = Object.getPrototypeOf(el);
-            const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
-            if (setter) setter.call(el, nextValue); else el.value = nextValue;
-          } else {
-            return { typed: false, unsupported: true };
-          }
-          el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: nextValue }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
+          highlightBeetElement(el);
+          if (!assignBeetValue(el, \(Self.jsLiteral(text)))) return { typed: false, unsupported: true };
+          \(Self.submitPrelude(submit))
           return { typed: true };
         })()
         """
         let raw = try await evaluate(js)
-        if raw.contains("\"typed\":true") { return "typed into [\(ref)]" }
+        if raw.contains("\"typed\":true") {
+            noteAgentAction("Typed into [\(ref)]")
+            return submit ? "typed into [\(ref)] and submitted" : "typed into [\(ref)]"
+        }
         if raw.contains("\"disabled\":true") { throw BrowserError.disabledElement(ref) }
         if raw.contains("\"unsupported\":true") { throw BrowserError.unsupportedElement(ref) }
         throw BrowserError.staleReference(ref)
+    }
+
+    /// Scroll the page or a referenced element. Positive dy moves down.
+    func scroll(dx: Int = 0, dy: Int, ref: String? = nil) async throws -> String {
+        let js: String
+        if let ref {
+            js = """
+            (() => {
+              \(Self.referenceRegistryPrelude)
+              \(Self.highlightPrelude)
+              const requested = \(Self.jsLiteral(ref));
+              if (!requested.startsWith(beetState.token + ':')) return { scrolled: false, stale: true };
+              const el = Array.from(document.querySelectorAll('*')).find(node => node[beetRefKey] === requested);
+              if (!el || !el.isConnected) return { scrolled: false, stale: true };
+              highlightBeetElement(el);
+              const target = el.scrollHeight > el.clientHeight ? el : (el.closest('[style*=overflow], .overflow-auto, .overflow-y-auto') || window);
+              if (target === window) window.scrollBy(\(dx), \(dy));
+              else target.scrollBy(\(dx), \(dy));
+              return { scrolled: true };
+            })()
+            """
+        } else {
+            js = """
+            (() => {
+              window.scrollBy(\(dx), \(dy));
+              return { scrolled: true };
+            })()
+            """
+        }
+        let raw = try await evaluate(js)
+        if raw.contains("\"stale\":true") { throw BrowserError.staleReference(ref ?? "") }
+        noteAgentAction("Scrolled \(dy > 0 ? "down" : "up")")
+        var result = "scrolled dx=\(dx) dy=\(dy)"
+        if let ref { result += " using [\(ref)]" }
+        return result
     }
 
     /// Snapshot of the visible page, saved as PNG.
@@ -483,6 +574,57 @@ final class BrowserController: ObservableObject {
           return el[beetRefKey];
         };
         """
+
+    private nonisolated static let highlightPrelude = """
+        const highlightBeetElement = (el) => {
+          if (!el || !el.style) return;
+          el.style.setProperty('outline', '3px solid #b8b8b8', 'important');
+          el.style.setProperty('outline-offset', '2px', 'important');
+          setTimeout(() => {
+            el.style.removeProperty('outline');
+            el.style.removeProperty('outline-offset');
+          }, 900);
+        };
+        """
+
+    private nonisolated static let assignValuePrelude = """
+        const assignBeetValue = (el, nextValue) => {
+          if (el.isContentEditable) {
+            el.textContent = nextValue;
+          } else if ('value' in el) {
+            const prototype = Object.getPrototypeOf(el);
+            const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set
+              || Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+              || Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+            if (setter) setter.call(el, nextValue); else el.value = nextValue;
+          } else {
+            return false;
+          }
+          el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: nextValue }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        };
+        """
+
+    private nonisolated static func submitPrelude(_ submit: Bool) -> String {
+        guard submit else { return "" }
+        return """
+          el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+          el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+          if (el.form) {
+            if (typeof el.form.requestSubmit === 'function') el.form.requestSubmit();
+            else el.form.submit();
+          }
+        """
+    }
+
+    func noteAgentAction(_ text: String) {
+        lastAgentAction = text
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3))
+            if lastAgentAction == text { lastAgentAction = nil }
+        }
+    }
 
     enum BrowserError: Error, LocalizedError {
         case emptyURL
@@ -571,5 +713,57 @@ extension BrowserController {
     func markFailed(_ message: String) {
         isLoading = false
         lastError = message
+    }
+}
+
+/// Lives on the owning WKWebView so load events are delivered even when the
+/// docked browser panel is not mounted.
+@MainActor
+private final class NavigationRelay: NSObject, WKNavigationDelegate {
+    weak var owner: BrowserController?
+
+    init(owner: BrowserController) {
+        self.owner = owner
+    }
+
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        owner?.markStarted(webView.url)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        webView.evaluateJavaScript("document.title") { [weak self, weak webView] result, _ in
+            let title = (result as? String) ?? ""
+            Task { @MainActor in
+                self?.owner?.markFinished(webView?.url, title: title)
+            }
+        }
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        owner?.markFailed(error.localizedDescription)
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        owner?.markFailed(error.localizedDescription)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
+    ) {
+        guard let owner, let url = navigationAction.request.url else {
+            decisionHandler(.cancel)
+            return
+        }
+        do {
+            _ = try BrowserURLValidator.validatedURL(
+                url.absoluteString,
+                filePolicy: owner.navigationFilePolicy)
+            decisionHandler(.allow)
+        } catch {
+            owner.markFailed(error.localizedDescription)
+            decisionHandler(.cancel)
+        }
     }
 }

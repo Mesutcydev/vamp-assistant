@@ -25,7 +25,7 @@ struct IntentPicker: View {
     private var header: some View {
         HStack {
             Text("Context for this turn")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.textPrimary)
             Spacer()
             if !store.selection.isEmpty {
@@ -50,7 +50,7 @@ struct IntentPicker: View {
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: preset.glyph)
-                                .font(.system(size: 11))
+                                .font(.system(size: 11, design: .serif))
                                 .foregroundStyle(Theme.accent)
                                 .frame(width: 16)
                             Text(preset.name)
@@ -78,7 +78,7 @@ struct IntentPicker: View {
 
     private var rolesSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            sectionLabel("How Beet Code should help")
+            sectionLabel("How Vamp Assistant should help")
             LazyVGrid(columns: columns, spacing: 8) {
                 ForEach(IntentRole.allCases) { role in
                     let selected = store.selection.roles.contains(role)
@@ -146,7 +146,7 @@ struct IntentPicker: View {
     private func chipLabel(_ title: String, glyph: String, selected: Bool, tint: Color) -> some View {
         HStack(spacing: 6) {
             Image(systemName: glyph)
-                .font(.system(size: 11))
+                .font(.system(size: 11, design: .serif))
                 .frame(width: 16)
             Text(title)
                 .font(.caption.weight(.medium))
@@ -154,7 +154,7 @@ struct IntentPicker: View {
             Spacer(minLength: 0)
             if selected {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.system(size: 9, weight: .bold, design: .serif))
             }
         }
         .foregroundStyle(selected ? tint : Theme.textSecondary)

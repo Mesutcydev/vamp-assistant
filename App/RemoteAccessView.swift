@@ -48,10 +48,10 @@ struct RemoteAccessView: View {
                     .fill(Theme.wash(Theme.accent))
                     .frame(width: 44, height: 44)
                 Image(systemName: "iphone")
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.system(size: 22, weight: .semibold, design: .serif))
                     .foregroundStyle(Theme.accent)
                 Image(systemName: "qrcode")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.system(size: 9, weight: .bold, design: .serif))
                     .foregroundStyle(Theme.textPrimary)
                     .padding(3)
                     .background(Theme.surface, in: Circle())
@@ -59,7 +59,7 @@ struct RemoteAccessView: View {
                     .offset(x: 9, y: 9)
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text("Remote Beetcode sessions")
+                Text("Remote Vamp Assistant sessions")
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
                 Text("Scan once, then continue the same coding sessions from a phone or tablet.")
@@ -85,7 +85,7 @@ struct RemoteAccessView: View {
             Text("Remote access is off")
                 .font(.headline)
                 .foregroundStyle(Theme.textPrimary)
-            Text("Beet Code will listen only when you turn this on. The browser surface is session-aware and never exposes the terminal CLI or the local model API.")
+            Text("Vamp Assistant will listen only when you turn this on. The browser surface is session-aware and never exposes the terminal CLI or the local model API.")
                 .font(.callout)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -166,6 +166,18 @@ struct RemoteAccessView: View {
                 }
                 Toggle(isOn: $settings.remoteFileSharingEnabled) {
                     Label("File transfer", systemImage: "folder.badge.plus")
+                }
+                Toggle(isOn: $settings.remoteMacControlEnabled) {
+                    Label("Mac Control from iPhone", systemImage: "display.and.arrow.down")
+                }
+                .onChange(of: settings.remoteMacControlEnabled) { _, enabled in
+                    guard enabled else { return }
+                    if !ComputerPermission.accessibilityGranted {
+                        ComputerPermission.requestAccessibility()
+                    }
+                    if !ComputerPermission.screenRecordingGranted {
+                        ComputerPermission.requestScreenRecording()
+                    }
                 }
             }
             .font(.callout)
@@ -256,14 +268,14 @@ struct RemoteAccessConsentView: View {
     let onCancel: () -> Void
     let onAllow: (_ clipboard: Bool, _ files: Bool) -> Void
 
-    @State private var allowClipboard = true
-    @State private var allowFiles = true
+    @State private var allowClipboard = false
+    @State private var allowFiles = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             HStack(alignment: .top, spacing: 14) {
                 Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.system(size: 22, weight: .semibold, design: .serif))
                     .foregroundStyle(Theme.accent)
                     .frame(width: 46, height: 46)
                     .background(Theme.wash(Theme.accent), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
@@ -272,7 +284,7 @@ struct RemoteAccessConsentView: View {
                     Text("Allow Remote Sessions?")
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(Theme.textPrimary)
-                    Text("Paired devices can continue your Beet Code sessions while this Mac and the remote host are on.")
+                    Text("Paired devices can continue your Vamp Assistant sessions while this Mac and the remote host are on.")
                         .font(.callout)
                         .foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -335,7 +347,7 @@ struct RemoteAccessConsentView: View {
     ) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 15, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.accent)
                 .frame(width: 36, height: 36)
                 .background(Theme.wash(Theme.accent), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -373,7 +385,7 @@ private struct RemoteQRCodeView: View {
         }
         .task(id: value) { image = Self.makeImage(from: value) }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Beet Code remote pairing QR code")
+        .accessibilityLabel("Vamp Assistant remote pairing QR code")
     }
 
     private static let context = CIContext()

@@ -49,6 +49,7 @@ enum BotComputerError: Error, LocalizedError {
     case containersUnavailable
     case commandFailed(String)
     case recordMissing
+    case unknownProfile
 
     var errorDescription: String? {
         switch self {
@@ -56,6 +57,7 @@ enum BotComputerError: Error, LocalizedError {
             "Apple Container is not available on this Mac. Use an isolated workspace instead."
         case .commandFailed(let message): message
         case .recordMissing: "That bot computer no longer exists."
+        case .unknownProfile: "Choose Builder, Reviewer, Navigator, or Researcher."
         }
     }
 }
@@ -73,6 +75,13 @@ actor BotComputerService {
             in: .userDomainMask
         )[0].appendingPathComponent("BeetCode/BotComputers", isDirectory: true)
     }
+
+    static let specialists: [(id: String, name: String)] = [
+        ("builder", "Builder"),
+        ("reviewer", "Reviewer"),
+        ("navigator", "Navigator"),
+        ("researcher", "Researcher"),
+    ]
 
     func capabilities() -> BotHostCapabilities {
         let executable = Self.containerExecutable(fileManager: fileManager)
@@ -131,6 +140,41 @@ actor BotComputerService {
         records.append(record)
         try save(records)
         return record
+    }
+
+    func prepareIfNeeded(
+        profileID: String,
+        name: String,
+        backend: BotComputerBackend
+    ) throws -> BotComputerRecord {
+        if let existing = try load().first(where: { $0.profileID == profileID }) {
+            return existing
+        }
+        return try prepare(profileID: profileID, name: name, backend: backend)
+    }
+
+    func prepareSpecialist(profileID: String) throws -> BotComputerRecord {
+        guard let spec = Self.specialists.first(where: { $0.id == profileID }) else {
+            throw BotComputerError.unknownProfile
+        }
+        return try prepareIfNeeded(
+            profileID: spec.id,
+            name: spec.name,
+            backend: preferredBackend())
+    }
+
+    func prepareSpecialists() throws -> [BotComputerRecord] {
+        let backend = preferredBackend()
+        for spec in Self.specialists {
+            _ = try prepareIfNeeded(profileID: spec.id, name: spec.name, backend: backend)
+        }
+        return try refresh()
+    }
+
+    func preferredBackend() -> BotComputerBackend {
+        let caps = capabilities()
+        return caps.supportsAppleContainers && caps.appleContainerServiceRunning
+            ? .appleContainer : .isolatedWorkspace
     }
 
     func refresh() throws -> [BotComputerRecord] {
@@ -198,7 +242,7 @@ actor BotComputerService {
                 executable: executable,
                 arguments: [
                     "run", "--detach", "--name", containerName,
-                    "--cpus", "2", "--memory", "2G",
+                    "--cpus", "4", "--memory", "4G",
                     "--volume", "\(record.workspacePath):/workspace",
                     "--workdir", "/workspace",
                     "--label", "com.beetcode.bot=\(record.profileID)",
@@ -211,6 +255,9 @@ actor BotComputerService {
         guard !result.failed else {
             throw BotComputerError.commandFailed(Self.failureMessage(result.output))
         }
+        Self.provisionGuestIfNeeded(
+            executable: executable,
+            containerName: containerName)
         record.state = .running
         record.updatedAt = Date()
         records[index] = record
@@ -247,6 +294,34 @@ actor BotComputerService {
         records[index] = record
         try save(records)
         return record
+    }
+
+    static func containerCLI(fileManager: FileManager = .default) -> String? {
+        containerExecutable(fileManager: fileManager)
+    }
+
+    static func execArguments(containerName: String, command: String) -> [String] {
+        ["exec", "-w", "/workspace", containerName, "sh", "-lc", command]
+    }
+
+    static let guestPackages = [
+        "bash", "git", "curl", "wget", "python3", "py3-pip", "nodejs", "npm",
+        "make", "g++", "musl-dev", "linux-headers", "tar", "unzip", "zip",
+        "jq", "openssh-client", "ca-certificates", "ripgrep", "patch",
+        "diffutils", "findutils", "coreutils",
+    ]
+
+    static var provisionCommand: String {
+        "apk add --no-cache " + guestPackages.joined(separator: " ")
+    }
+
+    static var guestReadyProbe: String {
+        "command -v git >/dev/null && command -v python3 >/dev/null && command -v node >/dev/null && command -v bash >/dev/null && command -v curl >/dev/null"
+    }
+
+    static func rewriteCommandForContainer(_ command: String, hostWorkspacePath: String) -> String {
+        guard !hostWorkspacePath.isEmpty else { return command }
+        return command.replacingOccurrences(of: hostWorkspacePath, with: "/workspace")
     }
 
     private var catalogURL: URL { root.appendingPathComponent("computers.json") }
@@ -307,5 +382,24 @@ actor BotComputerService {
               let entries = try? JSONDecoder().decode([ContainerListEntry].self, from: data)
         else { return [:] }
         return Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0.status.state.lowercased()) })
+    }
+
+    /// Installs a capable guest toolchain the first time the VM is empty.
+    /// Failure is non-fatal: the container still runs with busybox until a
+    /// later start can reach Alpine's package index.
+    static func provisionGuestIfNeeded(executable: String, containerName: String) {
+        let probe = try? ShellRunner.runProcess(
+            executable: executable,
+            arguments: execArguments(containerName: containerName, command: guestReadyProbe),
+            workingDirectory: FileManager.default.temporaryDirectory,
+            timeout: 8,
+            maxOutputBytes: 16 * 1024)
+        if probe?.failed == false { return }
+        _ = try? ShellRunner.runProcess(
+            executable: executable,
+            arguments: execArguments(containerName: containerName, command: provisionCommand),
+            workingDirectory: FileManager.default.temporaryDirectory,
+            timeout: 180,
+            maxOutputBytes: 2 * 1024 * 1024)
     }
 }

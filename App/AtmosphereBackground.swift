@@ -1,9 +1,14 @@
 import SwiftUI
 
-/// Faded window atmosphere — the classical engraving sits behind the
-/// transcript the way Hermes sits a map behind chat: present if you look
-/// for it, never competing with text.
+/// Window atmosphere — a classical engraving behind the page, the way Hermes
+/// sits a figure behind chat: visible on the empty home, quieter under text.
 struct AtmosphereBackground: View {
+    enum Intensity {
+        case conversation
+        case home
+    }
+
+    var intensity: Intensity = .conversation
     @ObservedObject private var settings = SettingsStore.shared
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -19,7 +24,7 @@ struct AtmosphereBackground: View {
                         .clipped()
                         .opacity(artOpacity)
                         .blendMode(blend)
-                        .saturation(0.55)
+                        .saturation(0)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                     Theme.bg.opacity(washOpacity)
@@ -31,19 +36,24 @@ struct AtmosphereBackground: View {
     }
 
     private var artOpacity: Double {
-        switch settings.appearance {
-        case .light: 0.05
-        case .dark: 0.04
-        case .beet: 0.08
-        case .system: 0.04
+        switch (intensity, settings.appearance) {
+        case (.home, .light): 0.18
+        case (.home, .beet): 0.12
+        case (.home, .dark), (.home, .system): 0.10
+        case (.conversation, .light): 0.05
+        case (.conversation, .beet): 0.04
+        case (.conversation, .dark), (.conversation, .system): 0.025
         }
     }
 
     private var washOpacity: Double {
-        switch settings.appearance {
-        case .light: 0.62
-        case .beet: 0.50
-        case .dark, .system: 0.62
+        switch (intensity, settings.appearance) {
+        case (.home, .light): 0.28
+        case (.home, .beet): 0.62
+        case (.home, .dark), (.home, .system): 0.68
+        case (.conversation, .light): 0.62
+        case (.conversation, .beet): 0.74
+        case (.conversation, .dark), (.conversation, .system): 0.78
         }
     }
 

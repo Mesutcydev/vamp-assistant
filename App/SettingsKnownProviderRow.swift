@@ -226,8 +226,11 @@ struct KnownProviderRow: View {
                     endpoint: provider.endpoint(model: selectedModel), apiKey: key)
                 liveProfiles = profiles
                 AppPreferencesStore.shared.saveRemoteModelProfiles(profiles)
-                if let first = profiles.first, modelDraft.isEmpty {
-                    modelDraft = first.model
+                if let first = profiles.first, modelDraft.isEmpty || !profiles.contains(where: { $0.model == selectedModel }) {
+                    modelDraft = profiles.contains(where: { $0.model == provider.defaultModel })
+                        ? provider.defaultModel
+                        : first.model
+                    persistModel()
                 }
                 state = .success("Loaded \(profiles.count) models.")
             } catch {

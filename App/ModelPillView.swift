@@ -23,14 +23,14 @@ struct ModelSelectionPill: View {
                     .fill(statusColor)
                     .frame(width: 6, height: 6)
                 Image(systemName: icon)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 11, weight: .medium, design: .serif))
                     .foregroundStyle(iconColor)
                 Text(label)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .layoutPriority(1)
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(.system(size: 8, weight: .semibold, design: .serif))
                     .foregroundStyle(Theme.textTertiary)
             }
             // Model identity is a text control in the command line, not a
@@ -271,7 +271,7 @@ private struct ModelPickerPopover: View {
             Image(systemName: "cpu.fill")
                 .foregroundStyle(Theme.accent)
             Text(source == .local ? "Local model" : source == .api ? "API model" : "OpenAI account")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.textPrimary)
             Spacer()
             switch appState.enginePhase {
@@ -291,7 +291,7 @@ private struct ModelPickerPopover: View {
 
     private func statusBadge(_ text: String, color: Color, icon: String) -> some View {
         Label(text, systemImage: icon)
-            .font(.system(size: 11, weight: .medium))
+            .font(.system(size: 11, weight: .medium, design: .serif))
             .foregroundStyle(color)
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
@@ -325,12 +325,12 @@ private struct ModelPickerPopover: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: isActive ? "checkmark.circle.fill" : "cpu")
-                    .font(.system(size: 13))
+                    .font(.system(size: 13, design: .serif))
                     .foregroundStyle(isActive ? Theme.success : Theme.textSecondary)
                     .frame(width: 16)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(model.displayName)
-                        .font(.system(size: 12.5, weight: isActive ? .semibold : .regular))
+                        .font(.system(size: 12.5, weight: isActive ? .semibold : .regular, design: .serif))
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
                     Text("\(model.parameters) · \(model.quantization) · \(isActive ? "active" : budgetHint(budget))")
@@ -400,7 +400,7 @@ private struct ModelPickerPopover: View {
     private var accountSection: some View {
         sectionLabel("ChatGPT account models")
         if !codexAccount.isAvailable {
-            Text("Codex CLI is not available on this Mac. Install Codex, then reopen Beet Code.")
+            Text("Codex CLI is not available on this Mac. Install Codex, then reopen Vamp Assistant.")
                 .font(.caption)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -450,12 +450,12 @@ private struct ModelPickerPopover: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: isActive ? "checkmark.circle.fill" : "person.crop.circle")
-                    .font(.system(size: 13))
+                    .font(.system(size: 13, design: .serif))
                     .foregroundStyle(isActive ? Theme.success : Theme.textSecondary)
                     .frame(width: 16)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(model.displayName)
-                        .font(.system(size: 12.5, weight: isActive ? .semibold : .regular))
+                        .font(.system(size: 12.5, weight: isActive ? .semibold : .regular, design: .serif))
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
                     Text(model.id)
@@ -503,12 +503,12 @@ private struct ModelPickerPopover: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: isActive ? "checkmark.circle.fill" : "cloud")
-                    .font(.system(size: 13))
+                    .font(.system(size: 13, design: .serif))
                     .foregroundStyle(isActive ? Theme.success : Theme.textSecondary)
                     .frame(width: 16)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(profile.displayName ?? profile.model)
-                        .font(.system(size: 12.5, weight: isActive ? .semibold : .regular))
+                        .font(.system(size: 12.5, weight: isActive ? .semibold : .regular, design: .serif))
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
                     Text("\(profile.displayProviderName) · \(profile.model)")
@@ -560,7 +560,7 @@ private struct ModelPickerPopover: View {
                     Task { await appState.deactivate() }
                 } label: {
                     Label("Unload", systemImage: "eject")
-                        .font(.system(size: 12))
+                        .font(.system(size: 12, design: .serif))
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(Theme.textSecondary)
@@ -580,7 +580,7 @@ private struct ModelPickerPopover: View {
             } label: {
                     Label(source == .local ? "Model Manager…" : source == .api ? "Manage API models…" : "Manage account…",
                           systemImage: source == .local ? "square.and.arrow.down.on.square" : source == .api ? "key" : "person.crop.circle")
-                    .font(.system(size: 12))
+                    .font(.system(size: 12, design: .serif))
             }
             .buttonStyle(.borderless)
             .foregroundStyle(Theme.accent)

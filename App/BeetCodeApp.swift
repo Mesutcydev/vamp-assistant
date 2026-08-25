@@ -48,6 +48,7 @@ struct BeetCodeApp: App {
     var body: some Scene {
         WindowGroup {
             MainWindowView()
+                .fontDesign(.serif)
                 .environmentObject(appState)
                 .environmentObject(appState.sessions)
                 // A real working minimum: sidebar + chat + docked panel need room.
@@ -114,9 +115,12 @@ struct BeetCodeApp: App {
 
         Settings {
             SettingsView()
+                .fontDesign(.serif)
                 .environmentObject(appState)
                 .preferredColorScheme(settings.appearance.colorScheme)
         }
+        .defaultSize(width: 900, height: 680)
+        .windowResizability(.contentMinSize)
     }
 }
 
@@ -140,4 +144,6 @@ extension Notification.Name {
     static let openWorkspace = Notification.Name("com.beetcode.openWorkspace")
     static let openSystemReadiness = Notification.Name("com.beetcode.openSystemReadiness")
     static let focusChatSearch = Notification.Name("com.beetcode.focusChatSearch")
+    static let openBotsDashboard = Notification.Name("com.beetcode.openBotsDashboard")
+    static let openAssistantHome = Notification.Name("com.beetcode.openAssistantHome")
 }

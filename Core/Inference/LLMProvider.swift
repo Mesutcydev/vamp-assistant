@@ -199,7 +199,7 @@ enum LLMProvider: String, CaseIterable, Codable, Sendable, Identifiable {
         case .longCat: "LongCat-2.0"
         case .alibaba: "qwen-plus"
         case .alibabaTokenPlan: "qwen3.8-max"
-        case .gemini: "gemini-3.7-flash"
+        case .gemini: "gemini-3.5-flash"
         case .openRouter: "openrouter/auto"
         case .openCode: "gpt-5.6-luna"
         case .openCodeGo: "kimi-k3"
@@ -211,6 +211,17 @@ enum LLMProvider: String, CaseIterable, Codable, Sendable, Identifiable {
     /// Curated model ids shown before a provider's live `/models` response is
     /// available. The live response remains authoritative when it succeeds.
     var availableModels: [String] { suggestedModels }
+
+    /// Retired catalog IDs still sitting in saved preferences. Map them at
+    /// launch so the first request is already a live model, instead of
+    /// waiting for a successful `/models` fetch to remap.
+    static func currentModelID(forSaved id: String) -> String {
+        switch id {
+        case "gemini-3.7-flash": "gemini-3.5-flash"
+        case "google/gemini-3.7-flash": "google/gemini-3.5-flash"
+        default: id
+        }
+    }
 
     /// Model presets offered in the BYOK settings UI.
     /// Static fallback model list — shown before a live `/v1/models` fetch
@@ -234,14 +245,14 @@ enum LLMProvider: String, CaseIterable, Codable, Sendable, Identifiable {
             "qwen3-coder-plus", "deepseek-v4-pro", "deepseek-v4-flash-0731", "glm-5.2",
         ]
         case .gemini: [
-            "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash",
-            "gemini-3.5-flash-lite", "gemini-3.1-pro-preview", "gemini-2.5-pro",
+            "gemini-3.5-flash", "gemini-3.6-flash", "gemini-3-flash-preview",
+            "gemini-flash-latest", "gemini-pro-latest", "gemini-2.5-pro",
             "gemini-2.5-flash", "gemini-2.5-flash-lite",
         ]
         case .openRouter: [
             "openrouter/auto", "openai/gpt-5.2", "openai/gpt-5",
             "anthropic/claude-opus-5", "anthropic/claude-sonnet-4.6",
-            "google/gemini-3.7-flash", "deepseek/deepseek-reasoner",
+            "google/gemini-3.5-flash", "deepseek/deepseek-reasoner",
             "qwen/qwen3.8-max", "moonshotai/kimi-k3", "meta-llama/llama-4-maverick",
         ]
         case .openCode: [
@@ -729,6 +740,11 @@ final class APIKeyStore: ObservableObject {
     // All access happens under cacheLock, which is what makes this safe.
     nonisolated(unsafe) private static var keyCache: [LLMProvider: String?] = [:]
     nonisolated(unsafe) private static var dynamicKeyCache: [String: String?] = [:]
+    // Swift dictionaries remove an entry when their subscript is assigned
+    // nil, so separate loaded sets are required to cache a missing/denied
+    // credential. Without them every UI refresh queried securityd again.
+    nonisolated(unsafe) private static var loadedProviders: Set<LLMProvider> = []
+    nonisolated(unsafe) private static var loadedDynamicProviderIDs: Set<String> = []
     nonisolated(unsafe) private static var configuredHintCache: Set<LLMProvider>?
     nonisolated private static let configuredHintDefaultsKey = "beetcode.configured-provider-hints"
 
@@ -742,7 +758,8 @@ final class APIKeyStore: ObservableObject {
         keyReadLock.lock()
         defer { keyReadLock.unlock() }
         cacheLock.lock()
-        if let cached = keyCache[provider] {
+        if loadedProviders.contains(provider) {
+            let cached = keyCache[provider] ?? nil
             cacheLock.unlock()
             return cached
         }
@@ -751,6 +768,7 @@ final class APIKeyStore: ObservableObject {
         let value = Keychain.read(service: provider.keychainService, account: "api-key")
         cacheLock.lock()
         keyCache[provider] = value
+        loadedProviders.insert(provider)
         cacheLock.unlock()
         return value
     }
@@ -765,7 +783,8 @@ final class APIKeyStore: ObservableObject {
         keyReadLock.lock()
         defer { keyReadLock.unlock() }
         cacheLock.lock()
-        if let cached = dynamicKeyCache[id] {
+        if loadedDynamicProviderIDs.contains(id) {
+            let cached = dynamicKeyCache[id] ?? nil
             cacheLock.unlock()
             return cached
         }
@@ -774,6 +793,7 @@ final class APIKeyStore: ObservableObject {
         let value = Keychain.read(service: keychainService(providerID: id), account: "api-key")
         cacheLock.lock()
         dynamicKeyCache[id] = value
+        loadedDynamicProviderIDs.insert(id)
         cacheLock.unlock()
         return value
     }
@@ -859,6 +879,7 @@ final class APIKeyStore: ObservableObject {
         }
         Self.cacheLock.lock()
         Self.keyCache[provider] = trimmed
+        Self.loadedProviders.insert(provider)
         Self.cacheLock.unlock()
         Self.markConfiguredHint(for: provider)
         objectWillChange.send()
@@ -877,6 +898,7 @@ final class APIKeyStore: ObservableObject {
         else { return false }
         Self.cacheLock.lock()
         Self.dynamicKeyCache[id] = trimmed
+        Self.loadedDynamicProviderIDs.insert(id)
         Self.cacheLock.unlock()
         objectWillChange.send()
         return true
@@ -886,6 +908,7 @@ final class APIKeyStore: ObservableObject {
         Keychain.delete(service: provider.keychainService, account: "api-key")
         Self.cacheLock.lock()
         Self.keyCache[provider] = nil
+        Self.loadedProviders.insert(provider)
         Self.cacheLock.unlock()
         Self.clearConfiguredHint(for: provider)
         objectWillChange.send()
@@ -897,6 +920,7 @@ final class APIKeyStore: ObservableObject {
         Keychain.delete(service: Self.keychainService(providerID: id), account: "api-key")
         Self.cacheLock.lock()
         Self.dynamicKeyCache[id] = nil
+        Self.loadedDynamicProviderIDs.insert(id)
         Self.cacheLock.unlock()
         objectWillChange.send()
     }

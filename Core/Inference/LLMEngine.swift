@@ -14,10 +14,21 @@ public struct ChatTurn: Sendable, Equatable {
 
     public let role: Role
     public let content: String
+    /// Gemini `functionResponse.name` pairing. Other engines ignore it.
+    public let toolName: String?
+    /// Gemini thought signature that must be echoed on the next model turn.
+    public let thoughtSignature: String?
 
-    public init(role: Role, content: String) {
+    public init(
+        role: Role,
+        content: String,
+        toolName: String? = nil,
+        thoughtSignature: String? = nil
+    ) {
         self.role = role
         self.content = content
+        self.toolName = toolName
+        self.thoughtSignature = thoughtSignature
     }
 }
 

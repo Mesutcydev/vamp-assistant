@@ -16,7 +16,7 @@ struct SettingsCard<Content: View>: View {
                     .foregroundStyle(Theme.textPrimary)
             } icon: {
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold, design: .serif))
                     .foregroundStyle(Theme.accent)
             }
 
@@ -132,7 +132,7 @@ struct PaletteSwatchPicker: View {
                     )
                 if isSelected {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(size: 10, weight: .bold, design: .serif))
                         .foregroundStyle(.white)
                         .shadow(color: .black.opacity(0.35), radius: 1)
                 }
@@ -181,7 +181,7 @@ struct InfoBanner: View {
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.md) {
             Image(systemName: icon)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.info)
                 .frame(width: 30, height: 30)
                 .background(Theme.washStrong(Theme.info),

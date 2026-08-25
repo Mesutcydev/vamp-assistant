@@ -73,6 +73,28 @@ struct AppPreferences: Codable, Sendable, Equatable {
     var externalResourceURLs: [URL] {
         externalResourcePaths.map { URL(fileURLWithPath: $0, isDirectory: true) }
     }
+
+    /// Rewrites retired BYOK model ids so a saved Gemini 3.7 choice does not
+    /// fire a 404 on the first request after launch.
+    @discardableResult
+    mutating func migrateRetiredModelIDs() -> Bool {
+        var changed = false
+        for (key, value) in remoteModel {
+            let current = LLMProvider.currentModelID(forSaved: value)
+            if current != value {
+                remoteModel[key] = current
+                changed = true
+            }
+        }
+        if let last = lastModelID {
+            let current = LLMProvider.currentModelID(forSaved: last)
+            if current != last {
+                lastModelID = current
+                changed = true
+            }
+        }
+        return changed
+    }
 }
 
 /// JSON-file-backed preferences under Application Support/BeetCode.
@@ -230,8 +252,11 @@ final class AppPreferencesStore: @unchecked Sendable {
 
     private static func load(from url: URL) -> AppPreferences {
         guard let data = try? Data(contentsOf: url),
-              let decoded = try? JSONDecoder().decode(AppPreferences.self, from: data)
+              var decoded = try? JSONDecoder().decode(AppPreferences.self, from: data)
         else { return AppPreferences() }
+        if decoded.migrateRetiredModelIDs() {
+            write(decoded, to: url)
+        }
         return decoded
     }
 

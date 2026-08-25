@@ -11,6 +11,29 @@ struct ParsedToolCall: Sendable, Equatable, Identifiable {
     /// Canonical JSON for execution/logging.
     var argumentsJSON: String { arguments.encoded() }
 
+    func askUserQuestion() -> String {
+        if let text = string("question") ?? string("query") ?? string("prompt")
+            ?? string("text") ?? string("message"),
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return text
+        }
+        if let text = arguments.stringValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !text.isEmpty {
+            return text
+        }
+        return "Please answer."
+    }
+
+    func askUserChoices() -> [String] {
+        for key in ["choices", "options", "answers"] {
+            let values = strings(key).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if !values.isEmpty { return values }
+        }
+        return []
+    }
+
     /// Convenience accessors used by tools.
     func string(_ key: String) -> String? {
         arguments.objectValue?[key]?.stringValue
@@ -75,8 +98,7 @@ enum ToolParser {
         var seen = Set<String>()
 
         for candidate in candidates {
-            guard let value = TolerantJSON.value(from: candidate.payload) else { continue }
-            for call in shape(value) where !seen.contains(call.signature) {
+            for call in decodePayload(candidate.payload) where !seen.contains(call.signature) {
                 seen.insert(call.signature)
                 calls.append(
                     ParsedToolCall(
@@ -86,6 +108,42 @@ enum ToolParser {
             }
         }
         return calls
+    }
+
+    private static func decodePayload(_ payload: String) -> [Shaped] {
+        let trimmed = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let value = TolerantJSON.value(from: trimmed) {
+            let shaped = shape(value)
+            if !shaped.isEmpty { return shaped }
+        }
+        if let xml = xmlTaggedCall(trimmed) {
+            return [xml]
+        }
+        // Hermes / some Qwen variants: tool name on the first line, JSON after.
+        if let newline = trimmed.firstIndex(of: "\n") {
+            let name = String(trimmed[..<newline]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let rest = String(trimmed[trimmed.index(after: newline)...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if isToolName(name) {
+                if let value = TolerantJSON.value(from: rest) {
+                    return [Shaped(name: name, arguments: coerceArguments(value))]
+                }
+                if let xml = xmlArguments(rest) {
+                    return [Shaped(name: name, arguments: xml)]
+                }
+                if !rest.isEmpty {
+                    return [Shaped(name: name, arguments: .string(rest))]
+                }
+            }
+        }
+        if isToolName(trimmed) {
+            return [Shaped(name: trimmed, arguments: .object([:]))]
+        }
+        return []
+    }
+
+    private static func isToolName(_ name: String) -> Bool {
+        name.range(of: #"^[A-Za-z][A-Za-z0-9_]*$"#, options: .regularExpression) != nil
     }
 
     // MARK: Extraction
@@ -121,6 +179,41 @@ enum ToolParser {
                         payload: String(text[payloadRange]),
                         containerRange: Range(match.range, in: text)))
                 }
+            }
+        }
+
+        // 2b. Llama-style <function=name>{…}</function>
+        if let regex = try? NSRegularExpression(
+            pattern: #"<function=([A-Za-z0-9_]+)>\s*([\s\S]*?)\s*</function>"#) {
+            let range = NSRange(text.startIndex..., in: text)
+            for match in regex.matches(in: text, range: range) where match.numberOfRanges > 2 {
+                guard let nameRange = Range(match.range(at: 1), in: text),
+                      let bodyRange = Range(match.range(at: 2), in: text) else { continue }
+                let name = String(text[nameRange])
+                let body = String(text[bodyRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let payload = body.hasPrefix("{")
+                    ? "{\"name\":\"\(name)\",\"arguments\":\(body)}"
+                    : "{\"name\":\"\(name)\",\"arguments\":{}}"
+                candidates.append(Candidate(
+                    range: bodyRange,
+                    payload: payload,
+                    containerRange: Range(match.range, in: text)))
+            }
+        }
+
+        // 2c. Anthropic-style <invoke name="…"><parameter name="…">…</parameter>
+        if let regex = try? NSRegularExpression(
+            pattern: #"<invoke\s+name=["']?([A-Za-z0-9_]+)["']?\s*>([\s\S]*?)</invoke>"#) {
+            let range = NSRange(text.startIndex..., in: text)
+            for match in regex.matches(in: text, range: range) where match.numberOfRanges > 2 {
+                guard let nameRange = Range(match.range(at: 1), in: text),
+                      let bodyRange = Range(match.range(at: 2), in: text) else { continue }
+                let name = String(text[nameRange])
+                let arguments = invokeParameters(String(text[bodyRange]))
+                candidates.append(Candidate(
+                    range: bodyRange,
+                    payload: "{\"name\":\"\(name)\",\"arguments\":\(arguments)}",
+                    containerRange: Range(match.range, in: text)))
             }
         }
 
@@ -185,8 +278,7 @@ enum ToolParser {
     static func strippingCalls(from text: String) -> String {
         var removals: [Range<String.Index>] = []
         for candidate in collectCandidates(text) {
-            guard let value = TolerantJSON.value(from: candidate.payload),
-                  !shape(value).isEmpty else { continue }
+            guard !decodePayload(candidate.payload).isEmpty else { continue }
             removals.append(candidate.containerRange ?? candidate.range)
         }
         // A model can emit an empty wrapper while deciding whether to call a
@@ -267,6 +359,8 @@ enum ToolParser {
             options: .regularExpression) != nil
         let hasToolTag = lower.contains("<tool_call>")
             || lower.contains("</tool_call>")
+            || lower.contains("<function=")
+            || lower.contains("<invoke")
         guard hasToolFence || hasToolTag, parse(text).isEmpty else { return nil }
         return "the tool wrapper did not contain a valid name and JSON arguments object"
     }
@@ -303,19 +397,113 @@ enum ToolParser {
             return [Shaped(name: name, arguments: coerceArguments(function["arguments"]))]
         }
 
-        guard let name = object["name"]?.stringValue, !name.isEmpty else { return [] }
+        if let name = object["function"]?.stringValue, !name.isEmpty {
+            return [Shaped(name: name, arguments: coerceArguments(
+                object["arguments"] ?? object["args"] ?? object["parameters"] ?? object["input"]))]
+        }
+
+        let name = object["name"]?.stringValue
+            ?? object["tool"]?.stringValue
+            ?? object["tool_name"]?.stringValue
+            ?? object["function_name"]?.stringValue
+        guard let name, !name.isEmpty else { return [] }
         let arguments = coerceArguments(
-            object["arguments"] ?? object["args"] ?? object["parameters"] ?? object["input"])
+            object["arguments"] ?? object["args"] ?? object["parameters"]
+                ?? object["input"] ?? object["tool_input"])
+        var fields = leftoverArguments(object)
+        if case .object(let objectFields) = arguments {
+            fields.merge(objectFields) { _, incoming in incoming }
+        } else if case .string(let text) = arguments, !text.isEmpty {
+            if fields.isEmpty {
+                return [Shaped(name: name, arguments: arguments)]
+            }
+            if fields["question"] == nil, fields["query"] == nil, fields["prompt"] == nil {
+                fields["question"] = .string(text)
+            }
+        }
+        if !fields.isEmpty {
+            return [Shaped(name: name, arguments: .object(fields))]
+        }
         return [Shaped(name: name, arguments: arguments)]
     }
 
+    private static func leftoverArguments(_ object: [String: LFJSONValue]) -> [String: LFJSONValue] {
+        let reserved: Set<String> = [
+            "name", "tool", "tool_name", "function_name", "function",
+            "arguments", "args", "parameters", "input", "tool_input",
+            "tool_calls", "id", "type", "index",
+        ]
+        return object.filter { !reserved.contains($0.key) }
+    }
+
+    private static func xmlTaggedCall(_ body: String) -> Shaped? {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"^([A-Za-z][A-Za-z0-9_]*)\s+([\s\S]+)$"#),
+              let match = regex.firstMatch(
+                in: body, range: NSRange(body.startIndex..., in: body)),
+              let nameRange = Range(match.range(at: 1), in: body),
+              let restRange = Range(match.range(at: 2), in: body)
+        else { return nil }
+        let name = String(body[nameRange])
+        let rest = String(body[restRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rest.isEmpty else { return nil }
+        if let xml = xmlArguments(rest) {
+            return Shaped(name: name, arguments: xml)
+        }
+        if rest.hasPrefix("{") || rest.hasPrefix("["),
+           let value = TolerantJSON.value(from: rest) {
+            return Shaped(name: name, arguments: coerceArguments(value))
+        }
+        return nil
+    }
+
+    private static func xmlArguments(_ body: String) -> LFJSONValue? {
+        if body.contains("<parameter") {
+            let encoded = invokeParameters(body)
+            if encoded != "{}" { return TolerantJSON.value(from: encoded) }
+        }
+        guard let regex = try? NSRegularExpression(
+            pattern: #"<([A-Za-z][A-Za-z0-9_]*)>([\s\S]*?)</\1>"#) else {
+            return nil
+        }
+        var object: [String: LFJSONValue] = [:]
+        let range = NSRange(body.startIndex..., in: body)
+        for match in regex.matches(in: body, range: range) where match.numberOfRanges > 2 {
+            guard let nameRange = Range(match.range(at: 1), in: body),
+                  let valueRange = Range(match.range(at: 2), in: body) else { continue }
+            let key = String(body[nameRange])
+            if key == "parameter" || key == "invoke" || key == "tool_call" { continue }
+            object[key] = .string(String(body[valueRange]).trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return object.isEmpty ? nil : .object(object)
+    }
+
+    private static func invokeParameters(_ body: String) -> String {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"<parameter\s+name="([^"]+)">([\s\S]*?)</parameter>"#) else {
+            return "{}"
+        }
+        var object: [String: LFJSONValue] = [:]
+        let range = NSRange(body.startIndex..., in: body)
+        for match in regex.matches(in: body, range: range) where match.numberOfRanges > 2 {
+            guard let nameRange = Range(match.range(at: 1), in: body),
+                  let valueRange = Range(match.range(at: 2), in: body) else { continue }
+            object[String(body[nameRange])] = .string(
+                String(body[valueRange]).trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return LFJSONValue.object(object).encoded()
+    }
+
     /// Models sometimes emit arguments as a JSON *string* rather than an object.
+    /// A non-JSON string (common for `ask_user`) is kept as a string so the
+    /// question can still be recovered.
     private static func coerceArguments(_ value: LFJSONValue?) -> LFJSONValue {
         guard let value else { return .object([:]) }
         if case .object = value { return value }
         if let text = value.stringValue, let inner = TolerantJSON.value(from: text) {
             if case .object = inner { return inner }
         }
+        if case .string = value { return value }
         return .object([:])
     }
 }

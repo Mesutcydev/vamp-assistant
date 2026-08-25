@@ -180,6 +180,73 @@ final class ToolCallTextTests: XCTestCase {
         let calls = ToolParser.parse(ToolCallText.serialize(name: #"we"ird"#, argumentsJSON: "{}"))
         XCTAssertEqual(calls.first?.name, #"we"ird"#)
     }
+
+    func testHermesNameOnFirstLine() {
+        let text = """
+        <tool_call>
+        read_file
+        {"path": "A.swift"}
+        </tool_call>
+        """
+        let calls = ToolParser.parse(text)
+        XCTAssertEqual(calls.map(\.name), ["read_file"])
+        XCTAssertEqual(calls.first?.string("path"), "A.swift")
+    }
+
+    func testLlamaFunctionEqualsWrapper() {
+        let text = #"<function=ask_user>{"question":"Which port?"}</function>"#
+        let calls = ToolParser.parse(text)
+        XCTAssertEqual(calls.map(\.name), ["ask_user"])
+        XCTAssertEqual(calls.first?.askUserQuestion(), "Which port?")
+    }
+
+    func testInvokeParameterWrapper() {
+        let text = #"<invoke name="read_file"><parameter name="path">A.swift</parameter></invoke>"#
+        let calls = ToolParser.parse(text)
+        XCTAssertEqual(calls.map(\.name), ["read_file"])
+        XCTAssertEqual(calls.first?.string("path"), "A.swift")
+    }
+
+    func testToolNameKeyAndFlatArguments() {
+        let fence = "\u{60}\u{60}\u{60}"
+        let text = "\(fence)tool\n{\"tool_name\":\"ask_user\",\"question\":\"Ship it?\"}\n\(fence)"
+        let calls = ToolParser.parse(text)
+        XCTAssertEqual(calls.map(\.name), ["ask_user"])
+        XCTAssertEqual(calls.first?.askUserQuestion(), "Ship it?")
+        XCTAssertEqual(calls.first?.askUserChoices(), [])
+    }
+
+    func testAskUserStringArgumentsAndChoices() {
+        let fence = "\u{60}\u{60}\u{60}"
+        let text = "\(fence)tool\n{\"name\":\"ask_user\",\"arguments\":\"Which theme?\",\"choices\":[\"dark\",\"light\"]}\n\(fence)"
+        let calls = ToolParser.parse(text)
+        XCTAssertEqual(calls.first?.askUserQuestion(), "Which theme?")
+        XCTAssertEqual(calls.first?.askUserChoices(), ["dark", "light"])
+    }
+
+    func testHermesAskUserPlainQuestion() {
+        let text = """
+        <tool_call>
+        ask_user
+        Which port should the server use?
+        </tool_call>
+        """
+        let calls = ToolParser.parse(text)
+        XCTAssertEqual(calls.map(\.name), ["ask_user"])
+        XCTAssertEqual(calls.first?.askUserQuestion(), "Which port should the server use?")
+    }
+
+    func testXMLTaggedArgumentsInsideToolCall() {
+        let text = """
+        <tool_call>
+        read_file
+        <path>A.swift</path>
+        </tool_call>
+        """
+        let calls = ToolParser.parse(text)
+        XCTAssertEqual(calls.map(\.name), ["read_file"])
+        XCTAssertEqual(calls.first?.string("path"), "A.swift")
+    }
 }
 
 final class TolerantJSONTests: XCTestCase {

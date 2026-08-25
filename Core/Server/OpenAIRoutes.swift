@@ -47,7 +47,7 @@ public enum OpenAIRoutes {
 
         case ("GET", "/"):
             return .response(.text(
-                "Beet Code API server — OpenAI-compatible local inference.\n" +
+                "Vamp Assistant API server — OpenAI-compatible local inference.\n" +
                 "  GET  /v1/models\n" +
                 "  POST /v1/chat/completions\n" +
                 "  POST /v1/messages      (Anthropic-format)\n" +

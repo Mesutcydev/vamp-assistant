@@ -24,12 +24,14 @@ final class BotComputerManager: ObservableObject {
     func prepareDefault() {
         perform { service in
             let capabilities = await service.capabilities()
-            _ = try await service.prepare(
-                profileID: "beet",
-                name: "Beet",
-                backend: capabilities.supportsAppleContainers
-                    ? .appleContainer : .isolatedWorkspace)
-            return (capabilities, try await service.refresh())
+            return (capabilities, try await service.prepareSpecialists())
+        }
+    }
+
+    func prepare(profileID: String) {
+        perform { service in
+            _ = try await service.prepareSpecialist(profileID: profileID)
+            return (await service.capabilities(), try await service.refresh())
         }
     }
 

@@ -231,7 +231,7 @@ actor CodexAppServerClient {
         let initializeParams = LFJSONValue.object([
             "clientInfo": .object([
                 "name": .string("beetcode"),
-                "title": .string("Beet Code"),
+                "title": .string("Vamp Assistant"),
                 "version": .string(clientVersion)
             ]),
             "capabilities": .object([
@@ -581,7 +581,7 @@ actor CodexAppServerClient {
     func declineDynamicTool(requestID: Int) async throws {
         try respondToDynamicTool(
             requestID: requestID,
-            output: "Tool call declined by Beet Code.",
+            output: "Tool call declined by Vamp Assistant.",
             success: false)
     }
 
@@ -633,7 +633,7 @@ actor CodexAppServerClient {
     }
 
     private nonisolated static let dynamicToolInstructions = """
-        Beet Code may provide native browser_* and computer_* tools. Prefer
+        Vamp Assistant may provide native browser_* and computer_* tools. Prefer
         those tools for the in-app browser and Mac UI tasks. For browser work,
         navigate, read elements, and act with fresh document-scoped refs. For
         computer work, call computer_status first, inspect with

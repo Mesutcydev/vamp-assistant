@@ -154,7 +154,7 @@ struct ReasoningEffortPicker: View {
                             .matchedGeometryEffect(id: "reactor-selection", in: selectionNamespace)
                     }
                     Image(systemName: glyph)
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold, design: .serif))
                         .foregroundStyle(isSelected ? tint : Theme.textTertiary)
                 }
                 .frame(height: 22)

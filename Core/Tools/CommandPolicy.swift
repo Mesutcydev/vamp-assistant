@@ -52,6 +52,11 @@ struct CommandPolicy: Sendable {
             return Decision(safeForAutoApproval: false, reason: "missing executable")
         }
         let executableName = URL(fileURLWithPath: executable).lastPathComponent
+        guard executable == executableName,
+              !executable.contains("/"),
+              !executable.contains("\\") else {
+            return Decision(safeForAutoApproval: false, reason: "executable path requires approval")
+        }
         guard allowedExecutables.contains(executableName) else {
             return Decision(safeForAutoApproval: false, reason: "executable '\(executableName)' requires approval")
         }
