@@ -52,7 +52,7 @@ private extension View {
     ) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         return background(strong ? AnyShapeStyle(.regularMaterial) : AnyShapeStyle(.thinMaterial), in: shape)
-            .background(BeetTheme.surface(appearance).opacity(strong ? 0.34 : 0.22), in: shape)
+            .background(BeetTheme.surface(appearance).opacity(strong ? 0.68 : 0.52), in: shape)
             .overlay {
                 shape.stroke(
                     LinearGradient(
@@ -73,16 +73,20 @@ struct RemoteBackdrop: View {
                 .resizable()
                 .scaledToFill()
                 .saturation(0)
+                // The engraving's fine detail fought every label drawn on top
+                // of it. Softening it keeps the atmosphere and returns the
+                // contrast to the content.
+                .blur(radius: 9)
                 .frame(width: proxy.size.width, height: proxy.size.height)
                 .clipped()
                 .overlay(appearance == .light
-                    ? Color.white.opacity(0.58)
-                    : Color.black.opacity(0.46))
+                    ? Color.white.opacity(0.74)
+                    : Color.black.opacity(0.66))
                 .overlay {
                     LinearGradient(
                         colors: appearance == .light
-                            ? [.white.opacity(0.20), .white.opacity(0.60)]
-                            : [.black.opacity(0.02), .black.opacity(0.38)],
+                            ? [.white.opacity(0.34), .white.opacity(0.70)]
+                            : [.black.opacity(0.16), .black.opacity(0.52)],
                         startPoint: .top,
                         endPoint: .bottom)
                 }
@@ -109,7 +113,7 @@ struct AppearanceMenuButton: View {
                 .foregroundStyle(BeetTheme.secondaryText(current))
                 .frame(width: 40, height: 40)
                 .background(.thinMaterial, in: Circle())
-                .background(BeetTheme.surface(current).opacity(0.2), in: Circle())
+                .background(BeetTheme.surface(current).opacity(0.62), in: Circle())
                 .overlay { Circle().stroke(BeetTheme.line(current).opacity(0.7), lineWidth: 0.75) }
                 .shadow(color: .black.opacity(current == .light ? 0.08 : 0.18), radius: 9, y: 4)
                 .contentShape(Circle())
@@ -355,7 +359,7 @@ struct RemoteSecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.foregroundStyle(BeetTheme.secondaryText(appearance))
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .background(BeetTheme.surfaceStrong(appearance).opacity(0.2), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(BeetTheme.surfaceStrong(appearance).opacity(0.62), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay { RoundedRectangle(cornerRadius: 14).stroke(BeetTheme.line(appearance)) }
             .scaleEffect(configuration.isPressed ? 0.975 : 1).animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
@@ -406,7 +410,13 @@ struct SessionListView: View {
                     onStart: {
                         startBotID = ""
                         showStartSession = true
-                    })
+                    },
+                    onBots: { showBotRuns = true },
+                    onComputers: { showComputers = true },
+                    onShare: { showSharing = true },
+                    onAppStream: { showAppStream = true },
+                    onDiagnostics: { showDiagnostics = true },
+                    onForget: { Task { await store.revoke() } })
                 if !store.isConnected {
                     RemoteReconnectBanner(store: store)
                 }
@@ -430,26 +440,9 @@ struct SessionListView: View {
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(BeetTheme.background(appearance).opacity(0.94), for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button { showBotRuns = true } label: { Image(systemName: "person.3.sequence.fill") }
-                        .accessibilityLabel("Specialist bots")
-                    Button { showComputers = true } label: {
-                        Image(systemName: "desktopcomputer.and.macbook")
-                    }
-                    .accessibilityLabel("Choose a Vamp Assistant computer")
-                    Button { showSharing = true } label: { Image(systemName: "square.and.arrow.up") }
-                        .accessibilityLabel("Share clipboard or files")
-                    Menu {
-                        Button("Refresh", systemImage: "arrow.clockwise") { Task { try? await store.refresh() } }
-                        Button("App Stream", systemImage: "macwindow.on.rectangle") { showAppStream = true }
-                        Button("Control Diagnostics", systemImage: "stethoscope") { showDiagnostics = true }
-                        Button("Forget this Mac", systemImage: "iphone.slash", role: .destructive) { Task { await store.revoke() } }
-                    } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Session options")
-                }
-            }
+        // The home screen carries its own header. A second, empty system bar
+        // stacked above it produced two competing control rows.
+        .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showStartSession, onDismiss: openDeferredSession) {
                 StartSessionSheet(store: store, initialBotID: startBotID) { sessionID in
                     deferredSessionID = sessionID
@@ -566,6 +559,7 @@ struct RemoteBotRunsView: View {
                 }
             }
             .buttonStyle(.borderedProminent)
+            .tint(BeetTheme.accent)
             .disabled(selectedModelID.isEmpty || workflowPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
         .padding(14)
@@ -628,10 +622,12 @@ struct RemoteBotRunsView: View {
                 if run.state == "recoverable" {
                     Button("Resume from checkpoint") { Task { _ = await store.resumeBotRun(run.id) } }
                         .buttonStyle(.borderedProminent)
+                        .tint(BeetTheme.accent)
                 } else if run.state == "needsApproval" {
                     HStack {
                         Button("Approve") { Task { _ = await store.approveBotRun(run.id, approved: true) } }
                             .buttonStyle(.borderedProminent)
+                            .tint(BeetTheme.accent)
                         Button("Decline", role: .destructive) { Task { _ = await store.approveBotRun(run.id, approved: false) } }
                     }
                 } else if run.state == "needsInput" {
@@ -644,6 +640,7 @@ struct RemoteBotRunsView: View {
                         Task { if await store.answerBotRun(run.id, answer: answer) { answers[run.id] = "" } }
                     }
                     .buttonStyle(.borderedProminent)
+                    .tint(BeetTheme.accent)
                     .disabled(answers[run.id, default: ""].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 } else if !run.isTerminal {
                     TextField("Steer this run", text: Binding(
@@ -681,6 +678,7 @@ struct RemoteBotRunsView: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
+                    .tint(BeetTheme.accent)
                     .disabled(selectedModelID.isEmpty || prompts[specialist.id, default: ""].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             } else {
@@ -701,6 +699,7 @@ struct RemoteBotRunsView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(BeetTheme.accent)
                 .disabled(selectedModelID.isEmpty || prompts[specialist.id, default: ""].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
@@ -944,82 +943,129 @@ struct SessionControlHeader: View {
     @Binding var search: String
     let onControl: () -> Void
     let onStart: () -> Void
+    let onBots: () -> Void
+    let onComputers: () -> Void
+    let onShare: () -> Void
+    let onAppStream: () -> Void
+    let onDiagnostics: () -> Void
+    let onForget: () -> Void
     @Environment(\.remoteAppearance) private var appearance
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Vamp Assistant")
-                .font(.title2.weight(.semibold))
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-                .accessibilityAddTraits(.isHeader)
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(store.isConnected ? BeetTheme.accentBright : BeetTheme.secondaryText(appearance))
-                    .frame(width: 8, height: 8)
-                    .shadow(
-                        color: (store.isConnected ? BeetTheme.accentBright : BeetTheme.secondaryText(appearance)).opacity(0.35),
-                        radius: 4)
-                Button {
-                    if !store.isConnected { Task { await store.connectSaved() } }
-                } label: {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(store.connectionLabel == "Connected" ? "Mac connected" : store.connectionLabel)
-                            .font(.subheadline.weight(.semibold))
-                        Text(store.connectionSubtitle)
-                            .font(.caption2)
-                            .foregroundStyle(BeetTheme.secondaryText(appearance))
-                    }
+            HStack(spacing: 8) {
+                Text("Vamp Assistant")
+                    .font(.title2.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .accessibilityAddTraits(.isHeader)
+                if store.isRefreshing {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel("Refreshing sessions")
                 }
-                .buttonStyle(.plain)
-                .disabled(store.isConnected)
-                .accessibilityLabel(store.isConnected ? "Mac connected" : "\(store.connectionLabel). \(store.connectionSubtitle)")
-                Spacer(minLength: 8)
-                Button(action: onControl) {
-                    Image(systemName: "display.and.arrow.down")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 36, height: 36)
-                        .background(BeetTheme.accent, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                }
-                .buttonStyle(RemotePressButtonStyle())
-                .disabled(!store.isConnected)
-                .opacity(store.isConnected ? 1 : 0.45)
-                .accessibilityLabel("Control Mac")
-                .accessibilityHint(store.isConnected ? "Open a live view of this Mac" : "Connect to your Mac first")
-                RemoteAppearanceSwitcher()
-                Button { Task { try? await store.refresh() } } label: {
-                    Group {
-                        if store.isRefreshing { ProgressView().controlSize(.small) }
-                        else { Image(systemName: "arrow.clockwise") }
-                    }
-                    .frame(width: 36, height: 36)
-                }
-                .buttonStyle(RemoteChromeButtonStyle())
-                .accessibilityLabel("Refresh sessions")
-                Button(action: onStart) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 36, height: 36)
-                        .background(BeetTheme.accent, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                }
-                .buttonStyle(RemotePressButtonStyle())
-                .disabled(!store.isConnected)
-                .opacity(store.isConnected ? 1 : 0.45)
-                .accessibilityLabel("Start a new session")
-                .accessibilityHint(store.isConnected ? "" : "Connect to your Mac first")
+                Spacer(minLength: 6)
+                primaryAction(
+                    symbol: "display.and.arrow.down",
+                    label: "Control Mac",
+                    hint: store.isConnected ? "Open a live view of this Mac" : "Connect to your Mac first",
+                    action: onControl)
+                primaryAction(
+                    symbol: "plus",
+                    label: "Start a new session",
+                    hint: store.isConnected ? "" : "Connect to your Mac first",
+                    action: onStart)
+                overflowMenu
             }
+            connectionRow
             SearchField(text: $search)
             RemoteModeSwitcher(mode: $store.sessionMode)
         }
         .padding(.horizontal, 12)
-        .padding(.top, 10)
+        .padding(.top, 6)
         .padding(.bottom, 12)
-        .background(BeetTheme.background(appearance).opacity(0.94))
+        .background(BeetTheme.background(appearance).opacity(0.97))
         .overlay(alignment: .bottom) {
             Rectangle().fill(BeetTheme.line(appearance)).frame(height: 0.75)
         }
+    }
+
+    private var connectionRow: some View {
+        HStack(spacing: 9) {
+            Circle()
+                .fill(store.isConnected ? BeetTheme.accentBright : BeetTheme.secondaryText(appearance))
+                .frame(width: 8, height: 8)
+                .shadow(
+                    color: (store.isConnected ? BeetTheme.accentBright : BeetTheme.secondaryText(appearance)).opacity(0.35),
+                    radius: 4)
+            Button {
+                if !store.isConnected { Task { await store.connectSaved() } }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(store.connectionLabel == "Connected" ? "Mac connected" : store.connectionLabel)
+                        .font(.subheadline.weight(.semibold))
+                    Text("·")
+                        .font(.caption)
+                        .foregroundStyle(BeetTheme.secondaryText(appearance))
+                    Text(store.connectionSubtitle)
+                        .font(.caption)
+                        .foregroundStyle(BeetTheme.secondaryText(appearance))
+                        .lineLimit(1)
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(store.isConnected)
+            .accessibilityLabel(store.isConnected
+                                ? "Mac connected, \(store.connectionSubtitle)"
+                                : "\(store.connectionLabel). \(store.connectionSubtitle)")
+            Spacer(minLength: 4)
+        }
+    }
+
+    private var overflowMenu: some View {
+        Menu {
+            Button("Refresh sessions", systemImage: "arrow.clockwise") { Task { try? await store.refresh() } }
+            Section {
+                Button("Specialist bots", systemImage: "person.3.sequence.fill", action: onBots)
+                Button("Vamp Assistant computers", systemImage: "desktopcomputer.and.macbook", action: onComputers)
+                Button("Share clipboard or files", systemImage: "square.and.arrow.up", action: onShare)
+                Button("App Stream", systemImage: "macwindow.on.rectangle", action: onAppStream)
+            }
+            Section {
+                AppearancePickerMenu()
+            }
+            Section {
+                Button("Control Diagnostics", systemImage: "stethoscope", action: onDiagnostics)
+                Button("Forget this Mac", systemImage: "iphone.slash", role: .destructive, action: onForget)
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 15, weight: .semibold))
+                .frame(width: 36, height: 36)
+                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(RemoteChromeButtonStyle())
+        .accessibilityLabel("More options")
+    }
+
+    private func primaryAction(
+        symbol: String,
+        label: String,
+        hint: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .background(BeetTheme.accent, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(RemotePressButtonStyle())
+        .disabled(!store.isConnected)
+        .opacity(store.isConnected ? 1 : 0.45)
+        .accessibilityLabel(label)
+        .accessibilityHint(hint)
     }
 }
 
@@ -1192,7 +1238,11 @@ struct StartSessionSheet: View {
                             Label("Local", systemImage: "cpu").tag("local")
                             Label("ChatGPT", systemImage: "person.crop.circle").tag("chatgpt")
                             Label("API", systemImage: "cloud").tag("api")
-                        }.pickerStyle(.segmented)
+                        }
+                        .pickerStyle(.segmented)
+                        // The global control tint is near-white in dark mode;
+                        // the selected segment keeps the dark chip instead.
+                        .tint(BeetTheme.accent)
 
                         botComputerSection
 
@@ -1422,8 +1472,16 @@ struct StartSessionSheet: View {
                                 .foregroundStyle(selectedBotComputerID == computer.id ? BeetTheme.accentBright : BeetTheme.secondaryText(appearance))
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(displayName(for: computer)).font(.body.weight(.semibold))
-                                Text(botComputerSubtitle(computer))
-                                    .font(.caption).foregroundStyle(BeetTheme.secondaryText(appearance))
+                                HStack(spacing: 6) {
+                                    Circle()
+                                        .fill(computer.state == "running"
+                                              ? BeetTheme.accentBright
+                                              : BeetTheme.secondaryText(appearance).opacity(0.5))
+                                        .frame(width: 6, height: 6)
+                                    Text(botComputerSubtitle(computer))
+                                        .font(.caption).foregroundStyle(BeetTheme.secondaryText(appearance))
+                                        .lineLimit(1)
+                                }
                             }
                             Spacer()
                             if computer.state == "running" {
@@ -1432,7 +1490,7 @@ struct StartSessionSheet: View {
                                     .disabled(botComputerBusyID != nil)
                             } else if computer.backend != "isolatedWorkspace" {
                                 Button(botComputerBusyID == computer.id ? "Starting…" : "Start") { startBotComputer(computer) }
-                                    .buttonStyle(.borderedProminent).tint(BeetTheme.accentBright)
+                                    .buttonStyle(.borderedProminent).tint(BeetTheme.accent)
                                     .disabled(botComputerBusyID != nil)
                             }
                         }
@@ -1474,10 +1532,24 @@ struct StartSessionSheet: View {
         }
     }
 
+    /// Every prepared computer used to render as the same "Assistant computer",
+    /// which made a list of five of them impossible to tell apart. Name each one
+    /// after the bot profile it belongs to, and number them only when two
+    /// computers really do share a profile.
     private func displayName(for computer: RemoteBotComputer) -> String {
-        computer.name.trimmingCharacters(in: .whitespacesAndNewlines).localizedCaseInsensitiveCompare("Beet") == .orderedSame
-            ? "Assistant computer"
-            : computer.name
+        let trimmed = computer.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let generic = trimmed.isEmpty
+            || trimmed.localizedCaseInsensitiveCompare("Beet") == .orderedSame
+            || trimmed.localizedCaseInsensitiveCompare("Assistant computer") == .orderedSame
+        let base = generic
+            ? "\(RemoteBotProfile.profile(id: computer.profileID).name) computer"
+            : trimmed
+        let sameName = botComputers.filter {
+            $0.profileID == computer.profileID && $0.name == computer.name
+        }
+        guard sameName.count > 1,
+              let position = sameName.firstIndex(where: { $0.id == computer.id }) else { return base }
+        return "\(base) \(position + 1)"
     }
 
     private func canAttachBotComputer(_ computer: RemoteBotComputer) -> Bool {
@@ -1492,7 +1564,7 @@ struct StartSessionSheet: View {
         case "macOSVirtualMachine": backend = "macOS VM"
         default: backend = computer.backend
         }
-        return computer.state.capitalized + " · " + backend + " · private browser"
+        return computer.state.capitalized + " · " + backend
     }
 
     private func attachMatchingBotComputer() {
@@ -1532,21 +1604,45 @@ struct StartSessionSheet: View {
     private var apiKeySection: some View {
         VStack(alignment: .leading, spacing: 9) {
             Text("API KEY").font(.caption2.bold()).tracking(0.8).foregroundStyle(BeetTheme.secondaryText(appearance))
-            HStack(spacing: 8) {
-                Picker("Provider", selection: $keyProviderID) {
-                    Text("OpenAI").tag("openAI")
-                    Text("Gemini").tag("gemini")
-                    Text("OpenRouter").tag("openRouter")
-                    Text("Anthropic").tag("anthropic")
-                    Text("DeepSeek").tag("deepSeek")
-                    Text("OpenCode Zen").tag("openCode")
-                    Text("OpenCode Go").tag("openCodeGo")
-                }.pickerStyle(.menu)
-                SecureField("Paste key", text: $keyDraft)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                Button(isSavingKey ? "Saving…" : "Save") { saveAPIKey() }
-                    .disabled(keyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSavingKey)
+            VStack(spacing: 9) {
+                HStack {
+                    Text("Provider")
+                        .font(.subheadline)
+                        .foregroundStyle(BeetTheme.secondaryText(appearance))
+                    Spacer(minLength: 8)
+                    Picker("Provider", selection: $keyProviderID) {
+                        Text("OpenAI").tag("openAI")
+                        Text("Gemini").tag("gemini")
+                        Text("OpenRouter").tag("openRouter")
+                        Text("Anthropic").tag("anthropic")
+                        Text("DeepSeek").tag("deepSeek")
+                        Text("OpenCode Zen").tag("openCode")
+                        Text("OpenCode Go").tag("openCodeGo")
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                }
+                HStack(spacing: 8) {
+                    SecureField("Paste key", text: $keyDraft)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 44)
+                        .background(BeetTheme.surfaceStrong(appearance).opacity(0.72),
+                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    Button(isSavingKey ? "Saving…" : "Save") { saveAPIKey() }
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: 44)
+                        .background(BeetTheme.surfaceStrong(appearance),
+                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .buttonStyle(RemotePressButtonStyle())
+                        .disabled(keyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSavingKey)
+                }
             }
+            .padding(12)
+            .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(BeetTheme.line(appearance)) }
             if let keyMessage { Text(keyMessage).font(.caption).foregroundStyle(BeetTheme.secondaryText(appearance)) }
             Text("Stored securely in the Mac Keychain; the key is never saved on this device or in chat.")
                 .font(.caption2).foregroundStyle(BeetTheme.secondaryText(appearance))
@@ -1734,7 +1830,7 @@ private struct RemoteHomeBotCard: View {
             .frame(width: 92)
             .padding(.vertical, 10)
             .background(
-                BeetTheme.surface(appearance).opacity(0.55),
+                BeetTheme.surface(appearance).opacity(0.86),
                 in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -1928,7 +2024,7 @@ struct SearchField: View {
     @Binding var text: String
     var body: some View {
         HStack(spacing: 9) { Image(systemName: "magnifyingglass").foregroundStyle(BeetTheme.secondaryText(appearance)); TextField("Search sessions", text: $text).textInputAutocapitalization(.never); if !text.isEmpty { Button { text = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(BeetTheme.secondaryText(appearance)) } }
-            .padding(.horizontal, 13).frame(minHeight: 44).background(BeetTheme.surfaceStrong(appearance).opacity(0.72), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            .padding(.horizontal, 13).frame(minHeight: 44).background(BeetTheme.surfaceStrong(appearance), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
 }
 
@@ -1970,7 +2066,7 @@ struct RemoteSessionButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(
-                configuration.isPressed ? BeetTheme.surfaceStrong(appearance) : BeetTheme.surface(appearance).opacity(0.22),
+                configuration.isPressed ? BeetTheme.surfaceStrong(appearance) : BeetTheme.surface(appearance).opacity(0.58),
                 in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .scaleEffect(configuration.isPressed ? 0.992 : 1)
             .animation(.easeOut(duration: 0.11), value: configuration.isPressed)
@@ -2045,23 +2141,24 @@ struct ConversationView: View {
             .toolbarBackground(BeetTheme.background(appearance).opacity(0.92), for: .navigationBar).toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showComputers = true } label: {
-                        Image(systemName: "desktopcomputer.and.macbook")
-                    }
-                    .accessibilityLabel("Switch or add a Vamp Assistant computer")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Toggle("Auto mode", isOn: $store.autoMode)
                         Toggle("Full Access", isOn: $store.fullAccess)
-                        Divider()
-                        Button { showSharing = true } label: {
-                            Label("Share clipboard or files", systemImage: "square.and.arrow.up")
+                        Section {
+                            Button { showSharing = true } label: {
+                                Label("Share clipboard or files", systemImage: "square.and.arrow.up")
+                            }
+                            Button { showComputers = true } label: {
+                                Label("Vamp Assistant computers", systemImage: "desktopcomputer.and.macbook")
+                            }
+                        }
+                        Section {
+                            AppearancePickerMenu()
                         }
                     } label: {
-                        Image(systemName: store.fullAccess ? "lock.open.fill" : "ellipsis.circle")
+                        Image(systemName: store.fullAccess ? "lock.open.fill" : "ellipsis")
                     }
-                    .accessibilityLabel("Chat controls")
+                    .accessibilityLabel(store.fullAccess ? "Chat controls, Full Access on" : "Chat controls")
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -2076,6 +2173,7 @@ struct ConversationView: View {
                             draft: $draft,
                             isRunning: detail.isRunning,
                             isReachable: store.isConnected,
+                            isCodeSession: detail.mode == "code" || !(detail.workspacePath ?? "").isEmpty,
                             onSend: { send() },
                             onQueue: { send(action: "queue") },
                             onSteer: { send(action: "steer") },
@@ -2186,7 +2284,7 @@ struct ConversationStatus: View {
         }
         .font(.caption).foregroundStyle(BeetTheme.secondaryText(appearance))
         .padding(.horizontal, 16).frame(minHeight: 34)
-        .background(BeetTheme.surface(appearance).opacity(0.62))
+        .background(BeetTheme.surface(appearance).opacity(0.92))
     }
 }
 
@@ -2254,7 +2352,7 @@ struct MessageBubble: View {
                     .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Vamp Assistant").font(.caption.weight(.semibold)).foregroundStyle(BeetTheme.secondaryText(appearance))
-                    MarkdownText(message.content)
+                    MarkdownText(message.content, agentReasoning: true)
                 }
                 Spacer(minLength: 4)
             }
@@ -2289,58 +2387,166 @@ struct RemoteChatErrorCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(BeetTheme.surfaceStrong(appearance), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.32), lineWidth: 0.75)
+                .stroke(BeetTheme.line(appearance), lineWidth: 0.75)
         }
+    }
+}
+
+/// Agent reasoning arrives as a run of short bold headings glued straight onto
+/// the prose that follows (`**A****B**waiting**C**`). Rendered inline that
+/// collapses into one unreadable paragraph — and the empty `****` pairs leak
+/// through as literal asterisks. This restores a line break around each run.
+enum RemoteAgentText {
+    static func readable(_ raw: String) -> String {
+        guard raw.contains("**") else { return raw }
+        var out = ""
+        var index = raw.startIndex
+        var isBoldOpen = false
+        var boldHasContent = false
+        while index < raw.endIndex {
+            let next = raw.index(after: index)
+            if raw[index] == "*", next < raw.endIndex, raw[next] == "*" {
+                let after = raw.index(index, offsetBy: 2)
+                if isBoldOpen {
+                    if boldHasContent {
+                        out += "**"
+                        if after < raw.endIndex, !raw[after].isWhitespace { out += "\n" }
+                    } else {
+                        out.removeLast(2)
+                    }
+                    isBoldOpen = false
+                } else {
+                    // Only break when the run is glued onto the previous
+                    // character; ordinary inline emphasis stays inline.
+                    if let last = out.last, !last.isWhitespace { out += "\n" }
+                    out += "**"
+                    isBoldOpen = true
+                    boldHasContent = false
+                }
+                index = after
+            } else {
+                if isBoldOpen, !raw[index].isWhitespace { boldHasContent = true }
+                out.append(raw[index])
+                index = next
+            }
+        }
+        return out
     }
 }
 
 struct MarkdownText: View {
     let content: String
-    init(_ content: String) { self.content = content }
-    var body: some View { if let value = try? AttributedString(markdown: content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) { Text(value).font(.body).lineSpacing(5).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) } else { Text(content).font(.body).lineSpacing(5).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) } }
+    init(_ content: String, agentReasoning: Bool = false) {
+        self.content = agentReasoning ? RemoteAgentText.readable(content) : content
+    }
+    var body: some View {
+        Group {
+            if let value = try? AttributedString(
+                markdown: content,
+                options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
+                Text(value)
+            } else {
+                Text(content)
+            }
+        }
+        .font(.body)
+        .lineSpacing(5)
+        .textSelection(.enabled)
+        .fixedSize(horizontal: false, vertical: true)
+    }
 }
 
 struct ToolMessageCard: View {
     let message: RemoteMessage
     @Environment(\.remoteAppearance) private var appearance
+    @State private var isExpanded = false
+
+    // Parsed once at init: the transcript re-renders on every streamed chunk,
+    // and re-parsing each tool payload per frame is pure waste.
+    private let displayName: String
+    private let displayContent: String
+
+    private var collapsedLineLimit: Int { 6 }
+
+    init(message: RemoteMessage) {
+        self.message = message
+        self.displayName = Self.toolTitle(message)
+        self.displayContent = Self.toolBody(message)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(displayName, systemImage: message.role == "toolCall" ? "hammer" : "checkmark.circle.fill")
-                .font(.caption.weight(.semibold)).foregroundStyle(BeetTheme.accentBright)
+            HStack(spacing: 7) {
+                Image(systemName: message.role == "toolCall" ? "hammer" : "checkmark.circle.fill")
+                    .font(.caption.weight(.semibold))
+                Text(displayName)
+                    .font(.caption.weight(.semibold))
+                Spacer(minLength: 6)
+                if isTruncatable {
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.bold))
+                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                }
+            }
+            .foregroundStyle(BeetTheme.accentBright)
             if !displayContent.isEmpty {
-                Text(displayContent).font(.caption.monospaced()).lineSpacing(3)
-                    .textSelection(.enabled).lineLimit(12)
+                Text(displayContent)
+                    .font(.caption.monospaced())
+                    .lineSpacing(3)
+                    .textSelection(.enabled)
+                    .lineLimit(isExpanded ? nil : Optional(collapsedLineLimit))
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(13).frame(maxWidth: .infinity, alignment: .leading)
-        .background(BeetTheme.surfaceStrong(appearance).opacity(0.64), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(BeetTheme.surfaceStrong(appearance), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(BeetTheme.line(appearance).opacity(0.7), lineWidth: 0.75) }
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .onTapGesture {
+            guard isTruncatable else { return }
+            withAnimation(.easeOut(duration: 0.16)) { isExpanded.toggle() }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(displayName). \(displayContent.prefix(280))")
+        .accessibilityHint(isTruncatable ? (isExpanded ? "Tap to collapse" : "Tap to show the full output") : "")
     }
 
-    private var displayName: String {
+    private var isTruncatable: Bool {
+        displayContent.split(separator: "\n", omittingEmptySubsequences: false).count > collapsedLineLimit
+            || displayContent.count > 340
+    }
+
+    private static func toolTitle(_ message: RemoteMessage) -> String {
         let raw = message.toolName ?? "Tool activity"
         return raw.replacingOccurrences(of: "dynamic:", with: "")
             .replacingOccurrences(of: "_", with: " ")
     }
 
-    private var displayContent: String {
+    private static func toolBody(_ message: RemoteMessage) -> String {
         let trimmed = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed == "{}" { return "" }
+        if trimmed == "{}" || trimmed == "[]" { return "" }
         guard let data = trimmed.data(using: .utf8),
-              let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
-              !array.isEmpty else { return message.content }
-        let text = array.compactMap { $0["text"] as? String }.joined(separator: "\n")
-        return text.isEmpty ? message.content : text
+              let json = try? JSONSerialization.jsonObject(with: data) else { return trimmed }
+        if let array = json as? [[String: Any]] {
+            let text = array.compactMap { $0["text"] as? String }.joined(separator: "\n")
+            if !text.isEmpty { return text }
+        }
+        // Raw single-line argument blobs are unreadable on a phone; indent them.
+        if let pretty = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]),
+           let rendered = String(data: pretty, encoding: .utf8) {
+            return rendered
+        }
+        return trimmed
     }
 }
 
 struct StreamingBubble: View {
     let text: String, phase: String
     @Environment(\.remoteAppearance) private var appearance
-    var body: some View { HStack(alignment: .top, spacing: 11) { Color.clear.frame(width: 30, height: 30).accessibilityHidden(true); VStack(alignment: .leading, spacing: 8) { HStack(spacing: 7) { ProgressView().controlSize(.small); Text(phase.capitalized) }.font(.caption.weight(.semibold)).foregroundStyle(BeetTheme.accentBright); if text.isEmpty { Text("Vamp Assistant is working…").foregroundStyle(BeetTheme.secondaryText(appearance)) } else { MarkdownText(text) } }; Spacer(minLength: 4) } }
+    var body: some View { HStack(alignment: .top, spacing: 11) { Color.clear.frame(width: 30, height: 30).accessibilityHidden(true); VStack(alignment: .leading, spacing: 8) { HStack(spacing: 7) { ProgressView().controlSize(.small); Text(phase.capitalized) }.font(.caption.weight(.semibold)).foregroundStyle(BeetTheme.accentBright); if text.isEmpty { Text("Vamp Assistant is working…").foregroundStyle(BeetTheme.secondaryText(appearance)) } else { MarkdownText(text, agentReasoning: true) } }; Spacer(minLength: 4) } }
 }
 
 struct QueuedFollowUpsView: View {
@@ -2395,6 +2601,7 @@ struct RemoteComposer: View {
     @Binding var draft: String
     let isRunning: Bool
     var isReachable: Bool = true
+    var isCodeSession: Bool = true
     let onSend: () -> Void
     var onQueue: (() -> Void)? = nil
     var onSteer: (() -> Void)? = nil
@@ -2471,6 +2678,7 @@ struct RemoteComposer: View {
         .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 6)
         .frame(maxWidth: .infinity)
         .background(.ultraThinMaterial)
+        .background(BeetTheme.background(appearance).opacity(0.78))
         .sheet(isPresented: $showCommands) {
             RemoteCommandPalette(draft: $draft) {
                 showCommands = false
@@ -2490,7 +2698,7 @@ struct RemoteComposer: View {
     private var placeholder: String {
         if !isReachable { return "Waiting for Mac…" }
         if isRunning { return "Queue a follow-up or steer…" }
-        return "Continue this coding task…"
+        return isCodeSession ? "Continue this coding task…" : "Message Vamp Assistant…"
     }
 
     private var primarySymbol: String {
@@ -2640,6 +2848,7 @@ struct PendingInteractionView: View {
                         ForEach(options, id: \.self) { option in
                             Button(option) { onResolve(option) }
                                 .buttonStyle(.borderedProminent)
+                                .tint(BeetTheme.accent)
                                 .frame(maxWidth: .infinity)
                         }
                     }
@@ -2649,6 +2858,7 @@ struct PendingInteractionView: View {
                     .background(BeetTheme.surfaceStrong(appearance), in: RoundedRectangle(cornerRadius: 11))
                 Button("Send answer") { onResolve(answer) }
                     .buttonStyle(.borderedProminent)
+                    .tint(BeetTheme.accent)
                     .disabled(answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             } else {
                 ViewThatFits {
