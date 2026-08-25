@@ -101,7 +101,8 @@ final class RemoteSessionTests: XCTestCase {
         XCTAssertTrue(RemoteSessionPage.html.contains("id=\"bots-open\""))
         XCTAssertTrue(RemoteSessionPage.html.contains("id=\"bot-choice\""))
         XCTAssertTrue(RemoteSessionPage.html.contains("class=\"bot-rail\""))
-        XCTAssertTrue(RemoteSessionPage.html.contains("/assets/bot-builder.png"))
+        XCTAssertTrue(RemoteSessionPage.html.contains("/assets/bot-builder-light.png"))
+        XCTAssertTrue(RemoteSessionPage.html.contains("/assets/bot-builder-dark.png"))
         XCTAssertTrue(RemoteSessionPage.html.contains("/api/models"))
         XCTAssertTrue(RemoteSessionPage.html.contains("startBotSession"))
         XCTAssertTrue(RemoteSessionPage.html.contains("await selectSession(body.sessionID)"))
@@ -444,15 +445,17 @@ final class RemoteSessionTests: XCTestCase {
         XCTAssertFalse(page.body.contains("Choose a bot to start."))
         XCTAssertNotNil(page.headers["Content-Security-Policy"])
 
-        let logo = try await request(baseURL, path: "/assets/beetlogo.png")
+        let logo = try await request(baseURL, path: "/assets/vamp-icon.png")
         XCTAssertEqual(logo.status, 200)
         XCTAssertEqual(logo.headers["content-type"], "image/png")
         let backdrop = try await request(baseURL, path: "/assets/vamp-backdrop.png")
         XCTAssertEqual(backdrop.status, 200)
         XCTAssertEqual(backdrop.headers["content-type"], "image/png")
-        let builderThumb = try await request(baseURL, path: "/assets/bot-builder.png")
-        XCTAssertEqual(builderThumb.status, 200)
-        XCTAssertEqual(builderThumb.headers["content-type"], "image/png")
+        for path in ["/assets/bot-builder-light.png", "/assets/bot-builder-dark.png"] {
+            let builderThumb = try await request(baseURL, path: path)
+            XCTAssertEqual(builderThumb.status, 200)
+            XCTAssertEqual(builderThumb.headers["content-type"], "image/png")
+        }
 
         let rejectedOrigin = try await request(
             baseURL,

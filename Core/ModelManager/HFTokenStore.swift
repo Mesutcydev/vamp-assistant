@@ -163,8 +163,29 @@ enum Keychain {
 
     private static let testLock = NSLock()
     nonisolated(unsafe) private static var testStore: [String: String] = [:]
+    /// `kSecUseAuthenticationUISkip` does not consistently suppress legacy
+    /// ACL dialogs for ad-hoc signed macOS builds. Serialize Security calls
+    /// and also disable Keychain UI at the process level for non-interactive
+    /// reads/updates. Explicit restore/unlock actions pass `true` instead.
+    private static let interactionLock = NSLock()
     private static func testKey(_ service: String, _ account: String) -> String {
         "\(service)/\(account)"
+    }
+
+    static func withAuthenticationUI<T>(_ allowed: Bool, _ operation: () -> T) -> T {
+        interactionLock.lock()
+        defer { interactionLock.unlock() }
+#if os(macOS)
+        var previous: DarwinBoolean = true
+        let readPrevious = SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess
+        _ = SecKeychainSetUserInteractionAllowed(allowed)
+        defer {
+            if readPrevious {
+                _ = SecKeychainSetUserInteractionAllowed(previous.boolValue)
+            }
+        }
+#endif
+        return operation()
     }
 
     static func read(service: String, account: String) -> String? {
@@ -185,7 +206,9 @@ enum Keychain {
             kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip,
         ]
         var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        let status = withAuthenticationUI(false) {
+            SecItemCopyMatching(query as CFDictionary, &item)
+        }
         guard status == errSecSuccess, let data = item as? Data else { return nil }
         return String(data: data, encoding: .utf8)
     }
@@ -205,9 +228,11 @@ enum Keychain {
             kSecAttrAccount as String: account,
             kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip,
         ]
-        let updateStatus = SecItemUpdate(
-            base as CFDictionary,
-            [kSecValueData as String: data] as CFDictionary)
+        let updateStatus = withAuthenticationUI(false) {
+            SecItemUpdate(
+                base as CFDictionary,
+                [kSecValueData as String: data] as CFDictionary)
+        }
         if updateStatus == errSecSuccess { return true }
         guard updateStatus == errSecItemNotFound else {
             Log.app.error("Keychain update failed without prompting: \(String(describing: updateStatus), privacy: .public)")
@@ -238,6 +263,8 @@ enum Keychain {
             kSecAttrAccount as String: account,
             kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip,
         ]
-        SecItemDelete(query as CFDictionary)
+        _ = withAuthenticationUI(false) {
+            SecItemDelete(query as CFDictionary)
+        }
     }
 }

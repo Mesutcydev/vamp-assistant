@@ -188,13 +188,13 @@ struct RemoteDiagnosticsSettingsView: View {
                 .foregroundStyle(BeetTheme.secondaryText(appearance))
             Text(message)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color(white: 0.72))
+                .foregroundStyle(Color.primary.opacity(0.86))
                 .textSelection(.enabled)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 18).stroke(Color.white.opacity(0.35)) }
+        .overlay { RoundedRectangle(cornerRadius: 18).stroke(BeetTheme.line(appearance)) }
     }
 
     private var breadcrumbsCard: some View {

@@ -55,7 +55,9 @@ enum BeetTheme {
     // The legacy type name remains internal for source compatibility. Every
     // visible value is strictly monochrome.
     static let accent = Color(white: 0.22)
-    static let accentBright = Color(white: 0.72)
+    // Adaptive foreground accent: the previous fixed light gray was readable
+    // on OLED black but nearly disappeared over the light engraving artwork.
+    static let accentBright = Color.primary.opacity(0.78)
     static let wash = Color.white.opacity(0.08)
 
     static func background(_ appearance: RemoteAppearance) -> Color {

@@ -389,9 +389,11 @@ struct SessionListView: View {
     @State private var showSharing = false
     @State private var showComputers = false
     @State private var showControl = false
+    @State private var showAppStream = false
     @State private var showBotRuns = false
     @State private var showDiagnostics = false
     @State private var startBotID = ""
+    @State private var deferredSessionID: UUID?
     private var visible: [RemoteSessionSummary] { search.isEmpty ? store.sessions : store.sessions.filter { $0.title.localizedCaseInsensitiveContains(search) || $0.workspace.localizedCaseInsensitiveContains(search) } }
     var body: some View {
         ZStack {
@@ -442,19 +444,25 @@ struct SessionListView: View {
                         .accessibilityLabel("Share clipboard or files")
                     Menu {
                         Button("Refresh", systemImage: "arrow.clockwise") { Task { try? await store.refresh() } }
+                        Button("App Stream", systemImage: "macwindow.on.rectangle") { showAppStream = true }
                         Button("Control Diagnostics", systemImage: "stethoscope") { showDiagnostics = true }
                         Button("Forget this Mac", systemImage: "iphone.slash", role: .destructive) { Task { await store.revoke() } }
                     } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Session options")
                 }
             }
-            .sheet(isPresented: $showStartSession) {
+            .sheet(isPresented: $showStartSession, onDismiss: openDeferredSession) {
                 StartSessionSheet(store: store, initialBotID: startBotID) { sessionID in
+                    deferredSessionID = sessionID
                     showStartSession = false
-                    onOpen(sessionID)
                 }
             }
             .sheet(isPresented: $showSharing) { RemoteShareSheet(store: store) }
-            .sheet(isPresented: $showBotRuns) { RemoteBotRunsView(store: store, onOpen: onOpen) }
+            .sheet(isPresented: $showBotRuns, onDismiss: openDeferredSession) {
+                RemoteBotRunsView(store: store) { sessionID in
+                    deferredSessionID = sessionID
+                    showBotRuns = false
+                }
+            }
             .sheet(isPresented: $showComputers) { ComputerSwitcherSheet(store: store) }
             .sheet(isPresented: $showDiagnostics) {
                 NavigationStack {
@@ -467,6 +475,21 @@ struct SessionListView: View {
                 }
             }
             .fullScreenCover(isPresented: $showControl) { RemoteControlView(store: store) }
+            .fullScreenCover(isPresented: $showAppStream) {
+                RemoteControlView(store: store, sourceMode: .application)
+            }
+    }
+
+    private func openDeferredSession() {
+        guard let sessionID = deferredSessionID else { return }
+        deferredSessionID = nil
+        // Navigation changes issued during sheet dismissal are occasionally
+        // dropped by SwiftUI. The dismissal completion is the first stable
+        // point at which the stack can accept the destination.
+        Task { @MainActor in
+            await Task.yield()
+            onOpen(sessionID)
+        }
     }
 }
 
@@ -633,7 +656,7 @@ struct RemoteBotRunsView: View {
                             Task { if await store.steerBotRun(run.id, message: message) { steer[run.id] = "" } }
                         }.disabled(steer[run.id, default: ""].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         if let sessionID = run.sessionID {
-                            Button("Inspect") { dismiss(); onOpen(sessionID) }
+                            Button("Inspect") { onOpen(sessionID) }
                         }
                         Spacer()
                         Button("Stop", role: .destructive) { Task { _ = await store.stopBotRun(run.id) } }
@@ -1224,10 +1247,11 @@ struct StartSessionSheet: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .task {
                 selectedBotID = initialBotID
-                await store.loadStartModels()
-                await loadBotComputers()
+                async let models: Void = store.loadStartModels()
+                async let computers: Void = loadBotComputers()
+                async let folders: Void = store.loadWorkspaces()
+                _ = await (models, computers, folders)
                 attachMatchingBotComputer()
-                await store.loadWorkspaces()
                 selectFirstModel()
                 if selectedWorkspacePath.isEmpty {
                     selectedWorkspacePath = store.workspaces.first(where: { $0.isCurrent == true })?.path

@@ -63,7 +63,10 @@ enum Theme {
     // neutrals around them so captions stay legible on the lifted surfaces.
     static let textPrimary   = Color.dynamic(light: 0x181818, dark: 0xF2F2F2, beet: 0xF2F2F2)
     static let textSecondary = Color.dynamic(light: 0x626262, dark: 0xB0B0B0, beet: 0xB0B0B0)
-    static let textTertiary  = Color.dynamic(light: 0x8A8A8A, dark: 0x7E7E7E, beet: 0x7E7E7E)
+    // Tertiary text still carries actionable metadata and must remain readable
+    // at caption sizes. These values clear WCAG AA against the app's primary
+    // light and OLED-dark surfaces.
+    static let textTertiary  = Color.dynamic(light: 0x707070, dark: 0x969696, beet: 0x969696)
     static let rose          = Color.dynamic(light: 0x303030, dark: 0xC8C8C8, beet: 0xC8C8C8)
 
     /// Elevation shadow: a whisper in light mode, much deeper in dark —
@@ -321,7 +324,10 @@ enum LFButtonTone {
     var foreground: Color {
         switch self {
         case .secondary: Theme.textSecondary
-        case .primary, .destructive: .white
+        case .primary: .white
+        // Danger reverses from a dark fill in light mode to a near-white fill
+        // in dark mode. Theme.bg provides the matching high-contrast inverse.
+        case .destructive: Theme.bg
         }
     }
 
@@ -350,7 +356,7 @@ struct LFCapsuleButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 11, weight: .semibold, design: .serif))
-            .foregroundStyle(isEnabled ? tone.foreground : Theme.textTertiary)
+            .foregroundStyle(isEnabled ? tone.foreground : Theme.textSecondary)
             .padding(.horizontal, 12)
             .frame(minHeight: 30)
             .background(isEnabled ? tone.fill : Theme.surfaceInset.opacity(0.55), in: Capsule())
@@ -358,7 +364,7 @@ struct LFCapsuleButtonStyle: ButtonStyle {
             .contentShape(Capsule())
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
             .brightness(configuration.isPressed ? -0.035 : 0)
-            .opacity(isEnabled ? 1 : 0.72)
+            .opacity(isEnabled ? 1 : 0.88)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12),
                        value: configuration.isPressed)
     }
@@ -372,14 +378,14 @@ struct LFIconButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundStyle(isEnabled ? tone.foreground : Theme.textTertiary)
+            .foregroundStyle(isEnabled ? tone.foreground : Theme.textSecondary)
             .frame(width: size, height: size)
             .background(isEnabled ? tone.fill : Theme.surfaceInset.opacity(0.55), in: Circle())
             .overlay(Circle().strokeBorder(tone.border, lineWidth: 1))
             .contentShape(Circle())
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
             .brightness(configuration.isPressed ? -0.04 : 0)
-            .opacity(isEnabled ? 1 : 0.72)
+            .opacity(isEnabled ? 1 : 0.88)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12),
                        value: configuration.isPressed)
     }

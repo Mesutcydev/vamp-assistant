@@ -294,7 +294,9 @@ enum SessionCrypto {
             query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUISkip
         }
         var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        let status = Keychain.withAuthenticationUI(interactionAllowed) {
+            SecItemCopyMatching(query as CFDictionary, &item)
+        }
         if status == errSecSuccess, let data = item as? Data, data.count == 32 {
             let key = SymmetricKey(data: data)
             keyCacheLock.lock()

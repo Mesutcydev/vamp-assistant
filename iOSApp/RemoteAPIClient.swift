@@ -16,6 +16,20 @@ struct RemoteAPIClient {
         return URLSession(configuration: configuration)
     }()
 
+    /// Ordinary companion requests must not share a connection pool with
+    /// long-lived screen, audio, and terminal streams. A dedicated ephemeral
+    /// session also fails promptly when the Mac disappears instead of leaving
+    /// a sheet looking frozen behind URLSession's connectivity heuristics.
+    private static let apiSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpMaximumConnectionsPerHost = 6
+        configuration.timeoutIntervalForRequest = 15
+        configuration.timeoutIntervalForResource = 30
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.waitsForConnectivity = false
+        return URLSession(configuration: configuration)
+    }()
+
     private static let streamSession: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 24 * 60 * 60
@@ -81,9 +95,13 @@ struct RemoteAPIClient {
     func clipboard() async throws -> RemoteClipboardSnapshot { try await request("api/clipboard") }
     func sharedFiles() async throws -> RemoteSharedFileEnvelope { try await request("api/files") }
     func controlStatus() async throws -> RemoteMacControlStatus { try await request("api/control") }
+    func controlApplications() async throws -> RemoteMacApplicationEnvelope {
+        try await request("api/control/apps")
+    }
 
     func controlScreen(
         displayID: UInt32? = nil,
+        windowID: UInt32? = nil,
         resolution: RemoteStreamResolution = .balanced
     ) async throws -> RemoteMacControlFrame {
         var url = baseURL.appending(path: "api/control/screen")
@@ -91,11 +109,14 @@ struct RemoteAPIClient {
         if let displayID {
             queryItems.append(URLQueryItem(name: "display", value: String(displayID)))
         }
+        if let windowID {
+            queryItems.append(URLQueryItem(name: "window", value: String(windowID)))
+        }
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         components?.queryItems = queryItems
         url = components?.url ?? url
         let request = try authorizedRequest(url: url, method: "GET")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.apiSession.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw RemoteClientError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
             let message = (try? JSONDecoder().decode(RemoteErrorBody.self, from: data).error)
@@ -114,11 +135,15 @@ struct RemoteAPIClient {
 
     func controlScreenStream(
         displayID: UInt32? = nil,
+        windowID: UInt32? = nil,
         resolution: RemoteStreamResolution = .high
     ) -> AsyncThrowingStream<RemoteMacControlFrame, Error> {
         var queryItems = [URLQueryItem(name: "resolution", value: resolution.rawValue)]
         if let displayID {
             queryItems.append(URLQueryItem(name: "display", value: String(displayID)))
+        }
+        if let windowID {
+            queryItems.append(URLQueryItem(name: "window", value: String(windowID)))
         }
         return avcStream(path: "api/control/screen/stream", queryItems: queryItems)
     }
@@ -739,7 +764,7 @@ struct RemoteAPIClient {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await Self.apiSession.data(for: request)
             return try decode(Response.self, data: data, response: response)
         } catch is CancellationError {
             throw CancellationError()

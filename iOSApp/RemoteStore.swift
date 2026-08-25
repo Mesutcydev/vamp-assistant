@@ -41,6 +41,7 @@ final class RemoteStore {
     private var token: String?
     private var pollingTask: Task<Void, Never>?
     private var sessionStreamTask: Task<Void, Never>?
+    private var refreshTask: Task<Void, Error>?
     private var connectionAvailable = false
     private var consecutivePollingFailures = 0
 
@@ -132,9 +133,25 @@ final class RemoteStore {
     }
 
     func refresh() async throws {
-        guard let client else { throw RemoteClientError.notConnected }
+        if let refreshTask {
+            try await refreshTask.value
+            return
+        }
         isRefreshing = true
-        defer { isRefreshing = false }
+        let task = Task { @MainActor [weak self] in
+            guard let self else { throw CancellationError() }
+            try await self.performRefresh()
+        }
+        refreshTask = task
+        defer {
+            refreshTask = nil
+            isRefreshing = false
+        }
+        try await task.value
+    }
+
+    private func performRefresh() async throws {
+        guard let client else { throw RemoteClientError.notConnected }
         async let status = client.status()
         async let list = client.sessions()
         let (nextStatus, nextList) = try await (status, list)
@@ -167,16 +184,26 @@ final class RemoteStore {
         return try await client.controlStatus()
     }
 
+    func macControlApplications() async throws -> [RemoteMacApplication] {
+        guard let client else { throw RemoteClientError.notConnected }
+        return try await client.controlApplications().applications
+    }
+
     func macControlFrame(
         displayID: UInt32? = nil,
+        windowID: UInt32? = nil,
         resolution: RemoteStreamResolution = .balanced
     ) async throws -> RemoteMacControlFrame {
         guard let client else { throw RemoteClientError.notConnected }
-        return try await client.controlScreen(displayID: displayID, resolution: resolution)
+        return try await client.controlScreen(
+            displayID: displayID,
+            windowID: windowID,
+            resolution: resolution)
     }
 
     func macControlFrames(
         displayID: UInt32? = nil,
+        windowID: UInt32? = nil,
         resolution: RemoteStreamResolution = .balanced
     ) -> AsyncThrowingStream<RemoteMacControlFrame, Error> {
         guard let client else {
@@ -184,7 +211,10 @@ final class RemoteStore {
                 continuation.finish(throwing: RemoteClientError.notConnected)
             }
         }
-        return client.controlScreenStream(displayID: displayID, resolution: resolution)
+        return client.controlScreenStream(
+            displayID: displayID,
+            windowID: windowID,
+            resolution: resolution)
     }
 
     func sendMacControl(_ command: RemoteInputSender.Command) async throws {

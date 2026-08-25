@@ -1,6 +1,11 @@
 import SwiftUI
 import UIKit
 
+enum RemoteControlSourceMode {
+    case display
+    case application
+}
+
 private struct RemoteControlUnavailableState: View {
     let title: String
     let message: String
@@ -125,6 +130,7 @@ private struct RemoteControlUnavailableState: View {
 
 struct RemoteControlView: View {
     let store: RemoteStore
+    let sourceMode: RemoteControlSourceMode
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -156,6 +162,8 @@ struct RemoteControlView: View {
     @State private var shareItems: [Any] = []
     @State private var showShare = false
     @State private var selectedDisplayID: Int?
+    @State private var applications: [RemoteMacApplication] = []
+    @State private var selectedWindowID: Int?
     @State private var showStats = true
     @State private var fpsText = "—"
     @State private var bitrateText = "—"
@@ -170,11 +178,22 @@ struct RemoteControlView: View {
     private var isControlAvailable: Bool { store.isConnected && status?.ready != false }
 
     private var streamResolution: RemoteStreamResolution { RemoteStreamResolution.resolve(streamResolutionRaw) }
+    private var activeDisplayID: UInt32? {
+        sourceMode == .display ? selectedDisplayID.map(UInt32.init) : nil
+    }
+    private var activeWindowID: UInt32? {
+        sourceMode == .application ? selectedWindowID.map(UInt32.init) : nil
+    }
+    private var selectedApplication: RemoteMacApplication? {
+        guard let selectedWindowID else { return nil }
+        return applications.first { $0.windowID == selectedWindowID }
+    }
     private static let accent = Color(white: 0.72)
     private static let panel = Color(white: 0.10)
 
-    init(store: RemoteStore) {
+    init(store: RemoteStore, sourceMode: RemoteControlSourceMode = .display) {
         self.store = store
+        self.sourceMode = sourceMode
         _inputSender = StateObject(wrappedValue: RemoteInputSender(sendCommands: { commands in
             _ = try await store.sendMacControlBatch(commands)
         }))
@@ -310,6 +329,12 @@ struct RemoteControlView: View {
         .onChange(of: selectedDisplayID) { _, _ in
             decoder.reset()
             videoBinder.reset()
+            streamRestart.bump()
+        }
+        .onChange(of: selectedWindowID) { _, _ in
+            decoder.reset()
+            videoBinder.reset()
+            resetZoom()
             streamRestart.bump()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.keyboardWillChangeFrameNotification)) { note in
@@ -510,6 +535,7 @@ struct RemoteControlView: View {
             statLine("input", latencyText)
             statLine("queue", "\(inputSender.pendingCount)")
             statLine("stream", streamResolution.title)
+            statLine("source", selectedApplication?.name ?? "display")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
@@ -550,15 +576,15 @@ struct RemoteControlView: View {
             ) {
                 audioPlayer.isMuted.toggle()
             }
-            if let displays = status?.displays, displays.count > 1 {
+            if sourceMode == .display, let displays = status?.displays, displays.count > 1 {
                 classicIconButton(systemName: "rectangle.on.rectangle.angled") {
                     cycleDisplay(in: displays)
                 }
                 Menu {
                     ForEach(displays) { display in
                         Button {
+                            selectedWindowID = nil
                             selectedDisplayID = display.id
-                            streamRestart.bump()
                         } label: {
                             let sizeLabel: String = {
                                 if let w = display.width, let h = display.height {
@@ -573,6 +599,35 @@ struct RemoteControlView: View {
                     classicIconLabel(systemName: "display.2", active: false)
                 }
                 .buttonStyle(.plain)
+            }
+            if sourceMode == .application {
+                Menu {
+                    if applications.isEmpty {
+                        Text("No streamable applications")
+                    } else {
+                        ForEach(applications) { application in
+                            Button {
+                                selectedWindowID = application.windowID
+                            } label: {
+                                Label {
+                                    Text("\(application.name) · \(application.detail)")
+                                } icon: {
+                                    Image(systemName: selectedWindowID == application.windowID ? "checkmark" : "macwindow")
+                                }
+                            }
+                        }
+                    }
+                    Divider()
+                    Button {
+                        Task { await refreshApplications() }
+                    } label: {
+                        Label("Refresh applications", systemImage: "arrow.clockwise")
+                    }
+                } label: {
+                    classicIconLabel(systemName: "macwindow.on.rectangle", active: selectedWindowID != nil)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Choose streamed application")
             }
             Menu {
                 Menu {
@@ -743,7 +798,19 @@ struct RemoteControlView: View {
                     try? await Task.sleep(for: .milliseconds(750))
                     continue
                 }
-                if selectedDisplayID == nil {
+                if sourceMode == .application {
+                    await refreshApplications()
+                    if selectedWindowID == nil {
+                        selectedWindowID = applications.first?.windowID
+                    }
+                    guard selectedWindowID != nil else {
+                        reconnectBanner = "Open an application on your Mac to stream it."
+                        diagnostics.setPhase("waiting for application")
+                        try? await Task.sleep(for: .seconds(1))
+                        continue
+                    }
+                } else if selectedDisplayID == nil {
+                    selectedWindowID = nil
                     selectedDisplayID = status?.displays?.first?.id
                 }
                 reconnectBanner = nil
@@ -751,10 +818,11 @@ struct RemoteControlView: View {
                 errorText = nil
                 diagnostics.setPhase("opening stream")
                 diagnostics.breadcrumb(
-                    "stream display=\(selectedDisplayID.map(String.init) ?? "main") res=\(streamResolution.rawValue)"
+                    "stream display=\(activeDisplayID.map(String.init) ?? "auto") window=\(activeWindowID.map(String.init) ?? "none") res=\(streamResolution.rawValue)"
                 )
                 for try await next in store.macControlFrames(
-                    displayID: selectedDisplayID.map(UInt32.init),
+                    displayID: activeDisplayID,
+                    windowID: activeWindowID,
                     resolution: streamResolution
                 ) {
                     try Task.checkCancellation()
@@ -804,7 +872,8 @@ struct RemoteControlView: View {
                 do {
                     let started = ProcessInfo.processInfo.systemUptime
                     let still = try await store.macControlFrame(
-                        displayID: selectedDisplayID.map(UInt32.init),
+                        displayID: activeDisplayID,
+                        windowID: activeWindowID,
                         resolution: streamResolution)
                     screenLatencyText = "\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000)) ms"
                     latencyText = inputSender.lastRoundTripMilliseconds.map { "\($0) ms" } ?? "—"
@@ -820,6 +889,26 @@ struct RemoteControlView: View {
                 let delayMs = min(Int(pow(2.0, Double(min(reconnectAttempt, 4)))) * 250, 4_000)
                 try? await Task.sleep(for: .milliseconds(max(delayMs, streamResolution.refreshIntervalMilliseconds)))
             }
+        }
+    }
+
+    @MainActor
+    private func refreshApplications() async {
+        do {
+            let next = try await store.macControlApplications()
+            applications = next
+            if let selectedWindowID,
+               !next.contains(where: { $0.windowID == selectedWindowID }) {
+                self.selectedWindowID = next.first?.windowID
+                reconnectBanner = next.isEmpty
+                    ? "Open an application on your Mac to stream it."
+                    : "The selected app closed. Switched to another app."
+                diagnostics.breadcrumb("selected window disappeared — app stream refreshed")
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            diagnostics.noteError("apps: \(error.localizedDescription)")
         }
     }
 
@@ -839,6 +928,7 @@ struct RemoteControlView: View {
 
     private func cycleDisplay(in displays: [RemoteMacDisplay]) {
         guard !displays.isEmpty else { return }
+        selectedWindowID = nil
         let current = selectedDisplayID ?? displays[0].id
         let index = displays.firstIndex(where: { $0.id == current }) ?? 0
         let next = displays[(index + 1) % displays.count]
@@ -868,7 +958,8 @@ struct RemoteControlView: View {
         Task { @MainActor in
             do {
                 let still = try await store.macControlFrame(
-                    displayID: selectedDisplayID.map(UInt32.init),
+                    displayID: activeDisplayID,
+                    windowID: activeWindowID,
                     resolution: streamResolution)
                 guard let jpeg = still.jpegStill, let image = UIImage(data: jpeg) else {
                     screenshotStatus = "No frame to capture"

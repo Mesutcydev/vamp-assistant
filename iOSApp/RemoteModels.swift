@@ -36,6 +36,28 @@ struct RemoteMacDisplay: Decodable, Equatable, Identifiable {
     let height: Double?
 }
 
+struct RemoteMacApplicationEnvelope: Decodable, Equatable {
+    let applications: [RemoteMacApplication]
+}
+
+struct RemoteMacApplication: Decodable, Equatable, Identifiable {
+    let windowID: Int
+    let bundleIdentifier: String?
+    let name: String
+    let windowTitle: String?
+    let width: Double
+    let height: Double
+
+    var id: Int { windowID }
+
+    var detail: String {
+        guard let windowTitle, !windowTitle.isEmpty, windowTitle != name else {
+            return "\(Int(width))×\(Int(height))"
+        }
+        return "\(windowTitle) · \(Int(width))×\(Int(height))"
+    }
+}
+
 struct RemoteMacControlFrame {
     enum Payload: Equatable {
         case h264(data: Data, keyframe: Bool, parameterSets: Data?)
