@@ -219,13 +219,16 @@ final class RemoteStore {
 
     func sendMacControl(_ command: RemoteInputSender.Command) async throws {
         guard let client else { throw RemoteClientError.notConnected }
-        _ = try await client.sendControl(Self.controlBody(for: command))
+        let json = try JSONSerialization.data(withJSONObject: Self.controlBody(for: command))
+        _ = try await client.sendControlPayload(json)
     }
 
     func sendMacControlBatch(_ commands: [RemoteInputSender.Command]) async throws -> RemoteAcceptedResponse {
         guard let client else { throw RemoteClientError.notConnected }
         guard !commands.isEmpty else { throw RemoteClientError.invalidResponse }
-        return try await client.sendControlBatch(commands.map(Self.controlBody(for:)))
+        let json = try JSONSerialization.data(
+            withJSONObject: ["commands": commands.map(Self.controlBody(for:))])
+        return try await client.sendControlPayload(json)
     }
 
     static func controlBody(for command: RemoteInputCommand) -> [String: Any] {
