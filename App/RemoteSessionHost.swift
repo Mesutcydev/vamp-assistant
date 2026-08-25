@@ -1997,10 +1997,16 @@ private enum RemotePairedClientStore {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip,
         ]
-        SecItemDelete(query as CFDictionary)
-        guard !tokens.isEmpty else { return }
+        if tokens.isEmpty {
+            SecItemDelete(query as CFDictionary)
+            return
+        }
+        if SecItemUpdate(query as CFDictionary,
+                         [kSecValueData as String: data] as CFDictionary) == errSecSuccess { return }
         var insert = query
+        insert.removeValue(forKey: kSecUseAuthenticationUI as String)
         insert[kSecValueData as String] = data
         insert[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         SecItemAdd(insert as CFDictionary, nil)

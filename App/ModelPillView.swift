@@ -380,9 +380,7 @@ private struct ModelPickerPopover: View {
                     .foregroundStyle(Theme.textSecondary)
                 Button("Add provider…") {
                     dismiss()
-                    // The Settings scene can't be opened via Notification —
-                    // use the system action that raises it.
-                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                    NotificationCenter.default.post(name: .openAppSettings, object: nil)
                 }
                 .font(.caption.weight(.medium))
                 .buttonStyle(.borderless)
@@ -570,7 +568,7 @@ private struct ModelPickerPopover: View {
             Button {
                 dismiss()
                 if source == .account {
-                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                    NotificationCenter.default.post(name: .openAppSettings, object: nil)
                     DispatchQueue.main.async {
                         NotificationCenter.default.post(name: .openProviderSettings, object: nil)
                     }

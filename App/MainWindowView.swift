@@ -50,6 +50,7 @@ struct MainWindowView: View {
     @State private var showReadiness = false
     @State private var readinessIsOnboarding = false
     @State private var showBotsDashboard = false
+    @State private var showSettings = false
 
     private var dockedPanelOpen: Bool {
         showSimulator || showBrowser || showDiagnostics
@@ -94,8 +95,15 @@ struct MainWindowView: View {
     }
 
     private var configuredLayout: some View {
-        responsiveLayout
-            .navigationTitle(showBotsDashboard ? "Bots" : (sessions.workspaceURL?.lastPathComponent ?? "Vamp Assistant"))
+        Group {
+            if showSettings {
+                SettingsView()
+                    .environmentObject(appState)
+            } else {
+                responsiveLayout
+            }
+        }
+            .navigationTitle(showSettings ? "Settings" : (showBotsDashboard ? "Bots" : (sessions.workspaceURL?.lastPathComponent ?? "Vamp Assistant")))
             .toolbar {
                 if #available(macOS 26.0, *) {
                     ToolbarItemGroup(placement: .primaryAction) {
@@ -256,7 +264,7 @@ struct MainWindowView: View {
     private var appNotifications: AnyPublisher<Notification, Never> {
         Publishers.MergeMany([
             .openModelManager, .openWorkspace, .openSystemReadiness, .openRemoteAccess,
-            .openBrowserPanel, .openBotsDashboard, .openAssistantHome,
+            .openBrowserPanel, .openBotsDashboard, .openAssistantHome, .openAppSettings,
             .toggleBrowserPanel, .toggleSimulatorPanel, .toggleDiagnosticsPanel,
             .gitStatus, .gitDiff, .undoCheckpoint, .exportChatMarkdown,
             .exportChatJSON, .exportTaskBundle, .newChat, .stopAgent,
@@ -274,11 +282,20 @@ struct MainWindowView: View {
         case .openRemoteAccess: requestRemoteAccess()
         case .openBrowserPanel: presentToolPanel(.browser)
         case .openBotsDashboard:
+            showSettings = false
             showBotsDashboard = true
             showBrowser = false
             showSimulator = false
             showDiagnostics = false
-        case .openAssistantHome: showBotsDashboard = false
+        case .openAssistantHome:
+            showSettings = false
+            showBotsDashboard = false
+        case .openAppSettings:
+            showSettings = true
+            showBotsDashboard = false
+            showBrowser = false
+            showSimulator = false
+            showDiagnostics = false
         case .toggleBrowserPanel: toggleToolPanel(.browser)
         case .toggleSimulatorPanel: toggleToolPanel(.simulator)
         case .toggleDiagnosticsPanel: toggleToolPanel(.diagnostics)
@@ -411,7 +428,9 @@ struct MainWindowView: View {
         } detail: {
             HStack(spacing: 0) {
                 Group {
-                    if showBotsDashboard {
+                    if showSettings {
+                        SettingsView().environmentObject(appState)
+                    } else if showBotsDashboard {
                         BotDashboardView()
                             .environmentObject(appState)
                             .environmentObject(sessions)
@@ -489,7 +508,9 @@ struct MainWindowView: View {
                 Rectangle().fill(Theme.hairline).frame(height: 1)
             }
 
-            if showBotsDashboard {
+            if showSettings {
+                SettingsView().environmentObject(appState)
+            } else if showBotsDashboard {
                 BotDashboardView()
                     .environmentObject(appState)
                     .environmentObject(sessions)

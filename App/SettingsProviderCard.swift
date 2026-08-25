@@ -28,6 +28,7 @@ struct ProviderCard: View {
     }
     @State private var testState: TestState = .idle
     @State private var saveMessage: String?
+    @State private var isExpanded = false
 
     private var hasKey: Bool { keyStore.hasKey(for: provider) }
     private var keyAvailableForUse: Bool {
@@ -72,6 +73,14 @@ struct ProviderCard: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) { isExpanded.toggle() }
+                } label: {
+                    Label(isExpanded ? "Hide" : "Configure",
+                          systemImage: isExpanded ? "chevron.up" : "chevron.down")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
 
             Text(endpointLabel)
@@ -80,6 +89,7 @@ struct ProviderCard: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
 
+            if isExpanded {
             // Custom provider: base URL first — everything hangs off it.
             if provider == .custom {
                 HStack(spacing: Spacing.sm) {
@@ -262,6 +272,7 @@ struct ProviderCard: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
+            }
             }
         }
         .padding(Spacing.lg)

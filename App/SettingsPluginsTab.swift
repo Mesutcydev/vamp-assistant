@@ -20,12 +20,31 @@ struct PluginsTab: View {
                 text: "Bring your coding setup with you. Vamp Assistant finds compatible skills, commands, prompts and workflows, then makes them available as slash commands in the composer.")
 
             SettingsCard(
-                title: "Import from coding tools",
+                title: "Coding tool capabilities",
                 icon: "square.and.arrow.down",
-                footer: "Claude Code, Codex, Cursor, Copilot, Windsurf, OpenCode and Agent Skills are detected automatically. Plugin scripts and installers are never executed.") {
+                footer: "Detected skills, commands, prompts and workflows are enabled in place—there is no copy step. Source updates appear after Rescan. Plugin scripts and installers are never executed.") {
+                HStack(spacing: Spacing.sm) {
+                    Image(systemName: commands.isEmpty ? "circle.dashed" : "checkmark.circle.fill")
+                        .foregroundStyle(commands.isEmpty ? Theme.textTertiary : Theme.success)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(commands.isEmpty ? "No capabilities detected" : "Automatically enabled")
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text(commands.isEmpty ? "Connect a folder or scan the standard coding-tool locations." : "(commands.count) capabilities are ready in the composer.")
+                            .font(.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    Spacer()
+                    if !commands.isEmpty {
+                        Button("View commands") { showsCommands = true }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
+                }
+
                 HStack(spacing: Spacing.sm) {
                     Button(action: addIDEFolder) {
-                        Label("Add IDE folder", systemImage: "plus")
+                        Label("Connect folder", systemImage: "folder.badge.plus")
                     }
                     .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
                     .help("Choose a skill, plugin, commands, prompts or workflows folder")
@@ -39,7 +58,7 @@ struct PluginsTab: View {
 
                     Spacer()
 
-                    Text(isScanning ? "Looking for capabilities…" : commands.isEmpty ? "Nothing found" : "\(commands.count) ready")
+                    Text(isScanning ? "Looking for capabilities…" : commands.isEmpty ? "Nothing found" : "\(commands.count) enabled")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(commands.isEmpty ? Theme.textTertiary : Theme.success)
                 }
@@ -50,7 +69,7 @@ struct PluginsTab: View {
                     SettingRow(label: summary.origin.rawValue, value: summary.detail) {
                         Text("\(summary.count)")
                             .font(.caption2.weight(.semibold).monospacedDigit())
-                            .foregroundStyle(summary.count == 0 ? Theme.textTertiary : Theme.accent)
+                            .foregroundStyle(summary.count == 0 ? Theme.textTertiary : Theme.success)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)
                             .background(Theme.surfaceInset, in: Capsule())

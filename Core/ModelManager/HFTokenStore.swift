@@ -203,9 +203,18 @@ enum Keychain {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip,
         ]
-        SecItemDelete(base as CFDictionary)
+        let updateStatus = SecItemUpdate(
+            base as CFDictionary,
+            [kSecValueData as String: data] as CFDictionary)
+        if updateStatus == errSecSuccess { return true }
+        guard updateStatus == errSecItemNotFound else {
+            Log.app.error("Keychain update failed without prompting: \(String(describing: updateStatus), privacy: .public)")
+            return false
+        }
         var attributes = base
+        attributes.removeValue(forKey: kSecUseAuthenticationUI as String)
         attributes[kSecValueData as String] = data
         attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         let status = SecItemAdd(attributes as CFDictionary, nil)
@@ -227,6 +236,7 @@ enum Keychain {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip,
         ]
         SecItemDelete(query as CFDictionary)
     }

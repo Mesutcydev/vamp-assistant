@@ -60,8 +60,8 @@ enum LegacyMigration {
     /// this into one bounded "Restore keys" action with a visible Keychain
     /// prompt instead of a silent loss.
     static func pendingInteractiveRenames() -> [(legacy: String, current: String)] {
-        keychainRenames.filter { _, current in
-            !itemExists(service: current)
+        keychainRenames.filter { legacy, current in
+            itemExists(service: legacy) && !itemExists(service: current)
         }
     }
 

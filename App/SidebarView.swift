@@ -143,7 +143,7 @@ struct SidebarView: View {
                 NotificationCenter.default.post(name: .openModelManager, object: nil)
             }
             footerTool("Settings", icon: "gearshape", isActive: false) {
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                NotificationCenter.default.post(name: .openAppSettings, object: nil)
             }
         }
         .padding(8)

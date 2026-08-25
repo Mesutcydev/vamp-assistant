@@ -21,11 +21,14 @@ struct ProvidersTab: View {
             // one paragraph read as a runt next to the provider cards.
             InfoBanner(
                 icon: "key",
-                text: "Run the agent on a remote model instead of a local download. Keys live in the Keychain only. After saving a key, use **Test** to verify the connection, then activate the provider in the Model Manager.")
+                text: "Connect an account or API provider, then choose its model from the composer. Credentials stay in the Mac Keychain and are read only when that provider is used.")
+            providerSectionTitle("Account", subtitle: "Use your existing subscription")
             CodexAccountCard()
+            providerSectionTitle("API providers", subtitle: "Expand only the service you want to configure")
             ForEach(LLMProvider.allCases) { provider in
                 ProviderCard(provider: provider)
             }
+            providerSectionTitle("Compatible services", subtitle: "OpenAI-compatible gateways and imported configurations")
             SettingsCard(
                 title: "Compatible provider presets",
                 icon: "network",
@@ -50,6 +53,19 @@ struct ProvidersTab: View {
             // A restored/saved key may have cleared the pending state.
             pendingRestore = LegacyMigration.needsInteractiveKeyMigration()
         }
+    }
+
+    private func providerSectionTitle(_ title: String, subtitle: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(Theme.textPrimary)
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(Theme.textSecondary)
+            Spacer()
+        }
+        .padding(.top, Spacing.xs)
     }
 
     private var keyRestoreBanner: some View {

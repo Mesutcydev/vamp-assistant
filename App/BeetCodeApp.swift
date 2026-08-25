@@ -49,6 +49,7 @@ struct BeetCodeApp: App {
         WindowGroup {
             MainWindowView()
                 .fontDesign(.serif)
+                .tint(Theme.accent)
                 .environmentObject(appState)
                 .environmentObject(appState.sessions)
                 // A real working minimum: sidebar + chat + docked panel need room.
@@ -71,6 +72,12 @@ struct BeetCodeApp: App {
         .windowResizability(.contentMinSize)
         .windowToolbarStyle(.unified)
         .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") {
+                    NotificationCenter.default.post(name: .openAppSettings, object: nil)
+                }
+                .keyboardShortcut(",", modifiers: [.command])
+            }
             // ⌘M is macOS's standard Minimize shortcut; Model Manager gets
             // ⇧⌘M so neither command fights the system.
             CommandGroup(after: .newItem) {
@@ -113,14 +120,6 @@ struct BeetCodeApp: App {
             }
         }
 
-        Settings {
-            SettingsView()
-                .fontDesign(.serif)
-                .environmentObject(appState)
-                .preferredColorScheme(settings.appearance.colorScheme)
-        }
-        .defaultSize(width: 900, height: 680)
-        .windowResizability(.contentMinSize)
     }
 }
 
@@ -146,4 +145,5 @@ extension Notification.Name {
     static let focusChatSearch = Notification.Name("com.beetcode.focusChatSearch")
     static let openBotsDashboard = Notification.Name("com.beetcode.openBotsDashboard")
     static let openAssistantHome = Notification.Name("com.beetcode.openAssistantHome")
+    static let openAppSettings = Notification.Name("com.beetcode.openAppSettings")
 }
