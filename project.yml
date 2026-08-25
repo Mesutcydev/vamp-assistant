@@ -56,8 +56,8 @@ targets:
       properties:
         CFBundleDisplayName: "Vamp Assistant"
         CFBundleIconName: AppIcon
-        CFBundleShortVersionString: "0.10.21"
-        CFBundleVersion: "59"
+        CFBundleShortVersionString: "0.10.22"
+        CFBundleVersion: "60"
         LSApplicationCategoryType: public.app-category.developer-tools
         LSMinimumSystemVersion: "15.0"
         NSHumanReadableCopyright: "Copyright © 2026 Vamp Assistant contributors"
@@ -157,8 +157,8 @@ targets:
       path: iOSApp/Info.plist
       properties:
         CFBundleDisplayName: "Vamp Assist"
-        CFBundleShortVersionString: "0.1.31"
-        CFBundleVersion: "45"
+        CFBundleShortVersionString: "0.1.32"
+        CFBundleVersion: "46"
         ITSAppUsesNonExemptEncryption: false
         NSLocalNetworkUsageDescription: "Vamp Assistant connects to Vamp Assistant running on your trusted Mac."
         NSCameraUsageDescription: "Vamp Assistant scans the one-time pairing QR code shown by your Mac."
@@ -185,8 +185,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.beetcode.remote.ios
         PRODUCT_NAME: "Vamp Assistant"
         PRODUCT_MODULE_NAME: BeetCodeRemoteIOS
-        MARKETING_VERSION: "0.1.31"
-        CURRENT_PROJECT_VERSION: "45"
+        MARKETING_VERSION: "0.1.32"
+        CURRENT_PROJECT_VERSION: "46"
         CODE_SIGN_ENTITLEMENTS: iOSApp/BeetCodeRemote.entitlements
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: iOSApp/Info.plist

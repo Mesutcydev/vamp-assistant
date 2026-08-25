@@ -22,6 +22,17 @@ final class RemoteSessionTests: XCTestCase {
         XCTAssertFalse(RemoteNetworkEndpointDiscovery.isPrivateIPv4("192.168.1.999"))
     }
 
+    func testLANPeersRemainAllowedWhenTailscaleIsAdvertised() {
+        XCTAssertTrue(RemoteNetworkEndpointDiscovery.allowsPeer(
+            "192.168.1.44", advertisedKind: .tailscale, allowLAN: true))
+        XCTAssertTrue(RemoteNetworkEndpointDiscovery.allowsPeer(
+            "100.90.4.3", advertisedKind: .tailscale, allowLAN: true))
+        XCTAssertFalse(RemoteNetworkEndpointDiscovery.allowsPeer(
+            "192.168.1.44", advertisedKind: .tailscale, allowLAN: false))
+        XCTAssertFalse(RemoteNetworkEndpointDiscovery.allowsPeer(
+            "8.8.8.8", advertisedKind: .tailscale, allowLAN: true))
+    }
+
     func testTailscaleCLIStateOverridesStaleInterfaces() {
         let running = RemoteNetworkEndpointDiscovery.selectEndpoint(
             addresses: ["192.168.1.20", "100.70.1.2"],

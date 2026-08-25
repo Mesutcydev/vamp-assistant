@@ -76,13 +76,13 @@ struct RemoteBackdrop: View {
                 .frame(width: proxy.size.width, height: proxy.size.height)
                 .clipped()
                 .overlay(appearance == .light
-                    ? Color.white.opacity(0.84)
-                    : Color.black.opacity(0.76))
+                    ? Color.white.opacity(0.58)
+                    : Color.black.opacity(0.46))
                 .overlay {
                     LinearGradient(
                         colors: appearance == .light
-                            ? [.white.opacity(0.54), .white.opacity(0.92)]
-                            : [.black.opacity(0.06), .black.opacity(0.66)],
+                            ? [.white.opacity(0.20), .white.opacity(0.60)]
+                            : [.black.opacity(0.02), .black.opacity(0.38)],
                         startPoint: .top,
                         endPoint: .bottom)
                 }
@@ -226,7 +226,7 @@ struct PairingActions: View {
                 .buttonStyle(RemoteSecondaryButtonStyle())
             DisclosureGroup(isExpanded: $showManual) {
                 VStack(spacing: 11) {
-                    RemoteField(title: "Mac address", placeholder: "http://100.x.x.x:9575", text: $address, field: .address, focusedField: focusedField)
+                    RemoteField(title: "Mac address", placeholder: "http://192.168.1.x:9575", text: $address, field: .address, focusedField: focusedField)
                         .submitLabel(.next)
                         .onSubmit { focusedField.wrappedValue = .code }
                     RemoteField(title: "Pairing code", placeholder: "Six-digit code", text: $code, field: .code, focusedField: focusedField)
@@ -323,7 +323,7 @@ struct RemoteField: View {
 
 struct PairingAssurances: View {
     @Environment(\.remoteAppearance) private var appearance
-    let items = [("lock.shield.fill", "Private", "Direct to your Mac"), ("checkmark.shield.fill", "In control", "Approve every action"), ("bolt.horizontal.fill", "No cloud relay", "Fast over Tailscale")]
+    let items = [("lock.shield.fill", "Private", "Direct to your Mac"), ("checkmark.shield.fill", "In control", "Approve every action"), ("bolt.horizontal.fill", "No cloud relay", "LAN or Tailscale")]
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             ForEach(items, id: \.1) { item in
@@ -775,7 +775,7 @@ struct PairAnotherMacSheet: View {
                 RemoteBackdrop()
                 ScrollView {
                     VStack(spacing: 16) {
-                        Text("Scan the QR on your Mac, or enter the Tailscale address and pairing code.")
+                        Text("Scan the QR on your Mac, or enter its LAN or Tailscale address and pairing code.")
                             .font(.subheadline)
                             .foregroundStyle(BeetTheme.secondaryText(appearance))
                             .frame(maxWidth: .infinity, alignment: .leading)

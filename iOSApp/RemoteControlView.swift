@@ -7,6 +7,7 @@ enum RemoteControlSourceMode {
 }
 
 private struct RemoteControlUnavailableState: View {
+    @Environment(\.remoteAppearance) private var appearance
     let title: String
     let message: String
     let status: String
@@ -27,10 +28,14 @@ private struct RemoteControlUnavailableState: View {
                     .saturation(0)
                     .frame(width: proxy.size.width, height: proxy.size.height)
                     .clipped()
-                    .overlay(Color.black.opacity(0.82))
+                    .overlay(appearance == .light
+                        ? Color.white.opacity(0.58)
+                        : Color.black.opacity(0.46))
                     .overlay {
                         LinearGradient(
-                            colors: [.black.opacity(0.18), .black.opacity(0.76)],
+                            colors: appearance == .light
+                                ? [.white.opacity(0.18), .white.opacity(0.62)]
+                                : [.black.opacity(0.02), .black.opacity(0.40)],
                             startPoint: .top,
                             endPoint: .bottom)
                     }
@@ -43,7 +48,7 @@ private struct RemoteControlUnavailableState: View {
                             .font(.system(size: 14, weight: .semibold))
                             .frame(width: 44, height: 44)
                             .background(.thinMaterial, in: Circle())
-                            .overlay(Circle().stroke(Color.white.opacity(0.15), lineWidth: 0.75))
+                            .overlay(Circle().stroke(BeetTheme.line(appearance), lineWidth: 0.75))
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Close remote control")
@@ -57,17 +62,17 @@ private struct RemoteControlUnavailableState: View {
                 VStack(spacing: 18) {
                     ZStack {
                         Circle()
-                            .fill(Color.white.opacity(0.08))
+                            .fill(BeetTheme.surfaceStrong(appearance))
                             .frame(width: 76, height: 76)
                         Circle()
-                            .stroke(Color.white.opacity(0.16), lineWidth: 0.75)
+                            .stroke(BeetTheme.line(appearance), lineWidth: 0.75)
                             .frame(width: 76, height: 76)
                         if isWorking {
-                            ProgressView().controlSize(.large).tint(.white)
+                            ProgressView().controlSize(.large).tint(BeetTheme.accentBright)
                         } else {
                             Image(systemName: symbol)
                                 .font(.system(size: 28, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.9))
+                                .foregroundStyle(BeetTheme.accentBright)
                         }
                     }
 
@@ -75,13 +80,13 @@ private struct RemoteControlUnavailableState: View {
                         Text(status)
                             .font(.caption2.weight(.bold))
                             .tracking(1.1)
-                            .foregroundStyle(.white.opacity(0.55))
+                            .foregroundStyle(BeetTheme.secondaryText(appearance))
                         Text(title)
                             .font(.title2.weight(.semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                         Text(message)
                             .font(.subheadline)
-                            .foregroundStyle(.white.opacity(0.68))
+                            .foregroundStyle(BeetTheme.secondaryText(appearance))
                             .multilineTextAlignment(.center)
                             .lineSpacing(2)
                             .frame(maxWidth: 330)

@@ -18,15 +18,17 @@ struct RemoteAPIClient {
 
     /// Ordinary companion requests must not share a connection pool with
     /// long-lived screen, audio, and terminal streams. A dedicated ephemeral
-    /// session also fails promptly when the Mac disappears instead of leaving
-    /// a sheet looking frozen behind URLSession's connectivity heuristics.
+    /// session prevents long streams from starving pairing and list refreshes.
+    /// Waiting for connectivity is important on a real iPhone because the
+    /// Local Network prompt and Tailscale route can settle after the request
+    /// begins; the request timeout still bounds an unavailable Mac.
     private static let apiSession: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpMaximumConnectionsPerHost = 6
-        configuration.timeoutIntervalForRequest = 15
-        configuration.timeoutIntervalForResource = 30
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = 45
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        configuration.waitsForConnectivity = false
+        configuration.waitsForConnectivity = true
         return URLSession(configuration: configuration)
     }()
 
@@ -34,12 +36,12 @@ struct RemoteAPIClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 24 * 60 * 60
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        configuration.waitsForConnectivity = false
+        configuration.waitsForConnectivity = true
         return URLSession(configuration: configuration)
     }()
 
     func pair(code: String) async throws -> RemotePairResponse {
-        try await request("api/pair", method: "POST", body: ["code": code], authorized: false)
+        try await request("api/pair", method: "POST", body: ["code": code], authorized: false, timeout: 30)
     }
 
     func status() async throws -> RemoteStatus { try await request("api/status") }

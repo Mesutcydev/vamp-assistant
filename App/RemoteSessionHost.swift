@@ -162,6 +162,7 @@ final class RemoteSessionHost {
     private(set) var pairingExpiresAt = Date().addingTimeInterval(RemoteSessionHost.pairingLifetime)
     private(set) var networkHost: String?
     private(set) var networkKind: RemoteNetworkKind?
+    private var allowLANPeers = false
 
     init(
         engine: any LLMEngine,
@@ -206,7 +207,8 @@ final class RemoteSessionHost {
                 if let endpoint,
                    (port == 0 || currentPort == port || currentPort == RemoteSessionPorts.resolved(port)),
                    networkHost == endpoint.host,
-                   networkKind == endpoint.kind { return }
+                   networkKind == endpoint.kind,
+                   allowLANPeers == allowLAN { return }
                 await server.stop()
             }
             self.server = nil
@@ -224,6 +226,7 @@ final class RemoteSessionHost {
 
         networkHost = endpoint.host
         networkKind = endpoint.kind
+        allowLANPeers = allowLAN
         rotatePairingCode()
         let resolver: LocalAPIServer.RouteResolver = { [weak self] request in
             guard let self else { return nil }
@@ -1676,20 +1679,15 @@ final class RemoteSessionHost {
         // the advertised numeric endpoint, plus explicit loopback access for
         // local debugging, and reject every other browser origin.
         let trustedHosts = Set([networkHost?.lowercased(), "127.0.0.1", "localhost"].compactMap { $0 })
-        return trustedHosts.contains(originHost)
+        if trustedHosts.contains(originHost) { return true }
+        return allowLANPeers && RemoteNetworkEndpointDiscovery.isPrivateIPv4(originHost)
     }
 
     private func allowedPeer(_ address: String) -> Bool {
-        guard address != "unknown" else { return false }
-        if address == "127.0.0.1" || address == "::1" { return true }
-        switch networkKind {
-        case .tailscale:
-            return RemoteNetworkEndpointDiscovery.isTailscale(address)
-        case .localNetwork:
-            return RemoteNetworkEndpointDiscovery.isPrivateIPv4(address)
-        case nil:
-            return false
-        }
+        RemoteNetworkEndpointDiscovery.allowsPeer(
+            address,
+            advertisedKind: networkKind,
+            allowLAN: allowLANPeers)
     }
 
     private func pendingInteraction(for id: UUID) -> LFJSONValue {
@@ -2007,6 +2005,24 @@ enum RemoteNetworkEndpointDiscovery {
         guard parts.count == 4, parts.allSatisfy({ (0...255).contains($0) }) else { return false }
         if parts[0] == 10 || parts[0] == 192 && parts[1] == 168 { return true }
         return parts[0] == 172 && (16...31).contains(parts[1])
+    }
+
+    static func allowsPeer(
+        _ address: String,
+        advertisedKind: RemoteNetworkKind?,
+        allowLAN: Bool
+    ) -> Bool {
+        guard address != "unknown" else { return false }
+        if address == "127.0.0.1" || address == "::1" { return true }
+        if allowLAN, isPrivateIPv4(address) { return true }
+        switch advertisedKind {
+        case .tailscale:
+            return isTailscale(address)
+        case .localNetwork:
+            return isPrivateIPv4(address)
+        case nil:
+            return false
+        }
     }
 }
 

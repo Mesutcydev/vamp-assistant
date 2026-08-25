@@ -105,6 +105,7 @@ struct MainWindowView: View {
         }
             .navigationTitle(showSettings ? "Settings" : (showBotsDashboard ? "Bots" : (sessions.workspaceURL?.lastPathComponent ?? "Vamp Assistant")))
             .toolbar {
+#if compiler(>=6.2)
                 if #available(macOS 26.0, *) {
                     ToolbarItemGroup(placement: .primaryAction) {
                         topToolCluster
@@ -117,6 +118,12 @@ struct MainWindowView: View {
                         moreActionsMenu
                     }
                 }
+#else
+                ToolbarItemGroup(placement: .primaryAction) {
+                    topToolCluster
+                    moreActionsMenu
+                }
+#endif
             }
             .onChange(of: appState.enginePhase) { _, phase in
                 switch phase {

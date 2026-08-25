@@ -195,7 +195,7 @@ final class SettingsStore: ObservableObject {
             DefaultsKeys.apiServerPort: 1234,
             DefaultsKeys.remoteSessionEnabled: false,
             DefaultsKeys.remoteSessionPort: RemoteSessionPorts.defaultPort,
-            DefaultsKeys.remoteSessionAllowLAN: false,
+            DefaultsKeys.remoteSessionAllowLAN: true,
             DefaultsKeys.remoteAccessConsentCompleted: false,
             DefaultsKeys.remoteClipboardSharingEnabled: false,
             DefaultsKeys.remoteFileSharingEnabled: false,

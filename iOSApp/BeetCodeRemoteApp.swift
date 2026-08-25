@@ -62,22 +62,22 @@ enum BeetTheme {
 
     static func background(_ appearance: RemoteAppearance) -> Color {
         switch appearance {
-        case .light: Color(white: 0.965)
-        case .dark: Color(white: 0.045)
+        case .light: Color(white: 0.975)
+        case .dark: Color(white: 0.075)
         }
     }
 
     static func surface(_ appearance: RemoteAppearance) -> Color {
         switch appearance {
-        case .light: Color.white.opacity(0.78)
-        case .dark: Color(white: 0.07).opacity(0.68)
+        case .light: Color.white.opacity(0.72)
+        case .dark: Color(white: 0.11).opacity(0.72)
         }
     }
 
     static func surfaceStrong(_ appearance: RemoteAppearance) -> Color {
         switch appearance {
-        case .light: Color(white: 0.93).opacity(0.90)
-        case .dark: Color(white: 0.13).opacity(0.76)
+        case .light: Color(white: 0.95).opacity(0.84)
+        case .dark: Color(white: 0.17).opacity(0.80)
         }
     }
 
@@ -90,8 +90,8 @@ enum BeetTheme {
 
     static func secondaryText(_ appearance: RemoteAppearance) -> Color {
         switch appearance {
-        case .light: Color(white: 0.26)
-        case .dark: Color(white: 0.76)
+        case .light: Color(white: 0.22)
+        case .dark: Color(white: 0.82)
         }
     }
 }

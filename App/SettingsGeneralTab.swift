@@ -189,7 +189,7 @@ struct GeneralTab: View {
                 }
             }
 
-            SettingsCard(title: "Remote Vamp Assistant Sessions", icon: "iphone", footer: "Off by default. Uses port \(RemoteSessionPorts.defaultPort) so it can run beside Vamp Host (9475). Tailscale is preferred; the QR is a one-time pairing code.") {
+            SettingsCard(title: "Remote Vamp Assistant Sessions", icon: "iphone", footer: "Off by default. Uses port \(RemoteSessionPorts.defaultPort) so it can run beside Vamp Host (9475). LAN and Tailscale connections still require the one-time QR pairing code.") {
                 SettingToggle(label: "Enable remote session access", isOn: $settings.remoteSessionEnabled)
                 SettingRow(label: "Port") {
                     TextField("\(RemoteSessionPorts.defaultPort)", value: $settings.remoteSessionPort, format: .number)

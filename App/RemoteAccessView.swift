@@ -214,7 +214,10 @@ struct RemoteAccessView: View {
         Group {
             switch appState.remoteNetworkKind {
             case .tailscale:
-                Label("Connected through Tailscale. Traffic stays on your tailnet.", systemImage: "lock.shield.fill")
+                Label(settings.remoteSessionAllowLAN
+                      ? "Ready on Tailscale and trusted local networks. Pairing is still required."
+                      : "Connected through Tailscale. Traffic stays on your tailnet.",
+                      systemImage: "lock.shield.fill")
                     .foregroundStyle(Theme.success)
             case .localNetwork:
                 Label("Local-network fallback is enabled. Use only on trusted private Wi‑Fi.", systemImage: "exclamationmark.triangle.fill")
@@ -308,14 +311,14 @@ struct RemoteAccessConsentView: View {
                 capabilityRow(
                     icon: "folder.badge.plus",
                     title: "File transfer",
-                    detail: "Share files up to 20 MB through BeetCode Remote Downloads.",
+                    detail: "Share files up to 20 MB through Vamp Assistant Remote Downloads.",
                     trailing: AnyView(Toggle("", isOn: $allowFiles).labelsHidden()))
             }
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Theme.hairline, lineWidth: 0.75))
 
-            Label("Only paired devices on your Tailscale network are accepted. You can change or revoke access later.", systemImage: "network.badge.shield.half.filled")
+            Label("Only paired devices on an allowed LAN or Tailscale network are accepted. You can change or revoke access later.", systemImage: "network.badge.shield.half.filled")
                 .font(.caption)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
