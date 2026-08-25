@@ -234,6 +234,7 @@ final class ToolCallTextTests: XCTestCase {
         let calls = ToolParser.parse(text)
         XCTAssertEqual(calls.map(\.name), ["ask_user"])
         XCTAssertEqual(calls.first?.askUserQuestion(), "Which port should the server use?")
+        XCTAssertEqual(calls.first?.argumentsJSON, "\"Which port should the server use?\"")
     }
 
     func testXMLTaggedArgumentsInsideToolCall() {

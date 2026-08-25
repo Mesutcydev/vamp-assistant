@@ -440,7 +440,7 @@ final class AgentSessionController: ObservableObject {
         // persisted record (the loop persists under this ID). A continuation
         // keeps the SAME id — never mint a fresh one on top of a restored
         // record, or undo would target a session that does not exist.
-        let sessionID = continuationSeed?.id ?? seed?.id ?? UUID()
+        let sessionID = continuationSeed?.id ?? seed?.id ?? activeSessionID ?? UUID()
         activeSessionID = sessionID
 
         let agentLoop = AgentLoop(
@@ -516,7 +516,7 @@ final class AgentSessionController: ObservableObject {
             return
         }
 
-        let sessionID = seed?.id ?? UUID()
+        let sessionID = seed?.id ?? activeSessionID ?? UUID()
         var record = seed ?? SessionRecord(
             id: sessionID,
             title: String(displayText.prefix(80)),

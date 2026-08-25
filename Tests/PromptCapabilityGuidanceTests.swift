@@ -266,7 +266,7 @@ final class PromptCapabilityGuidanceTests: XCTestCase {
             workspace: Workspace(root: tempRoot),
             chatOnly: true)
 
-        XCTAssertTrue(text.contains("chat-only mode"))
+        XCTAssertTrue(text.contains("project-free assistant mode"))
         XCTAssertTrue(text.contains("No project folder is connected"))
         XCTAssertFalse(text.contains(tempRoot.path))
         XCTAssertFalse(text.contains("read_file"))

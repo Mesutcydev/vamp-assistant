@@ -368,6 +368,25 @@ final class ComposerStore {
         sendBlocker == nil && controller?.isRunning == false
     }
 
+    var canQueue: Bool {
+        sendBlocker == nil
+            && controller?.isRunning == true
+            && controller?.activeSessionID != nil
+            && attachments.isEmpty
+    }
+
+    var canSteer: Bool { canQueue }
+
+    var runningActionBlocker: String? {
+        guard controller?.isRunning == true,
+              !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return nil }
+        if !attachments.isEmpty {
+            return "Attachments can be sent after this turn finishes; queue or steer with text only."
+        }
+        return nil
+    }
+
     /// A compact action is offered only when the persisted history contains
     /// tool output that the compactor can actually collapse.
     var canCompactHistory: Bool {
@@ -399,6 +418,53 @@ final class ComposerStore {
         attachments = []
         selection = IntentSelection()
         return true
+    }
+
+    /// The keyboard and primary composer action remain useful during a run:
+    /// an ordinary submit becomes a durable follow-up instead of being lost.
+    @discardableResult
+    func submit() -> Bool {
+        if controller?.isRunning == true {
+            return queue()
+        }
+        return send()
+    }
+
+    @discardableResult
+    func queue() -> Bool {
+        guard let controller,
+              let appState,
+              let sessionID = controller.activeSessionID,
+              canQueue,
+              let message = composedDraft()
+        else { return false }
+        guard appState.enqueueLocalTask(sessionID: sessionID, message: message) != nil else {
+            return false
+        }
+        clearAfterRunningAction()
+        return true
+    }
+
+    @discardableResult
+    func steer() -> Bool {
+        guard let controller, canSteer, let message = composedDraft(),
+              controller.steer(message)
+        else { return false }
+        clearAfterRunningAction()
+        return true
+    }
+
+    private func composedDraft() -> String? {
+        let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        return IntentComposer.compose(selection: selection, draft: text) { [weak self] source in
+            self?.resolvedFocus(source) ?? ""
+        }
+    }
+
+    private func clearAfterRunningAction() {
+        prompt = ""
+        selection = IntentSelection()
     }
 
     // MARK: Persistence (per workspace, validated on restore)

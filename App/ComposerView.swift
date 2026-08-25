@@ -18,7 +18,8 @@ enum ComposerPlacement {
 ///   Intent button; the card never moves.
 /// - Enter sends, Shift+Enter inserts a newline, ⌘↩ sends too, Esc stops a
 ///   running agent (the only `.cancelAction` owner in the window).
-/// - Send morphs into Stop while the agent runs.
+/// - During a run, the same input can queue a follow-up or steer the turn;
+///   Stop remains independently available.
 /// - A restrained state border tracks idle → focused → streaming.
 struct ComposerView: View {
     @EnvironmentObject private var appState: AppState
@@ -58,7 +59,7 @@ struct ComposerView: View {
         .padding(.bottom, placement == .home ? 0 : 18)
         .background(Color.clear)
         .onReceive(NotificationCenter.default.publisher(for: .sendMessage)) { _ in
-            store.send()
+            store.submit()
         }
     }
 
@@ -143,16 +144,16 @@ struct ComposerView: View {
             // inserts a newline.
             .onKeyPress(phases: .down) { press in
                 if ShortcutBinding(rawValue: SettingsStore.shared.sendShortcut).matches(press) {
-                    return store.send() ? .handled : .ignored
+                    return store.submit() ? .handled : .ignored
                 }
                 if press.key == .return && press.modifiers.contains(.command) {
-                    return store.send() ? .handled : .ignored
+                    return store.submit() ? .handled : .ignored
                 }
                 let newlineModifiers: EventModifiers = [.shift, .option, .control]
                 if press.key == .return,
                    settings.enterSends,
                    press.modifiers.intersection(newlineModifiers).isEmpty {
-                    return store.send() ? .handled : .ignored
+                    return store.submit() ? .handled : .ignored
                 }
                 return .ignored
             }
@@ -169,6 +170,9 @@ struct ComposerView: View {
     }
 
     private var composerPlaceholder: LocalizedStringKey {
+        if controller.isRunning {
+            return "Queue a follow-up or steer this turn…"
+        }
         if placement == .home {
             return "What's on your mind?"
         }
@@ -199,6 +203,7 @@ struct ComposerView: View {
     /// Shown only when the user has something to send but can't — never a
     /// nag on an empty composer.
     private var blockingHint: String? {
+        if let blocker = store.runningActionBlocker { return blocker }
         guard !controller.isRunning,
               !store.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let blocker = store.sendBlocker,
@@ -1105,8 +1110,8 @@ private struct ContextMeter: View {
 
 // MARK: - Send / stop
 
-/// Send morphs into Stop while the agent runs; the only `.cancelAction`
-/// owner in the window, so Esc never conflicts.
+/// Running turns expose separate steer, queue, and stop actions. This remains
+/// the only `.cancelAction` owner in the window, so Esc never conflicts.
 private struct SendStopButton: View {
     @EnvironmentObject private var controller: AgentSessionController
     @ObservedObject private var settings = SettingsStore.shared
@@ -1115,12 +1120,36 @@ private struct SendStopButton: View {
     var body: some View {
         Group {
             if controller.isRunning {
-                stopButton
+                runningActions
             } else {
                 sendButton
             }
         }
-        .frame(width: 38, height: 38)
+        .frame(height: 38)
+    }
+
+    private var runningActions: some View {
+        HStack(spacing: 6) {
+            if !store.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Button("Steer") { store.steer() }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(LFCapsuleButtonStyle(tone: .secondary))
+                    .disabled(!store.canSteer)
+                    .help("Redirect the active turn with this message")
+                    .accessibilityLabel("Steer active turn")
+
+                Button { store.queue() } label: {
+                    Image(systemName: "text.badge.plus")
+                        .font(.caption.weight(.bold))
+                }
+                .buttonStyle(LFIconButtonStyle(tone: .primary, size: 38))
+                .disabled(!store.canQueue)
+                .help("Queue this message after the active turn")
+                .accessibilityLabel("Queue follow-up")
+            }
+
+            stopButton
+        }
     }
 
     private var stopButton: some View {

@@ -69,7 +69,10 @@ public enum LFJSONValue: Sendable, Equatable {
 
     /// Pretty-printed JSON for logging and prompts.
     public func encoded(prettyPrinted: Bool = false) -> String {
-        let options: JSONSerialization.WritingOptions = prettyPrinted ? [.prettyPrinted, .sortedKeys] : [.sortedKeys]
+        var options: JSONSerialization.WritingOptions = [.fragmentsAllowed, .sortedKeys]
+        if prettyPrinted {
+            options.insert(.prettyPrinted)
+        }
         let any = revert()
         guard let data = try? JSONSerialization.data(withJSONObject: any, options: options) else { return "null" }
         return String(decoding: data, as: UTF8.self)

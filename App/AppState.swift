@@ -772,19 +772,45 @@ final class AppState: ObservableObject {
               SessionStore.shared.validateWorkspaceBinding(record)
         else { return nil }
 
+        return enqueueTask(
+            sessionID: sessionID,
+            workspacePath: record.workspacePath,
+            message: message,
+            source: "remote")
+    }
+
+    /// Queues a follow-up from the native composer while its current turn is
+    /// still running. The controller has already validated the active local
+    /// session, so this path can reserve the follow-up even during the brief
+    /// interval before the first turn is persisted to disk.
+    func enqueueLocalTask(sessionID: UUID, message: String) -> QueuedAgentTask? {
+        guard sessions.activeSessionID == sessionID else { return nil }
+        return enqueueTask(
+            sessionID: sessionID,
+            workspacePath: sessions.workspaceURL?.path ?? "",
+            message: message,
+            source: "local")
+    }
+
+    private func enqueueTask(
+        sessionID: UUID,
+        workspacePath: String,
+        message: String,
+        source: String
+    ) -> QueuedAgentTask? {
         let modelID = engine.activeRemoteEndpoint?.model ?? activeCodexModelID ?? activeModelID ?? ""
         do {
             let task = try taskQueue.enqueue(
                 sessionID: sessionID,
-                workspacePath: record.workspacePath,
+                workspacePath: workspacePath,
                 message: message,
                 modelID: modelID,
-                source: "remote")
+                source: source)
             refreshTaskQueue()
             drainTaskQueue()
             return task
         } catch {
-            Log.app.warning("Could not enqueue remote task: \(error.localizedDescription, privacy: .public)")
+            Log.app.warning("Could not enqueue \(source, privacy: .public) task: \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }
@@ -887,7 +913,10 @@ final class AppState: ObservableObject {
     }
 
     private func finishQueuedTask(_ reason: AgentFinish) {
-        guard let id = activeQueuedTaskID else { return }
+        guard let id = activeQueuedTaskID else {
+            scheduleQueueDrain()
+            return
+        }
         let state: QueuedTaskState
         let summary: String?
         let error: String?
@@ -921,6 +950,10 @@ final class AppState: ObservableObject {
         }
         activeQueuedTaskID = nil
         refreshTaskQueue()
+        scheduleQueueDrain()
+    }
+
+    private func scheduleQueueDrain() {
         queueDrainTask?.cancel()
         queueDrainTask = Task { @MainActor [weak self] in
             await Task.yield()

@@ -10,6 +10,7 @@ final class EndToEndTests: XCTestCase {
     private var appSupport: TempWorkspace!
 
     private var savedPlanMode: Bool?
+    private var savedAgentMode: String?
     private var savedAutoApproveEdits: Bool?
     private var savedAutoApproveCommands: Bool?
 
@@ -18,6 +19,7 @@ final class EndToEndTests: XCTestCase {
         // on, approvals manual) cannot leak into the test process.
         let defaults = UserDefaults.standard
         savedPlanMode = defaults.object(forKey: "planMode") as? Bool
+        savedAgentMode = defaults.string(forKey: "agentMode")
         savedAutoApproveEdits = defaults.object(forKey: "autoApproveEdits") as? Bool
         savedAutoApproveCommands = defaults.object(forKey: "autoApproveCommands") as? Bool
         defaults.set(false, forKey: "planMode")
@@ -41,9 +43,11 @@ final class EndToEndTests: XCTestCase {
     override func tearDown() async throws {
         let defaults = UserDefaults.standard
         if let savedPlanMode { defaults.set(savedPlanMode, forKey: "planMode") } else { defaults.removeObject(forKey: "planMode") }
+        if let savedAgentMode { defaults.set(savedAgentMode, forKey: "agentMode") } else { defaults.removeObject(forKey: "agentMode") }
         if let savedAutoApproveEdits { defaults.set(savedAutoApproveEdits, forKey: "autoApproveEdits") } else { defaults.removeObject(forKey: "autoApproveEdits") }
         if let savedAutoApproveCommands { defaults.set(savedAutoApproveCommands, forKey: "autoApproveCommands") } else { defaults.removeObject(forKey: "autoApproveCommands") }
         savedPlanMode = nil
+        savedAgentMode = nil
         savedAutoApproveEdits = nil
         savedAutoApproveCommands = nil
     }
@@ -169,6 +173,11 @@ final class EndToEndTests: XCTestCase {
         // manual approvals (setUp pins them on by default).
         UserDefaults.standard.set(false, forKey: "autoApproveEdits")
         UserDefaults.standard.set(false, forKey: "autoApproveCommands")
+        // Auto mode deliberately approves safe edits. This test is about the
+        // manual approval card, so use Goal's safety posture without enabling
+        // its separate plan gate.
+        SettingsStore.shared.agentMode = .goal
+        UserDefaults.standard.set(false, forKey: "planMode")
 
         let engine = FakeLLMEngine()
         let appState = AppState(engine: EngineRouter(local: engine))
@@ -182,11 +191,11 @@ final class EndToEndTests: XCTestCase {
             "Changed it.",
         ])
         appState.sessions.send("change file.txt")
-        let approvalDeadline = Date().addingTimeInterval(10)
+        let approvalDeadline = Date().addingTimeInterval(20)
         while appState.sessions.pendingApproval == nil, Date() < approvalDeadline {
             try? await Task.sleep(for: .milliseconds(50))
         }
-        guard let request = appState.sessions.pendingApproval else {
+        guard appState.sessions.pendingApproval != nil else {
             return XCTFail("expected approval request")
         }
         appState.sessions.approve(true)

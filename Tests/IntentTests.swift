@@ -196,6 +196,7 @@ final class ComposerStoreTests: XCTestCase {
         appSupport = TempWorkspace()
         ModelStore.shared.overrideModelsDir = appSupport.url(for: "Models")
         SessionStore.shared.overrideSessionsDir = appSupport.url(for: "Sessions")
+        TaskQueueStore.shared.overrideDirectory = appSupport.url(for: "TaskQueue")
         ComposerStore.overrideDraftsDir = appSupport.url(for: "Drafts")
         AgentSessionController.overrideChatRuntimeDirectory = appSupport.url(for: "ChatRuntime")
         workspace = TempWorkspace()
@@ -218,6 +219,7 @@ final class ComposerStoreTests: XCTestCase {
         AgentSessionController.overrideChatRuntimeDirectory = nil
         ModelStore.shared.overrideModelsDir = nil
         SessionStore.shared.overrideSessionsDir = nil
+        TaskQueueStore.shared.overrideDirectory = nil
     }
 
     // MARK: Helpers
@@ -428,8 +430,8 @@ final class ComposerStoreTests: XCTestCase {
         XCTAssertNil(appState.sessions.workspaceURL)
 
         let systemPrompt = try XCTUnwrap(engine.turnHistory.first?.first?.content)
-        XCTAssertTrue(systemPrompt.contains("chat-only mode"))
-        XCTAssertFalse(systemPrompt.contains("# Tool protocol"))
+        XCTAssertTrue(systemPrompt.contains("project-free assistant mode"))
+        XCTAssertTrue(systemPrompt.contains("# Tool protocol"))
         XCTAssertFalse(systemPrompt.contains("ChatRuntime"))
         XCTAssertFalse(systemPrompt.contains("read_file"))
 
@@ -513,6 +515,45 @@ final class ComposerStoreTests: XCTestCase {
             }
         }
         XCTAssertTrue(delivered, "no selection → the draft is sent verbatim")
+    }
+
+    func testRunningComposerQueuesFollowUpAndDrainsItAfterCurrentTurn() async {
+        let (appState, store, engine) = makeStack()
+        await openWorkspace(appState, store)
+        activateFirstModel(appState)
+        engine.holdNextStream()
+        engine.enqueue(texts: ["First turn done.", "Follow-up done."])
+
+        store.prompt = "first task"
+        XCTAssertTrue(store.send())
+        let started = await waitUntil { appState.sessions.isRunning }
+        XCTAssertTrue(started)
+
+        store.prompt = "follow-up task"
+        XCTAssertTrue(store.canQueue)
+        XCTAssertTrue(store.submit(), "Enter/primary submit should queue while running")
+        XCTAssertEqual(store.prompt, "")
+        XCTAssertEqual(appState.queuedTasks.filter { $0.state == .queued }.count, 1)
+        XCTAssertEqual(appState.queuedTasks.first?.source, "local")
+
+        let firstStreamHeld = await waitUntil { engine.streamCallCount == 1 }
+        XCTAssertTrue(firstStreamHeld)
+        engine.release()
+        let startedFollowUp = await waitUntil(timeout: 10) { engine.streamCallCount == 2 }
+        XCTAssertTrue(
+            startedFollowUp,
+            "follow-up did not start; queue=\(appState.queuedTasks) session=\(String(describing: appState.sessions.activeSessionID.flatMap(SessionStore.shared.load)))")
+        let finishedFollowUp = await waitUntil(timeout: 10) {
+            !appState.sessions.isRunning
+                && appState.queuedTasks.contains { $0.state == .completed }
+        }
+        XCTAssertTrue(finishedFollowUp, "follow-up did not finish; queue=\(appState.queuedTasks)")
+        let userMessages = appState.sessions.transcript.compactMap { item -> String? in
+            if case .user(let text) = item.kind { return text }
+            return nil
+        }
+        XCTAssertTrue(userMessages.contains("first task"))
+        XCTAssertTrue(userMessages.contains("follow-up task"))
     }
 
     func testSlashCommandsBypassValidationAndNeverSend() async {

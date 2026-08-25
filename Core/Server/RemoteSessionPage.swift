@@ -234,13 +234,14 @@ textarea {
   resize: none; border: 0; outline: 0; background: transparent;
   color: var(--text); font-size: 16px; line-height: 1.45;
 }
-.send, .stop {
+.send, .steer, .stop {
   width: 42px; height: 42px; border-radius: 11px;
   font-weight: 800; transition: transform 160ms var(--ease-out), opacity 160ms var(--ease-out);
 }
 .send { background: linear-gradient(135deg, var(--accent-bright), var(--accent)); color: #111111; }
+.steer { width: auto; padding: 0 12px; border: 1px solid var(--line); background: var(--panel-strong); color: var(--text); }
 .stop { background: var(--danger); color: #111111; }
-.send.hidden, .stop.hidden { display: none; }
+.send.hidden, .steer.hidden, .stop.hidden { display: none; }
 .hint { padding: 7px 3px 0; color: var(--muted); font-size: 11px; }
 .run-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 8px 3px 0; }
 .run-control { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
@@ -891,6 +892,7 @@ textarea {
       <div class="composer">
         <textarea id="composer" rows="1" placeholder="Continue this coding task…" disabled aria-label="Next prompt"></textarea>
         <button id="send" class="send" type="button" disabled aria-label="Send prompt">↑</button>
+        <button id="steer" class="steer hidden" type="button" aria-label="Steer active turn">Steer</button>
         <button id="stop" class="stop hidden" type="button" aria-label="Stop Vamp Assistant">■</button>
       </div>
       <div class="run-controls" role="group" aria-label="Run controls">
@@ -1630,12 +1632,18 @@ function previewText(preview) {
 
 function updateComposer() {
   const hasSession = Boolean(state.token && state.current);
-  const unavailable = !hasSession || state.busy || state.loadingSession;
+  const unavailable = !hasSession || state.loadingSession;
+  const hasDraft = Boolean($('composer').value.trim());
   $('composer').disabled = unavailable;
-  $('send').disabled = unavailable;
-  $('send').classList.toggle('hidden', state.busy);
+  $('composer').placeholder = state.busy ? 'Queue a follow-up or steer this turn…' : 'Continue this coding task…';
+  $('send').disabled = unavailable || !hasDraft;
+  $('send').classList.toggle('hidden', !hasSession);
+  $('send').textContent = state.busy ? '+' : '↑';
+  $('send').setAttribute('aria-label', state.busy ? 'Queue follow-up' : 'Send prompt');
+  $('steer').disabled = unavailable || !hasDraft;
+  $('steer').classList.toggle('hidden', !hasSession || !state.busy || !hasDraft);
   $('stop').classList.toggle('hidden', !hasSession || !state.busy);
-  $('chat-model').disabled = unavailable;
+  $('chat-model').disabled = unavailable || state.busy;
 }
 
 async function loadSession(quiet = false, lockComposer = true) {
@@ -1901,15 +1909,17 @@ async function resolvePlan(pending, action, feedback = '') {
   } catch (error) { showNotice(error.message, 'error'); }
 }
 
-async function send() {
+async function send(action = '') {
   const input = $('composer');
   const message = input.value.trim();
-  if (!message || !state.current || state.busy) return;
-  state.busy = true;
+  if (!message || !state.current) return;
+  const wasBusy = state.busy;
+  if (!wasBusy) state.busy = true;
   updateComposer();
-  setStatus('Sending…', 'busy');
+  setStatus(wasBusy ? (action === 'steer' ? 'Steering…' : 'Queueing…') : 'Sending…', 'busy');
   try {
     const payload = { message, autoMode: state.autoMode, fullAccess: state.fullAccess };
+    if (wasBusy) payload.action = action === 'steer' ? 'steer' : 'queue';
     const modelID = $('chat-model').value;
     if (modelID) payload.modelID = modelID;
     await api('/api/sessions/' + encodeURIComponent(state.current) + '/messages', {
@@ -1919,8 +1929,10 @@ async function send() {
     input.value = '';
     await loadSession();
   } catch (error) {
-    state.busy = false;
-    state.phase = 'idle';
+    if (!wasBusy) {
+      state.busy = false;
+      state.phase = 'idle';
+    }
     updateComposer();
     showNotice(error.message, 'error');
     setStatus('Connected', 'live');
@@ -1975,6 +1987,7 @@ $('pair-button').onclick = () => pair($('pair-code').value);
 $('pair-code').oninput = event => { event.target.value = event.target.value.replace(/[^0-9]/g, '').slice(0, 6); };
 $('pair-code').onkeydown = event => { if (event.key === 'Enter') pair(event.target.value); };
 $('send').onclick = send;
+$('steer').onclick = () => send('steer');
 $('chat-model').onchange = () => {
   if (state.lastErrorMessage) state.dismissedError = state.lastErrorMessage;
   if (state.lastRecord) renderMessages(state.lastRecord);
@@ -2024,6 +2037,7 @@ document.querySelectorAll('[data-theme-choice]').forEach(button => {
 $('composer').onkeydown = event => {
   if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(); }
 };
+$('composer').oninput = updateComposer;
 async function revokeBrowser() {
   try {
     await api('/api/revoke', { method: 'POST' });
