@@ -547,7 +547,11 @@ private struct SwiftTermRemoteView: UIViewRepresentable {
     }
 
     @MainActor
-    final class Coordinator: NSObject, TerminalViewDelegate {
+    // SwiftTerm's TerminalViewDelegate requirements are nonisolated, but every
+    // callback arrives on the main thread from a UIView and the bodies touch
+    // main-actor state. Defer the isolation check to run time rather than
+    // marking each method nonisolated.
+    final class Coordinator: NSObject, @preconcurrency TerminalViewDelegate {
         let session: RemoteTerminalSession
         var onInput: (Data) -> Void
         var lastOutputID: UInt64 = 0
