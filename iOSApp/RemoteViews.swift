@@ -1001,22 +1001,45 @@ private struct RemoteBotProfile: Identifiable, Hashable {
     }
 }
 
+/// A bot's identity mark, framed the way the Mac app frames the beet logo:
+/// the artwork sits *inside* a rounded plate rather than bleeding to its
+/// corners, so every tile reads as one component instead of a pasted image.
+/// The plate stays dark in all three appearances because the artwork is lit
+/// against darkness — on a light plate its roots and shadows vanish.
 private struct RemoteBotThumbnail: View {
     let profile: RemoteBotProfile
     var size: CGFloat = 56
+    var isSelected = false
+
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+    }
 
     var body: some View {
         Image(profile.imageName)
             .resizable()
-            .scaledToFill()
+            .scaledToFit()
+            .padding(size * 0.06)
             .frame(width: size, height: size)
-            .background(Color.black, in: RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
-            .clipShape(RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-                    .stroke(Color.white.opacity(0.14), lineWidth: 0.75)
+            .background {
+                shape.fill(
+                    LinearGradient(
+                        colors: [
+                            profile.tint.opacity(0.34),
+                            Color(red: 0.08, green: 0.03, blue: 0.05),
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom))
             }
-            .shadow(color: profile.tint.opacity(0.22), radius: 8, y: 4)
+            .clipShape(shape)
+            .overlay {
+                shape.stroke(
+                    profile.tint.opacity(isSelected ? 0.85 : 0.30),
+                    lineWidth: isSelected ? 1.5 : 0.75)
+            }
+            .shadow(color: profile.tint.opacity(isSelected ? 0.45 : 0.24),
+                    radius: isSelected ? 12 : 8, y: 4)
+            .animation(.snappy(duration: 0.2), value: isSelected)
             .accessibilityHidden(true)
     }
 }
@@ -1069,7 +1092,7 @@ private struct RemoteHomeBotCard: View {
                     .font(.caption2)
                     .foregroundStyle(BeetTheme.secondaryText(appearance))
                     .multilineTextAlignment(.center)
-                    .lineLimit(2)
+                    .lineLimit(2, reservesSpace: true)
             }
             .frame(width: 92)
             .padding(.vertical, 10)
@@ -1113,9 +1136,10 @@ private struct RemoteBotChooser: View {
                         let isSelected = effectiveID == profile.id
                         Button {
                             selectedBotID = RemoteBotProfile.resolvedID(profile.id) ?? ""
+                            UISelectionFeedbackGenerator().selectionChanged()
                         } label: {
                             VStack(spacing: 6) {
-                                RemoteBotThumbnail(profile: profile, size: 48)
+                                RemoteBotThumbnail(profile: profile, size: 48, isSelected: isSelected)
                                 Text(profile.name)
                                     .font(.caption2.weight(.semibold))
                                     .foregroundStyle(isSelected ? profile.tint : .primary)
@@ -1129,6 +1153,7 @@ private struct RemoteBotChooser: View {
                                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                                     .stroke(isSelected ? profile.tint.opacity(0.7) : BeetTheme.line(appearance).opacity(0.5), lineWidth: isSelected ? 1.25 : 0.75)
                             }
+                            .animation(.snappy(duration: 0.2), value: isSelected)
                         }
                         .buttonStyle(RemotePressButtonStyle())
                         .accessibilityLabel(profile.name)
