@@ -45,6 +45,7 @@
 		14D22A0251C30B61D733C168 /* HFHubClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E91E277693DEDBC50474E51 /* HFHubClient.swift */; };
 		156530C9412347B515225AD8 /* ClaimVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA9E3FFD8281AB75A3716E67 /* ClaimVerifier.swift */; };
 		15EA60D4A1AB446409147797 /* SearchTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 779C29C568FABEB261C541A3 /* SearchTool.swift */; };
+		16198BC6F755EEF536A66DA1 /* SidebarChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF031E8A7F276EBD5ADE68CF /* SidebarChrome.swift */; };
 		1651B4CE3CF1A49B698FFA37 /* ExternalCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 972E733AD2F5BDFA05167273 /* ExternalCommands.swift */; };
 		1659848A6AF40CCC05900185 /* TaskQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C1ED64EC6F8973BE96C22F /* TaskQueueTests.swift */; };
 		17CDDA9ECD66C92CE353A15F /* ContextResolvers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 593A9F6ECB59B6A49692A684 /* ContextResolvers.swift */; };
@@ -805,6 +806,7 @@
 		FE715B1CC3D11B8D720F2E02 /* SymbolGraphTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SymbolGraphTests.swift; sourceTree = "<group>"; };
 		FE95A2CD601C6F60F4BE3699 /* ChildProcessRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildProcessRegistry.swift; sourceTree = "<group>"; };
 		FEF3882EFFE23E3297394EC0 /* ComputerToolsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComputerToolsTests.swift; sourceTree = "<group>"; };
+		FF031E8A7F276EBD5ADE68CF /* SidebarChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarChrome.swift; sourceTree = "<group>"; };
 		FF5A58CDEE48304EC64BBB55 /* GGUFMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GGUFMetadata.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -1121,6 +1123,7 @@
 				8EF5DB981DF82BC708D5A668 /* SettingsProvidersTab.swift */,
 				D74A584EF90F67826F086E19 /* SettingsView.swift */,
 				B23E26F0E8B552B49688B0E6 /* ShortcutBinding.swift */,
+				FF031E8A7F276EBD5ADE68CF /* SidebarChrome.swift */,
 				34FCC7599AAAD923FB7E7FD0 /* SidebarGroupHeader.swift */,
 				5446177C9F91F0701EFBBEE6 /* SidebarView.swift */,
 				9C14748BC02FA1EDF587A5F3 /* SimulatorController.swift */,
@@ -1891,6 +1894,7 @@
 				CC66F682C995D4A584EEE8F0 /* SettingsView.swift in Sources */,
 				FD62DAAC92BB26AEB27D14FD /* ShellRunner.swift in Sources */,
 				2BC86C817B7799B380D2541A /* ShortcutBinding.swift in Sources */,
+				16198BC6F755EEF536A66DA1 /* SidebarChrome.swift in Sources */,
 				ABF54E59C5ECD2EC10CB63D4 /* SidebarGroupHeader.swift in Sources */,
 				27C4C1630215DEFC29E650E8 /* SidebarView.swift in Sources */,
 				3A83DECBF20F80D887ADEC8E /* SimBuildRunTool.swift in Sources */,
@@ -2279,7 +2283,7 @@
 				CODE_SIGN_ENTITLEMENTS = iOSApp/BeetCodeRemote.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 47;
+				CURRENT_PROJECT_VERSION = 49;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = iOSApp/Info.plist;
@@ -2308,7 +2312,7 @@
 				CODE_SIGN_ENTITLEMENTS = iOSApp/BeetCodeRemote.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 47;
+				CURRENT_PROJECT_VERSION = 49;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = iOSApp/Info.plist;

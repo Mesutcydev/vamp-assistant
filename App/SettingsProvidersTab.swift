@@ -71,7 +71,8 @@ struct ProvidersTab: View {
     private var keyRestoreBanner: some View {
         HStack(alignment: .top, spacing: Spacing.md) {
             Image(systemName: "key.fill")
-                .font(.system(size: 13, weight: .semibold, design: .serif))
+                .accessibilityHidden(true)
+                .font(.app(size: 13, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.warning)
                 .frame(width: 30, height: 30)
                 .background(Theme.washStrong(Theme.warning),

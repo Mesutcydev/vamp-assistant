@@ -18,6 +18,9 @@ struct ChatView: View {
     @State private var composerStore = ComposerStore()
     @State private var sessionTitle = "New chat"
     @State private var homeVisible = false
+    /// Width of the main content region, measured by the hero's background
+    /// probe and used only to size the composer.
+    @State private var heroRegionWidth: CGFloat = 900
 
     private var isEmptyConversation: Bool {
         controller.transcript.isEmpty
@@ -78,6 +81,7 @@ struct ChatView: View {
     private var workspaceTrustBanner: some View {
         HStack(spacing: 10) {
             Image(systemName: "lock.shield")
+                .accessibilityHidden(true)
                 .foregroundStyle(Theme.warning)
             Text("This project contains MCP servers or hooks. Trust it before they can run.")
                 .font(.caption)
@@ -244,14 +248,10 @@ struct ChatView: View {
 
     private var emptyState: some View {
         VStack(spacing: 0) {
-            Spacer(minLength: 24)
+            Spacer(minLength: Spacing.xl)
 
-            VStack(spacing: 16) {
-                VStack(spacing: 12) {
-                    Color.clear
-                        .frame(width: 76, height: 76)
-                        .accessibilityHidden(true)
-
+            VStack(spacing: Spacing.lg) {
+                VStack(spacing: Spacing.md) {
                     Text("VAMP ASSISTANT")
                         .font(AppFont.homeWordmark)
                         .tracking(2.4)
@@ -270,23 +270,41 @@ struct ChatView: View {
 
                 if let status = homeStatus {
                     Text(status)
-                        .font(.system(size: 13, design: .serif))
+                        .font(.app(size: 13, design: .serif))
                         .foregroundStyle(homeStatusTint)
                         .padding(.top, 2)
                 }
             }
 
-            Spacer(minLength: 28)
+            // Hero rhythm: 16 title → subtitle, 32 subtitle → composer.
+            // One gap, twice the other, instead of two unrelated numbers.
+            Spacer().frame(height: 32)
 
-            ComposerView(store: composerStore, placement: .home)
+            ComposerView(store: composerStore, placement: .home,
+                         homeMaxWidth: ComposerMetrics.homeWidth(for: heroRegionWidth))
                 .environmentObject(controller)
-                .padding(.bottom, 36)
 
-            Spacer(minLength: 0)
-                .frame(maxHeight: 20)
+            Spacer(minLength: Spacing.xl)
         }
         .padding(.horizontal, 48)
+        // Both spacers flex, so the hero group is mathematically centred in
+        // the canvas. This reserved strip is the one optical correction:
+        // half of it (32pt, ~4% of the canvas) lifts the group above true
+        // centre, which a wordmark this heavy needs to look centred.
+        .padding(.bottom, 64)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Measure the MAIN CONTENT region the hero occupies, so the composer
+        // proportion is a share of that region and never of the whole window.
+        // Read from a background probe: the width it reports cannot depend on
+        // anything the width feeds, so this settles in one pass.
+        .background {
+            GeometryReader { geo in
+                Color.clear
+                    .onChange(of: geo.size.width, initial: true) { _, width in
+                        heroRegionWidth = width
+                    }
+            }
+        }
         .opacity(homeVisible ? 1 : 0)
         .onAppear {
             if reduceMotion {
@@ -323,12 +341,13 @@ struct ChatView: View {
         } label: {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "antenna.radiowaves.left.and.right")
-                    .font(.system(size: 13, weight: .semibold, design: .serif))
+                    .accessibilityHidden(true)
+                    .font(.app(size: 13, weight: .semibold, design: .serif))
                     .foregroundStyle(Theme.textPrimary)
                     .frame(width: 36, height: 36)
                     .background(Theme.surface.opacity(0.92),
-                                in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
                         .strokeBorder(Theme.hairline, lineWidth: 0.75))
 
                 Circle()
@@ -337,12 +356,15 @@ struct ChatView: View {
                     .overlay(Circle().stroke(Theme.bg, lineWidth: 2))
                     .padding(5)
             }
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
         }
         .buttonStyle(LFPlainPressButtonStyle())
         .lfHoverLift()
-        .help("Remote Sessions")
+        .help(appState.remoteSessionRunning
+              ? "Remote Sessions — a session is running"
+              : "Remote Sessions")
         .accessibilityLabel("Open Remote Sessions")
+        .accessibilityValue(appState.remoteSessionRunning ? "A session is running" : "No session running")
     }
 
     private var hasPendingGate: Bool {

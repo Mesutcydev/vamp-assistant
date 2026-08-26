@@ -16,8 +16,8 @@ struct SettingsCard<Content: View>: View {
                     .foregroundStyle(Theme.textPrimary)
             } icon: {
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold, design: .serif))
-                    .foregroundStyle(Theme.accent)
+                    .font(.app(size: 12, weight: .semibold, design: .serif))
+                    .foregroundStyle(Theme.accentText)
             }
 
             VStack(alignment: .leading, spacing: Spacing.md) {
@@ -130,8 +130,11 @@ struct PaletteSwatchPicker: View {
                             .strokeBorder(isSelected ? Theme.accent : Color.clear, lineWidth: 2)
                     )
                 if isSelected {
+                    // Intentionally NOT themed: the swatch beneath is always
+                    // the palette's fixed light accent (see swatchColor), so
+                    // this checkmark is white in both appearances by design.
                     Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .bold, design: .serif))
+                        .font(.app(size: 10, weight: .bold, design: .serif))
                         .foregroundStyle(.white)
                         .shadow(color: .black.opacity(0.35), radius: 1)
                 }
@@ -180,7 +183,7 @@ struct InfoBanner: View {
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.md) {
             Image(systemName: icon)
-                .font(.system(size: 13, weight: .semibold, design: .serif))
+                .font(.app(size: 13, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.info)
                 .frame(width: 30, height: 30)
                 .background(Theme.washStrong(Theme.info),

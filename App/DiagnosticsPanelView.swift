@@ -119,17 +119,18 @@ struct DiagnosticsPanelView: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: icon)
+                    .accessibilityHidden(true)
                     .font(.caption2.weight(.bold))
                 Text(label)
                     .font(.caption2.weight(.semibold))
                 Text("\(count)")
                     .font(.caption2.weight(.bold))
                     .monospacedDigit()
-                    .foregroundStyle(isActive ? Theme.accent : Theme.textTertiary)
+                    .foregroundStyle(isActive ? Theme.accentText : Theme.textTertiary)
             }
             .lineLimit(1)
             .fixedSize()
-            .foregroundStyle(isActive ? Theme.accent : Theme.textSecondary)
+            .foregroundStyle(isActive ? Theme.accentText : Theme.textSecondary)
             .padding(.horizontal, 9)
             .padding(.vertical, 5)
             .background(isActive ? Theme.washStrong(Theme.accent) : Theme.surface, in: Capsule())

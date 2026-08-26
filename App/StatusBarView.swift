@@ -11,8 +11,8 @@ struct StatusBarView: View {
             statusRow(includeSecondary: true)
             statusRow(includeSecondary: false)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.xs)
         .font(.caption)
         .foregroundStyle(Theme.textSecondary)
         .lineLimit(1)

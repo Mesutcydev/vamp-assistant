@@ -52,8 +52,9 @@ struct ProviderCard: View {
             // icon-header chrome every SettingsCard wears.
             HStack(spacing: Spacing.sm) {
                 Image(systemName: provider == .custom ? "server.rack" : "cloud.fill")
-                    .font(.system(size: 12, weight: .semibold, design: .serif))
-                    .foregroundStyle(Theme.accent)
+                    .accessibilityHidden(true)
+                    .font(.app(size: 12, weight: .semibold, design: .serif))
+                    .foregroundStyle(Theme.accentText)
                 Text(provider.displayName)
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)

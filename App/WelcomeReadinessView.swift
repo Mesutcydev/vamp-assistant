@@ -102,10 +102,11 @@ struct WelcomeReadinessView: View {
     private var header: some View {
         HStack(spacing: 14) {
             Image(systemName: "sparkles")
-                .font(.system(size: 22, weight: .semibold))
+                .accessibilityHidden(true)
+                .font(.app(size: 22, weight: .semibold))
                 .foregroundStyle(Theme.rose)
                 .frame(width: 48, height: 48)
-                .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
                 .shadow(color: Theme.accent.opacity(0.28), radius: 12, y: 4)
             VStack(alignment: .leading, spacing: 3) {
                 Text(isOnboarding ? "Welcome to Vamp Assistant" : "System Readiness")
@@ -145,8 +146,8 @@ struct WelcomeReadinessView: View {
                 actionTitle: agentReady ? nil : "Choose Model",
                 action: onOpenModelManager)
         }
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
             .strokeBorder(Theme.hairline, lineWidth: 1))
         .shadow(color: Theme.cardShadow, radius: 10, y: 3)
     }
@@ -189,8 +190,8 @@ struct WelcomeReadinessView: View {
                 ready: (readiness.snapshot?.connectedDeviceCount ?? 0) > 0,
                 optional: true)
         }
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
             .strokeBorder(Theme.hairline, lineWidth: 1))
         .shadow(color: Theme.cardShadow, radius: 10, y: 3)
     }
@@ -214,7 +215,7 @@ struct WelcomeReadinessView: View {
     ) -> some View {
         HStack(spacing: 12) {
             Image(systemName: systemImage)
-                .font(.system(size: 14, weight: .semibold, design: .serif))
+                .font(.app(size: 14, weight: .semibold, design: .serif))
                 .foregroundStyle(ready ? Theme.success : optional ? Theme.textTertiary : Theme.warning)
                 .frame(width: 32, height: 32)
                 .background(Theme.wash(ready ? Theme.success : optional ? Theme.textTertiary : Theme.warning), in: Circle())

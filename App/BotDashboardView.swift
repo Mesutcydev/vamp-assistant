@@ -274,8 +274,8 @@ private struct BotSpecialistCard: View {
                     .frame(minHeight: 76, maxHeight: 120)
                     .scrollContentBackground(.hidden)
                     .padding(8)
-                    .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
                         .strokeBorder(Theme.hairline, lineWidth: 1))
                     .accessibilityLabel("Task for \(specialist.name)")
             }
@@ -380,7 +380,7 @@ private struct BotSpecialistCard: View {
             }
         }
         .padding(12)
-        .background(Theme.surfaceInset.opacity(0.55), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Theme.surfaceInset.opacity(0.55), in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
     }
 
     private func resourceLabel(_ run: BotRunRecord) -> String {

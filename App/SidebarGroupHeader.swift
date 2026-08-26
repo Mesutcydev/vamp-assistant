@@ -54,7 +54,7 @@ struct SidebarGroupHeader: View {
                 .clipShape(RoundedRectangle(cornerRadius: 3.5, style: .continuous))
         } else {
             Image(systemName: icon)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.app(size: 12, weight: .semibold))
                 .foregroundStyle(Theme.textTertiary)
                 .frame(width: 16, height: 16)
         }

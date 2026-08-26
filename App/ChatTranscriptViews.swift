@@ -14,12 +14,13 @@ struct ChatHeaderView: View {
     var body: some View {
         HStack(spacing: 9) {
             Image(systemName: "bubble.left.and.bubble.right.fill")
+                .accessibilityHidden(true)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(Theme.accent)
+                .foregroundStyle(Theme.accentText)
                 .frame(width: 24, height: 24)
                 .background(
                     Theme.wash(Theme.accent),
-                    in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
 
             Text(title)
                 .font(.caption.weight(.semibold))
@@ -35,8 +36,8 @@ struct ChatHeaderView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.textSecondary)
-                .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
                 .lfHoverLift()
                 .help("Back to home")
                 .accessibilityLabel("Back to home")
@@ -74,8 +75,8 @@ struct ChatHeaderActions: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(Theme.textSecondary)
-            .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
             .fixedSize()
             .lfHoverLift()
             .help("Control this chat from iPhone or iPad")
@@ -89,8 +90,8 @@ struct ChatHeaderActions: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(Theme.textSecondary)
-            .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
             .fixedSize()
             .lfHoverLift()
             .help("Review changed files")
@@ -288,7 +289,7 @@ struct AssistantAvatar: View {
 
     var body: some View {
         Image(systemName: "sparkles")
-            .font(.system(size: size * 0.46, weight: .semibold))
+            .font(.app(size: size * 0.46, weight: .semibold))
             .foregroundStyle(Theme.rose)
             .frame(width: size, height: size)
             .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: size * 0.3, style: .continuous))
@@ -630,7 +631,7 @@ struct MarkdownBlockView: View {
 
     private func tableCell(_ source: String, emphasized: Bool) -> some View {
         inline(source)
-            .font(.system(size: 13.5 * CGFloat(Theme.currentTextSize.scale),
+            .font(.app(size: 13.5 * CGFloat(Theme.currentTextSize.scale),
                           weight: emphasized ? .semibold : .regular, design: .serif))
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
@@ -652,9 +653,9 @@ struct MarkdownBlockView: View {
 
     private func headingFont(_ level: Int) -> Font {
         switch level {
-        case 1: .system(size: 22 * CGFloat(Theme.currentTextSize.scale), weight: .bold, design: .serif)
+        case 1: .app(size: 22 * CGFloat(Theme.currentTextSize.scale), weight: .bold, design: .serif)
         case 2: AppFont.chatHeading
-        default: .system(size: 16 * CGFloat(Theme.currentTextSize.scale), weight: .semibold, design: .serif)
+        default: .app(size: 16 * CGFloat(Theme.currentTextSize.scale), weight: .semibold, design: .serif)
         }
     }
 
@@ -663,7 +664,7 @@ struct MarkdownBlockView: View {
             ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                 HStack(alignment: .firstTextBaseline, spacing: 9) {
                     Text(numbered ? "\(index + 1)." : "•")
-                        .font(.system(size: 16 * CGFloat(Theme.currentTextSize.scale),
+                        .font(.app(size: 16 * CGFloat(Theme.currentTextSize.scale),
                                       weight: numbered ? .regular : .semibold, design: .serif))
                         .foregroundStyle(Theme.textSecondary)
                         .frame(width: 20, alignment: .trailing)
@@ -770,8 +771,9 @@ struct AgentActivityCard: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: hasFailure ? "exclamationmark.circle.fill" : "sparkles")
-                        .font(.system(size: 11, weight: .semibold, design: .serif))
-                        .foregroundStyle(hasFailure ? Theme.danger : Theme.accent)
+                        .accessibilityHidden(true)
+                        .font(.app(size: 11, weight: .semibold, design: .serif))
+                        .foregroundStyle(hasFailure ? Theme.danger : Theme.accentText)
                         .frame(width: 22, height: 22)
                         .background(
                             Theme.washStrong(hasFailure ? Theme.danger : Theme.accent),
@@ -827,6 +829,7 @@ struct ActivityRow: View {
         case .toolCall(let invocation):
             HStack(spacing: 6) {
                 Image(systemName: "arrow.turn.down.right")
+                    .accessibilityHidden(true)
                     .font(.caption2)
                     .foregroundStyle(Theme.textTertiary)
                 Text(invocation.name)
@@ -845,6 +848,7 @@ struct ActivityRow: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: failed ? "xmark.circle.fill" : "checkmark.circle.fill")
+                            .accessibilityHidden(true)
                             .foregroundStyle(failed ? Theme.danger : Theme.success)
                         Text(resultButtonTitle(
                             expanded: outputExpanded,
@@ -877,8 +881,9 @@ struct ActivityRow: View {
         case .reasoning(let text):
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "brain.head.profile")
+                    .accessibilityHidden(true)
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(Theme.accentText)
                     .frame(width: 14, height: 18)
                 Text(text)
                     .font(.callout)
@@ -1113,7 +1118,7 @@ struct TranscriptCardHeader: View {
     var body: some View {
         HStack(spacing: Spacing.sm) {
             Image(systemName: systemImage)
-                .font(.system(size: 13, weight: .semibold, design: .serif))
+                .font(.app(size: 13, weight: .semibold, design: .serif))
                 .foregroundStyle(tint)
                 .frame(width: 30, height: 30)
                 .background(Theme.washStrong(tint),
@@ -1212,7 +1217,7 @@ struct ApprovalCard: View {
         .background(
             Theme.surface.opacity(0.96),
             in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
-        .shadow(color: Color.black.opacity(0.09), radius: 18, y: 7)
+        .shadow(color: Theme.cardShadow, radius: 18, y: 7)
     }
 
     private var approvalButtonRow: some View {
@@ -1506,6 +1511,7 @@ struct FinishBanner: View {
         case .engineError(let message):
             HStack(alignment: .top, spacing: Spacing.sm) {
                 Image(systemName: "exclamationmark.triangle.fill")
+                    .accessibilityHidden(true)
                     .foregroundStyle(Theme.danger)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Error")
@@ -1537,7 +1543,7 @@ struct FinishBanner: View {
     private var completionCard: some View {
         HStack(alignment: .center, spacing: Spacing.sm) {
             Image(systemName: summary.artifact == nil ? "checkmark.seal.fill" : "shippingbox.fill")
-                .font(.system(size: 13, weight: .semibold, design: .serif))
+                .font(.app(size: 13, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.success)
                 .frame(width: 30, height: 30)
                 .background(Theme.wash(Theme.success), in: Circle())

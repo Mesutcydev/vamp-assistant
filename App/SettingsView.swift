@@ -9,14 +9,9 @@ struct SettingsView: View {
     @ObservedObject private var settings = SettingsStore.shared
     private let onClose: () -> Void
 
-    init(onClose: @escaping () -> Void = {
-        NotificationCenter.default.post(name: .openAssistantHome, object: nil)
-    }) {
-        self.onClose = onClose
-    }
-
-    enum Tab: String, CaseIterable, Identifiable {
+    enum Tab: String, CaseIterable, Identifiable, Hashable {
         case general = "General"
+        case models = "Models"
         case agent = "Agent"
         case bots = "Bots"
         case providers = "Providers"
@@ -26,45 +21,67 @@ struct SettingsView: View {
         var icon: String {
             switch self {
             case .general: "gearshape"
+            case .models: "square.stack.3d.up"
             case .agent: "cpu"
-            case .bots: "square.stack.3d.up"
+            case .bots: "person.3"
             case .providers: "key"
             case .plugins: "puzzlepiece"
             }
         }
     }
 
-    @State private var tab: Tab = .general
+    @State private var tab: Tab
+
+    init(initialTab: Tab = .general, onClose: @escaping () -> Void = {
+        NotificationCenter.default.post(name: .openAssistantHome, object: nil)
+    }) {
+        self.onClose = onClose
+        _tab = State(initialValue: initialTab)
+    }
 
     var body: some View {
-        NavigationSplitView {
+        // Root row, not a NavigationSplitView: on macOS 26 a split view wraps
+        // its sidebar in an inset, rounded concentric-glass panel, which is
+        // what gave the navigation column its own corners inside the window.
+        HStack(spacing: 0) {
+            // One container for the back action, the separator, and the
+            // destinations: a single horizontal inset they cannot drift apart
+            // on, and a separator that ends exactly where the rows end instead
+            // of running into the column's vertical divider.
             VStack(spacing: 0) {
-                Button(action: onClose) {
-                    Label("Back to Assistant", systemImage: "chevron.left")
-                        .font(.callout.weight(.semibold))
-                        .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .padding(12)
-                .help("Return to Vamp Assistant")
-                .keyboardShortcut(.cancelAction)
+                // A navigation row, not a panel — same inset, icon width, and
+                // row height as the destinations below it.
+                SidebarNavRow(title: "Back to Assistant", icon: "chevron.left", action: onClose)
+                    .help("Return to Vamp Assistant")
+                    .padding(.top, SidebarMetrics.inset)
 
-                Divider().overlay(Theme.hairline)
+                SidebarDivider(inset: 0)
+                    .padding(.vertical, 7)
 
-                List(Tab.allCases, selection: $tab) { option in
-                    Label(option.rawValue, systemImage: option.icon)
-                        .font(.body.weight(.medium))
-                        .padding(.vertical, 7)
-                        .tag(option)
+                // No ScrollView: six fixed rows always fit, and a scroll view
+                // adds its own horizontal content inset.
+                VStack(spacing: 2) {
+                    ForEach(Tab.allCases) { option in
+                        SidebarNavRow(title: option.rawValue,
+                                      icon: option.icon,
+                                      selected: option == tab) {
+                            tab = option
+                        }
+                    }
                 }
-                .listStyle(.sidebar)
-                .scrollContentBackground(.hidden)
+
+                Spacer(minLength: 0)
             }
+            .padding(.horizontal, SidebarMetrics.inset)
             .navigationTitle("Settings")
-            .background(.ultraThinMaterial)
-            .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 260)
-        } detail: {
+            // Same surface as the History drawer: one material running up
+            // under the titlebar and out through the split view's leading and
+            // bottom inset. The window mask is the only corner geometry.
+            .frame(width: SidebarMetrics.width)
+            .sidebarSurface()
+
+            SidebarSplitDivider()
+
             VStack(spacing: 0) {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
@@ -85,6 +102,9 @@ struct SettingsView: View {
                 Group {
                     switch tab {
                     case .general: GeneralTab()
+                    case .models:
+                        ModelManagerView(embedded: true)
+                            .environmentObject(appState)
                     case .agent: AgentTab()
                     case .bots: BotsTab()
                     case .providers: ProvidersTab()
@@ -93,6 +113,7 @@ struct SettingsView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(minWidth: 820, minHeight: 620)
         .background { AtmosphereBackground(intensity: .conversation) }
@@ -101,11 +122,15 @@ struct SettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openProviderSettings)) { _ in
             tab = .providers
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openModelManager)) { _ in
+            tab = .models
+        }
     }
 
     private var detailSubtitle: String {
         switch tab {
         case .general: "Appearance, composer, shortcuts, downloads, and remote access"
+        case .models: "Local models, memory budget, downloads, and remote providers"
         case .agent: "Autonomy, generation, safety, memory, and Mac control"
         case .bots: "Specialist computers, browser profiles, and orchestration"
         case .providers: "Local, account, and API model connections"

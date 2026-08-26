@@ -56,7 +56,7 @@ struct KnownProviderRow: View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack(spacing: Spacing.sm) {
                 Image(systemName: "shippingbox.fill")
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(Theme.accentText)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(provider.displayName)
                         .font(.callout.weight(.semibold))

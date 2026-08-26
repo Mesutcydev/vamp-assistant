@@ -23,14 +23,14 @@ struct ModelSelectionPill: View {
                     .fill(statusColor)
                     .frame(width: 6, height: 6)
                 Image(systemName: icon)
-                    .font(.system(size: 11, weight: .medium, design: .serif))
+                    .font(.app(size: 11, weight: .medium, design: .serif))
                     .foregroundStyle(iconColor)
                 Text(label)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .layoutPriority(1)
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 8, weight: .semibold, design: .serif))
+                    .font(.app(size: 8, weight: .semibold, design: .serif))
                     .foregroundStyle(Theme.textTertiary)
             }
             // Model identity is a text control in the command line, not a
@@ -40,7 +40,7 @@ struct ModelSelectionPill: View {
             .padding(.horizontal, 7)
             .frame(minHeight: 26)
             .background(showPopover ? Theme.washStrong(Theme.accent) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
             .overlay(alignment: .bottom) {
                 if case .ready = appState.enginePhase {
                     Capsule()
@@ -269,9 +269,9 @@ private struct ModelPickerPopover: View {
     private var header: some View {
         HStack(spacing: 8) {
             Image(systemName: "cpu.fill")
-                .foregroundStyle(Theme.accent)
+                .foregroundStyle(Theme.accentText)
             Text(source == .local ? "Local model" : source == .api ? "API model" : "OpenAI account")
-                .font(.system(size: 13, weight: .semibold, design: .serif))
+                .font(.app(size: 13, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.textPrimary)
             Spacer()
             switch appState.enginePhase {
@@ -291,7 +291,7 @@ private struct ModelPickerPopover: View {
 
     private func statusBadge(_ text: String, color: Color, icon: String) -> some View {
         Label(text, systemImage: icon)
-            .font(.system(size: 11, weight: .medium, design: .serif))
+            .font(.app(size: 11, weight: .medium, design: .serif))
             .foregroundStyle(color)
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
@@ -325,12 +325,13 @@ private struct ModelPickerPopover: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: isActive ? "checkmark.circle.fill" : "cpu")
-                    .font(.system(size: 13, design: .serif))
+                    .accessibilityHidden(true)
+                    .font(.app(size: 13, design: .serif))
                     .foregroundStyle(isActive ? Theme.success : Theme.textSecondary)
                     .frame(width: 16)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(model.displayName)
-                        .font(.system(size: 12.5, weight: isActive ? .semibold : .regular, design: .serif))
+                        .font(.app(size: 12.5, weight: isActive ? .semibold : .regular, design: .serif))
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
                     Text("\(model.parameters) · \(model.quantization) · \(isActive ? "active" : budgetHint(budget))")
@@ -384,7 +385,7 @@ private struct ModelPickerPopover: View {
                 }
                 .font(.caption.weight(.medium))
                 .buttonStyle(.borderless)
-                .foregroundStyle(Theme.accent)
+                .foregroundStyle(Theme.accentText)
             }
             .padding(.vertical, 2)
         } else {
@@ -424,7 +425,7 @@ private struct ModelPickerPopover: View {
                 Spacer()
                 Button("Refresh") { Task { await codexAccount.refreshModels() } }
                     .buttonStyle(.borderless)
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(Theme.accentText)
             }
         } else {
             ForEach(codexAccount.models) { model in
@@ -448,12 +449,13 @@ private struct ModelPickerPopover: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: isActive ? "checkmark.circle.fill" : "person.crop.circle")
-                    .font(.system(size: 13, design: .serif))
+                    .accessibilityHidden(true)
+                    .font(.app(size: 13, design: .serif))
                     .foregroundStyle(isActive ? Theme.success : Theme.textSecondary)
                     .frame(width: 16)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(model.displayName)
-                        .font(.system(size: 12.5, weight: isActive ? .semibold : .regular, design: .serif))
+                        .font(.app(size: 12.5, weight: isActive ? .semibold : .regular, design: .serif))
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
                     Text(model.id)
@@ -501,12 +503,13 @@ private struct ModelPickerPopover: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: isActive ? "checkmark.circle.fill" : "cloud")
-                    .font(.system(size: 13, design: .serif))
+                    .accessibilityHidden(true)
+                    .font(.app(size: 13, design: .serif))
                     .foregroundStyle(isActive ? Theme.success : Theme.textSecondary)
                     .frame(width: 16)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(profile.displayName ?? profile.model)
-                        .font(.system(size: 12.5, weight: isActive ? .semibold : .regular, design: .serif))
+                        .font(.app(size: 12.5, weight: isActive ? .semibold : .regular, design: .serif))
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
                     Text("\(profile.displayProviderName) · \(profile.model)")
@@ -558,7 +561,7 @@ private struct ModelPickerPopover: View {
                     Task { await appState.deactivate() }
                 } label: {
                     Label("Unload", systemImage: "eject")
-                        .font(.system(size: 12, design: .serif))
+                        .font(.app(size: 12, design: .serif))
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(Theme.textSecondary)
@@ -578,10 +581,10 @@ private struct ModelPickerPopover: View {
             } label: {
                     Label(source == .local ? "Model Manager…" : source == .api ? "Manage API models…" : "Manage account…",
                           systemImage: source == .local ? "square.and.arrow.down.on.square" : source == .api ? "key" : "person.crop.circle")
-                    .font(.system(size: 12, design: .serif))
+                    .font(.app(size: 12, design: .serif))
             }
             .buttonStyle(.borderless)
-            .foregroundStyle(Theme.accent)
+            .foregroundStyle(Theme.accentText)
             .help(source == .account ? "Open OpenAI account settings" : "Download more models, import folders, manage providers")
         }
         .padding(.horizontal, 12)
@@ -611,14 +614,15 @@ private struct ReasoningModelControl: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
                 Image(systemName: "brain.head.profile")
-                    .foregroundStyle(Theme.accent)
+                    .accessibilityHidden(true)
+                    .foregroundStyle(Theme.accentText)
                 Text("Reasoning")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
                 Spacer()
                 Text(selection?.capitalized ?? "Auto")
                     .font(.caption2.weight(.semibold).monospaced())
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(Theme.accentText)
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -658,7 +662,7 @@ private struct ReasoningModelControl: View {
         } label: {
             Text(title)
                 .font(.caption2.weight(selected ? .semibold : .medium))
-                .foregroundStyle(selected ? Theme.accent : Theme.textSecondary)
+                .foregroundStyle(selected ? Theme.accentText : Theme.textSecondary)
                 .padding(.horizontal, 9)
                 .frame(minHeight: 25)
                 .background(selected ? Theme.washStrong(Theme.accent) : Color.clear, in: Capsule())

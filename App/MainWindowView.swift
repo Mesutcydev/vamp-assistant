@@ -39,7 +39,10 @@ struct MainWindowView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var sessions: AgentSessionController
     @ObservedObject private var settings = SettingsStore.shared
-    @State private var showModelManager = false
+    /// Settings is a first-class in-app workspace.  Keeping the selected
+    /// tab here lets deep links (the composer, readiness card, and sidebar)
+    /// open Models in the same split view instead of spawning a cramped sheet.
+    @State private var settingsTab: SettingsView.Tab = .general
     @State private var showSimulator = false
     @State private var showBrowser = false
     @State private var showDiagnostics = false
@@ -51,6 +54,12 @@ struct MainWindowView: View {
     @State private var readinessIsOnboarding = false
     @State private var showBotsDashboard = false
     @State private var showSettings = false
+    /// The sidebar is a region of the window's root row, not a
+    /// NavigationSplitView column: on macOS 26 that column is wrapped in an
+    /// inset, rounded concentric-glass panel, which gave the drawer its own
+    /// bottom-trailing corner instead of letting the window own the corners.
+    @State private var sidebarVisible = true
+    @State private var sidebarWidth: CGFloat = SidebarMetrics.width
 
     private var dockedPanelOpen: Bool {
         showSimulator || showBrowser || showDiagnostics
@@ -97,7 +106,7 @@ struct MainWindowView: View {
     private var configuredLayout: some View {
         Group {
             if showSettings {
-                SettingsView(onClose: { showSettings = false })
+                SettingsView(initialTab: settingsTab, onClose: { showSettings = false })
                     .environmentObject(appState)
             } else {
                 responsiveLayout
@@ -105,6 +114,17 @@ struct MainWindowView: View {
         }
             .navigationTitle(showSettings ? "Settings" : (showBotsDashboard ? "Bots" : (sessions.workspaceURL?.lastPathComponent ?? "Vamp Assistant")))
             .toolbar {
+                if !showSettings {
+                    ToolbarItem(placement: .navigation) {
+                        Button {
+                            sidebarVisible.toggle()
+                        } label: {
+                            Image(systemName: "sidebar.left")
+                        }
+                        .help("Toggle sidebar")
+                        .keyboardShortcut("s", modifiers: [.command, .control])
+                    }
+                }
 #if compiler(>=6.2)
                 if #available(macOS 26.0, *) {
                     ToolbarItemGroup(placement: .primaryAction) {
@@ -138,8 +158,11 @@ struct MainWindowView: View {
                                                     detail: reason, level: .error)
                 }
             }
-            .toolbarBackground(.ultraThinMaterial, for: .windowToolbar)
-            .toolbarBackground(.visible, for: .windowToolbar)
+            // The sidebar surface runs up under the titlebar. A visible
+            // toolbar band would paint its own material and separator across
+            // that corner, splitting one window silhouette into two stacked
+            // rectangles.
+            .toolbarBackground(.hidden, for: .windowToolbar)
             .background(Theme.bg)
             .onChange(of: showCompactSidebar) { _, on in
                 if on {
@@ -168,15 +191,15 @@ struct MainWindowView: View {
         }
         .padding(2)
         .background(.ultraThinMaterial,
-                    in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
             .strokeBorder(Theme.hairline.opacity(0.42), lineWidth: 0.75))
     }
 
     private var moreActionsMenu: some View {
         Menu {
             Button("Remote sessions…") { requestRemoteAccess() }
-            Button("Model manager…") { showModelManager = true }
+            Button("Models…") { openModelsSettings() }
             Divider()
             Button("Export current chat as Markdown…") {
                 exportCurrentChat(format: .markdown)
@@ -186,12 +209,12 @@ struct MainWindowView: View {
             }
         } label: {
             Image(systemName: "ellipsis")
-                .font(.system(size: 13, weight: .semibold, design: .serif))
+                .font(.app(size: 13, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.textSecondary)
                 .frame(width: 32, height: 32)
                 .background(.ultraThinMaterial,
-                            in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
                     .strokeBorder(Theme.hairline.opacity(0.42), lineWidth: 0.75))
         }
         .menuStyle(.borderlessButton)
@@ -206,11 +229,11 @@ struct MainWindowView: View {
     ) -> some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 13, weight: .medium, design: .serif))
+                .font(.app(size: 13, weight: .medium, design: .serif))
                 .foregroundStyle(active ? Theme.rose : Theme.textSecondary)
                 .frame(width: 30, height: 28)
                 .background(active ? Theme.surfaceInset : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                            in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
         }
         .buttonStyle(.plain)
         .lfHoverLift()
@@ -220,11 +243,6 @@ struct MainWindowView: View {
 
     private var presentationView: some View {
         configuredLayout
-            .sheet(isPresented: $showModelManager) {
-                ModelManagerView()
-                    .environmentObject(appState)
-                    .frame(minWidth: 640, minHeight: 480)
-            }
             .sheet(isPresented: $showRemoteAccess) {
                 RemoteAccessView()
                     .environmentObject(appState)
@@ -255,7 +273,7 @@ struct MainWindowView: View {
                     },
                     onOpenModelManager: {
                         showReadiness = false
-                        DispatchQueue.main.async { showModelManager = true }
+                        DispatchQueue.main.async { openModelsSettings() }
                     },
                     onComplete: completeWelcome)
                 .environmentObject(appState)
@@ -281,7 +299,7 @@ struct MainWindowView: View {
 
     private func handleAppNotification(_ notification: Notification) {
         switch notification.name {
-        case .openModelManager: showModelManager = true
+        case .openModelManager: openModelsSettings()
         case .openWorkspace: chooseWorkspace()
         case .openSystemReadiness:
             readinessIsOnboarding = false
@@ -298,6 +316,7 @@ struct MainWindowView: View {
             showSettings = false
             showBotsDashboard = false
         case .openAppSettings:
+            settingsTab = .general
             showSettings = true
             showBotsDashboard = false
             showBrowser = false
@@ -318,6 +337,18 @@ struct MainWindowView: View {
         case .stopAgent: sessions.stop()
         default: break
         }
+    }
+
+    /// Opens the Models page inside the full Settings workspace.  This keeps
+    /// navigation, sizing, keyboard focus, and the Back to Assistant affordance
+    /// identical to every other settings destination.
+    private func openModelsSettings() {
+        settingsTab = .models
+        showSettings = true
+        showBotsDashboard = false
+        showBrowser = false
+        showSimulator = false
+        showDiagnostics = false
     }
 
     private func requestRemoteAccess() {
@@ -428,16 +459,21 @@ struct MainWindowView: View {
         }
     }
 
+    /// Sidebar, divider, and main region are siblings in the window's root
+    /// row. Nothing here is a card: no region carries a radius of its own, so
+    /// the window mask is the only thing that rounds a corner and every
+    /// interior junction — drawer/content and drawer/status bar — is square.
     private var wideLayout: some View {
-        NavigationSplitView {
-            SidebarView(showRemoteAccess: $showRemoteAccess)
-                .navigationSplitViewColumnWidth(min: 240, ideal: 292, max: 380)
-        } detail: {
+        HStack(spacing: 0) {
+            if sidebarVisible {
+                SidebarView(showRemoteAccess: $showRemoteAccess)
+                    .frame(width: sidebarWidth)
+                SidebarSplitDivider(width: $sidebarWidth,
+                                    range: SidebarMetrics.minWidth...SidebarMetrics.maxWidth)
+            }
             HStack(spacing: 0) {
                 Group {
-                    if showSettings {
-                        SettingsView(onClose: { showSettings = false }).environmentObject(appState)
-                    } else if showBotsDashboard {
+                    if showBotsDashboard {
                         BotDashboardView()
                             .environmentObject(appState)
                             .environmentObject(sessions)
@@ -516,7 +552,7 @@ struct MainWindowView: View {
             }
 
             if showSettings {
-                SettingsView(onClose: { showSettings = false }).environmentObject(appState)
+                SettingsView(initialTab: settingsTab, onClose: { showSettings = false }).environmentObject(appState)
             } else if showBotsDashboard {
                 BotDashboardView()
                     .environmentObject(appState)

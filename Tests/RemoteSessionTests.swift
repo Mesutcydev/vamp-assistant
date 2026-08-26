@@ -656,6 +656,19 @@ final class RemoteSessionTests: XCTestCase {
         XCTAssertEqual(continuation.json.objectValue?["queued"]?.boolValue, false)
         XCTAssertEqual(continuation.json.objectValue?["fallback"]?.boolValue, true)
 
+        // Delete and rename are refused while this chat is the running one.
+        let deleteWhileRunning = try await request(
+            baseURL, path: "/api/sessions/\(sessionID.uuidString)", method: "DELETE", token: token)
+        XCTAssertEqual(deleteWhileRunning.status, 409)
+        let renameWhileRunning = try await request(
+            baseURL,
+            path: "/api/sessions/\(sessionID.uuidString)",
+            method: "PATCH",
+            token: token,
+            body: Data("{\"title\":\"Too soon\"}".utf8))
+        XCTAssertEqual(renameWhileRunning.status, 409)
+        XCTAssertNotNil(SessionStore.shared.load(id: sessionID))
+
         let inFlightDetail = try await request(baseURL, path: "/api/sessions/\(sessionID.uuidString)", token: token)
         XCTAssertEqual(inFlightDetail.status, 200)
         XCTAssertNotNil(inFlightDetail.json.objectValue?["phase"]?.stringValue)
@@ -670,6 +683,33 @@ final class RemoteSessionTests: XCTestCase {
         XCTAssertTrue(SessionStore.shared.load(id: sessionID)?.messages.contains {
             $0.role == .user && $0.content == "Continue from the phone"
         } == true)
+
+        // Once the turn is done: rename lands, an empty title is rejected, and
+        // delete removes the record for good.
+        let renamed = try await request(
+            baseURL,
+            path: "/api/sessions/\(sessionID.uuidString)",
+            method: "PATCH",
+            token: token,
+            body: Data("{\"title\":\"Renamed from the phone\"}".utf8))
+        XCTAssertEqual(renamed.status, 200)
+        XCTAssertEqual(SessionStore.shared.load(id: sessionID)?.title, "Renamed from the phone")
+
+        let blankTitle = try await request(
+            baseURL,
+            path: "/api/sessions/\(sessionID.uuidString)",
+            method: "PATCH",
+            token: token,
+            body: Data("{\"title\":\"   \"}".utf8))
+        XCTAssertEqual(blankTitle.status, 400)
+
+        let deleted = try await request(
+            baseURL, path: "/api/sessions/\(sessionID.uuidString)", method: "DELETE", token: token)
+        XCTAssertEqual(deleted.status, 200)
+        XCTAssertNil(SessionStore.shared.load(id: sessionID))
+        let afterDelete = try await request(
+            baseURL, path: "/api/sessions/\(sessionID.uuidString)", token: token)
+        XCTAssertEqual(afterDelete.status, 404)
 
         let revoke = try await request(baseURL, path: "/api/revoke", method: "POST", token: token)
         XCTAssertEqual(revoke.status, 200)

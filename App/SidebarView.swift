@@ -55,7 +55,7 @@ struct SidebarView: View {
                     NotificationCenter.default.post(name: .openBotsDashboard, object: nil)
                     if showsCloseButton { dismiss() }
                 })
-            Divider().overlay(Theme.hairline)
+            SidebarDivider()
             SidebarHeaderView(
                 workspaceURL: sessions.workspaceURL,
                 sidebarTab: sidebarTab,
@@ -79,7 +79,7 @@ struct SidebarView: View {
                 onRemoveQueuedTask: { appState.removeQueuedTask($0) },
                 onClose: { dismiss() }
             )
-            Divider().overlay(Theme.hairline)
+            SidebarDivider()
             List(selection: $selectedSessionID) {
                 if sidebarTab == .sessions {
                     ownSections
@@ -100,18 +100,7 @@ struct SidebarView: View {
             .background(Color.clear)
             sidebarFooter
         }
-        // The macOS 26 split-view sidebar is inset from the window on its
-        // leading and bottom edges. Keeping this root transparent exposed the
-        // window background around that inset while the detail/status chrome
-        // reached its own edge, producing two unrelated corner silhouettes.
-        // Extend one continuous sidebar surface through the container safe
-        // area; AppKit still applies the real window mask, so both outer
-        // corners now follow the same window radius without adding a second
-        // rounded rectangle or border.
-        .background {
-            Theme.surface
-                .ignoresSafeArea(.container, edges: [.top, .leading, .bottom])
-        }
+        .sidebarSurface()
         .onExitCommand {
             guard showsCloseButton else { return }
             dismiss()
@@ -134,6 +123,15 @@ struct SidebarView: View {
         // Off-main load + reload whenever a session is saved (controller
         // publishes transcript/session changes through objectWillChange).
         .task { await reloadSessions() }
+        .onReceive(NotificationCenter.default.publisher(for: .remoteSessionsChanged)) { note in
+            // A paired device deleted or renamed a chat; nothing else
+            // invalidates this view's decrypted snapshot.
+            if let id = note.object as? UUID {
+                pinnedSessionIDs.remove(id)
+                if selectedSessionID == id { selectedSessionID = nil }
+            }
+            Task { await reloadSessions() }
+        }
         .onReceive(sessions.objectWillChange) { _ in
             // Throttled: objectWillChange also fires per streamed token, and
             // a full decrypt-all pass per token would melt the disk.
@@ -162,27 +160,25 @@ struct SidebarView: View {
                 NotificationCenter.default.post(name: .openAppSettings, object: nil)
             }
         }
-        .padding(8)
+        .padding(SidebarMetrics.inset)
         .background(Color.clear)
-        .overlay(alignment: .top) {
-            Rectangle().fill(Theme.hairline).frame(height: 1)
-        }
+        .overlay(alignment: .top) { SidebarDivider() }
     }
 
     private func footerTool(_ title: String, icon: String, isActive: Bool,
                             action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 7) {
+            HStack(spacing: SidebarMetrics.iconGap) {
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold, design: .serif))
+                    .font(.app(size: 12, weight: .semibold, design: .serif))
                 Text(title)
-                    .font(.system(size: 12, weight: .medium, design: .serif))
+                    .font(.app(size: 12, weight: .medium, design: .serif))
                     .lineLimit(1)
             }
             .foregroundStyle(isActive ? Theme.rose : Theme.textSecondary)
-            .frame(maxWidth: .infinity, minHeight: 32)
+            .frame(maxWidth: .infinity, minHeight: SidebarMetrics.rowHeight)
             .background(isActive ? Theme.wash(Theme.accent) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
         }
         .buttonStyle(LFPlainPressButtonStyle())
         .lfHoverLift()
@@ -259,24 +255,24 @@ struct SidebarView: View {
     }
 
     private var ownHistoryEmptyState: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
             Image(systemName: "bubble.left.and.bubble.right")
-                .font(.system(size: 18, weight: .medium, design: .serif))
-                .foregroundStyle(Theme.accent)
+                .font(.app(size: 18, weight: .medium, design: .serif))
+                .foregroundStyle(Theme.accentText)
             Text("Your work will stay close")
-                .font(.system(size: 12, weight: .semibold, design: .serif))
+                .font(.app(size: 12, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.textPrimary)
             Text("Chats are saved locally and grouped by project as soon as you start a task.")
-                .font(.system(size: 11, design: .serif))
+                .font(.app(size: 11, design: .serif))
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(12)
+        .padding(Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
             .strokeBorder(Theme.hairline, lineWidth: 1))
-        .listRowInsets(EdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 8))
+        .listRowInsets(EdgeInsets(top: Spacing.sm, leading: SidebarMetrics.inset, bottom: Spacing.sm, trailing: SidebarMetrics.inset))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
     }
@@ -409,17 +405,17 @@ struct SidebarView: View {
                     ProgressView()
                         .controlSize(.small)
                     Text(importStatus)
-                        .font(.system(size: 11, weight: .medium, design: .serif))
+                        .font(.app(size: 11, weight: .medium, design: .serif))
                         .foregroundStyle(Theme.textSecondary)
                         .lineLimit(2)
                         .truncationMode(.middle)
                 }
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.wash(Theme.info), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .background(Theme.wash(Theme.info), in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
                     .strokeBorder(Theme.washBorder(Theme.info), lineWidth: 1))
-                .listRowInsets(EdgeInsets(top: 5, leading: 8, bottom: 4, trailing: 8))
+                .listRowInsets(EdgeInsets(top: Spacing.xs, leading: SidebarMetrics.inset, bottom: Spacing.xs, trailing: SidebarMetrics.inset))
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             }
@@ -435,7 +431,7 @@ struct SidebarView: View {
                     .padding(.vertical, 7)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Theme.wash(summaryTint), in: Capsule())
-                    .listRowInsets(EdgeInsets(top: 5, leading: 8, bottom: 4, trailing: 8))
+                    .listRowInsets(EdgeInsets(top: Spacing.xs, leading: SidebarMetrics.inset, bottom: Spacing.xs, trailing: SidebarMetrics.inset))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
@@ -474,30 +470,31 @@ struct SidebarView: View {
     private var importedEmptyState: some View {
         VStack(alignment: .leading, spacing: 8) {
             Image(systemName: "arrow.down.doc")
-                .font(.system(size: 18, weight: .medium, design: .serif))
-                .foregroundStyle(Theme.accent)
+                .accessibilityHidden(true)
+                .font(.app(size: 18, weight: .medium, design: .serif))
+                .foregroundStyle(Theme.accentText)
             Text("Continue work from other tools")
-                .font(.system(size: 12, weight: .semibold, design: .serif))
+                .font(.app(size: 12, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.textPrimary)
             Text("Find Claude, Codex, and Cursor chats, then organize them by project. Everything stays on this Mac.")
-                .font(.system(size: 11, design: .serif))
+                .font(.app(size: 11, design: .serif))
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             Button {
                 runImport()
             } label: {
                 Label("Scan for chats", systemImage: "arrow.clockwise")
-                    .font(.system(size: 11, weight: .semibold, design: .serif))
+                    .font(.app(size: 11, weight: .semibold, design: .serif))
             }
             .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
             .disabled(isImporting)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
             .strokeBorder(Theme.hairline, lineWidth: 1))
-        .listRowInsets(EdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 8))
+        .listRowInsets(EdgeInsets(top: Spacing.sm, leading: SidebarMetrics.inset, bottom: Spacing.sm, trailing: SidebarMetrics.inset))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
     }
@@ -507,7 +504,7 @@ struct SidebarView: View {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(Theme.textTertiary)
             Text(message)
-                .font(.system(size: 11, weight: .medium, design: .serif))
+                .font(.app(size: 11, weight: .medium, design: .serif))
                 .foregroundStyle(Theme.textSecondary)
         }
         .padding(.vertical, 8)
@@ -537,10 +534,10 @@ struct SidebarView: View {
             }
         }
         .padding(10)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
             .strokeBorder(Theme.hairline, lineWidth: 1))
-        .listRowInsets(EdgeInsets(top: 5, leading: 8, bottom: 5, trailing: 8))
+        .listRowInsets(EdgeInsets(top: Spacing.xs, leading: SidebarMetrics.inset, bottom: Spacing.xs, trailing: SidebarMetrics.inset))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
     }
@@ -613,6 +610,7 @@ struct SidebarView: View {
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: icon)
+                    .accessibilityHidden(true)
                     .font(.caption2.weight(.semibold))
                 Text(label)
                     .font(.caption2.weight(.semibold))
@@ -1058,11 +1056,11 @@ private struct SidebarPrimaryDestinations: View {
     let onBots: () -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Spacing.sm) {
             destination("Assistant", icon: "sparkles", action: onAssistant)
             destination("Bots", icon: "person.3.sequence.fill", action: onBots)
         }
-        .padding(10)
+        .padding(SidebarMetrics.inset)
         .background(Color.clear)
     }
 
@@ -1075,7 +1073,7 @@ private struct SidebarPrimaryDestinations: View {
             Label(title, systemImage: icon)
                 .font(.callout.weight(.semibold))
                 .frame(maxWidth: .infinity, minHeight: 32)
-                .background(Theme.surfaceInset.opacity(0.5), in: RoundedRectangle(cornerRadius: 9))
+                .background(Theme.surfaceInset.opacity(0.5), in: RoundedRectangle(cornerRadius: Radius.md))
         }
         .buttonStyle(.plain)
     }
@@ -1138,8 +1136,8 @@ struct SessionHistoryRow: View {
                         .monospacedDigit()
                     if pinned {
                         Image(systemName: "pin.fill")
-                            .font(.system(size: 8, weight: .semibold, design: .serif))
-                            .foregroundStyle(Theme.accent)
+                            .font(.app(size: 8, weight: .semibold, design: .serif))
+                            .foregroundStyle(Theme.accentText)
                             .accessibilityLabel("Pinned")
                     }
                     if statusTitle != nil {
@@ -1149,7 +1147,7 @@ struct SessionHistoryRow: View {
                     if let statusTitle {
                         HStack(spacing: 3) {
                             Image(systemName: statusIcon)
-                                .font(.system(size: 8, weight: .semibold, design: .serif))
+                                .font(.app(size: 8, weight: .semibold, design: .serif))
                             Text(statusTitle)
                                 .lineLimit(1)
                         }
@@ -1162,17 +1160,17 @@ struct SessionHistoryRow: View {
                 .foregroundStyle(Theme.textTertiary)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(.horizontal, SidebarMetrics.rowPadding)
+        .padding(.vertical, Spacing.sm)
         .background(
             selected
                 ? Theme.washStrong(Theme.accent)
                 : isHovered ? Theme.surfaceInset.opacity(0.42) : Color.clear,
-            in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                 .strokeBorder(Color.clear, lineWidth: 1))
-        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: 0.12), value: isHovered)
         .tag(record.id)
@@ -1186,7 +1184,8 @@ struct SessionHistoryRow: View {
             Divider()
             Button("Delete chat", role: .destructive, action: onDelete)
         }
-        .listRowInsets(EdgeInsets(top: 1, leading: 7, bottom: 1, trailing: 7))
+        .listRowInsets(EdgeInsets(top: 1, leading: SidebarMetrics.inset,
+                                  bottom: 1, trailing: SidebarMetrics.inset))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
         .disabled(!workspaceAvailable)
@@ -1222,7 +1221,7 @@ struct SidebarHeaderView: View {
     @FocusState private var searchFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Spacing.md) {
             identityRow
             primaryActions
             quietNavigation
@@ -1233,22 +1232,22 @@ struct SidebarHeaderView: View {
                 queueSummary
             }
         }
-        .padding(.horizontal, showsCloseButton ? 18 : 12)
-        .padding(.top, showsCloseButton ? 14 : 12)
-        .padding(.bottom, 11)
+        .padding(.horizontal, SidebarMetrics.inset)
+        .padding(.top, Spacing.md)
+        .padding(.bottom, Spacing.md)
         .background(Color.clear)
     }
 
     private var identityRow: some View {
-        HStack(spacing: 9) {
+        HStack(spacing: Spacing.sm) {
             workspaceMark
             VStack(alignment: .leading, spacing: 2) {
                 Text("WORKSPACE")
-                    .font(.system(size: 9, weight: .bold, design: .serif))
+                    .font(.app(size: 9, weight: .bold, design: .serif))
                     .tracking(0.8)
                     .foregroundStyle(Theme.textTertiary)
                 Text(workspaceURL?.lastPathComponent ?? "Chat only")
-                    .font(.system(size: 13.5, weight: .semibold, design: .serif))
+                    .font(.app(size: 13.5, weight: .semibold, design: .serif))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -1267,22 +1266,22 @@ struct SidebarHeaderView: View {
                 PanelCloseButton(action: onClose)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 10)
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.sm)
         .background(Theme.surface.opacity(0.72),
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
             .strokeBorder(Theme.hairline.opacity(0.62), lineWidth: 1))
     }
 
     private var primaryActions: some View {
         Button(action: onNewSession) {
             Label("New chat", systemImage: "square.and.pencil")
-                .font(.system(size: 13.5, weight: .semibold, design: .serif))
+                .font(.app(size: 13.5, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.bg)
-                .frame(maxWidth: .infinity, minHeight: 38)
+                .frame(maxWidth: .infinity, minHeight: 36)
                 .background(Theme.textPrimary,
-                            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
         }
         .buttonStyle(LFPlainPressButtonStyle())
         .shadow(color: Theme.cardShadow.opacity(0.5), radius: 6, y: 2)
@@ -1290,7 +1289,7 @@ struct SidebarHeaderView: View {
     }
 
     private var quietNavigation: some View {
-        VStack(spacing: 1) {
+        VStack(spacing: 2) {
             quietNavigationRow("Search", icon: "magnifyingglass", trailing: "⌘F") {
                 searchFocused = true
             }
@@ -1311,28 +1310,29 @@ struct SidebarHeaderView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack(spacing: 10) {
+            HStack(spacing: SidebarMetrics.iconGap) {
                 Image(systemName: icon)
-                    .font(.system(size: 12.5, weight: .medium, design: .serif))
-                    .frame(width: 16)
-                Text(title).font(.system(size: 13, design: .serif))
+                    .accessibilityHidden(true)
+                    .font(.app(size: 12.5, weight: .medium, design: .serif))
+                    .frame(width: SidebarMetrics.iconWidth)
+                Text(title).font(.app(size: 13, design: .serif))
                 Spacer()
                 if let trailing {
                     Text(trailing)
-                        .font(.system(size: 10.5, design: .monospaced))
+                        .font(.app(size: 10.5, design: .monospaced))
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
-                        .overlay(RoundedRectangle(cornerRadius: 5)
+                        .overlay(RoundedRectangle(cornerRadius: Radius.sm)
                             .strokeBorder(Theme.hairline, lineWidth: 1))
                 }
             }
             .foregroundStyle(Theme.textSecondary)
-            .padding(.horizontal, 8)
-            .frame(height: 34)
+            .padding(.horizontal, SidebarMetrics.rowPadding)
+            .frame(height: SidebarMetrics.rowHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(Theme.surfaceInset.opacity(0.001), in: RoundedRectangle(cornerRadius: 8))
+        .background(Theme.surfaceInset.opacity(0.001), in: RoundedRectangle(cornerRadius: Radius.sm))
         .lfHoverLift()
     }
 
@@ -1345,25 +1345,25 @@ struct SidebarHeaderView: View {
                     .aspectRatio(contentMode: .fit)
             } else {
                 Image(systemName: workspaceURL == nil ? "bubble.left.and.bubble.right.fill" : "folder.fill")
-                    .font(.system(size: 13, weight: .medium, design: .serif))
+                    .font(.app(size: 13, weight: .medium, design: .serif))
                     .foregroundStyle(Theme.textSecondary)
             }
         }
         .frame(width: 28, height: 28)
-        .background(Theme.rose.opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(Theme.rose.opacity(0.14), in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
         .foregroundStyle(Theme.rose)
         .accessibilityHidden(true)
     }
 
     private var historyModeBar: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: Spacing.xs) {
             historyModeButton(.sessions, title: "My chats", icon: "bubble.left.and.bubble.right")
             historyModeButton(.imported, title: "Other tools", icon: "arrow.down.doc")
         }
         .padding(4)
         .background(Theme.surfaceInset.opacity(0.52),
-                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
             .strokeBorder(Theme.hairline.opacity(0.75), lineWidth: 1))
     }
 
@@ -1377,11 +1377,12 @@ struct SidebarHeaderView: View {
         return Button {
             onSelectTab(mode)
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: SidebarMetrics.iconGap) {
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold, design: .serif))
+                    .accessibilityHidden(true)
+                    .font(.app(size: 12, weight: .semibold, design: .serif))
                 Text(title)
-                    .font(.system(size: 13, weight: active ? .semibold : .medium, design: .serif))
+                    .font(.app(size: 13, weight: active ? .semibold : .medium, design: .serif))
                 if let count, count > 0 {
                     Text("\(min(count, 99))")
                         .font(.caption2.weight(.bold))
@@ -1390,10 +1391,10 @@ struct SidebarHeaderView: View {
                 }
             }
             .foregroundStyle(active ? Theme.textPrimary : Theme.textSecondary)
-            .frame(maxWidth: .infinity, minHeight: 31)
+            .frame(maxWidth: .infinity, minHeight: SidebarMetrics.rowHeight)
             .background(active ? Theme.surface : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(
+                        in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).strokeBorder(
                 active ? Theme.hairline : Color.clear, lineWidth: 1))
             .shadow(color: active ? Theme.cardShadow.opacity(0.45) : .clear, radius: 2, y: 1)
         }
@@ -1403,18 +1404,18 @@ struct SidebarHeaderView: View {
     }
 
     private var searchField: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: Spacing.sm) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 12, weight: .semibold, design: .serif))
+                .font(.app(size: 12, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.textTertiary)
             TextField("Search all history", text: $historySearch)
                 .textFieldStyle(.plain)
-                .font(.system(size: 13, design: .serif))
+                .font(.app(size: 13, design: .serif))
                 .focused($searchFocused)
             if !historySearch.isEmpty {
                 Button { historySearch = "" } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 11, design: .serif))
+                        .font(.app(size: 11, design: .serif))
                         .foregroundStyle(Theme.textTertiary)
                 }
                 .buttonStyle(.plain)
@@ -1423,8 +1424,8 @@ struct SidebarHeaderView: View {
         }
         .padding(.horizontal, 9)
         .frame(height: 34)
-        .background(Theme.surfaceInset.opacity(0.65), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+        .background(Theme.surfaceInset.opacity(0.65), in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
             .strokeBorder(Theme.hairline.opacity(0.8), lineWidth: 1))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Search chat history")
@@ -1438,16 +1439,16 @@ struct SidebarHeaderView: View {
         return VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 7) {
                 Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 11, weight: .semibold, design: .serif))
+                    .font(.app(size: 11, weight: .semibold, design: .serif))
                     .foregroundStyle(Theme.info)
                 Text(queuedTasks.count == 1 ? "1 task in queue" : "\(queuedTasks.count) tasks in queue")
-                    .font(.system(size: 11, weight: .semibold, design: .serif))
+                    .font(.app(size: 11, weight: .semibold, design: .serif))
                     .foregroundStyle(Theme.textPrimary)
                 Spacer(minLength: 4)
                 Button("Run next", action: onRunNext)
                     .font(.caption2.weight(.semibold))
                     .buttonStyle(.borderless)
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(Theme.accentText)
                     .help("Start the next queued task when a model is ready")
             }
 
@@ -1487,9 +1488,9 @@ struct SidebarHeaderView: View {
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 8)
-        .background(Theme.wash(Theme.info), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .background(Theme.wash(Theme.info), in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
                 .strokeBorder(Theme.washBorder(Theme.info), lineWidth: 1))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(queuedTasks.count) queued tasks")

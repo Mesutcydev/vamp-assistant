@@ -60,7 +60,7 @@ struct BotComputerSettingsCard: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(12)
-        .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
     }
 
     private var capabilityRow: some View {
@@ -84,11 +84,11 @@ struct BotComputerSettingsCard: View {
     private func computerRow(_ computer: BotComputerRecord) -> some View {
         HStack(spacing: Spacing.md) {
             ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
                     .fill(Theme.accent.opacity(0.13))
                 Image(systemName: computer.backend == .appleContainer
                     ? "cube.transparent.fill" : "folder.fill")
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(Theme.accentText)
             }
             .frame(width: 38, height: 38)
 

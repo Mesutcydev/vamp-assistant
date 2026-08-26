@@ -1,32 +1,58 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The Model Manager sheet. One scrolling column of cards: local catalog
-/// models first, then remote (BYOK) providers. Each card surfaces the model's
+/// The Models workspace. One scrolling column of cards: local catalog models
+/// first, then remote (BYOK) providers. Each card surfaces the model's
 /// identity, fit verdict and specs at a glance, with exactly one prominent
 /// action and everything destructive tucked into an overflow menu.
 struct ModelManagerView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
+    /// Models is normally rendered as a Settings destination.  The standalone
+    /// variant remains available for older callers, but no longer determines
+    /// the sheet size or navigation flow.
+    let embedded: Bool
     /// True while an import validation/copy runs off-main — multi-GB copies
     /// must never block the UI.
     @State private var importInProgress = false
+    @State private var searchText = ""
     private let device = DeviceProfile.current()
+
+    init(embedded: Bool = false) {
+        self.embedded = embedded
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            ManagerHeaderView(
+            if !embedded {
+                ManagerHeaderView(
+                    device: device,
+                    recommendedName: CatalogLibrary.recommendedChat(device: device)?.displayName,
+                    freeBytes: appState.availableBudget,
+                    totalBytes: MemoryAdvisor.physicalMemory,
+                    importing: importInProgress,
+                    onImport: importModel,
+                    onDone: { dismiss() })
+            }
+
+            ModelManagerLibraryBar(
+                searchText: $searchText,
+                localCount: CatalogLibrary.sections(
+                    device: device,
+                    keepIDs: Set(appState.modelStore.installed.map(\.id))
+                ).reduce(0) { $0 + $1.models.count },
                 device: device,
-                recommendedName: CatalogLibrary.recommendedChat(device: device)?.displayName,
                 freeBytes: appState.availableBudget,
                 totalBytes: MemoryAdvisor.physicalMemory,
+                recommendedName: CatalogLibrary.recommendedChat(device: device)?.displayName,
                 importing: importInProgress,
-                onImport: importModel,
-                onDone: { dismiss() })
+                showsImport: embedded,
+                onImport: importModel
+            )
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.lg) {
-                    LocalModelsSection()
+                    LocalModelsSection(query: searchText)
                     RemoteSection()
                         .environmentObject(appState)
                 }
@@ -34,10 +60,116 @@ struct ModelManagerView: View {
             }
         }
         .background { AtmosphereBackground(intensity: .conversation) }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .tint(Theme.accent)
         // Re-sync with reality every open: models imported/copied/deleted
         // outside the registry (or left unregistered by an interrupted
         // import) must not show stale Download/Load states.
         .onAppear { appState.modelStore.rescanFromDisk() }
+    }
+
+    /// Search and catalog metadata sit in their own stable row so the header
+    /// stays focused on hardware budget and import actions.
+    private struct ModelManagerLibraryBar: View {
+        @Binding var searchText: String
+        let localCount: Int
+        let device: DeviceProfile
+        let freeBytes: UInt64
+        let totalBytes: UInt64
+        let recommendedName: String?
+        let importing: Bool
+        let showsImport: Bool
+        let onImport: () -> Void
+
+        private var usedFraction: Double {
+            guard totalBytes > 0 else { return 0 }
+            return min(1, max(0, 1 - Double(freeBytes) / Double(totalBytes)))
+        }
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                HStack(alignment: .center, spacing: Spacing.md) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Label("Model library", systemImage: "square.stack.3d.up")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                        HStack(spacing: Spacing.sm) {
+                            Text("\(localCount) available")
+                            Text("•")
+                            Text(device.summary)
+                            if let recommendedName {
+                                Text("• Daily pick: \(recommendedName)")
+                            }
+                        }
+                        .font(.caption)
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    }
+                    Spacer(minLength: Spacing.md)
+                    if showsImport {
+                        if importing {
+                            ProgressView()
+                                .controlSize(.small)
+                                .help("Importing model…")
+                        } else {
+                            Button("Import…", action: onImport)
+                                .buttonStyle(LFCapsuleButtonStyle())
+                                .help("Import a local MLX, GGUF, or Apple Core AI model pack")
+                        }
+                    }
+                }
+
+                HStack(alignment: .center, spacing: Spacing.md) {
+                    Label("RAM", systemImage: "memorychip")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Theme.textSecondary)
+                    GeometryReader { proxy in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Theme.surfaceInset)
+                            Capsule()
+                                .fill(Theme.accentGradient)
+                                .frame(width: max(4, proxy.size.width * usedFraction))
+                        }
+                    }
+                    .frame(height: 5)
+                    Text("\(ByteFormatter.bytes(freeBytes)) free")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(Theme.textTertiary)
+                        .fixedSize()
+                }
+
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.textTertiary)
+                    TextField("Filter models", text: $searchText)
+                        .textFieldStyle(.plain)
+                        .font(.callout)
+                        .frame(minWidth: 150, idealWidth: 190, maxWidth: 230)
+                    if !searchText.isEmpty {
+                        Button {
+                            searchText = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(Theme.textTertiary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Clear model search")
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Theme.surfaceInset.opacity(0.72), in: Capsule())
+                .overlay(Capsule().strokeBorder(Theme.hairline.opacity(0.72), lineWidth: 0.75))
+            }
+            .padding(.horizontal, 22)
+            .padding(.vertical, 18)
+            .background(Theme.surface.opacity(0.78))
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(Theme.hairline.opacity(0.72)).frame(height: 0.75)
+            }
+        }
     }
 
     /// Pick a local model — MLX, GGUF, or an Apple Core AI resource pack — and
@@ -354,21 +486,62 @@ private struct ManagerHeaderView: View {
 
 private struct LocalModelsSection: View {
     @EnvironmentObject private var appState: AppState
+    let query: String
     private let device = DeviceProfile.current()
 
     var body: some View {
         let keepIDs = Set(appState.modelStore.installed.map(\.id))
         let recommended = CatalogLibrary.recommendedIDs(device: device)
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let sections = CatalogLibrary.sections(device: device, keepIDs: keepIDs).compactMap { section -> CatalogLibrary.Section? in
+            let models = normalizedQuery.isEmpty
+                ? section.models
+                : section.models.filter {
+                    $0.displayName.lowercased().contains(normalizedQuery)
+                        || $0.family.lowercased().contains(normalizedQuery)
+                        || $0.format.rawValue.lowercased().contains(normalizedQuery)
+                }
+            guard !models.isEmpty else { return nil }
+            return CatalogLibrary.Section(id: section.id, models: models)
+        }
         VStack(alignment: .leading, spacing: Spacing.lg) {
-            ForEach(CatalogLibrary.sections(device: device, keepIDs: keepIDs)) { section in
-                VStack(alignment: .leading, spacing: Spacing.sm) {
-                    SectionHeader(title: section.title, systemImage: section.systemImage)
-                    ForEach(section.models) { model in
-                        ModelCard(model: model, isRecommended: recommended.contains(model.id))
+            if sections.isEmpty, !normalizedQuery.isEmpty {
+                ModelManagerEmptySearch(query: query)
+            } else {
+                ForEach(sections) { section in
+                    VStack(alignment: .leading, spacing: Spacing.sm) {
+                        SectionHeader(title: section.title, systemImage: section.systemImage)
+                        ForEach(section.models) { model in
+                            ModelCard(model: model, isRecommended: recommended.contains(model.id))
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+private struct ModelManagerEmptySearch: View {
+    let query: String
+
+    var body: some View {
+        HStack(spacing: Spacing.md) {
+            Image(systemName: "magnifyingglass")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(Theme.textTertiary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("No models found")
+                    .font(.callout.weight(.semibold))
+                Text("Try a different search than \"\(query)\".")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(Spacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
     }
 }
 
@@ -442,7 +615,7 @@ private struct ModelCard: View {
                 .font(.headline)
             Text(model.family)
                 .font(.caption)
-                .foregroundStyle(Theme.accent)
+                .foregroundStyle(Theme.accentText)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(Theme.wash(Theme.accent), in: Capsule())
@@ -466,12 +639,12 @@ private struct ModelCard: View {
             if isRecommended, !isActive {
                 Label("Daily pick", systemImage: "star.fill")
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(Theme.accentText)
             }
             if isActive {
                 Label("Active", systemImage: "checkmark.circle.fill")
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(Theme.accentText)
             }
         }
     }
@@ -508,8 +681,8 @@ private struct ModelGlyph: View {
 
     var body: some View {
         Image(systemName: format == .gguf ? "shippingbox" : (format == .coreAI ? "apple.intelligence" : "cpu"))
-            .font(.system(size: 16, weight: .semibold, design: .serif))
-            .foregroundStyle(isActive ? Theme.accent : Theme.textSecondary)
+            .font(.app(size: 16, weight: .semibold, design: .serif))
+            .foregroundStyle(isActive ? Theme.accentText : Theme.textSecondary)
             .frame(width: 38, height: 38)
             .background(isActive ? Theme.accentSoft : Theme.surfaceInset,
                         in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
@@ -680,7 +853,7 @@ private struct ModelActions: View {
                 Button("Remove…", role: .destructive, action: removeInstalled)
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 13, weight: .semibold, design: .serif))
+                    .font(.app(size: 13, weight: .semibold, design: .serif))
                     .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
@@ -697,7 +870,7 @@ private struct ModelActions: View {
                     }
                 } label: {
                     Image(systemName: "ellipsis")
-                        .font(.system(size: 13, weight: .semibold, design: .serif))
+                        .font(.app(size: 13, weight: .semibold, design: .serif))
                         .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
                 }
@@ -754,7 +927,7 @@ private struct RemoteSection: View {
                 if configured.isEmpty {
                     HStack(spacing: Spacing.md) {
                         Image(systemName: "key")
-                            .font(.system(size: 14, weight: .semibold, design: .serif))
+                            .font(.app(size: 14, weight: .semibold, design: .serif))
                             .foregroundStyle(Theme.textSecondary)
                             .frame(width: 38, height: 38)
                             .background(Theme.surfaceInset,

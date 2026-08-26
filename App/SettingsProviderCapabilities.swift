@@ -149,12 +149,13 @@ struct ReasoningEffortPicker: View {
             VStack(spacing: 3) {
                 ZStack {
                     if isSelected {
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                             .fill(Theme.washStrong(tint))
                             .matchedGeometryEffect(id: "reactor-selection", in: selectionNamespace)
                     }
                     Image(systemName: glyph)
-                        .font(.system(size: 11, weight: .semibold, design: .serif))
+                        .accessibilityHidden(true)
+                        .font(.app(size: 11, weight: .semibold, design: .serif))
                         .foregroundStyle(isSelected ? tint : Theme.textTertiary)
                 }
                 .frame(height: 22)
@@ -169,7 +170,7 @@ struct ReasoningEffortPicker: View {
             }
             .frame(maxWidth: .infinity, minHeight: 48)
             .padding(.horizontal, 4)
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
         }
         .buttonStyle(ReactorNodeButtonStyle(isSelected: isSelected, reduceMotion: reduceMotion))
         .help(isSelected ? "Selected: \(title) (\(subtitle))" : "Use \(title) reasoning (\(subtitle))")
@@ -197,10 +198,10 @@ struct ReactorNodeButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                     .fill(isSelected ? Theme.wash(Theme.accent) : Color.clear))
             .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                     .strokeBorder(isSelected ? Theme.washBorder(Theme.accent) : Color.clear, lineWidth: 1))
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.965 : 1)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)

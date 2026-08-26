@@ -135,7 +135,7 @@ private struct ComposerPillModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .font(.caption.weight(.medium))
-            .foregroundStyle(active ? Theme.accent : Theme.textSecondary)
+            .foregroundStyle(active ? Theme.accentText : Theme.textSecondary)
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 8)

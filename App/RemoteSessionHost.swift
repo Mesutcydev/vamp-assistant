@@ -1183,6 +1183,51 @@ final class RemoteSessionHost {
             return .response(json(sessionDetail(record)))
         }
 
+        // Delete and rename mirror the Mac sidebar exactly: a hard delete of
+        // the encrypted session file, and a title edit. Both are refused while
+        // that session is the running one — the Mac already refuses rename on
+        // the same condition, and a phone is where a mis-tap costs the most.
+        if components.count == 3, request.method == "DELETE" {
+            guard let record = ownedRecord(id) else {
+                return .response(json(["error": .string("Session not found.")], status: 404))
+            }
+            guard !(sessions.activeSessionID == record.id && sessions.isRunning) else {
+                return .response(json([
+                    "error": .string("This chat is still answering. Stop it before deleting."),
+                ], status: 409))
+            }
+            SessionStore.shared.delete(record)
+            NotificationCenter.default.post(name: .remoteSessionsChanged, object: record.id)
+            return .response(json(["ok": .bool(true), "deleted": .bool(true)]))
+        }
+
+        if components.count == 3, request.method == "PATCH" {
+            guard let raw = request.bodyJSON?.objectValue?["title"]?.stringValue else {
+                return .response(json(["error": .string("A title is required.")], status: 400))
+            }
+            let title = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty, title.utf8.count <= 200 else {
+                return .response(json(["error": .string("Enter a name under 200 bytes.")], status: 400))
+            }
+            guard var record = ownedRecord(id) else {
+                return .response(json(["error": .string("Session not found.")], status: 404))
+            }
+            guard !(sessions.activeSessionID == record.id && sessions.isRunning) else {
+                return .response(json([
+                    "error": .string("This chat is still answering. Rename it once the model stops."),
+                ], status: 409))
+            }
+            record.title = title
+            record.updatedAt = Date()
+            guard case .success = SessionStore.shared.save(record) else {
+                return .response(json(["error": .string("The rename could not be saved.")], status: 500))
+            }
+            NotificationCenter.default.post(
+                name: .sessionTitleChanged, object: record.id, userInfo: ["title": title])
+            NotificationCenter.default.post(name: .remoteSessionsChanged, object: record.id)
+            return .response(json(["ok": .bool(true), "title": .string(title)]))
+        }
+
         if components.count == 4, components[3] == "events", request.method == "GET" {
             guard ownedRecord(id) != nil else {
                 return .response(json(["error": .string("Session not found.")], status: 404))

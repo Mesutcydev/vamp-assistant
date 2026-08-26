@@ -34,6 +34,9 @@ final class RemoteStore {
     var workspacesSupported = true
     var fullAccess = false
     var reasoningEffort: String?
+    /// Failure text for loads the user did not explicitly ask for. Rendered
+    /// inline next to whatever is missing rather than as an alert.
+    var backgroundNotice: String?
     private(set) var pairedComputers: [PairedBeetCodeComputer] = []
     private(set) var activeComputerID: UUID?
 
@@ -292,8 +295,11 @@ final class RemoteStore {
 
     func loadStartModels() async {
         guard let client else { return }
-        do { startModels = try await client.models().models }
-        catch { presentError("Couldn't load models", error) }
+        do {
+            startModels = try await client.models().models
+            backgroundNotice = nil
+        }
+        catch { presentError("Couldn't load models", error, background: true) }
     }
 
     func startBotRun(profileID: String, modelID: String?, prompt: String) async -> Bool {
@@ -354,10 +360,35 @@ final class RemoteStore {
                message.localizedCaseInsensitiveContains("bot computer endpoint") {
                 return nil
             }
-            presentError("Couldn't load bots", error)
+            presentError("Couldn't load bots", error, background: true)
             return nil
         }
-        catch { presentError("Couldn't load bots", error); return nil }
+        catch { presentError("Couldn't load bots", error, background: true); return nil }
+    }
+
+    /// Hard delete on the Mac, mirroring its own sidebar. The server refuses
+    /// while that chat is still answering, so the phone surfaces that as an
+    /// error rather than pre-guessing state it polls at two-second intervals.
+    func deleteSession(_ id: UUID) async -> Bool {
+        guard let client else { return false }
+        do {
+            _ = try await client.deleteSession(id)
+            sessions.removeAll { $0.id == id }
+            return true
+        }
+        catch { presentError("Couldn't delete the chat", error); return false }
+    }
+
+    func renameSession(_ id: UUID, title: String) async -> Bool {
+        guard let client else { return false }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        do {
+            _ = try await client.renameSession(id, title: trimmed)
+            try? await refresh()
+            return true
+        }
+        catch { presentError("Couldn't rename the chat", error); return false }
     }
 
     func saveAPIKey(providerID: String, key: String) async -> Bool {
@@ -628,8 +659,15 @@ final class RemoteStore {
         } catch { presentError("Couldn't download", error); return nil }
     }
 
-    private func presentError(_ title: String, _ error: Error) {
+    // ponytail: `background: true` reports inline instead of throwing a modal.
+    // A blocking alert for a poll or prefetch failure interrupts whatever the
+    // user is doing, and the reconnect banner already explains the usual cause.
+    private func presentError(_ title: String, _ error: Error, background: Bool = false) {
         if Self.isCancellation(error) { return }
+        if background {
+            backgroundNotice = "\(title). \(error.localizedDescription)"
+            return
+        }
         errorTitle = title
         errorMessage = error.localizedDescription
     }

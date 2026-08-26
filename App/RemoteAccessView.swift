@@ -48,10 +48,10 @@ struct RemoteAccessView: View {
                     .fill(Theme.wash(Theme.accent))
                     .frame(width: 44, height: 44)
                 Image(systemName: "iphone")
-                    .font(.system(size: 22, weight: .semibold, design: .serif))
-                    .foregroundStyle(Theme.accent)
+                    .font(.app(size: 22, weight: .semibold, design: .serif))
+                    .foregroundStyle(Theme.accentText)
                 Image(systemName: "qrcode")
-                    .font(.system(size: 9, weight: .bold, design: .serif))
+                    .font(.app(size: 9, weight: .bold, design: .serif))
                     .foregroundStyle(Theme.textPrimary)
                     .padding(3)
                     .background(Theme.surface, in: Circle())
@@ -138,7 +138,7 @@ struct RemoteAccessView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Theme.textTertiary)
                     Text(appState.remotePairingCode)
-                        .font(.system(size: 28, weight: .bold, design: .monospaced))
+                        .font(.app(size: 28, weight: .bold, design: .monospaced))
                         .foregroundStyle(Theme.textPrimary)
                         .textSelection(.enabled)
                     Text("Expires \(expiresLabel)")
@@ -278,10 +278,10 @@ struct RemoteAccessConsentView: View {
         VStack(alignment: .leading, spacing: 22) {
             HStack(alignment: .top, spacing: 14) {
                 Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 22, weight: .semibold, design: .serif))
-                    .foregroundStyle(Theme.accent)
+                    .font(.app(size: 22, weight: .semibold, design: .serif))
+                    .foregroundStyle(Theme.accentText)
                     .frame(width: 46, height: 46)
-                    .background(Theme.wash(Theme.accent), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    .background(Theme.wash(Theme.accent), in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Allow Remote Sessions?")
@@ -314,8 +314,8 @@ struct RemoteAccessConsentView: View {
                     detail: "Share files up to 20 MB through Vamp Assistant Remote Downloads.",
                     trailing: AnyView(Toggle("", isOn: $allowFiles).labelsHidden()))
             }
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
                 .strokeBorder(Theme.hairline, lineWidth: 0.75))
 
             Label("Only paired devices on an allowed LAN or Tailscale network are accepted. You can change or revoke access later.", systemImage: "network.badge.shield.half.filled")
@@ -350,10 +350,10 @@ struct RemoteAccessConsentView: View {
     ) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold, design: .serif))
-                .foregroundStyle(Theme.accent)
+                .font(.app(size: 15, weight: .semibold, design: .serif))
+                .foregroundStyle(Theme.accentText)
                 .frame(width: 36, height: 36)
-                .background(Theme.wash(Theme.accent), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(Theme.wash(Theme.accent), in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.callout.weight(.semibold))
@@ -381,6 +381,9 @@ private struct RemoteQRCodeView: View {
                     .interpolation(.none)
                     .scaledToFit()
                     .padding(12)
+                    // Intentionally NOT themed: a QR code needs a white quiet
+                    // zone to scan. Theming this to the dark surface would make
+                    // the code unreadable to the phone's camera.
                     .background(Color.white, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
             } else {
                 ProgressView().controlSize(.small)

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct BeetCodeRemoteApp: App {
@@ -8,7 +9,9 @@ struct BeetCodeRemoteApp: App {
     var body: some Scene {
         WindowGroup {
             RemoteRootView(store: store)
-                .tint(BeetTheme.accent)
+                // accent is a button *fill*; as a tint it left spinners and
+                // controls dim. accentBright tracks the foreground instead.
+                .tint(BeetTheme.accentBright)
                 .environment(\.remoteAppearance, appearance)
                 .preferredColorScheme(appearance.colorScheme)
                 .task {
@@ -54,44 +57,56 @@ extension EnvironmentValues {
 enum BeetTheme {
     // The legacy type name remains internal for source compatibility. Every
     // visible value is strictly monochrome.
-    static let accent = Color(white: 0.22)
-    // Adaptive foreground accent: the previous fixed light gray was readable
-    // on OLED black but nearly disappeared over the light engraving artwork.
-    static let accentBright = Color.primary.opacity(0.78)
+
+    // ponytail: dynamic UIColor instead of an `accent(_ appearance:)` function
+    // so the ~20 call sites stay untouched. It always sits behind white glyphs,
+    // so dark mode needs a *lighter* gray — at white 0.22 the filled buttons
+    // scored 1.6:1 against the 0.075 background and vanished.
+    static let accent = Color(uiColor: UIColor { trait in
+        trait.userInterfaceStyle == .dark
+            ? UIColor(white: 0.40, alpha: 1)   // 5.7:1 vs white glyph, 3.2:1 vs bg
+            : UIColor(white: 0.20, alpha: 1)
+    })
+    static let accentBright = Color.primary.opacity(0.82)
     static let wash = Color.white.opacity(0.08)
 
     static func background(_ appearance: RemoteAppearance) -> Color {
         switch appearance {
-        case .light: Color(white: 0.975)
+        case .light: Color(white: 0.97)
         case .dark: Color(white: 0.075)
         }
     }
 
+    // Cards stay translucent: they are a tint over `remoteGlass`'s material,
+    // never a substitute for it. Legibility over the engraving comes from the
+    // blur behind them — pushing alpha up instead just flattens the glass.
     static func surface(_ appearance: RemoteAppearance) -> Color {
         switch appearance {
         case .light: Color.white.opacity(0.72)
-        case .dark: Color(white: 0.11).opacity(0.72)
+        case .dark: Color(white: 0.12).opacity(0.72)
         }
     }
 
     static func surfaceStrong(_ appearance: RemoteAppearance) -> Color {
         switch appearance {
-        case .light: Color(white: 0.95).opacity(0.84)
-        case .dark: Color(white: 0.17).opacity(0.80)
+        case .light: Color(white: 0.93).opacity(0.82)
+        case .dark: Color(white: 0.19).opacity(0.80)
         }
     }
 
     static func line(_ appearance: RemoteAppearance) -> Color {
         switch appearance {
-        case .light: Color(white: 0.62).opacity(0.42)
-        case .dark: Color(white: 0.62).opacity(0.34)
+        case .light: Color(white: 0.55).opacity(0.55)
+        case .dark: Color(white: 0.70).opacity(0.42)
         }
     }
 
+    // Was 0.22 / 0.82 — near-identical to primary, so captions carried no
+    // hierarchy. These still clear 5:1 on their own surfaces.
     static func secondaryText(_ appearance: RemoteAppearance) -> Color {
         switch appearance {
-        case .light: Color(white: 0.22)
-        case .dark: Color(white: 0.82)
+        case .light: Color(white: 0.38)
+        case .dark: Color(white: 0.68)
         }
     }
 }

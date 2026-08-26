@@ -744,6 +744,13 @@ struct RemoteAPIClient {
             "api/sessions/\(sessionID.uuidString)/\(pending.kind)", method: "POST", body: body)
     }
 
+    func deleteSession(_ id: UUID) async throws -> RemoteAcceptedResponse {
+        try await request("api/sessions/\(id.uuidString)", method: "DELETE")
+    }
+    func renameSession(_ id: UUID, title: String) async throws -> RemoteAcceptedResponse {
+        try await request("api/sessions/\(id.uuidString)", method: "PATCH", body: ["title": title])
+    }
+
     func revoke() async throws {
         let _: RemoteAcceptedResponse = try await request("api/revoke", method: "POST", body: [:])
     }

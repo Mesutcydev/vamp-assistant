@@ -57,16 +57,20 @@ enum Theme {
     static let bg           = Color.dynamic(light: 0xF5F5F5, dark: 0x000000, beet: 0x000000)
     static let surface      = Color.dynamic(light: 0xFFFFFF, dark: 0x0A0A0A, beet: 0x0A0A0A)
     static let surfaceInset = Color.dynamic(light: 0xECECEC, dark: 0x151515, beet: 0x151515)
-    static let hairline     = Color.dynamic(light: 0xDEDEDE, dark: 0x2A2A2A, beet: 0x2A2A2A)
+    // Card edges were 1.14–1.46:1 against the surfaces they sit on — present
+    // in the code, barely present on screen. Lifted to ~1.5–1.9:1: still a
+    // hairline, but one you can actually see the card end at.
+    static let hairline     = Color.dynamic(light: 0xC9C9C9, dark: 0x3A3A3A, beet: 0x3A3A3A)
 
     // Text tiers. Dark secondary/tertiary sit a touch brighter than the
     // neutrals around them so captions stay legible on the lifted surfaces.
     static let textPrimary   = Color.dynamic(light: 0x181818, dark: 0xF2F2F2, beet: 0xF2F2F2)
-    static let textSecondary = Color.dynamic(light: 0x626262, dark: 0xB0B0B0, beet: 0xB0B0B0)
+    static let textSecondary = Color.dynamic(light: 0x585858, dark: 0xB0B0B0, beet: 0xB0B0B0)
     // Tertiary text still carries actionable metadata and must remain readable
-    // at caption sizes. These values clear WCAG AA against the app's primary
-    // light and OLED-dark surfaces.
-    static let textTertiary  = Color.dynamic(light: 0x707070, dark: 0x969696, beet: 0x969696)
+    // at caption sizes, so it must clear AA on the WORST surface it lands on —
+    // surfaceInset, not just the page. Light was 0x707070: 4.95 on surface but
+    // 4.19 on an inset well. 0x6A6A6A clears 4.5 on all three in both modes.
+    static let textTertiary  = Color.dynamic(light: 0x6A6A6A, dark: 0x969696, beet: 0x969696)
     static let rose          = Color.dynamic(light: 0x303030, dark: 0xC8C8C8, beet: 0xC8C8C8)
 
     /// Elevation shadow: a whisper in light mode, much deeper in dark —
@@ -81,6 +85,11 @@ enum Theme {
     // Accent — storage-compatible palettes all resolve to monochrome.
     static var accent: Color { paletteColor(light: \.accentLight, dark: \.accentDark) }
     static var accentBright: Color { paletteColor(light: \.brightLight, dark: \.brightDark) }
+    /// Accent for FOREGROUND use — text, glyphs, chips. `accent` is a fill
+    /// (white text sits on it), which pins its dark value low enough to fail
+    /// AA when it is used the other way round. This keeps the light value and
+    /// lifts the dark one to the bright step: 5.2–5.9:1 instead of 3.3–3.8:1.
+    static var accentText: Color { paletteColor(light: \.accentLight, dark: \.brightDark) }
     static var accentSoft: Color { accent.opacity(0.14) }
 
     // Status — tuned per mode so they never blow out on the deep dark.
@@ -156,7 +165,7 @@ enum AppFont {
     static var navigationTitle: Font { .system(size: 12 * scale, weight: .medium, design: .serif) }
     static var navigationMeta: Font { .system(size: 11.5 * scale, weight: .regular, design: .serif) }
     static var editor: Font { .system(size: 15.5 * scale, weight: .regular, design: .serif) }
-    static var homeWordmark: Font { .system(size: 80, weight: .bold, design: .serif) }
+    static var homeWordmark: Font { .system(size: 80 * scale, weight: .bold, design: .serif) }
     static var homeInvitation: Font { .system(size: 15 * scale, weight: .regular, design: .serif) }
 }
 
@@ -197,6 +206,23 @@ extension Color {
                   green: Double((hex >> 8) & 0xFF) / 255,
                   blue: Double(hex & 0xFF) / 255,
                   opacity: opacity)
+    }
+}
+
+extension Font {
+    /// App text that honours the user's Text Size setting.
+    ///
+    /// `.system(size:)` is a fixed point size, so every literal call site
+    /// silently opted out of the preference — it reached only the handful of
+    /// `AppFont` tokens, leaving the setting a no-op across most of the UI.
+    /// `design` defaults to `.default` so swapping a call site never changes
+    /// the typeface, only whether it scales.
+    static func app(
+        size: CGFloat,
+        weight: Font.Weight = .regular,
+        design: Font.Design = .default
+    ) -> Font {
+        .system(size: size * CGFloat(Theme.currentTextSize.scale), weight: weight, design: design)
     }
 }
 
@@ -241,9 +267,9 @@ extension View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         return self
             .modifier(LFGlassModifier(shape: shape))
-            .overlay(shape.strokeBorder(.white.opacity(0.14), lineWidth: 0.5)
+            .overlay(shape.strokeBorder(Theme.hairline, lineWidth: 0.5)
                 .allowsHitTesting(false))
-            .shadow(color: .black.opacity(0.08), radius: 4, y: 1)
+            .shadow(color: Theme.cardShadow, radius: 4, y: 1)
             .brightness(hovering ? 0.025 : 0)
     }
 }
@@ -355,7 +381,7 @@ struct LFCapsuleButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 11, weight: .semibold, design: .serif))
+            .font(.app(size: 11, weight: .semibold, design: .serif))
             .foregroundStyle(isEnabled ? tone.foreground : Theme.textSecondary)
             .padding(.horizontal, 12)
             .frame(minHeight: 30)
@@ -398,7 +424,7 @@ struct PanelCloseButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "xmark")
-                .font(.system(size: 11, weight: .semibold, design: .serif))
+                .font(.app(size: 11, weight: .semibold, design: .serif))
         }
         .buttonStyle(LFIconButtonStyle(size: 26))
         .lfHoverLift()

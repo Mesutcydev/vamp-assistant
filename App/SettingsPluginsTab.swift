@@ -25,6 +25,7 @@ struct PluginsTab: View {
                 footer: "Detected skills, commands, prompts and workflows are enabled in place—there is no copy step. Source updates appear after Rescan. Plugin scripts and installers are never executed.") {
                 HStack(spacing: Spacing.sm) {
                     Image(systemName: commands.isEmpty ? "circle.dashed" : "checkmark.circle.fill")
+                        .accessibilityHidden(true)
                         .foregroundStyle(commands.isEmpty ? Theme.textTertiary : Theme.success)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(commands.isEmpty ? "No capabilities detected" : "Automatically enabled")
@@ -138,7 +139,7 @@ struct PluginsTab: View {
                                             value: command.location.path) {
                                             Text(command.kind.label)
                                                 .font(.caption2.weight(.medium))
-                                                .foregroundStyle(Theme.accent)
+                                                .foregroundStyle(Theme.accentText)
                                                 .padding(.horizontal, 7)
                                                 .padding(.vertical, 2)
                                                 .background(Theme.wash(Theme.accent), in: Capsule())
@@ -164,7 +165,7 @@ struct PluginsTab: View {
                     if !appState.openCodeCatalog.agents.isEmpty {
                         SettingRow(label: "Agents", value: appState.openCodeCatalog.agents.map(\.name).joined(separator: " · ")) {
                             Image(systemName: "person.2.fill")
-                                .foregroundStyle(Theme.accent)
+                                .foregroundStyle(Theme.accentText)
                         }
                     }
                     if !appState.openCodeCatalog.mcpServers.isEmpty {

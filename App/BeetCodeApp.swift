@@ -140,6 +140,9 @@ extension Notification.Name {
     static let stopAgent = Notification.Name("com.beetcode.stopAgent")
     static let sendMessage = Notification.Name("com.beetcode.sendMessage")
     static let sessionTitleChanged = Notification.Name("com.beetcode.sessionTitleChanged")
+    /// A paired device changed the session list (delete or rename). The
+    /// sidebar keeps its own decrypted snapshot, which nothing else invalidates.
+    static let remoteSessionsChanged = Notification.Name("com.beetcode.remoteSessionsChanged")
     static let openWorkspace = Notification.Name("com.beetcode.openWorkspace")
     static let openSystemReadiness = Notification.Name("com.beetcode.openSystemReadiness")
     static let focusChatSearch = Notification.Name("com.beetcode.focusChatSearch")

@@ -21,6 +21,16 @@ enum ComposerPlacement {
 /// - During a run, the same input can queue a follow-up or steer the turn;
 ///   Stop remains independently available.
 /// - A restrained state border tracks idle → focused → streaming.
+/// Composer proportions, derived rather than hard-coded.
+enum ComposerMetrics {
+    /// ~62% of the region the composer sits in: narrower than the wordmark
+    /// above it by a deliberate margin, and clamped so a narrow window still
+    /// fits the control row and a wide one does not stretch it.
+    static func homeWidth(for regionWidth: CGFloat) -> CGFloat {
+        min(max(regionWidth * 0.62, 480), 680)
+    }
+}
+
 struct ComposerView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var controller: AgentSessionController
@@ -29,6 +39,9 @@ struct ComposerView: View {
 
     var store: ComposerStore
     var placement: ComposerPlacement = .conversation
+    /// Home only. A proportion of the MAIN CONTENT region measured by the
+    /// caller — never of the whole window, which would drift with the sidebar.
+    var homeMaxWidth: CGFloat = ComposerMetrics.homeWidth(for: 900)
 
     @FocusState private var editorFocused: Bool
     @State private var isDropTargeted = false
@@ -52,7 +65,8 @@ struct ComposerView: View {
         }
         // The same centered column as the transcript above, so the input
         // sits directly under the conversation it belongs to.
-        .frame(maxWidth: placement == .home ? 640 : ContentColumn.maxWidth, alignment: .leading)
+        .frame(maxWidth: placement == .home ? homeMaxWidth : ContentColumn.maxWidth,
+               alignment: .leading)
         .frame(maxWidth: .infinity)
         .padding(.horizontal, placement == .home ? 0 : Spacing.xl)
         .padding(.top, placement == .home ? 0 : 8)
@@ -92,7 +106,7 @@ struct ComposerView: View {
                 SendStopButton(store: store)
             }
         }
-        .padding(14)
+        .padding(Spacing.md)
         .modifier(ComposerBorder(
             flow: settings.composerFlow,
             phase: phase,
@@ -119,7 +133,7 @@ struct ComposerView: View {
         let editor: Editor
 
         var body: some View {
-            HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .top, spacing: Spacing.sm) {
                 editor
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                 ComposerCommandMenu(store: store) {
@@ -136,7 +150,7 @@ struct ComposerView: View {
             .font(AppFont.editor)
             .foregroundStyle(Theme.textPrimary)
             .lineLimit(1...8)
-            .frame(minHeight: 38, alignment: .topLeading)
+            .frame(minHeight: 28, alignment: .topLeading)
             .focused($editorFocused)
             .padding(.horizontal, 1)
             .padding(.vertical, 1)
@@ -215,6 +229,7 @@ struct ComposerView: View {
     private func hintRow(_ text: String) -> some View {
         HStack(spacing: 5) {
             Image(systemName: "exclamationmark.circle")
+                .accessibilityHidden(true)
                 .foregroundStyle(Theme.warning)
             Text(text)
                 .foregroundStyle(Theme.warning)
@@ -224,7 +239,7 @@ struct ComposerView: View {
                 }
                 .font(.caption.weight(.medium))
                 .buttonStyle(.plain)
-                .foregroundStyle(Theme.accent)
+                .foregroundStyle(Theme.accentText)
             }
         }
         .font(.caption)
@@ -322,11 +337,11 @@ private struct ComposerDropOverlay: View {
     var body: some View {
         VStack(spacing: Spacing.sm) {
             Image(systemName: "arrow.down.doc.fill")
-                .font(.system(size: 20, weight: .semibold, design: .serif))
+                .font(.app(size: 20, weight: .semibold, design: .serif))
             Text("Drop files to attach")
-                .font(.system(size: 13, weight: .semibold, design: .serif))
+                .font(.app(size: 13, weight: .semibold, design: .serif))
         }
-        .foregroundStyle(Theme.accent)
+        .foregroundStyle(Theme.accentText)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.surface.opacity(0.96), in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
         .overlay {
@@ -420,7 +435,7 @@ private struct ComposerCommandMenu: View {
             .disabled(store.selection.isEmpty && store.attachments.isEmpty)
         } label: {
             Image(systemName: "ellipsis")
-                .font(.system(size: 13, weight: .bold, design: .serif))
+                .font(.app(size: 13, weight: .bold, design: .serif))
                 .foregroundStyle(Theme.textSecondary)
                 .frame(width: 28, height: 28)
                 .background(Theme.surfaceInset.opacity(0.44), in: Circle())
@@ -541,8 +556,8 @@ private struct AppleDeliverySetupView: View {
     private var header: some View {
         HStack(spacing: Spacing.md) {
             Image(systemName: "checkmark.shield.fill")
-                .font(.system(size: 24, weight: .semibold, design: .serif))
-                .foregroundStyle(Theme.accent)
+                .font(.app(size: 24, weight: .semibold, design: .serif))
+                .foregroundStyle(Theme.accentText)
                 .frame(width: 44, height: 44)
                 .background(Theme.washStrong(Theme.accent), in: Circle())
 
@@ -589,6 +604,7 @@ private struct AppleDeliverySetupView: View {
                 if let identity = currentIdentity {
                     HStack(spacing: 5) {
                         Image(systemName: "checkmark.circle.fill")
+                            .accessibilityHidden(true)
                             .foregroundStyle(Theme.success)
                         Text(identity.teamID.map { "Valid · Team \($0)" } ?? "Valid in macOS Keychain")
                     }
@@ -892,7 +908,7 @@ private struct AttachChip: View {
             attachFiles()
         } label: {
             Image(systemName: "paperclip")
-                .font(.system(size: 12, weight: .medium, design: .serif))
+                .font(.app(size: 12, weight: .medium, design: .serif))
                 .frame(width: 28, height: 28)
                 .contentShape(Circle())
                 .background(Theme.surfaceInset.opacity(0.44), in: Circle())
@@ -932,13 +948,13 @@ private struct IntentChipButton: View {
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: "target")
-                    .font(.system(size: 11, weight: .medium, design: .serif))
+                    .font(.app(size: 11, weight: .medium, design: .serif))
                 Text("Context")
                 if count > 0 {
                     // A plain accent count — no badge-in-badge capsule.
                     Text("\(count)")
                         .font(.caption2.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(Theme.accent)
+                        .foregroundStyle(Theme.accentText)
                 }
             }
             .lfComposerPill(active: active)
@@ -1011,7 +1027,7 @@ private struct AgentSetupMenu: View {
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: settings.agentMode.icon)
-                    .font(.system(size: 11, weight: .medium, design: .serif))
+                    .font(.app(size: 11, weight: .medium, design: .serif))
                 Text(settings.agentMode.label)
                 if settings.planMode {
                     Image(systemName: "list.bullet.clipboard")
@@ -1171,7 +1187,7 @@ private struct SendStopButton: View {
             store.send()
         } label: {
             Image(systemName: "arrow.up")
-                .font(.system(size: 12, weight: .bold, design: .serif))
+                .font(.app(size: 12, weight: .bold, design: .serif))
         }
         .buttonStyle(LFIconButtonStyle(tone: .primary, size: 38))
         .lfHoverLift()
