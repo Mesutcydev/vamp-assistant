@@ -100,7 +100,18 @@ struct SidebarView: View {
             .background(Color.clear)
             sidebarFooter
         }
-        .background(Color.clear)
+        // The macOS 26 split-view sidebar is inset from the window on its
+        // leading and bottom edges. Keeping this root transparent exposed the
+        // window background around that inset while the detail/status chrome
+        // reached its own edge, producing two unrelated corner silhouettes.
+        // Extend one continuous sidebar surface through the container safe
+        // area; AppKit still applies the real window mask, so both outer
+        // corners now follow the same window radius without adding a second
+        // rounded rectangle or border.
+        .background {
+            Theme.surface
+                .ignoresSafeArea(.container, edges: [.top, .leading, .bottom])
+        }
         .onExitCommand {
             guard showsCloseButton else { return }
             dismiss()
