@@ -153,22 +153,41 @@ final class RemoteControlApplicationRegistry {
             // Safari and several document apps can remain running with every
             // window closed. Activating that process does not create a window,
             // so the old launch path timed out with “no streamable window”.
-            // Once activation has had time to settle, request the app-standard
-            // New Window command and continue waiting for an actual layer-0
-            // window before returning it to the phone.
-            if attempt == 12,
+            // Request a real document/window early, then continue waiting for an
+            // actual layer-0 window before returning it to the phone.
+            if attempt == 4,
                !requestedNewWindow,
-               ComputerPermission.accessibilityGranted,
                let running = NSRunningApplication.runningApplications(
                     withBundleIdentifier: bundleIdentifier).first {
                 requestedNewWindow = true
-                running.activate(options: [.activateAllWindows])
-                try? await Task.sleep(for: .milliseconds(150))
-                try? await RemoteMacControl.perform(.key("n", modifiers: ["command"]))
+                await requestNewWindow(for: bundleIdentifier, running: running)
             }
             try await Task.sleep(for: .milliseconds(250))
         }
         throw RegistryError.applicationDidNotOpenWindow
+    }
+
+    /// Ask an already-running app to materialize a streamable window. Safari
+    /// accepts an open-document event without Accessibility permission; this is
+    /// important because app streaming only requires Screen Recording. Other
+    /// apps keep the original Cmd-N path when Accessibility is available.
+    private func requestNewWindow(for bundleIdentifier: String, running: NSRunningApplication) async {
+        running.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        if bundleIdentifier == "com.apple.Safari",
+           let applicationURL = running.bundleURL,
+           let blankURL = URL(string: "about:blank") {
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            NSWorkspace.shared.open(
+                [blankURL],
+                withApplicationAt: applicationURL,
+                configuration: configuration,
+                completionHandler: nil)
+            return
+        }
+
+        guard ComputerPermission.accessibilityGranted else { return }
+        try? await RemoteMacControl.perform(.key("n", modifiers: ["command"]))
     }
 
     func resize(windowID: UInt32, clientViewportAspect: Double) async throws -> Application {
