@@ -36,7 +36,7 @@ The [Vamp Assistant site](https://mesutcydev.github.io/vamp-assistant/) has the 
 
 The repository includes a native SwiftUI companion app that connects to the Mac app's existing private Remote Sessions endpoint. It supports camera QR pairing, one-tap reconnection, secure token storage, session browsing, new local/API sessions, live responses, prompts, stop controls, approvals/questions, and permission-gated clipboard and file exchange.
 
-[Download the latest unsigned iPhone/iPad IPA](https://github.com/Mesutcydev/vamp-assistant/releases/download/ios-v0.1.33/Vamp-Assistant-iOS-0.1.33-build-47-unsigned.ipa)
+[Download the latest unsigned iPhone/iPad IPA](https://github.com/Mesutcydev/vamp-assistant/releases/download/ios-v0.1.33/Vamp-Assistant-iOS-0.1.33-build-50-unsigned.ipa)
 
 Build an unsigned sideloadable IPA:
 
@@ -46,7 +46,7 @@ Build an unsigned sideloadable IPA:
 
 The resulting `Vamp-Assistant-iOS-*-unsigned.ipa` can be re-signed with AltStore, SideStore, Sideloadly, or a personal Apple development profile. Keep both devices on the same trusted LAN or Tailscale network, then paste the address or scan the QR shown by **Vamp Assistant → Remote Sessions**.
 
-**Install:** download the latest macOS build from [Releases](https://github.com/Mesutcydev/vamp-assistant/releases), extract it, and move **Vamp Assistant.app** to Applications. Apple Silicon + macOS 15+.
+**Install:** [download the latest Apple-silicon DMG](https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.24/Vamp-Assistant-0.10.24-build-72.dmg) or [ZIP](https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.24/Vamp-Assistant-0.10.24-build-72.zip), open it, and move **Vamp Assistant.app** to Applications. Apple Silicon + macOS 15+.
 
 > Gatekeeper will warn — this build is Apple Development–signed, **not notarized** (Developer ID certs are revoked). Right-click → Open, or `xattr -dr com.apple.quarantine "/path/to/Vamp Assistant.app"`.
 
