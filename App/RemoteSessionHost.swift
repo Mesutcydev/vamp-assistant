@@ -1813,7 +1813,15 @@ final class RemoteSessionHost {
         let queued = (queuedTasksHandler?(record.id) ?? []).map {
             "\($0.id.uuidString):\($0.state.rawValue):\($0.phase ?? "")"
         }.joined(separator: ",")
-        return [
+        let pendingInteractionHash = pendingInteraction(for: record.id).encoded().hashValue
+        let errorPresentationHash = errorPresentation(for: record).encoded().hashValue
+        let taskSignal: String
+        if let task {
+            taskSignal = "\(task.id.uuidString):\(task.state.rawValue):\(task.phase ?? "")"
+        } else {
+            taskSignal = "none"
+        }
+        let components: [String] = [
             String(record.updatedAt.timeIntervalSince1970),
             String(record.messages.count),
             sessions.activeSessionID?.uuidString ?? "none",
@@ -1822,13 +1830,14 @@ final class RemoteSessionHost {
             String(sessions.streamingText.hashValue),
             String(sessions.transcript.count),
             tail,
-            String(pendingInteraction(for: record.id).encoded().hashValue),
-            String(errorPresentation(for: record).encoded().hashValue),
+            String(pendingInteractionHash),
+            String(errorPresentationHash),
             sessions.remoteRunAgentMode ?? "none",
             String(sessions.remoteRunHasFullAccess ?? false),
-            task.map { "\($0.id.uuidString):\($0.state.rawValue):\($0.phase ?? "")" } ?? "none",
+            taskSignal,
             queued,
-        ].joined(separator: "|")
+        ]
+        return components.joined(separator: "|")
     }
 
     private func errorPresentation(
