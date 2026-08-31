@@ -38,6 +38,8 @@ The repository includes a native SwiftUI companion app that connects to the Mac 
 
 [Download the latest unsigned iPhone/iPad IPA](https://github.com/Mesutcydev/vamp-assistant/releases/download/ios-v0.1.35/Vamp-Assistant-iOS-0.1.35-build-57-unsigned.ipa)
 
+[Add the Vamp Assistant AltStore source](https://mesutcydev.github.io/vamp-assistant/apps.json)
+
 Build an unsigned sideloadable IPA:
 
 ```sh
