@@ -56,8 +56,8 @@ targets:
       properties:
         CFBundleDisplayName: "Vamp Assistant"
         CFBundleIconName: AppIcon
-        CFBundleShortVersionString: "0.10.24"
-        CFBundleVersion: "70"
+        CFBundleShortVersionString: "0.10.25"
+        CFBundleVersion: "78"
         LSApplicationCategoryType: public.app-category.developer-tools
         LSMinimumSystemVersion: "15.0"
         NSHumanReadableCopyright: "Copyright © 2026 Vamp Assistant contributors"
@@ -151,14 +151,21 @@ targets:
       - Core/Tools/RemotePointerCurve.swift
       - Core/Tools/RemoteStreamProfile.swift
       - Core/Tools/RemoteDisplayMapping.swift
+      # Shared theme vocabulary (accent palettes, typeface) — one source of
+      # truth for both clients instead of duplicated hex tables.
+      - Core/Persistence/AppTheme.swift
       - path: App/Assets.xcassets
         buildPhase: resources
     info:
       path: iOSApp/Info.plist
       properties:
         CFBundleDisplayName: "Vamp Assist"
-        CFBundleShortVersionString: "0.1.33"
-        CFBundleVersion: "49"
+        # xcodegen writes iOSApp/Info.plist from this block, so these were the real version —
+        # the target's MARKETING_VERSION / CURRENT_PROJECT_VERSION settings below had no effect
+        # on the shipped app at all, and a bump there silently produced an identically-numbered
+        # IPA with different code inside. Point them at the settings so there is one source.
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         ITSAppUsesNonExemptEncryption: false
         NSLocalNetworkUsageDescription: "Vamp Assistant connects to Vamp Assistant running on your trusted Mac."
         NSCameraUsageDescription: "Vamp Assistant scans the one-time pairing QR code shown by your Mac."
@@ -167,6 +174,10 @@ targets:
         LSApplicationQueriesSchemes:
           - tailscale
         NSAppTransportSecurity:
+          # Vamp Assistant is intentionally a private-network HTTP peer. The client enforces the
+          # LAN/Tailscale-only address policy before any request is made. Do not combine this
+          # with NSAllowsLocalNetworking: on current iOS the fine-grained key causes the global
+          # dynamic-IP allowance to be ignored. (Same rationale as vampstream-project.yml.)
           NSAllowsArbitraryLoads: true
         UILaunchScreen:
           UIColorName: AccentColor
@@ -185,8 +196,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.beetcode.remote.ios
         PRODUCT_NAME: "Vamp Assistant"
         PRODUCT_MODULE_NAME: BeetCodeRemoteIOS
-        MARKETING_VERSION: "0.1.33"
-        CURRENT_PROJECT_VERSION: "49"
+        MARKETING_VERSION: "0.1.35"
+        CURRENT_PROJECT_VERSION: "57"
         CODE_SIGN_ENTITLEMENTS: iOSApp/BeetCodeRemote.entitlements
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: iOSApp/Info.plist
@@ -211,6 +222,23 @@ targets:
         keychain-access-groups:
           - com.beetcode.remote.ios
 
+  BeetCodeRemoteIOSTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - iOSTests
+    dependencies:
+      - target: BeetCodeRemoteIOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.beetcode.remote.ios.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Vamp Assistant.app/Vamp Assistant"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        SWIFT_STRICT_CONCURRENCY: complete
+        SWIFT_APPROACHABLE_CONCURRENCY: YES
+
 schemes:
   BeetCode:
     build:
@@ -233,5 +261,10 @@ schemes:
     build:
       targets:
         BeetCodeRemoteIOS: all
+        BeetCodeRemoteIOSTests: [test]
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - BeetCodeRemoteIOSTests

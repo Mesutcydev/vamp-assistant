@@ -242,7 +242,13 @@ enum Keychain {
         attributes.removeValue(forKey: kSecUseAuthenticationUI as String)
         attributes[kSecValueData as String] = data
         attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        let status = SecItemAdd(attributes as CFDictionary, nil)
+        // Same discipline as the reads and updates above: a replaced binary no longer matches
+        // an existing item's ACL, and an unwrapped add is where the legacy dialog gets through.
+        // Creating a genuinely new item needs no authorization, so suppressing UI here cannot
+        // block a legitimate write — it only stops the re-prompt loop after a rebuild.
+        let status = withAuthenticationUI(false) {
+            SecItemAdd(attributes as CFDictionary, nil)
+        }
         if status != errSecSuccess {
             Log.app.error("Keychain write failed: \(String(describing: status), privacy: .public)")
             return false

@@ -40,6 +40,22 @@ final class ComputerToolsTests: XCTestCase {
         XCTAssertEqual(ComputerKey.modifiers(for: ["bogus"]), [])
     }
 
+    func testLoginWindowCharactersUsePhysicalANSIKeys() {
+        XCTAssertEqual(
+            ComputerEvents.loginWindowPhysicalKey(for: "a"),
+            .init(keyCode: 0, modifiers: []))
+        XCTAssertEqual(
+            ComputerEvents.loginWindowPhysicalKey(for: "A"),
+            .init(keyCode: 0, modifiers: .maskShift))
+        XCTAssertEqual(
+            ComputerEvents.loginWindowPhysicalKey(for: "9"),
+            .init(keyCode: 25, modifiers: []))
+        XCTAssertEqual(
+            ComputerEvents.loginWindowPhysicalKey(for: "!"),
+            .init(keyCode: 18, modifiers: .maskShift))
+        XCTAssertNil(ComputerEvents.loginWindowPhysicalKey(for: "ğ"))
+    }
+
     // MARK: AX tree rendering
 
     func testRenderFormatsNodesWithCoordinates() {
@@ -224,6 +240,12 @@ final class ComputerToolsTests: XCTestCase {
         XCTAssertEqual(right, .success(.click(x: nil, y: nil, button: "right", count: 1)))
         let middle = RemoteMacControl.parse(action: "click", x: 10, y: 20, button: "middle", count: 2)
         XCTAssertEqual(middle, .success(.click(x: 10, y: 20, button: "middle", count: 2)))
+    }
+
+    func testComputerPermissionRecognizesSecureLockSession() {
+        XCTAssertTrue(ComputerPermission.sessionIsLocked(["CGSSessionScreenIsLocked": true]))
+        XCTAssertFalse(ComputerPermission.sessionIsLocked(["CGSSessionScreenIsLocked": false]))
+        XCTAssertFalse(ComputerPermission.sessionIsLocked(nil))
     }
 
     // MARK: Dangerous shortcuts

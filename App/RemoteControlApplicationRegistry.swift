@@ -146,9 +146,10 @@ final class RemoteControlApplicationRegistry {
                     toAspect: clientViewportAspect,
                     preferredBounds: nil)
                 try await Task.sleep(for: .milliseconds(350))
-                return snapshot(includeIcons: true).first(where: {
-                    $0.bundleIdentifier == bundleIdentifier && $0.windowID != nil
-                }) ?? application
+                // Report the window that was just fitted. Re-querying by bundle identifier
+                // returns the app's *largest* window, which after a fit is very likely a
+                // different one than the fit touched.
+                return self.application(forWindowID: windowID, includeIcons: true) ?? application
             }
             // Safari and several document apps can remain running with every
             // window closed. Activating that process does not create a window,
@@ -197,7 +198,7 @@ final class RemoteControlApplicationRegistry {
         }
         guard let running = NSWorkspace.shared.runningApplications.first(where: {
             $0.processIdentifier == window.ownerPID
-        }), let bundleIdentifier = running.bundleIdentifier else {
+        }), running.bundleIdentifier != nil else {
             throw RegistryError.windowUnavailable
         }
         running.activate()
@@ -206,10 +207,87 @@ final class RemoteControlApplicationRegistry {
             toAspect: clientViewportAspect,
             preferredBounds: window.bounds)
         try await Task.sleep(for: .milliseconds(350))
-        guard let application = snapshot(includeIcons: true).first(where: {
-            $0.bundleIdentifier == bundleIdentifier && $0.windowID != nil
-        }) else { throw RegistryError.windowUnavailable }
+        // Same window in, same window out — resizing never changes a CGWindowID, and looking
+        // it back up by bundle identifier would hand back the app's largest window instead.
+        guard let application = self.application(forWindowID: windowID, includeIcons: true) else {
+            throw RegistryError.windowUnavailable
+        }
         return application
+    }
+
+    /// The Accessibility element for the window at `bounds`, falling back to the application's
+    /// focused window when no frame matches (or when the caller named no window).
+    ///
+    /// AX exposes no public window-number attribute, so the on-screen frame is the join key
+    /// back to the `CGWindowID` the client asked about. `kAXFocusedWindowAttribute` alone was
+    /// not the same window: `resize(windowID:)` names one window, and an app with several
+    /// windows can easily have focus on a different one — the fit then reshaped a window
+    /// nobody was streaming. AXPosition and kCGWindowBounds are both global, points, top-left.
+    nonisolated private static func axWindow(pid: pid_t, matching bounds: CGRect?) -> AXUIElement? {
+        let application = AXUIElementCreateApplication(pid)
+        if let bounds {
+            var windowsReference: CFTypeRef?
+            if AXUIElementCopyAttributeValue(
+                application,
+                kAXWindowsAttribute as CFString,
+                &windowsReference
+            ) == .success, let windows = windowsReference as? [AXUIElement] {
+                for window in windows {
+                    var positionReference: CFTypeRef?
+                    guard AXUIElementCopyAttributeValue(
+                        window,
+                        kAXPositionAttribute as CFString,
+                        &positionReference
+                    ) == .success,
+                    let positionReference,
+                    CFGetTypeID(positionReference) == AXValueGetTypeID() else { continue }
+                    var position = CGPoint.zero
+                    AXValueGetValue(positionReference as! AXValue, .cgPoint, &position)
+                    if abs(position.x - bounds.origin.x) < 2, abs(position.y - bounds.origin.y) < 2 {
+                        return window
+                    }
+                }
+            }
+        }
+        var focusedReference: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            application,
+            kAXFocusedWindowAttribute as CFString,
+            &focusedReference
+        ) == .success,
+        let focusedReference,
+        CFGetTypeID(focusedReference) == AXUIElementGetTypeID() else { return nil }
+        return (focusedReference as! AXUIElement)
+    }
+
+    /// The registry entry for one specific window, rather than for the app's largest one.
+    ///
+    /// `snapshot()` reports `bestWindow` — the biggest window an app owns — which stopped being
+    /// the right answer once fitting deliberately shrinks the streamed window: the fit lands on
+    /// one window and the reported `windowID` comes back pointing at a different, now-bigger
+    /// one. The client then streams a window that was never fitted, and a `windowID` that
+    /// changes between calls restarts the stream each time. The caller named a window; answer
+    /// about that window.
+    private func application(forWindowID windowID: UInt32, includeIcons: Bool) -> Application? {
+        guard let window = onScreenWindows().first(where: { $0.id == windowID }) else { return nil }
+        guard let running = NSWorkspace.shared.runningApplications.first(where: {
+            $0.processIdentifier == window.ownerPID
+        }), let bundleIdentifier = running.bundleIdentifier, let name = running.localizedName else {
+            return nil
+        }
+        return Application(
+            bundleIdentifier: bundleIdentifier,
+            name: name,
+            isRunning: true,
+            isActive: running.processIdentifier
+                == NSWorkspace.shared.frontmostApplication?.processIdentifier,
+            iconPNGBase64: includeIcons
+                ? iconBase64(bundleIdentifier: bundleIdentifier, icon: running.icon)
+                : nil,
+            windowID: window.id,
+            windowTitle: window.title,
+            width: Double(window.bounds.width),
+            height: Double(window.bounds.height))
     }
 
     private static func validate(aspect: Double) throws {
@@ -224,18 +302,9 @@ final class RemoteControlApplicationRegistry {
         preferredBounds: CGRect?
     ) throws {
         guard AXIsProcessTrusted() else { throw RegistryError.accessibilityRequired }
-        let application = AXUIElementCreateApplication(pid)
-        var focusedReference: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(
-            application,
-            kAXFocusedWindowAttribute as CFString,
-            &focusedReference
-        ) == .success,
-        let focusedReference,
-        CFGetTypeID(focusedReference) == AXUIElementGetTypeID() else {
+        guard let window = Self.axWindow(pid: pid, matching: preferredBounds) else {
             throw RegistryError.windowUnavailable
         }
-        let window = focusedReference as! AXUIElement
         var currentSize = CGSize(width: 1_280, height: 800)
         var sizeReference: CFTypeRef?
         if AXUIElementCopyAttributeValue(
@@ -266,10 +335,14 @@ final class RemoteControlApplicationRegistry {
             display: displayBounds,
             aspect: CGFloat(aspect))
         var requestedSize = targetFrame.size
-        guard let sizeValue = AXValueCreate(.cgSize, &requestedSize),
-              AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sizeValue) == .success else {
+        guard let sizeValue = AXValueCreate(.cgSize, &requestedSize) else {
             throw RegistryError.windowUnavailable
         }
+        // A fixed-size window, or one enforcing a minimum, returns a failure here. That is the
+        // app declining a size, not a window that has gone away — and failing the whole request
+        // on it made apps that stream perfectly well unstreamable. The snapshot below stays
+        // authoritative for whatever geometry the window actually settled on.
+        _ = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sizeValue)
 
         // Keep the resized app entirely on the same display. AX may clamp the
         // requested size to an application's minimum; the subsequent registry
@@ -312,6 +385,13 @@ final class RemoteControlApplicationRegistry {
         let fitScale = min(1, min(available.width / size.width, available.height / size.height))
         size.width = max(1, floor(size.width * fitScale))
         size.height = max(1, floor(size.height * fitScale))
+        // Never fit below what `onScreenWindows()` will still report as a window (80 x 60).
+        // A portrait viewport sets width to height x ~0.46, so a window under ~173pt tall fitted
+        // to under 80pt wide and vanished from discovery entirely — taking the stream target
+        // with it, and turning a short wide window into one that could not be streamed at all.
+        // Exact aspect is worth trading for a window that still exists.
+        size.width = min(max(size.width, 96), available.width)
+        size.height = min(max(size.height, 72), available.height)
         let maxX = max(available.minX, available.maxX - size.width)
         let maxY = max(available.minY, available.maxY - size.height)
         return CGRect(

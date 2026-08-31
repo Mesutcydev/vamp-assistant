@@ -143,6 +143,7 @@ struct ModelManagerView: View {
                     Image(systemName: "magnifyingglass")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Theme.textTertiary)
+                        .accessibilityHidden(true)
                     TextField("Filter models", text: $searchText)
                         .textFieldStyle(.plain)
                         .font(.callout)
@@ -861,6 +862,7 @@ private struct ModelActions: View {
             .menuIndicator(.hidden)
             .fixedSize()
             .help("More actions")
+            .accessibilityLabel("More actions for \(model.displayName)")
         } else {
             switch downloadState {
             case .preparing, .downloading, .paused:
@@ -878,6 +880,7 @@ private struct ModelActions: View {
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .help("More actions")
+                .accessibilityLabel("Download actions for \(model.displayName)")
             default:
                 EmptyView()
             }

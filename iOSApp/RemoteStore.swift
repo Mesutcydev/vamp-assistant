@@ -5,11 +5,21 @@ struct PairedBeetCodeComputer: Codable, Identifiable, Equatable {
     let id: UUID
     var name: String
     var baseURL: URL
+    var tokenExpiresAt: Date?
+    var networkKind: String?
 
-    init(id: UUID = UUID(), name: String? = nil, baseURL: URL) {
+    init(
+        id: UUID = UUID(),
+        name: String? = nil,
+        baseURL: URL,
+        tokenExpiresAt: Date? = nil,
+        networkKind: String? = nil
+    ) {
         self.id = id
         self.name = name ?? baseURL.host ?? "Vamp Assistant Mac"
         self.baseURL = baseURL
+        self.tokenExpiresAt = tokenExpiresAt
+        self.networkKind = networkKind
     }
 }
 
@@ -39,14 +49,34 @@ final class RemoteStore {
     var backgroundNotice: String?
     private(set) var pairedComputers: [PairedBeetCodeComputer] = []
     private(set) var activeComputerID: UUID?
+    private(set) var requiresPairing = false
 
     private(set) var baseURL: URL?
     private var token: String?
     private var pollingTask: Task<Void, Never>?
     private var sessionStreamTask: Task<Void, Never>?
+    private enum SessionStreamPhase: Equatable {
+        case stopped
+        case connecting
+        case connected
+        case reconnecting
+    }
+    private var sessionStreamPhase: SessionStreamPhase = .stopped
+    private var sessionStreamLastActivity: Date?
+    private var selectedSessionRevision: UInt64?
     private var refreshTask: Task<Void, Error>?
+    /// Prevent an approval toggle and a button tap (or two rapid taps) from
+    /// resolving the same server request twice. A duplicate resolve races the
+    /// SSE snapshot and used to make the pending card flash back into view.
+    private var resolvingPendingKeys: Set<String> = []
+    /// The request currently being resolved by this phone. The value remains
+    /// set until the live session stream confirms that the pending interaction
+    /// changed, so an older SSE snapshot renders a stable disabled card
+    /// instead of making the approval UI disappear and reappear.
+    private(set) var resolvingPendingKey: String?
     private var connectionAvailable = false
     private var consecutivePollingFailures = 0
+    private var pollIdleSeconds: Int = 4
 
     init() {
 #if DEBUG
@@ -62,11 +92,18 @@ final class RemoteStore {
         restoreComputerProfiles()
     }
 
-    var hasSavedConnection: Bool { baseURL != nil && token != nil }
+    var hasSavedConnection: Bool { baseURL != nil && token != nil && !requiresPairing }
     var isConnected: Bool { hasSavedConnection && connectionAvailable }
     var isMacReachable: Bool { isConnected }
     var connectionSubtitle: String {
-        if isConnected { return "Private over Tailscale" }
+        if isConnected {
+            switch activeComputer?.networkKind {
+            case "tailscale": return "Private over Tailscale"
+            case "localNetwork": return "Local network · HTTP"
+            default: return "Connected directly to your Mac"
+            }
+        }
+        if requiresPairing { return "Enter the new code shown on your Mac" }
         if isConnecting || connectionLabel == "Reconnecting…" || connectionLabel == "Connecting…" {
             return "Looking for \(activeComputerName)"
         }
@@ -78,13 +115,24 @@ final class RemoteStore {
     }
     var activeComputerName: String { activeComputer?.name ?? "Mac" }
 
+    func isResolvingPending(_ pending: RemotePendingInteraction, sessionID: UUID) -> Bool {
+        guard let requestID = pending.requestID else { return false }
+        return resolvingPendingKey == "\(sessionID.uuidString):\(requestID)"
+    }
+
     func restore() async {
         guard hasSavedConnection else { return }
         await connectSaved(showFailure: false)
     }
 
     func connectSaved(showFailure: Bool = true) async {
-        guard hasSavedConnection else { return }
+        guard baseURL != nil, token != nil else { return }
+        if requiresPairing || activeComputer?.tokenExpiresAt.map({ $0 <= Date() }) == true {
+            markPairingRequired(
+                "This Mac's access token expired. Enter the new pairing code shown on the Mac.",
+                showAlert: showFailure)
+            return
+        }
         isConnecting = true
         if showFailure { errorMessage = nil }
         defer { isConnecting = false }
@@ -95,6 +143,7 @@ final class RemoteStore {
             consecutivePollingFailures = 0
             startPolling()
         } catch {
+            if handleAuthenticationError(error, showAlert: showFailure) { return }
             connectionAvailable = false
             connectionLabel = "Mac unavailable"
             if showFailure {
@@ -111,8 +160,9 @@ final class RemoteStore {
         do {
             let parsed = try Self.parse(address: address, explicitCode: code)
             let response = try await RemoteAPIClient(baseURL: parsed.url).pair(code: parsed.code)
-            let computer = pairedComputers.first { $0.baseURL == parsed.url }
+            var computer = pairedComputers.first { $0.baseURL == parsed.url }
                 ?? PairedBeetCodeComputer(baseURL: parsed.url)
+            computer.tokenExpiresAt = Date(timeIntervalSince1970: response.expiresAt)
             try RemoteTokenStore.save(response.token, computerID: computer.id)
             if let index = pairedComputers.firstIndex(where: { $0.id == computer.id }) {
                 pairedComputers[index] = computer
@@ -122,6 +172,7 @@ final class RemoteStore {
             activeComputerID = computer.id
             baseURL = parsed.url
             token = response.token
+            requiresPairing = false
             saveComputerProfiles()
             try await refresh()
             connectionAvailable = true
@@ -160,6 +211,7 @@ final class RemoteStore {
         let (nextStatus, nextList) = try await (status, list)
         connectionAvailable = true
         consecutivePollingFailures = 0
+        noteIdleTick(changed: sessions != nextList.sessions)
         sessions = nextList.sessions
         // Bot runs were added after the original paired-session protocol;
         // an older Mac must remain usable instead of failing the whole refresh.
@@ -167,16 +219,22 @@ final class RemoteStore {
         RemoteNotificationCenter.shared.observeSessions(
             nextList.sessions,
             computerName: activeComputerName)
+        updateActiveComputer(
+            networkKind: nextStatus.networkKind,
+            tokenExpiresAt: nextStatus.tokenExpiresAt.map { Date(timeIntervalSince1970: $0) })
         connectionLabel = nextStatus.isRunning ? nextStatus.phase.capitalized : "Connected"
         if let id = selectedSession?.id,
            sessions.contains(where: { $0.id == id }) {
-            if sessionStreamTask == nil {
-                selectedSession = try await client.session(id)
-                startSessionStream(id: id)
+            if !isSessionStreamHealthy(for: id) {
+                applySessionDetail(try await client.session(id))
             }
+            if sessionStreamTask == nil { startSessionStream(id: id) }
         } else if selectedSession != nil {
             sessionStreamTask?.cancel()
             sessionStreamTask = nil
+            sessionStreamPhase = .stopped
+            sessionStreamLastActivity = nil
+            selectedSessionRevision = nil
             selectedSession = nil
         }
         errorMessage = nil
@@ -190,6 +248,26 @@ final class RemoteStore {
     func macControlApplications() async throws -> [RemoteMacApplication] {
         guard let client else { throw RemoteClientError.notConnected }
         return try await client.controlApplications().applications
+    }
+
+    func launchMacControlApplication(
+        bundleIdentifier: String,
+        viewportAspect: Double
+    ) async throws -> RemoteMacApplication {
+        guard let client else { throw RemoteClientError.notConnected }
+        return try await client.launchControlApplication(
+            bundleIdentifier: bundleIdentifier,
+            clientViewportAspect: viewportAspect).application
+    }
+
+    func resizeMacControlApplication(
+        windowID: UInt32,
+        viewportAspect: Double
+    ) async throws -> RemoteMacApplication {
+        guard let client else { throw RemoteClientError.notConnected }
+        return try await client.resizeControlApplication(
+            windowID: windowID,
+            clientViewportAspect: viewportAspect).application
     }
 
     func macControlFrame(
@@ -229,6 +307,14 @@ final class RemoteStore {
         guard let client else { throw RemoteClientError.notConnected }
         guard !commands.isEmpty else { throw RemoteClientError.invalidResponse }
         return try await client.sendControlBatch(commands.map(Self.controlBody(for:)))
+    }
+
+    func unlockMac(password: String) async throws {
+        guard let client else { throw RemoteClientError.notConnected }
+        guard !password.isEmpty, password.count <= 256 else {
+            throw RemoteClientError.server("Enter a login password between 1 and 256 characters.")
+        }
+        _ = try await client.unlockMac(password: password)
     }
 
     static func controlBody(for command: RemoteInputCommand) -> [String: Any] {
@@ -281,10 +367,15 @@ final class RemoteStore {
         guard let client else { return }
         sessionStreamTask?.cancel()
         sessionStreamTask = nil
+        sessionStreamPhase = .stopped
+        sessionStreamLastActivity = nil
+        selectedSessionRevision = nil
+        resolvingPendingKeys.removeAll()
+        resolvingPendingKey = nil
         selectedSession = nil
         do {
             let detail = try await client.session(sessionID)
-            selectedSession = detail
+            applySessionDetail(detail)
             RemoteNotificationCenter.shared.observeDetail(detail, computerName: activeComputerName)
             autoMode = detail.agentMode != "goal"
             fullAccess = detail.fullAccess ?? false
@@ -345,6 +436,26 @@ final class RemoteStore {
         guard let client else { return false }
         do { _ = try await client.resumeBotRun(id); try await refresh(); return true }
         catch { presentError("Couldn't resume bot", error); return false }
+    }
+
+    // MARK: Bot console
+    //
+    // These throw rather than presenting an alert: the console shows its own inline error, and a
+    // mistyped shell command is not worth a modal.
+
+    func execInBotComputer(_ id: UUID, command: String) async throws -> String {
+        guard let client else { throw RemoteClientError.notConnected }
+        return try await client.execInBotComputer(id, command: command).output
+    }
+
+    func botComputerFiles(_ id: UUID, path: String) async throws -> [RemoteBotWorkspaceEntry] {
+        guard let client else { throw RemoteClientError.notConnected }
+        return try await client.botComputerFiles(id, path: path).entries
+    }
+
+    func botComputerFile(_ id: UUID, path: String) async throws -> String {
+        guard let client else { throw RemoteClientError.notConnected }
+        return try await client.botComputerFile(id, path: path).contents
     }
 
     func botComputers() async -> RemoteBotComputerEnvelope? {
@@ -518,6 +629,23 @@ final class RemoteStore {
         }
     }
 
+    /// Keeps a currently running Mac loop in sync with the companion's
+    /// Auto/Full Access controls. Idle sessions carry the same values on their
+    /// next message, so no extra request is needed in that state.
+    func updateRunOptionsIfNeeded() async {
+        guard let client,
+              let detail = selectedSession,
+              detail.isRunning else { return }
+        do {
+            _ = try await client.updateSessionOptions(
+                detail.id,
+                autoMode: autoMode,
+                fullAccess: fullAccess)
+        } catch {
+            presentError("Couldn't update access mode", error, background: true)
+        }
+    }
+
     func cancelQueuedTask(_ taskID: UUID) async {
         guard let client, let id = selectedSession?.id else { return }
         do {
@@ -533,17 +661,73 @@ final class RemoteStore {
         catch { presentError("Couldn't stop", error) }
     }
 
+    func undoCheckpoint() async {
+        guard let client, let id = selectedSession?.id else { return }
+        do {
+            _ = try await client.undoCheckpoint(id) as RemoteAcceptedResponse
+            try? await refresh()
+        } catch {
+            presentError("Couldn't restore the checkpoint", error)
+        }
+    }
+
     func resolvePending(_ value: String) async {
         guard let client, let detail = selectedSession, let pending = detail.pending else { return }
+        guard let requestID = pending.requestID else { return }
+        let key = "\(detail.id.uuidString):\(requestID)"
+        guard resolvingPendingKeys.insert(key).inserted else { return }
+        resolvingPendingKey = key
+        var responseAccepted = false
+        defer {
+            resolvingPendingKeys.remove(key)
+            // Keep the visual lock until SSE (or the fallback detail request)
+            // confirms the old interaction is gone. On a failed POST it is
+            // safe to make the controls interactive again immediately.
+            if !responseAccepted, resolvingPendingKey == key {
+                resolvingPendingKey = nil
+            }
+        }
+        // The event stream is the source of truth while a session is open.
+        // Fetching a detail immediately after POST can win the race with an
+        // in-flight SSE snapshot and briefly restore the old pending state.
+        let hasHealthyStream = isSessionStreamHealthy(for: detail.id)
         do {
-            try await client.resolve(pending, sessionID: detail.id, value: value)
-            selectedSession = try await client.session(detail.id)
+            try await client.resolve(
+                pending,
+                sessionID: detail.id,
+                value: value,
+                autoMode: autoMode,
+                fullAccess: fullAccess)
+            responseAccepted = true
+            if hasHealthyStream {
+                // Give the normal live event the first chance to land. A
+                // revisioned GET then repairs a stalled-but-not-yet-closed SSE
+                // connection without allowing an older event to win later.
+                try? await Task.sleep(for: .milliseconds(400))
+            }
+            guard selectedSession?.id == detail.id,
+                  resolvingPendingKey == key else { return }
+            let updated = try await client.session(detail.id)
+            if applySessionDetail(updated) {
+                reconcilePendingResolution(with: updated)
+            }
         } catch { presentError("Couldn't continue", error) }
     }
 
-    func revoke() async {
-        if let client { try? await client.revoke() }
-        forgetSavedMac()
+    @discardableResult
+    func revoke() async -> Bool {
+        guard let client else {
+            forgetSavedMac()
+            return true
+        }
+        do {
+            try await client.revoke()
+            forgetSavedMac()
+            return true
+        } catch {
+            presentError("Couldn't unpair this Mac", error)
+            return false
+        }
     }
 
     func forgetSavedMac() {
@@ -591,8 +775,12 @@ final class RemoteStore {
         pollingTask = nil
         sessionStreamTask?.cancel()
         sessionStreamTask = nil
+        sessionStreamPhase = .stopped
+        sessionStreamLastActivity = nil
+        selectedSessionRevision = nil
         connectionAvailable = false
         token = nil
+        requiresPairing = false
         sessions = []
         startModels = []
         sharedFiles = []
@@ -689,6 +877,10 @@ final class RemoteStore {
         guard let computer = pairedComputers.first(where: { $0.id == id }) else { return }
         pollingTask?.cancel()
         sessionStreamTask?.cancel()
+        sessionStreamTask = nil
+        sessionStreamPhase = .stopped
+        sessionStreamLastActivity = nil
+        selectedSessionRevision = nil
         sessions = []
         selectedSession = nil
         startModels = []
@@ -698,6 +890,8 @@ final class RemoteStore {
         activeComputerID = id
         baseURL = computer.baseURL
         token = RemoteTokenStore.load(computerID: id)
+        requiresPairing = computer.tokenExpiresAt.map { $0 <= Date() } == true
+        if requiresPairing { connectionLabel = "Pair again" }
         saveComputerProfiles()
     }
 
@@ -729,6 +923,17 @@ final class RemoteStore {
         }
     }
 
+    /// Grows while the session list stays unchanged and resets the moment
+    /// anything moves, so a phone left on the list screen stops waking every
+    /// two seconds without ever feeling stale when it matters.
+    private func noteIdleTick(changed: Bool) {
+        if changed {
+            pollIdleSeconds = 4
+        } else {
+            pollIdleSeconds = min(30, pollIdleSeconds + 2)
+        }
+    }
+
     private func saveComputerProfiles() {
         let defaults = UserDefaults.standard
         if let data = try? JSONEncoder().encode(pairedComputers) {
@@ -737,15 +942,67 @@ final class RemoteStore {
         defaults.set(activeComputerID?.uuidString, forKey: "activeBeetCodeComputerID")
     }
 
+    private func updateActiveComputer(networkKind: String, tokenExpiresAt: Date?) {
+        guard let activeComputerID,
+              let index = pairedComputers.firstIndex(where: { $0.id == activeComputerID }) else { return }
+        var computer = pairedComputers[index]
+        let previous = computer
+        computer.networkKind = networkKind
+        if let tokenExpiresAt { computer.tokenExpiresAt = tokenExpiresAt }
+        guard computer != previous else { return }
+        pairedComputers[index] = computer
+        saveComputerProfiles()
+    }
+
+    private func handleAuthenticationError(_ error: Error, showAlert: Bool) -> Bool {
+        guard let clientError = error as? RemoteClientError,
+              clientError.requiresPairing else { return false }
+        markPairingRequired(
+            "This Mac no longer accepts the saved access token. Enter the new pairing code shown on the Mac.",
+            showAlert: showAlert)
+        return true
+    }
+
+    private func markPairingRequired(_ message: String, showAlert: Bool) {
+        pollingTask?.cancel()
+        pollingTask = nil
+        sessionStreamTask?.cancel()
+        sessionStreamTask = nil
+        sessionStreamPhase = .stopped
+        sessionStreamLastActivity = nil
+        selectedSessionRevision = nil
+        connectionAvailable = false
+        requiresPairing = true
+        connectionLabel = "Pair again"
+        sessions = []
+        selectedSession = nil
+        if showAlert {
+            errorTitle = "Pair again"
+            errorMessage = message
+        }
+    }
+
+    /// Poll cadence. Two seconds is right while something is actually happening
+    /// on the Mac, and wasteful when nothing is — this used to run at 2s
+    /// forever, which is a battery cost on the device least able to afford it.
+    /// Any running session, or a session the user is looking at, keeps it fast.
+    private var pollInterval: Duration {
+        if selectedSession != nil { return .seconds(2) }
+        if sessions.contains(where: \.isRunning) { return .seconds(2) }
+        return .seconds(pollIdleSeconds)
+    }
+
     private func startPolling() {
         pollingTask?.cancel()
         pollingTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(2))
+                let interval = await MainActor.run { self?.pollInterval ?? .seconds(2) }
+                try? await Task.sleep(for: interval)
                 guard !Task.isCancelled else { return }
                 do { try await self?.refresh() }
                 catch {
                     guard let self else { return }
+                    if self.handleAuthenticationError(error, showAlert: false) { return }
                     self.consecutivePollingFailures += 1
                     if self.consecutivePollingFailures >= 3 {
                         self.connectionAvailable = false
@@ -759,25 +1016,80 @@ final class RemoteStore {
     private func startSessionStream(id: UUID) {
         guard let client else { return }
         sessionStreamTask?.cancel()
+        sessionStreamPhase = .connecting
+        sessionStreamLastActivity = nil
         sessionStreamTask = Task { [weak self] in
             var retryDelay = Duration.milliseconds(300)
             while !Task.isCancelled {
                 guard let self, self.selectedSession?.id == id else { return }
                 do {
-                    for try await detail in client.sessionEvents(id) {
+                    for try await event in client.sessionEvents(id) {
                         guard !Task.isCancelled, self.selectedSession?.id == id else { return }
-                        self.selectedSession = detail
-                        RemoteNotificationCenter.shared.observeDetail(
-                            detail,
-                            computerName: self.activeComputerName)
-                        retryDelay = .milliseconds(300)
+                        self.sessionStreamPhase = .connected
+                        self.sessionStreamLastActivity = Date()
+                        switch event {
+                        case .heartbeat:
+                            continue
+                        case .snapshot(let detail):
+                            guard self.applySessionDetail(detail) else { continue }
+                            self.reconcilePendingResolution(with: detail)
+                            RemoteNotificationCenter.shared.observeDetail(
+                                detail,
+                                computerName: self.activeComputerName)
+                            retryDelay = .milliseconds(300)
+                        }
                     }
                 } catch {
                     guard !Task.isCancelled else { return }
+                    if self.handleAuthenticationError(error, showAlert: false) { return }
                 }
+                self.sessionStreamPhase = .reconnecting
+                self.sessionStreamLastActivity = nil
                 try? await Task.sleep(for: retryDelay)
                 retryDelay = .seconds(2)
             }
+        }
+    }
+
+    @discardableResult
+    private func applySessionDetail(_ detail: RemoteSessionDetail) -> Bool {
+        guard selectedSession == nil || selectedSession?.id == detail.id else { return false }
+        guard Self.shouldAcceptSessionRevision(
+            current: selectedSessionRevision,
+            incoming: detail.revision
+        ) else { return false }
+        selectedSessionRevision = detail.revision ?? selectedSessionRevision
+        selectedSession = detail
+        return true
+    }
+
+    /// Versionless snapshots are accepted for older Mac hosts. Once both sides
+    /// provide revisions, an in-flight older event may never overwrite newer
+    /// state fetched after an approval or reconnect.
+    nonisolated static func shouldAcceptSessionRevision(
+        current: UInt64?,
+        incoming: UInt64?
+    ) -> Bool {
+        guard let current, let incoming else { return true }
+        return incoming >= current
+    }
+
+    private func isSessionStreamHealthy(for id: UUID) -> Bool {
+        guard sessionStreamTask != nil,
+              selectedSession?.id == id,
+              sessionStreamPhase == .connected,
+              let lastActivity = sessionStreamLastActivity else { return false }
+        // The Mac emits a heartbeat every ~6 seconds. A 15-second deadline
+        // tolerates scheduling jitter while letting ordinary polling repair a
+        // half-open URLSession stream promptly.
+        return Date().timeIntervalSince(lastActivity) < 15
+    }
+
+    private func reconcilePendingResolution(with detail: RemoteSessionDetail) {
+        guard let key = resolvingPendingKey else { return }
+        let currentKey = detail.pending?.requestID.map { "\(detail.id.uuidString):\($0)" }
+        if currentKey != key {
+            resolvingPendingKey = nil
         }
     }
 

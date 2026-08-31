@@ -46,10 +46,30 @@ final class RemoteMacScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate, 
         var continuations: [UUID: AsyncStream<Frame>.Continuation] = [:]
         var captureWidth = 0
         var captureHeight = 0
+        var geometryRestartPending = false
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
     private let encoder = RemoteH264Encoder()
+
+    override init() {
+        super.init()
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(sessionDidResignActive),
+            name: NSWorkspace.sessionDidResignActiveNotification,
+            object: nil)
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(sessionDidResignActive),
+            name: Notification.Name("com.apple.screenIsLocked"),
+            object: nil)
+    }
+
+    deinit {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        DistributedNotificationCenter.default().removeObserver(self)
+    }
 
     func frames(config: Config) -> AsyncStream<Frame> {
         AsyncStream(bufferingPolicy: .bufferingNewest(2)) { continuation in
@@ -101,12 +121,17 @@ final class RemoteMacScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate, 
             state.config = config
             state.starting = true
             state.latest = nil
+            state.geometryRestartPending = false
         }
         encoder.forceKeyframe()
         await startIfNeeded()
     }
 
     private func startIfNeeded() async {
+        guard !ComputerPermission.sessionLocked else {
+            finishListeners()
+            return
+        }
         guard ComputerPermission.screenRecordingGranted else {
             finishListeners()
             return
@@ -114,9 +139,24 @@ final class RemoteMacScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate, 
 
         let config = state.withLock { $0.config }
         do {
-            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-            let targetWindow = config.windowID.flatMap { requestedID in
-                content.windows.first { $0.windowID == requestedID && $0.isOnScreen }
+            func shareableWindow() async throws -> (SCShareableContent, SCWindow?) {
+                let content = try await SCShareableContent.excludingDesktopWindows(
+                    false,
+                    onScreenWindowsOnly: true)
+                return (content, config.windowID.flatMap { requestedID in
+                    content.windows.first { $0.windowID == requestedID && $0.isOnScreen }
+                })
+            }
+            var (content, targetWindow) = try await shareableWindow()
+            // A window that is mid-resize, mid-activation, or briefly off this Space is not
+            // absent for good — but giving up on the first look ended the stream permanently
+            // and silently, and the client saw a clean end-of-stream and rendered nothing at
+            // all. Fitting the window to the phone made that race routine. Look again.
+            var attempt = 0
+            while config.windowID != nil, targetWindow == nil, attempt < 8 {
+                attempt += 1
+                try await Task.sleep(for: .milliseconds(250))
+                (content, targetWindow) = try await shareableWindow()
             }
             if config.windowID != nil, targetWindow == nil {
                 finishListeners()
@@ -160,7 +200,12 @@ final class RemoteMacScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate, 
             streamConfig.showsCursor = true
             streamConfig.queueDepth = 2
             streamConfig.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(config.framesPerSecond))
-            let scale = config.maxWidth.map { min(1, Double($0) / Double(pixelWidth)) } ?? 1
+            // Cap the longest axis rather than the width. A whole display is always landscape,
+            // so "width" and "long axis" were the same thing; a window fitted to a portrait
+            // phone is taller than it is wide, and a width-only cap left its height entirely
+            // unbounded. Landscape sources scale exactly as before.
+            let longestPixels = max(pixelWidth, pixelHeight)
+            let scale = config.maxWidth.map { min(1, Double($0) / Double(longestPixels)) } ?? 1
             let width = max(2, Int((Double(pixelWidth) * scale).rounded(.down) / 2) * 2)
             let height = max(2, Int((Double(pixelHeight) * scale).rounded(.down) / 2) * 2)
             streamConfig.width = width
@@ -228,15 +273,18 @@ final class RemoteMacScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate, 
     }
 
     private func finishListeners() {
-        let listeners = state.withLock { state -> [AsyncStream<Frame>.Continuation] in
+        let (stream, listeners) = state.withLock { state -> (SCStream?, [AsyncStream<Frame>.Continuation]) in
+            let stream = state.stream
             state.stream = nil
             state.starting = false
+            state.geometryRestartPending = false
             state.latest = nil
             let listeners = Array(state.continuations.values)
             state.continuations.removeAll()
-            return listeners
+            return (stream, listeners)
         }
         encoder.invalidate()
+        if let stream { Task { try? await stream.stopCapture() } }
         listeners.forEach { $0.finish() }
     }
 
@@ -245,6 +293,7 @@ final class RemoteMacScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate, 
             let current = state.stream
             state.stream = nil
             state.starting = false
+            state.geometryRestartPending = false
             return current
         }
         try? await current?.stopCapture()
@@ -255,11 +304,68 @@ final class RemoteMacScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate, 
         guard type == .screen else { return }
         let hasListeners = state.withLock { !$0.continuations.isEmpty }
         guard hasListeners else { return }
+        guard Self.isCompleteFrame(sampleBuffer) else { return }
+        refreshWindowGeometry(from: sampleBuffer)
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         // Drop if encoder is busy — latest frame wins on the next sample.
         guard !encoder.isBusy else { return }
         let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         _ = encoder.encode(pixelBuffer, presentationTime: pts)
+    }
+
+    func stream(_ stream: SCStream, didStopWithError error: any Error) {
+        finishListeners()
+    }
+
+    @objc private func sessionDidResignActive() {
+        finishListeners()
+    }
+
+    /// ScreenCaptureKit follows a desktop-independent window when it moves,
+    /// but the original SCWindow frame does not mutate with it. Read the live
+    /// on-screen rectangle from each sample so remote input stays aligned.
+    /// A size change also rebuilds the encoder/capture dimensions; an origin-
+    /// only move is cheap and updates metadata on the next published frame.
+    private func refreshWindowGeometry(from sampleBuffer: CMSampleBuffer) {
+        guard let screenRect = Self.frameScreenRect(sampleBuffer),
+              screenRect.width.isFinite,
+              screenRect.height.isFinite,
+              screenRect.width > 1,
+              screenRect.height > 1 else { return }
+        let restartConfig = state.withLock { state -> Config? in
+            guard state.config.windowID != nil else { return nil }
+            let previous = state.activeBounds
+            state.activeBounds = screenRect
+            let sizeChanged = abs(previous.width - screenRect.width) > 1
+                || abs(previous.height - screenRect.height) > 1
+            guard sizeChanged, !state.geometryRestartPending else { return nil }
+            state.geometryRestartPending = true
+            return state.config
+        }
+        if let restartConfig {
+            Task { await restart(with: restartConfig) }
+        }
+    }
+
+    private static func frameAttachments(
+        _ sampleBuffer: CMSampleBuffer
+    ) -> [SCStreamFrameInfo: Any]? {
+        guard let array = CMSampleBufferGetSampleAttachmentsArray(
+            sampleBuffer,
+            createIfNecessary: false) as? [[SCStreamFrameInfo: Any]] else { return nil }
+        return array.first
+    }
+
+    private static func isCompleteFrame(_ sampleBuffer: CMSampleBuffer) -> Bool {
+        guard let raw = frameAttachments(sampleBuffer)?[.status] as? NSNumber,
+              let status = SCFrameStatus(rawValue: raw.intValue) else { return false }
+        return status == .complete
+    }
+
+    private static func frameScreenRect(_ sampleBuffer: CMSampleBuffer) -> CGRect? {
+        guard let value = frameAttachments(sampleBuffer)?[.screenRect] else { return nil }
+        if let rect = value as? CGRect { return rect }
+        return (value as? NSValue)?.rectValue
     }
 
     private func publish(encoded: RemoteH264Encoder.EncodedFrame) {

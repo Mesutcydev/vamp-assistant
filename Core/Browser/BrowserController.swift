@@ -60,6 +60,22 @@ final class BrowserController: ObservableObject {
     private var storedWebView: WKWebView?
     private var navigationRelay: NavigationRelay?
 
+    /// Browser downloads are intentionally separate from WKWebView's page
+    /// navigation. A clicked binary (for example a Hugging Face `.gguf`)
+    /// must be streamed to disk instead of replacing the page with a forever
+    /// loading download response. The session is ephemeral so credentials
+    /// never outlive the app; the active bot's matching WebKit cookies are
+    /// copied onto the request below.
+    private static let downloadSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpMaximumConnectionsPerHost = 2
+        configuration.timeoutIntervalForRequest = 120
+        configuration.timeoutIntervalForResource = 7 * 24 * 60 * 60
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.waitsForConnectivity = true
+        return URLSession(configuration: configuration)
+    }()
+
     var webView: WKWebView { ensureWebView() }
 
     /// Shown in the docked panel chrome. Empty for the shared Mac browser.
@@ -128,6 +144,132 @@ final class BrowserController: ObservableObject {
     func forward() { webView.goForward() }
     func reload() { webView.reload() }
     func stop() { webView.stopLoading() }
+
+    /// Streams an HTTP(S) resource into the current workspace. This is the
+    /// explicit download primitive for the assistant: navigating to a binary
+    /// URL is useful for inspection, but it is not a download and gives the
+    /// model no completion signal. The returned path is the authoritative
+    /// on-disk result, after the temporary URL has been moved atomically.
+    func download(
+        _ urlString: String,
+        workspace: Workspace,
+        directory: String? = nil,
+        filename: String? = nil
+    ) async throws -> URL {
+        let url = try BrowserURLValidator.validatedURL(urlString, filePolicy: .refuse)
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+            throw BrowserError.invalidURL(urlString)
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 120
+        request.setValue(AppIdentity.browserUserAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("*/*", forHTTPHeaderField: "Accept")
+        request = await requestByAddingMatchingCookies(to: request, host: url.host)
+
+        let (temporaryURL, response) = try await Self.downloadSession.download(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            try? FileManager.default.removeItem(at: temporaryURL)
+            throw BrowserError.downloadFailed("The server returned HTTP \(status).")
+        }
+
+        // A login page or rate-limit page can still return HTTP 200. Never
+        // report that HTML as a successful model/file download; the caller
+        // needs a truthful failure so the assistant can retry with the page's
+        // actual direct link or ask for credentials.
+        if let contentType = http.value(forHTTPHeaderField: "Content-Type")?.lowercased(),
+           contentType.contains("text/html") {
+            try? FileManager.default.removeItem(at: temporaryURL)
+            throw BrowserError.downloadFailed("The server returned an HTML page instead of a file.")
+        }
+
+        let suggested = Self.downloadFilename(
+            response: response,
+            requested: filename,
+            sourceURL: url)
+        let relativeDirectory = directory?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let relativePath: String
+        if let relativeDirectory, !relativeDirectory.isEmpty {
+            relativePath = URL(fileURLWithPath: relativeDirectory)
+                .appendingPathComponent(suggested, isDirectory: false).path
+        } else {
+            relativePath = ".beetcode/downloads/\(suggested)"
+        }
+        let requestedDestination = try workspace.resolve(relativePath, access: .write).url
+        let destination = Self.uniqueDestination(for: requestedDestination)
+        do {
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.moveItem(at: temporaryURL, to: destination)
+        } catch {
+            try? FileManager.default.removeItem(at: temporaryURL)
+            throw BrowserError.downloadFailed("Could not save the downloaded file: \(error.localizedDescription)")
+        }
+
+        noteAgentAction("Downloaded \(destination.lastPathComponent)")
+        lastError = nil
+        return destination
+    }
+
+    private func requestByAddingMatchingCookies(to request: URLRequest, host: String?) async -> URLRequest {
+        guard let host, !host.isEmpty else { return request }
+        let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
+        let cookies = await withCheckedContinuation { continuation in
+            cookieStore.getAllCookies { cookies in
+                continuation.resume(returning: cookies)
+            }
+        }
+        let matching = cookies.filter { cookie in
+            let domain = cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            return host == domain || host.hasSuffix("." + domain)
+        }
+        guard !matching.isEmpty else { return request }
+        var request = request
+        let fields = HTTPCookie.requestHeaderFields(with: matching)
+        for (name, value) in fields { request.setValue(value, forHTTPHeaderField: name) }
+        return request
+    }
+
+    private static func downloadFilename(
+        response: URLResponse,
+        requested: String?,
+        sourceURL: URL
+    ) -> String {
+        let headerName = "Content-Disposition"
+        let headerValue = (response as? HTTPURLResponse)?.allHeaderFields.first {
+            String(describing: $0.key).caseInsensitiveCompare(headerName) == .orderedSame
+        }.map { String(describing: $0.value) }
+        let headerFilename = headerValue?.split(separator: ";").dropFirst().compactMap { part -> String? in
+            let item = part.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard item.lowercased().hasPrefix("filename") else { return nil }
+            return item.split(separator: "=", maxSplits: 1).last.map(String.init)
+        }.first
+        let raw = requested ?? headerFilename ?? sourceURL.lastPathComponent
+        let unquoted = raw.trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
+            .removingPercentEncoding ?? raw
+        let pathComponent = URL(fileURLWithPath: unquoted).lastPathComponent
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: " ._-()[]"))
+        let clean = String(pathComponent.unicodeScalars.map { allowed.contains($0) ? Character(String($0)) : "_" })
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if clean.isEmpty || clean == "." || clean == ".." { return "download" }
+        return String(clean.prefix(180))
+    }
+
+    private static func uniqueDestination(for requested: URL) -> URL {
+        guard FileManager.default.fileExists(atPath: requested.path) else { return requested }
+        let ext = requested.pathExtension
+        let stem = ext.isEmpty ? requested.lastPathComponent : requested.deletingPathExtension().lastPathComponent
+        for index in 1...10_000 {
+            let name = ext.isEmpty ? "\(stem)-\(index)" : "\(stem)-\(index).\(ext)"
+            let candidate = requested.deletingLastPathComponent().appendingPathComponent(name)
+            if !FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+        }
+        return requested.deletingLastPathComponent()
+            .appendingPathComponent("\(stem)-\(UUID().uuidString).\(ext)")
+    }
 
     /// Blocks until loading settles or the deadline passes. Bounded so a
     /// tool call can never hang the agent loop.
@@ -635,6 +777,7 @@ final class BrowserController: ObservableObject {
         case staleReference(String)
         case disabledElement(String)
         case unsupportedElement(String)
+        case downloadFailed(String)
         case snapshotFailed
 
         var errorDescription: String? {
@@ -647,6 +790,7 @@ final class BrowserController: ObservableObject {
             case .staleReference(let ref): "Element reference '\(ref)' is stale. Call browser_read with what=elements and retry with a fresh ref."
             case .disabledElement(let ref): "Element '\(ref)' is disabled."
             case .unsupportedElement(let ref): "Element '\(ref)' does not accept text input."
+            case .downloadFailed(let detail): "Download failed: \(detail)"
             case .snapshotFailed: "Could not capture the page snapshot."
             }
         }

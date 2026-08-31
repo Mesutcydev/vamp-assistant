@@ -163,6 +163,7 @@ final class SettingsStoreTests: XCTestCase {
     private func isolatedDefaults() -> (UserDefaults, String) {
         let suite = "com.beetcode.tests.appearance.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
+        defaults.removeVolatileDomain(forName: UserDefaults.registrationDomain)
         defaults.removePersistentDomain(forName: suite)
         return (defaults, suite)
     }
@@ -177,11 +178,73 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(store.textSize, .comfortable)
         XCTAssertFalse(store.computerControlEnabled)
         XCTAssertFalse(store.remoteMacControlEnabled)
+        XCTAssertFalse(store.remoteMacUnlockEnabled)
         XCTAssertFalse(store.intelligenceInspectorEnabled)
         XCTAssertFalse(store.experimentalDFlashEnabled)
         XCTAssertFalse(store.experimentalNGramEnabled)
         XCTAssertFalse(store.experimentalMLXPromptCacheEnabled)
         XCTAssertFalse(store.experimentalMLXQuantizedKVEnabled)
+        XCTAssertFalse(store.remoteSessionAllowLAN)
+    }
+
+    func testLegacyConfiguredRemoteSessionKeepsImplicitLANFallback() {
+        let (defaults, suite) = isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: "remoteSessionEnabled")
+
+        let store = SettingsStore(defaults: defaults, persistentDomainName: suite)
+
+        XCTAssertTrue(store.remoteSessionAllowLAN)
+    }
+
+    func testExplicitLANPreferenceSurvivesOptInMigration() {
+        let (defaults, suite) = isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: "remoteSessionEnabled")
+        defaults.set(false, forKey: "remoteSessionAllowLAN")
+
+        let store = SettingsStore(defaults: defaults, persistentDomainName: suite)
+
+        XCTAssertFalse(store.remoteSessionAllowLAN)
+        store.remoteSessionAllowLAN = true
+        XCTAssertTrue(SettingsStore(defaults: defaults, persistentDomainName: suite).remoteSessionAllowLAN)
+    }
+
+    func testLegacyLocalAPITokenMigratesToKeychainWithoutLoss() {
+        let (defaults, suite) = isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let service = "com.beetcode.tests.local-api.\(UUID().uuidString)"
+        defer { Keychain.delete(service: service, account: "apiServerToken") }
+        defaults.set("legacy-secret", forKey: "apiServerToken")
+
+        let store = SettingsStore(
+            defaults: defaults,
+            persistentDomainName: suite,
+            apiTokenService: service)
+
+        XCTAssertEqual(store.apiServerToken, "legacy-secret")
+        XCTAssertNil(defaults.string(forKey: "apiServerToken"))
+        XCTAssertEqual(
+            Keychain.read(service: service, account: "apiServerToken"),
+            "legacy-secret")
+    }
+
+    func testLocalAPITokenUpdatesKeychainInsteadOfPreferences() {
+        let (defaults, suite) = isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let service = "com.beetcode.tests.local-api.\(UUID().uuidString)"
+        defer { Keychain.delete(service: service, account: "apiServerToken") }
+        let store = SettingsStore(
+            defaults: defaults,
+            persistentDomainName: suite,
+            apiTokenService: service)
+
+        XCTAssertTrue(store.setAPIServerToken("new-secret"))
+
+        XCTAssertNil(defaults.string(forKey: "apiServerToken"))
+        XCTAssertEqual(
+            Keychain.read(service: service, account: "apiServerToken"),
+            "new-secret")
     }
 
     func testTextSizePersistsIndependently() {

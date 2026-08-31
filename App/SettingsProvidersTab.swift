@@ -6,6 +6,10 @@ import SwiftUI
 struct ProvidersTab: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var keyStore = APIKeyStore.shared
+    @ObservedObject private var tokenStore = HFTokenStore.shared
+    @State private var tokenDraft = ""
+    @State private var validationMessage: String?
+    @State private var isValidating = false
     /// Keys that survived the LocalForge rename inside the OLD Keychain
     /// services but could not be copied silently (their ACLs demand one
     /// interactive re-authorization). Banner offers the one-tap restore.
@@ -22,6 +26,58 @@ struct ProvidersTab: View {
             InfoBanner(
                 icon: "key",
                 text: "Connect an account or API provider, then choose its model from the composer. Credentials stay in the Mac Keychain and are read only when that provider is used.")
+            TinyFishSearchSettingsCard()
+            SettingsCard(title: "Hugging Face", icon: "arrow.down.circle", footer: "Stored in the Keychain, never synced. Required for gated repos; recommended for faster downloads.") {
+                SecureField("Access token (hf_…)", text: $tokenDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
+                HStack(spacing: Spacing.sm) {
+                    Button("Save") {
+                        tokenStore.saveToken(tokenDraft)
+                        validationMessage = "Saved to Keychain."
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.accent)
+                    .disabled(tokenDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+
+                    Button("Validate") {
+                        // Validate the DRAFT first; store only after it passes,
+                        // so an invalid token is never left in the Keychain.
+                        isValidating = true
+                        validationMessage = nil
+                        Task {
+                            defer { isValidating = false }
+                            do {
+                                let name = try await tokenStore.validate(draft: tokenDraft)
+                                tokenStore.saveToken(tokenDraft)
+                                validationMessage = "Validated as \(name) — saved."
+                            } catch {
+                                validationMessage = error.localizedDescription
+                            }
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isValidating || tokenDraft.isEmpty)
+
+                    if tokenStore.hasToken {
+                        Button("Remove", role: .destructive) {
+                            tokenStore.deleteToken()
+                            tokenDraft = ""
+                            validationMessage = "Token removed."
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    Spacer()
+                    if isValidating { ProgressView().controlSize(.small) }
+                }
+                if let validationMessage {
+                    Text(validationMessage)
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             providerSectionTitle("Account", subtitle: "Use your existing subscription")
             CodexAccountCard()
             providerSectionTitle("API providers", subtitle: "Expand only the service you want to configure")
@@ -48,6 +104,7 @@ struct ProvidersTab: View {
                 }
             }
         }
+        .onAppear { tokenDraft = tokenStore.token() ?? "" }
         .task { pendingRestore = LegacyMigration.needsInteractiveKeyMigration() }
         .onReceive(keyStore.objectWillChange) { _ in
             // A restored/saved key may have cleared the pending state.

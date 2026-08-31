@@ -5,28 +5,16 @@ import SwiftUI
 /// status color resolves through here so light and dark stay coherent by
 /// construction instead of per-view `colorScheme ? … : …` guesses.
 ///
-/// Aesthetic: monochrome black, white, and neutral gray.
+/// Aesthetic: neutral gray surfaces carrying one user-chosen accent.
 enum Theme {
-    // The active accent palette — read at DRAW time by the dynamic colors
-    // below, so a palette switch takes effect live without recreating views.
-    // Only ever mutated from the main actor via applyPalette.
-    nonisolated(unsafe) static var currentPalette: AccentPalette = .beetRed
-
-    // The active appearance — read at DRAW time by the dynamic colors below
-    // so a Beet-mode switch re-tints every neutral live. Only ever mutated
-    // from the main actor via applyAppearance.
+    // Read at DRAW time (colors) or body-evaluation time (fonts), so a change
+    // takes effect live without recreating the type. All four are mirrored
+    // from SettingsStore by `ThemeSync` in BeetCodeApp, on the main actor,
+    // before any view below it resolves a color or a font.
+    nonisolated(unsafe) static var currentPalette: AccentPalette = .graphite
     nonisolated(unsafe) static var currentAppearance: AppAppearance = .system
     nonisolated(unsafe) static var currentTextSize: AppTextSize = .comfortable
-
-    /// Applies the user's palette choice. Called once at launch and again on
-    /// every change (mirrors `applyAppearance`).
-    @MainActor static func applyPalette(_ palette: AccentPalette) {
-        currentPalette = palette
-    }
-
-    @MainActor static func applyTextSize(_ size: AppTextSize) {
-        currentTextSize = size
-    }
+    nonisolated(unsafe) static var currentTypeface: AppTypeface = .serif
 
     /// Palette-driven dynamic color: resolves the CURRENT palette's hex
     // pair for the active appearance on every draw.
@@ -82,7 +70,7 @@ enum Theme {
             : NSColor.black.withAlphaComponent(0.12)
     })
 
-    // Accent — storage-compatible palettes all resolve to monochrome.
+    // Accent — resolved live from the user's palette choice.
     static var accent: Color { paletteColor(light: \.accentLight, dark: \.accentDark) }
     static var accentBright: Color { paletteColor(light: \.brightLight, dark: \.brightDark) }
     /// Accent for FOREGROUND use — text, glyphs, chips. `accent` is a fill
@@ -154,19 +142,19 @@ enum ContentColumn {
 /// native proportional face; code, diffs, and diagnostics keep monospaced
 /// typography in their dedicated surfaces.
 enum AppFont {
-    /// New York across the product. Code, diffs, and pairing tokens stay
-    /// monospaced at the call site.
-    private static var scale: CGFloat { CGFloat(Theme.currentTextSize.scale) }
-    static var chatBody: Font { .system(size: 16 * scale, weight: .regular, design: .serif) }
-    static var chatHeading: Font { .system(size: 18 * scale, weight: .semibold, design: .serif) }
+    /// Prose and chrome. Every token asks for `.serif`, which `Font.app`
+    /// resolves against the user's Typeface setting (Serif is the default).
+    /// Code, diffs, and pairing tokens stay monospaced at the call site.
+    static var chatBody: Font { .app(size: 16, design: .serif) }
+    static var chatHeading: Font { .app(size: 18, weight: .semibold, design: .serif) }
     /// Folder / project group in the sidebar — parent of chat rows.
-    static var navigationGroup: Font { .system(size: 13.5 * scale, weight: .semibold, design: .serif) }
+    static var navigationGroup: Font { .app(size: 13.5, weight: .semibold, design: .serif) }
     /// Chat title inside a group — child of `navigationGroup`.
-    static var navigationTitle: Font { .system(size: 12 * scale, weight: .medium, design: .serif) }
-    static var navigationMeta: Font { .system(size: 11.5 * scale, weight: .regular, design: .serif) }
-    static var editor: Font { .system(size: 15.5 * scale, weight: .regular, design: .serif) }
-    static var homeWordmark: Font { .system(size: 80 * scale, weight: .bold, design: .serif) }
-    static var homeInvitation: Font { .system(size: 15 * scale, weight: .regular, design: .serif) }
+    static var navigationTitle: Font { .app(size: 12, weight: .medium, design: .serif) }
+    static var navigationMeta: Font { .app(size: 11.5, design: .serif) }
+    static var editor: Font { .app(size: 15.5, design: .serif) }
+    static var homeWordmark: Font { .app(size: 80, weight: .bold, design: .serif) }
+    static var homeInvitation: Font { .app(size: 15, design: .serif) }
 }
 
 /// Spacing — 4pt grid. Use these instead of ad-hoc padding literals.
@@ -222,7 +210,23 @@ extension Font {
         weight: Font.Weight = .regular,
         design: Font.Design = .default
     ) -> Font {
-        .system(size: size * CGFloat(Theme.currentTextSize.scale), weight: weight, design: design)
+        .system(size: size * CGFloat(Theme.currentTextSize.scale),
+                weight: weight,
+                design: resolvedDesign(design))
+    }
+
+    /// Maps a requested design onto the user's Typeface setting. `.serif` is
+    /// the app's "this is prose/chrome" request, so it becomes whatever the
+    /// user picked; anything else (explicit `.default`, monospaced code) is a
+    /// deliberate non-prose choice and is passed through untouched.
+    static func resolvedDesign(_ requested: Font.Design) -> Font.Design {
+        guard requested == .serif else { return requested }
+        return switch Theme.currentTypeface {
+        case .serif: .serif
+        case .sans: .default
+        case .rounded: .rounded
+        case .mono: .monospaced
+        }
     }
 }
 

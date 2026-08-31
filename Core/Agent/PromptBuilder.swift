@@ -211,11 +211,13 @@ enum PromptBuilder {
         return fitPrompt(sections, maxCharacters: promptBudget)
     }
 
-    /// Chat-only can still operate app-owned browser and opt-in computer-use
-    /// surfaces. Project, file, command, memory, MCP, and hook capabilities
-    /// remain unavailable because there is no workspace confinement boundary.
+    /// Chat-only can still operate app-owned browser, user-chosen document
+    /// saving, and opt-in computer-use surfaces. Project, general file,
+    /// command, memory, MCP, and hook capabilities remain unavailable because
+    /// there is no workspace confinement boundary.
     static func isChatOnlyTool(_ name: String) -> Bool {
         name.hasPrefix("browser_") || name.hasPrefix("computer_")
+            || name == "web_search" || name == "save_document"
             || name == "tailscale_status" || name == "disk_space_status"
             || name == "mac_system_status"
     }
@@ -226,14 +228,24 @@ enum PromptBuilder {
         contextWindowTokens: Int?,
         responseReserveTokens: Int
     ) -> String {
-        var sections = [
-            """
+        var assistantBoundary = """
             You are Vamp Assistant in project-free assistant mode. Have a helpful, direct
             conversation with the user. No project folder is connected. You
             cannot inspect or change project files, run shell commands, use
             project memory, or claim workspace access. If the user asks for
             project work, explain that they need to open a project folder.
-            """,
+            """
+        if tools.contains(where: { $0.name == "save_document" }) {
+            assistantBoundary += """
+
+            You can create a new text artifact with `save_document`; its native
+            Save panel makes the user choose the exact destination and does not
+            grant general file access. When the user asks you to save generated
+            content, use that tool instead of claiming you cannot create files.
+            """
+        }
+        var sections = [
+            assistantBoundary,
             outputStylePrompt(outputStyle),
         ]
         if tools.isEmpty {
@@ -389,20 +401,27 @@ enum PromptBuilder {
         add("Edit the workspace",
             tools: ["apply_patch", "write_file", "move_file"],
             guidance: "Prefer exact patches for existing files and verify the result.")
+        add("Save generated documents",
+            tools: ["save_document"],
+            guidance: "Use for HTML, Markdown, text, JSON, or other UTF-8 artifacts when no project is connected. The user chooses the destination in a native Save panel; report success only from the returned saved path.")
         add("Run and verify",
             tools: ["run_command", "background_process", "background_status", "build_diagnostics"],
             guidance: names.contains("background_process")
                 ? "Use detected checks for code changes; put long-running dev servers in `background_process`."
                 : "Use the listed command/check surface after code changes and inspect its result.")
         add("Read the public web",
-            tools: ["web_fetch"],
-            guidance: names.contains("browser_navigate")
-                ? "Use for bounded page text or API output; use `browser_navigate` when interaction or layout matters."
+            tools: ["web_search", "web_fetch"],
+            guidance: names.contains("web_search") && names.contains("web_fetch")
+                ? "Start with web_search for current ranked sources, then use web_fetch or the in-app browser to verify a page. Use web_fetch directly when you already have a URL."
+                : names.contains("web_search")
+                ? "Use web_search for current ranked sources and URLs; use the in-app browser when interaction or layout matters."
+                : names.contains("browser_navigate")
+                ? "Use for bounded page text or API output; use browser_navigate when interaction or layout matters."
                 : "Use for bounded page text or API output.")
         add("In-app browser",
-            tools: ["browser_navigate", "browser_read", "browser_click", "browser_type", "browser_scroll", "browser_eval", "browser_screenshot"],
+            tools: ["browser_navigate", "browser_read", "browser_click", "browser_type", "browser_scroll", "browser_eval", "browser_screenshot", "browser_download"],
             guidance: names.contains("browser_navigate") && names.contains("browser_read")
-                ? "For web UI, navigate → browser_read what=elements → act with a fresh ref. Actions capture a bounded fresh observation by default; never reuse a ref after it changes."
+                ? "For web UI, navigate → browser_read what=elements → act with a fresh ref. Actions capture a bounded fresh observation by default; never reuse a ref after it changes. For an explicit download, read the page's links, pass the direct http(s) href (not a page or binary navigation click) to browser_download, and wait for its saved path and byte count before claiming success."
                 : "Use only the listed browser operations and observe again after any interaction.")
         add("Built-in iOS Simulator",
             tools: ["sim_build_run", "sim_list_devices", "sim_boot_device", "sim_launch_app", "sim_tap", "sim_swipe", "sim_type", "sim_describe", "sim_screenshot"],
@@ -454,7 +473,7 @@ enum PromptBuilder {
             lines.append("- **Connected extensions** — \(visible.joined(separator: "; "))\(suffix).")
         }
 
-        lines.append("Writes, commands, and UI/network actions may pause for approval. Request them normally and let Vamp Assistant enforce the boundary; never claim success without observing the result.")
+        lines.append("Writes, commands, and UI/network actions may pause for approval in approval mode. In Auto mode or Full Access, request routine actions directly without asking the user to approve an app card; Vamp Assistant still enforces hard denies, workspace confinement, destructive safeguards, and macOS privacy permissions. Never claim success without observing the result.")
         return "# Runtime capability map\n\n" + lines.joined(separator: "\n")
     }
 
@@ -923,18 +942,18 @@ enum ToolRouter {
         ]
         if has(webWords) || lower.contains("www.") || lower.contains("://") {
             recognized = true
-            include(["web_fetch"])
+            include(["web_search", "web_fetch"])
         }
 
         let browserWords: Set<String> = [
-            "browser", "button", "click", "dom", "form", "page", "rendered",
-            "site", "website",
+            "browser", "button", "click", "download", "dom", "form", "page",
+            "rendered", "save", "site", "website",
         ]
         if has(browserWords) {
             recognized = true
             include([
                 "browser_navigate", "browser_read", "browser_screenshot",
-                "browser_click", "browser_type", "browser_scroll", "browser_eval",
+                "browser_click", "browser_type", "browser_scroll", "browser_eval", "browser_download",
             ])
         }
 
@@ -1047,13 +1066,13 @@ enum ToolRouter {
 
     private static let knownToolNames: Set<String> = [
         "read_file", "write_file", "move_file", "list_directory", "search",
-        "find_files", "glob", "web_fetch", "background_process", "background_status",
+        "find_files", "glob", "save_document", "web_search", "web_fetch", "background_process", "background_status",
         "apply_patch", "run_command", "build_diagnostics", "create_macos_app",
         "create_ios_app", "macos_build_run", "apple_ship", "sim_list_devices",
         "sim_boot_device", "sim_launch_app", "sim_tap", "sim_swipe", "sim_type",
         "sim_describe", "sim_screenshot", "describe_image", "sim_build_run",
         "browser_read", "browser_screenshot", "browser_navigate", "browser_click",
-        "browser_type", "browser_scroll", "browser_eval", "computer_status", "computer_ui_tree",
+        "browser_type", "browser_scroll", "browser_eval", "browser_download", "computer_status", "computer_ui_tree",
         "computer_screenshot", "computer_click", "computer_type", "computer_key",
         "computer_scroll", "task", "memory_add", "memory_delete", "ask_user",
         "attempt_completion", "tailscale_status", "disk_space_status",
@@ -1085,7 +1104,7 @@ enum ToolRouter {
         "repo", "repository", "site", "source", "test", "tests", "website",
     ]
     private static let browserEvidenceWords: Set<String> = [
-        "browser", "page", "preview", "render", "rendered", "site", "website",
+        "browser", "download", "page", "preview", "render", "rendered", "site", "website",
     ]
 
     private static func tokens(in text: String) -> Set<String> {

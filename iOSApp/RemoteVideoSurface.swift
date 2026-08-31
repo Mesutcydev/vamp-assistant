@@ -42,7 +42,7 @@ final class RemoteVideoSurfaceBinder: ObservableObject {
             renderer.flush(removingDisplayedImage: false, completionHandler: nil)
         }
         guard let sample = Self.makeSampleBuffer(from: pixelBuffer) else { return }
-        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true) as? NSArray,
+        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true) as NSArray?,
            let dict = attachments.firstObject as? NSMutableDictionary {
             dict[kCMSampleAttachmentKey_DisplayImmediately] = kCFBooleanTrue
         }

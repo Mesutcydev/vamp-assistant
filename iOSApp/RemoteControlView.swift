@@ -1,9 +1,55 @@
+import Observation
 import SwiftUI
 import UIKit
 
 enum RemoteControlSourceMode {
     case display
     case application
+}
+
+enum RemoteViewportStability {
+    static func shouldAccept(
+        _ size: CGSize,
+        keyboardOverlayVisible: Bool,
+        keyboardInset: CGFloat
+    ) -> Bool {
+        size.width > 1
+            && size.height > 1
+            && !keyboardOverlayVisible
+            && keyboardInset <= 0
+    }
+}
+
+@MainActor
+@Observable
+private final class RemoteStreamViewState {
+    private(set) var geometry: RemoteMacControlGeometry?
+
+    func update(with frame: RemoteMacControlFrame) {
+        let next = frame.geometry
+        if geometry != next { geometry = next }
+    }
+
+    func reset() {
+        geometry = nil
+    }
+}
+
+private struct RemoteStreamGeometryReader<Content: View>: View {
+    let state: RemoteStreamViewState
+    let content: (RemoteMacControlGeometry?) -> Content
+
+    init(
+        state: RemoteStreamViewState,
+        @ViewBuilder content: @escaping (RemoteMacControlGeometry?) -> Content
+    ) {
+        self.state = state
+        self.content = content
+    }
+
+    var body: some View {
+        content(state.geometry)
+    }
 }
 
 private struct RemoteControlUnavailableState: View {
@@ -22,24 +68,10 @@ private struct RemoteControlUnavailableState: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack {
-                Image("WindowAtmosphere")
-                    .resizable()
-                    .scaledToFill()
-                    .saturation(0)
-                    .frame(width: proxy.size.width, height: proxy.size.height)
-                    .clipped()
-                    .overlay(appearance == .light
-                        ? Color.white.opacity(0.58)
-                        : Color.black.opacity(0.46))
-                    .overlay {
-                        LinearGradient(
-                            colors: appearance == .light
-                                ? [.white.opacity(0.18), .white.opacity(0.62)]
-                                : [.black.opacity(0.02), .black.opacity(0.40)],
-                            startPoint: .top,
-                            endPoint: .bottom)
-                    }
-                    .accessibilityHidden(true)
+                // ponytail: was a second copy of RemoteBackdrop with weaker dim
+                // values, so this screen's engraving read brighter and busier
+                // than every other screen. One backdrop, one look.
+                RemoteBackdrop()
 
                 VStack(spacing: 0) {
                 HStack {
@@ -133,18 +165,184 @@ private struct RemoteControlUnavailableState: View {
     }
 }
 
+private struct RemoteMacUnlockState: View {
+    @Environment(\.remoteAppearance) private var appearance
+    let message: String
+    let topInset: CGFloat
+    let bottomInset: CGFloat
+    let submit: (String) async throws -> Void
+    let dismiss: () -> Void
+
+    @State private var password = ""
+    @State private var isSubmitting = false
+    @State private var feedback: String?
+    @FocusState private var passwordIsFocused: Bool
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                RemoteBackdrop()
+
+                VStack(spacing: 0) {
+                    HStack {
+                        Button(action: dismiss) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 14, weight: .semibold))
+                                .frame(width: 44, height: 44)
+                                .background(.thinMaterial, in: Circle())
+                                .overlay(Circle().stroke(BeetTheme.line(appearance), lineWidth: 0.75))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Close remote control")
+                        Spacer()
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, max(topInset + 8, 58))
+
+                    Spacer(minLength: 20)
+
+                    VStack(spacing: 18) {
+                        ZStack {
+                            Circle()
+                                .fill(BeetTheme.surfaceStrong(appearance))
+                                .frame(width: 76, height: 76)
+                            Circle()
+                                .stroke(BeetTheme.line(appearance), lineWidth: 0.75)
+                                .frame(width: 76, height: 76)
+                            Image(systemName: "lock.open.fill")
+                                .font(.system(size: 28, weight: .medium))
+                                .foregroundStyle(BeetTheme.accentBright)
+                        }
+
+                        VStack(spacing: 8) {
+                            Text("SECURE REMOTE UNLOCK")
+                                .font(.caption2.weight(.bold))
+                                .tracking(1.1)
+                                .foregroundStyle(BeetTheme.secondaryText(appearance))
+                            Text("Mac is locked")
+                                .font(.title2.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text(message)
+                                .font(.subheadline)
+                                .foregroundStyle(BeetTheme.secondaryText(appearance))
+                                .multilineTextAlignment(.center)
+                                .lineSpacing(2)
+                                .frame(maxWidth: 330)
+                        }
+
+                        SecureField("Mac login password", text: $password)
+                            .textContentType(.password)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .submitLabel(.go)
+                            .privacySensitive()
+                            .focused($passwordIsFocused)
+                            .onSubmit(submitPassword)
+                            .disabled(isSubmitting)
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 48)
+                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(BeetTheme.line(appearance), lineWidth: 0.75)
+                            }
+
+                        Button(action: submitPassword) {
+                            HStack(spacing: 8) {
+                                if isSubmitting { ProgressView().controlSize(.small) }
+                                Text(isSubmitting ? "Unlocking…" : "Unlock Mac")
+                            }
+                            .font(.headline)
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Color(white: 0.28))
+                        .disabled(password.isEmpty || password.count > 256 || isSubmitting)
+
+                        if let feedback {
+                            Text(feedback)
+                                .font(.caption)
+                                .foregroundStyle(feedback.hasPrefix("Unlock request sent")
+                                    ? BeetTheme.secondaryText(appearance)
+                                    : Color.orange)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity)
+                        }
+
+                        Text("Available only through your encrypted Tailscale connection. The password is sent once, then cleared from this field.")
+                            .font(.caption2)
+                            .foregroundStyle(BeetTheme.secondaryText(appearance))
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: 310)
+                    }
+                    .frame(maxWidth: 360)
+                    .padding(24)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 26, style: .continuous)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [.white.opacity(0.22), .white.opacity(0.07)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing),
+                                lineWidth: 0.75)
+                    }
+                    .shadow(color: .black.opacity(0.4), radius: 28, y: 16)
+                    .padding(.horizontal, 20)
+
+                    Spacer(minLength: max(bottomInset, 16) + 20)
+                }
+                .frame(width: proxy.size.width, height: proxy.size.height)
+            }
+        }
+        .ignoresSafeArea()
+        .task {
+            try? await Task.sleep(for: .milliseconds(250))
+            passwordIsFocused = true
+        }
+        .onDisappear {
+            password = ""
+            feedback = nil
+        }
+    }
+
+    private func submitPassword() {
+        guard !password.isEmpty, password.count <= 256, !isSubmitting else { return }
+        let submittedPassword = password
+        password = ""
+        feedback = nil
+        isSubmitting = true
+
+        Task { @MainActor in
+            do {
+                try await submit(submittedPassword)
+                feedback = "Unlock request sent. Waiting for the Mac…"
+                try? await Task.sleep(for: .seconds(4))
+            } catch is CancellationError {
+                return
+            } catch {
+                feedback = error.localizedDescription
+            }
+            isSubmitting = false
+            if password.isEmpty { passwordIsFocused = true }
+        }
+    }
+}
+
 struct RemoteControlView: View {
     let store: RemoteStore
     let sourceMode: RemoteControlSourceMode
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var status: RemoteMacControlStatus?
-    @State private var frame: RemoteMacControlFrame?
+    @State private var streamState = RemoteStreamViewState()
     @State private var errorText: String?
     @State private var reconnectBanner: String?
     @State private var showKeyboard = false
     @State private var keyboardPad: CGFloat = 0
+    @State private var stableViewportSize: CGSize = .zero
     @State private var hideChrome = false
     @AppStorage("beet.remote.fillScreen") private var fillScreen = false
     @AppStorage("beet.remote.streamResolution") private var streamResolutionRaw = "1080p"
@@ -155,12 +353,12 @@ struct RemoteControlView: View {
     @State private var previewOffset: CGSize = .zero
     @State private var lastPreviewPinch: CGFloat = 1
     @State private var lastPreviewDrag: CGSize = .zero
-    @StateObject private var inputSender: RemoteInputSender
+    @State private var inputSender: RemoteInputSender
     @StateObject private var audioPlayer = RemoteAudioPlayer()
     @StateObject private var videoBinder = RemoteVideoSurfaceBinder()
     @StateObject private var streamRestart = RemoteStreamRestart()
     @StateObject private var markup = RemoteMarkupStore()
-    @ObservedObject private var diagnostics = RemoteControlDiagnostics.shared
+    private let diagnostics = RemoteControlDiagnostics.shared
     @State private var decoder = RemoteH264Decoder()
     @State private var audioTask: Task<Void, Never>?
     @State private var showTerminal = false
@@ -169,18 +367,25 @@ struct RemoteControlView: View {
     @State private var selectedDisplayID: Int?
     @State private var applications: [RemoteMacApplication] = []
     @State private var selectedWindowID: Int?
+    @State private var launchingApplicationID: String?
+    @State private var viewportAspect = 9.0 / 16.0
     @State private var showStats = true
     @State private var fpsText = "—"
     @State private var bitrateText = "—"
     @State private var latencyText = "—"
     @State private var screenLatencyText = "—"
-    @State private var lastFrameAt: Date?
-    @State private var lastFrameBytes = 0
     @State private var screenshotStatus = ""
     @State private var reconnectAttempt = 0
 
     private var streamGeneration: Int { streamRestart.generation }
-    private var isControlAvailable: Bool { store.isConnected && status?.ready != false }
+    /// Video only requires Screen Recording. Accessibility gates input, but it
+    /// must not prevent Vamp Stream from opening in view-only mode.
+    private var isControlAvailable: Bool {
+        guard store.isConnected else { return false }
+        guard let status else { return true }
+        return status.enabled && status.screenRecording && status.locked != true
+    }
+    private var isInputAvailable: Bool { status?.accessibility == true }
 
     private var streamResolution: RemoteStreamResolution { RemoteStreamResolution.resolve(streamResolutionRaw) }
     private var activeDisplayID: UInt32? {
@@ -199,13 +404,16 @@ struct RemoteControlView: View {
     init(store: RemoteStore, sourceMode: RemoteControlSourceMode = .display) {
         self.store = store
         self.sourceMode = sourceMode
-        _inputSender = StateObject(wrappedValue: RemoteInputSender(sendCommands: { commands in
+        _inputSender = State(initialValue: RemoteInputSender(sendCommands: { commands in
             _ = try await store.sendMacControlBatch(commands)
         }))
     }
 
     var body: some View {
         GeometryReader { proxy in
+            let streamViewportSize = stableViewportSize.isUsableViewport
+                ? stableViewportSize
+                : proxy.size
             ZStack {
                 Color.black.ignoresSafeArea()
                 if !store.isConnected {
@@ -220,10 +428,35 @@ struct RemoteControlView: View {
                         primaryTitle: "Reconnect",
                         primaryAction: { Task { await store.connectSaved() } },
                         dismiss: { dismiss() })
-                } else if let status, !status.ready {
+                } else if let status, status.locked == true {
+                    if status.shouldOfferRemoteUnlock {
+                        RemoteMacUnlockState(
+                            message: status.remoteUnlockMessage
+                                ?? "Enter your Mac login password to unlock it remotely.",
+                            topInset: proxy.safeAreaInsets.top,
+                            bottomInset: proxy.safeAreaInsets.bottom,
+                            submit: { password in
+                                try await store.unlockMac(password: password)
+                            },
+                            dismiss: { dismiss() })
+                    } else {
+                        RemoteControlUnavailableState(
+                            title: "Mac is locked",
+                            message: status.remoteUnlockMessage
+                                ?? "Unlock the Mac to resume Vamp Stream and Remote Control. The connection will retry automatically.",
+                            status: "SECURE LOCK SCREEN",
+                            symbol: "lock.fill",
+                            isWorking: false,
+                            topInset: proxy.safeAreaInsets.top,
+                            bottomInset: proxy.safeAreaInsets.bottom,
+                            primaryTitle: nil,
+                            primaryAction: nil,
+                            dismiss: { dismiss() })
+                    }
+                } else if let status, !status.enabled || !status.screenRecording {
                     RemoteControlUnavailableState(
-                        title: "Mac Control is off",
-                        message: status.message ?? "Turn on Mac Control in Vamp Assistant on your Mac, then allow Screen Recording and Accessibility.",
+                        title: sourceMode == .application ? "Vamp Stream is off" : "Mac Control is off",
+                        message: status.message ?? "Turn on Mac Control in Vamp Assistant on your Mac, then allow Screen Recording.",
                         status: "ACTION REQUIRED ON MAC",
                         symbol: "display.trianglebadge.exclamationmark",
                         isWorking: false,
@@ -235,13 +468,22 @@ struct RemoteControlView: View {
                 } else {
                     // Always mount the video layer once Control is reachable so decoded
                     // frames are not dropped while "Connecting…" is on screen.
-                    ZStack {
-                        inputSurface(frame: frame, size: proxy.size)
-                        if !videoBinder.hasFrame {
-                            ProgressView(frame == nil ? "Connecting to Mac…" : "Starting video…")
-                                .foregroundStyle(.white.opacity(0.7))
+                    RemoteStreamGeometryReader(state: streamState) { geometry in
+                        ZStack {
+                            inputSurface(geometry: geometry, size: streamViewportSize)
+                            if !videoBinder.hasFrame {
+                                ProgressView(geometry == nil ? "Connecting to Mac…" : "Starting video…")
+                                    .foregroundStyle(.white.opacity(0.7))
+                            }
                         }
                     }
+                    // The software keyboard may reduce GeometryReader's proposal. Keep
+                    // the stream and gesture coordinates at the last keyboard-free size
+                    // and pin their origin so the picture neither scales nor shifts.
+                    .frame(width: streamViewportSize.width, height: streamViewportSize.height)
+                    .position(
+                        x: streamViewportSize.width / 2,
+                        y: streamViewportSize.height / 2)
                 }
 
                 if isControlAvailable && markup.isVisible {
@@ -263,6 +505,20 @@ struct RemoteControlView: View {
                             .padding(.top, max(proxy.safeAreaInsets.top, 12) + 8)
                         Spacer()
                     }
+                }
+
+                if isControlAvailable && !isInputAvailable {
+                    VStack {
+                        Text("View only · Grant Accessibility on the Mac to control it")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(.black.opacity(0.72), in: Capsule())
+                            .padding(.top, max(proxy.safeAreaInsets.top, 12) + (reconnectBanner == nil ? 8 : 44))
+                        Spacer()
+                    }
+                    .allowsHitTesting(false)
                 }
 
                 if isControlAvailable && dragLocked {
@@ -310,8 +566,16 @@ struct RemoteControlView: View {
                     classicBottomChrome(bottomInset: max(proxy.safeAreaInsets.bottom, 10))
                 }
             }
+            .onAppear { updateStableViewport(proxy.size) }
+            .onChange(of: proxy.size) { _, size in updateStableViewport(size) }
         }
         .environment(\.colorScheme, .dark)
+        // The screen forces dark, so the theme has to follow it. Without this,
+        // light mode fed light-mode grays to a dark surface and the status and
+        // hint labels rendered dark-on-dark. (preferredColorScheme would also
+        // fix the status bar, but the app root's own preferredColorScheme wins
+        // over it and flips the card back to light — don't swap it in.)
+        .environment(\.remoteAppearance, .dark)
         .ignoresSafeArea()
         .statusBarHidden(hideChrome)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: showKeyboard)
@@ -323,24 +587,36 @@ struct RemoteControlView: View {
         }
         .task {
             configureDecoder()
-            startAudio()
             await run()
         }
         .onChange(of: streamResolution) { _, _ in
             decoder.reset()
             videoBinder.reset()
+            streamState.reset()
             streamRestart.bump()
         }
         .onChange(of: selectedDisplayID) { _, _ in
             decoder.reset()
             videoBinder.reset()
+            streamState.reset()
             streamRestart.bump()
         }
         .onChange(of: selectedWindowID) { _, _ in
             decoder.reset()
             videoBinder.reset()
+            streamState.reset()
             resetZoom()
             streamRestart.bump()
+        }
+        .onChange(of: inputSender.lastError) { _, message in
+            if let message, !message.isEmpty { errorText = message }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active, !audioPlayer.isMuted {
+                startAudio()
+            } else {
+                stopAudio()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.keyboardWillChangeFrameNotification)) { note in
             guard let end = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
@@ -350,27 +626,26 @@ struct RemoteControlView: View {
             keyboardPad = 0
         }
         .onDisappear {
-            audioTask?.cancel()
-            audioTask = nil
-            audioPlayer.stop()
+            stopAudio()
             decoder.reset()
             videoBinder.reset()
+            streamState.reset()
             inputSender.stop(flushing: dragLocked ? .up(button: "left") : nil)
             dragLocked = false
         }
     }
 
     @ViewBuilder
-    private func inputSurface(frame: RemoteMacControlFrame?, size: CGSize) -> some View {
-        gestureScreen(frame: frame, size: size)
+    private func inputSurface(geometry: RemoteMacControlGeometry?, size: CGSize) -> some View {
+        gestureScreen(geometry: geometry, size: size)
     }
 
     @ViewBuilder
-    private func gestureScreen(frame: RemoteMacControlFrame?, size: CGSize) -> some View {
+    private func gestureScreen(geometry: RemoteMacControlGeometry?, size: CGSize) -> some View {
         GeometryReader { geo in
             let imageSize = CGSize(
-                width: max(frame?.imageWidth ?? 1, 1),
-                height: max(frame?.imageHeight ?? 1, 1))
+                width: max(geometry?.imageWidth ?? 1, 1),
+                height: max(geometry?.imageHeight ?? 1, 1))
             // Vamp Gestures: video is full-bleed; AVLayer gravity letterboxes inside the view.
             // Mapping uses the same content rect the gravity produces.
             let placed = RemoteDisplayMapping.contentRect(
@@ -381,36 +656,36 @@ struct RemoteControlView: View {
                 .scaleEffect(zoom, anchor: .center)
                 .offset(offset)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .animation(.interactiveSpring(response: 0.15, dampingFraction: 0.9), value: zoom)
-                .animation(.interactiveSpring(response: 0.15, dampingFraction: 0.9), value: offset)
+                .animation(reduceMotion ? nil : .interactiveSpring(response: 0.15, dampingFraction: 0.9), value: zoom)
+                .animation(reduceMotion ? nil : .interactiveSpring(response: 0.15, dampingFraction: 0.9), value: offset)
 
-            if let frame {
+            if let geometry {
             RemoteScreenGestureSurface(
                 zoom: zoom,
                 offset: offset,
                 viewSize: geo.size,
                 onTap: { point in
-                    guard let mappedPoint = mapped(point, placed: placed, frame: frame) else { return }
+                    guard let mappedPoint = mapped(point, placed: placed, geometry: geometry) else { return }
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     enqueue(.click(x: mappedPoint.x, y: mappedPoint.y, button: "left", count: 1))
                 },
                 onDoubleTap: { point in
-                    guard let mappedPoint = mapped(point, placed: placed, frame: frame) else { return }
+                    guard let mappedPoint = mapped(point, placed: placed, geometry: geometry) else { return }
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     enqueue(.click(x: mappedPoint.x, y: mappedPoint.y, button: "left", count: 2))
                 },
                 onRightClick: { point in
-                    guard let mappedPoint = mapped(point, placed: placed, frame: frame) else { return }
+                    guard let mappedPoint = mapped(point, placed: placed, geometry: geometry) else { return }
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     enqueue(.click(x: mappedPoint.x, y: mappedPoint.y, button: "right", count: 1))
                 },
                 onMiddleClick: { point in
-                    guard let mappedPoint = mapped(point, placed: placed, frame: frame) else { return }
+                    guard let mappedPoint = mapped(point, placed: placed, geometry: geometry) else { return }
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     enqueue(.click(x: mappedPoint.x, y: mappedPoint.y, button: "middle", count: 1))
                 },
                 onPointerMove: { point in
-                    guard let mappedPoint = mapped(point, placed: placed, frame: frame, clampToContent: true) else { return }
+                    guard let mappedPoint = mapped(point, placed: placed, geometry: geometry, clampToContent: true) else { return }
                     enqueue(.move(x: mappedPoint.x, y: mappedPoint.y))
                 },
                 onPointerEnded: {
@@ -423,8 +698,8 @@ struct RemoteControlView: View {
                         dy: dy,
                         contentWidth: Double(placed.width),
                         contentHeight: Double(placed.height),
-                        displayWidth: frame.displayWidth,
-                        displayHeight: frame.displayHeight)
+                        displayWidth: geometry.displayWidth,
+                        displayHeight: geometry.displayHeight)
                     enqueue(.scroll(x: nil, y: nil, dx: scaled.dx, dy: scaled.dy))
                 },
                 onViewportPan: { delta in
@@ -462,7 +737,7 @@ struct RemoteControlView: View {
                     }
                 },
                 onLongPress: { point in
-                    if let mappedPoint = mapped(point, placed: placed, frame: frame, clampToContent: true) {
+                    if let mappedPoint = mapped(point, placed: placed, geometry: geometry, clampToContent: true) {
                         enqueue(.move(x: mappedPoint.x, y: mappedPoint.y))
                     }
                     toggleDragLock()
@@ -473,13 +748,14 @@ struct RemoteControlView: View {
                         dy: dy,
                         contentWidth: Double(placed.width),
                         contentHeight: Double(placed.height),
-                        displayWidth: frame.displayWidth,
-                        displayHeight: frame.displayHeight)
+                        displayWidth: geometry.displayWidth,
+                        displayHeight: geometry.displayHeight)
                     let accel = RemoteDisplayMapping.accelerated(dx: scaled.dx, dy: scaled.dy)
                     enqueue(.relative(dx: accel.dx, dy: accel.dy))
                 }
             )
             .frame(width: geo.size.width, height: geo.size.height)
+            .allowsHitTesting(isInputAvailable)
             }
         }
         .clipped()
@@ -580,6 +856,11 @@ struct RemoteControlView: View {
                 active: audioPlayer.isActive && !audioPlayer.isMuted
             ) {
                 audioPlayer.isMuted.toggle()
+                if audioPlayer.isMuted {
+                    stopAudio()
+                } else {
+                    startAudio()
+                }
             }
             if sourceMode == .display, let displays = status?.displays, displays.count > 1 {
                 classicIconButton(systemName: "rectangle.on.rectangle.angled") {
@@ -612,14 +893,20 @@ struct RemoteControlView: View {
                     } else {
                         ForEach(applications) { application in
                             Button {
-                                selectedWindowID = application.windowID
+                                Task { await openApplication(application) }
                             } label: {
                                 Label {
                                     Text("\(application.name) · \(application.detail)")
                                 } icon: {
-                                    Image(systemName: selectedWindowID == application.windowID ? "checkmark" : "macwindow")
+                                    if launchingApplicationID == application.id {
+                                        ProgressView()
+                                    } else {
+                                        Image(systemName: selectedWindowID != nil && selectedWindowID == application.windowID
+                                              ? "checkmark" : application.isStreamable ? "macwindow" : "play.fill")
+                                    }
                                 }
                             }
+                            .disabled(launchingApplicationID != nil)
                         }
                     }
                     Divider()
@@ -734,6 +1021,7 @@ struct RemoteControlView: View {
                     .frame(width: 32, height: 32)
                     .background(Color.black.opacity(0.22), in: Capsule())
                     .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.7))
+                    .accessibilityLabel("Show the controls")
             }
             .buttonStyle(.plain)
         }
@@ -742,6 +1030,10 @@ struct RemoteControlView: View {
     }
 
     private func startAudio() {
+        guard !audioPlayer.isMuted, scenePhase == .active else {
+            stopAudio()
+            return
+        }
         audioTask?.cancel()
         audioPlayer.start()
         audioTask = Task { @MainActor in
@@ -768,6 +1060,12 @@ struct RemoteControlView: View {
         }
     }
 
+    private func stopAudio() {
+        audioTask?.cancel()
+        audioTask = nil
+        audioPlayer.stop()
+    }
+
     private func configureDecoder() {
         let binder = videoBinder
         let diag = diagnostics
@@ -791,32 +1089,40 @@ struct RemoteControlView: View {
     private func run() async {
         diagnostics.resetSession()
         diagnostics.setPhase("status")
+        var previousFrameAt: Date?
+        var lastStatsAt = Date.distantPast
+        var framesSinceStats = 0
+        var bytesSinceStats = 0
         while !Task.isCancelled {
             let generation = streamGeneration
             do {
                 diagnostics.breadcrumb("fetch /api/control")
                 status = try await store.macControlStatus()
-                guard status?.ready == true else {
-                    reconnectBanner = "Waiting for Mac Control…"
+                guard let status, status.enabled, status.screenRecording, status.locked != true else {
+                    stopAudio()
+                    reconnectBanner = status?.locked == true ? "Mac locked · waiting for unlock…" : "Waiting for Mac Control…"
                     diagnostics.setPhase("mac control off")
                     diagnostics.breadcrumb(status?.message ?? "not ready")
                     try? await Task.sleep(for: .milliseconds(750))
                     continue
                 }
+                if audioTask == nil, !audioPlayer.isMuted { startAudio() }
                 if sourceMode == .application {
                     await refreshApplications()
                     if selectedWindowID == nil {
-                        selectedWindowID = applications.first?.windowID
+                        selectedWindowID = applications.first(where: \.isStreamable)?.windowID
                     }
                     guard selectedWindowID != nil else {
-                        reconnectBanner = "Open an application on your Mac to stream it."
+                        reconnectBanner = applications.isEmpty
+                            ? "No applications are available to stream."
+                            : "Choose an application below to launch its stream."
                         diagnostics.setPhase("waiting for application")
                         try? await Task.sleep(for: .seconds(1))
                         continue
                     }
                 } else if selectedDisplayID == nil {
                     selectedWindowID = nil
-                    selectedDisplayID = status?.displays?.first?.id
+                    selectedDisplayID = status.displays?.first?.id
                 }
                 reconnectBanner = nil
                 reconnectAttempt = 0
@@ -836,23 +1142,29 @@ struct RemoteControlView: View {
                         break
                     }
                     let now = Date()
-                    if let lastFrameAt {
-                        let dt = max(now.timeIntervalSince(lastFrameAt), 0.001)
-                        fpsText = String(format: "%.0f", min(1 / dt, 99))
-                        let bits = Double(next.byteCount) * 8.0 / dt
-                        bitrateText = String(format: "%.0f", bits / 1000.0)
-                    }
-                    if let lastFrameAt, now.timeIntervalSince(lastFrameAt) > 3 {
+                    if let previousFrameAt, now.timeIntervalSince(previousFrameAt) > 3 {
                         reconnectBanner = "Stream stalled…"
-                    } else {
+                    } else if reconnectBanner != nil {
                         reconnectBanner = nil
                     }
-                    lastFrameAt = now
-                    lastFrameBytes = next.byteCount
-                    screenLatencyText = "live"
-                    latencyText = inputSender.lastRoundTripMilliseconds.map { "\($0) ms" } ?? "—"
-                    frame = next
-                    errorText = nil
+                    previousFrameAt = now
+                    framesSinceStats += 1
+                    bytesSinceStats += next.byteCount
+                    if lastStatsAt == .distantPast { lastStatsAt = now }
+                    let statsInterval = now.timeIntervalSince(lastStatsAt)
+                    if statsInterval >= 0.25 {
+                        fpsText = String(format: "%.0f", min(Double(framesSinceStats) / statsInterval, 99))
+                        bitrateText = String(
+                            format: "%.0f",
+                            Double(bytesSinceStats) * 8.0 / statsInterval / 1000.0)
+                        screenLatencyText = "live"
+                        latencyText = inputSender.lastRoundTripMilliseconds.map { "\($0) ms" } ?? "—"
+                        lastStatsAt = now
+                        framesSinceStats = 0
+                        bytesSinceStats = 0
+                    }
+                    streamState.update(with: next)
+                    if errorText != nil { errorText = nil }
                     if case .h264(let data, let keyframe, let parameterSets) = next.payload {
                         diagnostics.noteFrame(
                             bytes: data.count,
@@ -865,6 +1177,9 @@ struct RemoteControlView: View {
                 if generation == streamGeneration {
                     diagnostics.breadcrumb("stream ended")
                     diagnostics.setPhase("stream ended")
+                    reconnectAttempt += 1
+                    reconnectBanner = "Stream ended · reconnecting…"
+                    try? await Task.sleep(for: .milliseconds(500))
                 }
             } catch is CancellationError {
                 return
@@ -882,11 +1197,11 @@ struct RemoteControlView: View {
                         resolution: streamResolution)
                     screenLatencyText = "\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000)) ms"
                     latencyText = inputSender.lastRoundTripMilliseconds.map { "\($0) ms" } ?? "—"
-                    if let lastFrameAt {
-                        fpsText = String(format: "%.0f", min(1 / max(Date().timeIntervalSince(lastFrameAt), 0.001), 99))
+                    if let previousFrameAt {
+                        fpsText = String(format: "%.0f", min(1 / max(Date().timeIntervalSince(previousFrameAt), 0.001), 99))
                     }
-                    lastFrameAt = Date()
-                    frame = still
+                    previousFrameAt = Date()
+                    streamState.update(with: still)
                     diagnostics.breadcrumb("still JPEG ok \(still.imageWidth)x\(still.imageHeight)")
                 } catch {
                     diagnostics.noteError("still: \(error.localizedDescription)")
@@ -904,7 +1219,7 @@ struct RemoteControlView: View {
             applications = next
             if let selectedWindowID,
                !next.contains(where: { $0.windowID == selectedWindowID }) {
-                self.selectedWindowID = next.first?.windowID
+                self.selectedWindowID = next.first(where: \.isStreamable)?.windowID
                 reconnectBanner = next.isEmpty
                     ? "Open an application on your Mac to stream it."
                     : "The selected app closed. Switched to another app."
@@ -915,6 +1230,56 @@ struct RemoteControlView: View {
         } catch {
             diagnostics.noteError("apps: \(error.localizedDescription)")
         }
+    }
+
+    @MainActor
+    private func openApplication(_ application: RemoteMacApplication) async {
+        guard let bundleIdentifier = application.bundleIdentifier, !bundleIdentifier.isEmpty else {
+            if let windowID = application.windowID { selectedWindowID = windowID }
+            return
+        }
+        launchingApplicationID = application.id
+        reconnectBanner = application.isRunning == true ? "Opening application window…" : "Launching \(application.name)…"
+        defer { launchingApplicationID = nil }
+        do {
+            let launched = try await store.launchMacControlApplication(
+                bundleIdentifier: bundleIdentifier,
+                viewportAspect: viewportAspect)
+            replaceApplication(launched)
+            guard let windowID = launched.windowID else {
+                throw RemoteClientError.server("The application did not open a streamable window.")
+            }
+            selectedWindowID = windowID
+            reconnectBanner = nil
+            errorText = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            reconnectBanner = nil
+            errorText = error.localizedDescription
+            diagnostics.noteError("launch: \(error.localizedDescription)")
+        }
+    }
+
+    private func replaceApplication(_ application: RemoteMacApplication) {
+        if let index = applications.firstIndex(where: { $0.id == application.id }) {
+            applications[index] = application
+        } else {
+            applications.append(application)
+        }
+    }
+
+    private func updateStableViewport(_ size: CGSize) {
+        // `showKeyboard` flips before UIKit publishes the keyboard frame. If
+        // we only inspect keyboardPad, that brief ordering gap stores the
+        // shrunken proposal and makes the stream jump smaller, then back.
+        guard RemoteViewportStability.shouldAccept(
+            size,
+            keyboardOverlayVisible: showKeyboard,
+            keyboardInset: keyboardPad
+        ) else { return }
+        stableViewportSize = size
+        viewportAspect = min(max(Double(size.width / size.height), 0.25), 4)
     }
 
     private func enqueue(_ command: RemoteInputSender.Command) {
@@ -986,16 +1351,16 @@ struct RemoteControlView: View {
     private func mapped(
         _ location: CGPoint,
         placed: CGRect,
-        frame: RemoteMacControlFrame,
+        geometry: RemoteMacControlGeometry,
         clampToContent: Bool = false
     ) -> CGPoint? {
         RemoteDisplayMapping.mapPoint(
             location,
             contentRect: placed,
-            displayX: frame.displayX,
-            displayY: frame.displayY,
-            displayWidth: frame.displayWidth,
-            displayHeight: frame.displayHeight,
+            displayX: geometry.displayX,
+            displayY: geometry.displayY,
+            displayWidth: geometry.displayWidth,
+            displayHeight: geometry.displayHeight,
             clampToContent: clampToContent)
     }
 
@@ -1026,6 +1391,12 @@ struct RemoteControlView: View {
         previewOffset = .zero
         lastPreviewPinch = 1
         lastPreviewDrag = .zero
+    }
+}
+
+private extension CGSize {
+    var isUsableViewport: Bool {
+        width.isFinite && height.isFinite && width > 0 && height > 0
     }
 }
 
@@ -1114,6 +1485,8 @@ private struct RemoteMarkupOverlay: View {
                             .padding(10)
                             .background(store.tool == tool ? Color(white: 0.46) : Color.black.opacity(0.55), in: Circle())
                     }
+                    .accessibilityLabel(tool == .draw ? "Draw" : tool == .highlight ? "Highlight" : "Erase")
+                    .accessibilityAddTraits(store.tool == tool ? .isSelected : [])
                 }
                 Button("Clear") { store.clear() }
                     .font(.caption.weight(.semibold))

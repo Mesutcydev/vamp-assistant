@@ -123,7 +123,7 @@ final class AppState: ObservableObject {
             thermal: thermal,
             codexAccount: codexAccount)
         remoteSessionHost = RemoteSessionHost(engine: engine, sessions: sessions)
-        let isTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        let isTestHost = Self.isTestHost
         if !isTestHost {
             taskQueue.recoverInterrupted()
         }
@@ -164,6 +164,12 @@ final class AppState: ObservableObject {
         }
         remoteSessionHost.macControlAllowedHandler = {
             SettingsStore.shared.remoteMacControlEnabled
+        }
+        remoteSessionHost.remoteMacUnlockAllowedHandler = {
+            SettingsStore.shared.remoteMacUnlockEnabled
+        }
+        remoteSessionHost.remoteMacUnlockHandler = { password in
+            try await RemoteMacControl.unlockLoginWindow(password: password)
         }
         remoteSessionHost.botRunsHandler = { [weak self] in self?.botRuns.runs ?? [] }
         remoteSessionHost.startBotRunHandler = { [weak self] profileID, modelID, prompt in
@@ -972,7 +978,7 @@ final class AppState: ObservableObject {
     /// delete stored state.
     private func restoreLaunchState() {
         let preferences = preferences.current
-        let isTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        let isTestHost = Self.isTestHost
 
         // Vamp Assistant always cold-launches into a fresh, project-free chat.
         // chat. The validated bookmark, last session id, and encrypted history
@@ -990,7 +996,7 @@ final class AppState: ObservableObject {
         // complete, chat-role, MemoryAdvisor admission) and no-ops cleanly
         // when any of it fails. Never under the test host: an auto-load
         // would page real weights mid-suite.
-        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil,
+        if !Self.isTestHost,
            let modelID = preferences.lastModelID,
            let catalog = ModelCatalog.model(id: modelID) {
             Task { await self.activate(model: catalog) }
@@ -1002,7 +1008,7 @@ final class AppState: ObservableObject {
         // real Application Support is live there, and an auto-resumed
         // download would hit the network mid-suite and starve fixture runs.
         if preferences.autoResumeDownloads,
-           ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
+           !Self.isTestHost {
             for modelID in downloadManager.resumableModelIDs {
                 guard let model = ModelCatalog.model(id: modelID) else { continue }
                 startDownload(of: model)
@@ -1296,7 +1302,23 @@ final class AppState: ObservableObject {
     // MARK: Local API server (v0.3)
 
     /// Reconciles both network surfaces with their independent settings.
+    /// True inside the XCTest host. Binding a loopback port and starting a
+    /// LAN listener are process-wide side effects, so a test that builds an
+    /// `AppState` must not do either — nor inherit whether the developer
+    /// happens to have them switched on.
+    static var isTestHost: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || ProcessInfo.processInfo.arguments.contains("--ui-smoke")
+    }
+
+    /// Reconciles both listeners with their Settings toggles.
+    ///
+    /// Skipped entirely under test: nothing ever tears these `AppState`s down,
+    /// so each one used to leave a bound socket and a thread parked in
+    /// `accept()` behind for the rest of the run. Ten of those starved the
+    /// main actor badly enough that the next test needing it never finished.
     private func syncServers() {
+        guard !Self.isTestHost else { return }
         syncAPIServer()
         syncRemoteSessionHost()
     }
@@ -1305,6 +1327,7 @@ final class AppState: ObservableObject {
     /// while the app stays open. Reconcile the listener periodically so a
     /// previous "not connected" state heals without toggling Settings.
     private func startRemoteNetworkMonitoring() {
+        guard !Self.isTestHost else { return }
         remoteNetworkMonitorTask?.cancel()
         remoteNetworkMonitorTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {

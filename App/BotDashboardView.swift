@@ -25,52 +25,94 @@ struct BotDashboardView: View {
     @State private var workflowPrompt = ""
     @State private var workflowModelID = ""
     @State private var workflowMessage: String?
+    @State private var selectedSpecialistID = BotSpecialist.all[0].id
 
+    /// Master-detail rather than a grid of four self-contained cards.
+    ///
+    /// Every specialist previously carried its own composer, steering field, status and evidence
+    /// inline, which left nowhere to put a console, a workspace browser, or run history without
+    /// making each card taller than the window. A rail of compact rows plus one detail pane gives
+    /// the selected bot the whole right-hand side.
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                header
-                workflowComposer
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 280, maximum: 420), spacing: 16)],
-                    alignment: .leading,
-                    spacing: 16
-                ) {
-                    ForEach(BotSpecialist.all) { specialist in
-                        BotSpecialistCard(
-                            specialist: specialist,
-                            computer: appState.botComputers.computers.first { $0.profileID == specialist.id },
-                            run: appState.botRuns.run(for: specialist.id),
-                            events: appState.botRuns.run(for: specialist.id)
-                                .map { appState.botRuns.events(for: $0.id) } ?? [],
-                            models: appState.botModelOptions,
-                            onOpenModels: {
-                                NotificationCenter.default.post(name: .openModelManager, object: nil)
-                            },
-                            onStart: { model, prompt in
-                                appState.botRuns.start(
-                                    profileID: specialist.id,
-                                    profileName: specialist.name,
-                                    modelID: model,
-                                    prompt: prompt)
-                            },
-                            onOpen: open,
-                            onSteer: { appState.botRuns.steer(runID: $0, message: $1) },
-                            onApprove: { appState.botRuns.approve(runID: $0, approved: $1) },
-                            onAnswer: { appState.botRuns.answer(runID: $0, text: $1) },
-                            onResume: { appState.botRuns.resume(runID: $0) },
-                            onStop: { appState.botRuns.stop(runID: $0) })
-                    }
-                }
-            }
-            .frame(maxWidth: 1_100, alignment: .leading)
-            .frame(maxWidth: .infinity)
-            .padding(24)
+        HStack(spacing: 0) {
+            rail
+            Divider()
+            detail
         }
         .background { AtmosphereBackground(intensity: .conversation) }
         .task { appState.botComputers.reload() }
         .onAppear { selectWorkflowModel() }
         .onChange(of: appState.botModelOptions.map(\.id)) { _, _ in selectWorkflowModel() }
+    }
+
+    private var selectedSpecialist: BotSpecialist {
+        BotSpecialist.all.first { $0.id == selectedSpecialistID } ?? BotSpecialist.all[0]
+    }
+
+    private var rail: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                header
+                workflowComposer
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Specialists")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(BotSpecialist.all) { specialist in
+                        BotRailRow(
+                            specialist: specialist,
+                            computer: appState.botComputers.computers.first { $0.profileID == specialist.id },
+                            run: appState.botRuns.run(for: specialist.id),
+                            isSelected: specialist.id == selectedSpecialistID,
+                            onSelect: { selectedSpecialistID = specialist.id })
+                    }
+                }
+            }
+            .padding(20)
+        }
+        .frame(width: 320)
+    }
+
+    private var detail: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                detailCard(for: selectedSpecialist)
+                BotConsolePanel(
+                    computer: appState.botComputers.computers.first { $0.profileID == selectedSpecialistID },
+                    run: appState.botRuns.run(for: selectedSpecialistID),
+                    events: appState.botRuns.run(for: selectedSpecialistID)
+                        .map { appState.botRuns.events(for: $0.id) } ?? [])
+            }
+            .frame(maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(24)
+        }
+    }
+
+    private func detailCard(for specialist: BotSpecialist) -> some View {
+        BotSpecialistCard(
+                specialist: specialist,
+                computer: appState.botComputers.computers.first { $0.profileID == specialist.id },
+                run: appState.botRuns.run(for: specialist.id),
+                events: appState.botRuns.run(for: specialist.id)
+                    .map { appState.botRuns.events(for: $0.id) } ?? [],
+                models: appState.botModelOptions,
+                onOpenModels: {
+                    NotificationCenter.default.post(name: .openModelManager, object: nil)
+                },
+                onStart: { model, prompt in
+                    appState.botRuns.start(
+                        profileID: specialist.id,
+                        profileName: specialist.name,
+                        modelID: model,
+                        prompt: prompt)
+                },
+                onOpen: open,
+                onSteer: { appState.botRuns.steer(runID: $0, message: $1) },
+                onApprove: { appState.botRuns.approve(runID: $0, approved: $1) },
+                onAnswer: { appState.botRuns.answer(runID: $0, text: $1) },
+            onResume: { appState.botRuns.resume(runID: $0) },
+            onStop: { appState.botRuns.stop(runID: $0) })
     }
 
     private var workflowComposer: some View {
@@ -440,6 +482,62 @@ private struct BotSpecialistCard: View {
     private func selectAvailableModel() {
         if !models.contains(where: { $0.id == selectedModelID }) {
             selectedModelID = models.first?.id ?? ""
+        }
+    }
+}
+
+/// Compact specialist row for the rail: identity, computer state, and run state at a glance.
+private struct BotRailRow: View {
+    let specialist: BotSpecialist
+    let computer: BotComputerRecord?
+    let run: BotRunRecord?
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 10) {
+                Image(specialist.image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 28, height: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(specialist.name)
+                        .font(.subheadline.weight(.semibold))
+                    Text(statusText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 7, height: 7)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isSelected ? AnyShapeStyle(.selection) : AnyShapeStyle(.clear)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var statusText: String {
+        if let run, !run.state.isTerminal { return run.phase }
+        if let computer { return computer.backend.title + " · " + computer.state.rawValue }
+        return "No computer prepared"
+    }
+
+    private var statusColor: Color {
+        guard let run else { return computer?.state == .running ? .green : .secondary }
+        switch run.state {
+        case .running: return .green
+        case .needsApproval, .needsInput: return .orange
+        case .failed: return .red
+        case .completed: return .blue
+        default: return .secondary
         }
     }
 }

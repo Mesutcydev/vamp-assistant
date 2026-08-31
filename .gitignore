@@ -7,6 +7,8 @@
 .derived-*/
 .derived-install/
 .derived-xcode27/
+.test-derived/
+.*-test-derived/
 .packaging-beetcode-remote-ios/
 DerivedData/
 build/

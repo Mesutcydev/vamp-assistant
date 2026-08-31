@@ -34,12 +34,14 @@ private struct BrowserPanelChrome: View {
                     Image(systemName: "chevron.left")
                 }
                 .help("Back")
+                .accessibilityLabel("Back")
                 .disabled(!controller.webView.canGoBack)
 
                 Button { controller.forward() } label: {
                     Image(systemName: "chevron.right")
                 }
                 .help("Forward")
+                .accessibilityLabel("Forward")
                 .disabled(!controller.webView.canGoForward)
 
                 Button {
@@ -53,6 +55,7 @@ private struct BrowserPanelChrome: View {
                     }
                 }
                 .help(controller.isLoading ? "Stop" : "Reload")
+                .accessibilityLabel(controller.isLoading ? "Stop loading" : "Reload page")
 
                 Menu {
                     Button("Vamp Assistant", systemImage: "sparkles") {
@@ -105,6 +108,7 @@ private struct BrowserPanelChrome: View {
                     Image(systemName: "safari")
                 }
                 .help("Open in Safari")
+                .accessibilityLabel("Open in Safari")
                 .disabled((controller.currentURL ?? controller.webView.url) == nil)
 
                 PanelCloseButton(action: onClose)

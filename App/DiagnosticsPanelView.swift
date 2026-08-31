@@ -46,11 +46,13 @@ struct DiagnosticsPanelView: View {
             }
             .controlSize(.small)
             .help("Clear all breadcrumbs")
+            .accessibilityLabel("Clear all breadcrumbs")
             Button { exportLog() } label: {
                 Image(systemName: "square.and.arrow.up")
             }
             .controlSize(.small)
             .help("Export diagnostics log for a bug report")
+            .accessibilityLabel("Export diagnostics log")
             if let onClose {
                 PanelCloseButton(action: onClose)
             }

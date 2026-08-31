@@ -5,6 +5,16 @@ import XCTest
 @MainActor
 final class RemoteSessionTests: XCTestCase {
 
+    func testSecureLockStateIsDetectedWithoutTreatingMissingMetadataAsLocked() {
+        XCTAssertTrue(ComputerPermission.sessionIsLocked([
+            "CGSSessionScreenIsLocked": true,
+        ]))
+        XCTAssertFalse(ComputerPermission.sessionIsLocked([
+            "CGSSessionScreenIsLocked": false,
+        ]))
+        XCTAssertFalse(ComputerPermission.sessionIsLocked(nil))
+    }
+
     func testPortraitViewportResizeFitsEntireMacDisplay() {
         let frame = RemoteControlApplicationRegistry.targetWindowFrame(
             current: CGRect(x: 1_100, y: 180, width: 1_280, height: 800),
@@ -45,6 +55,33 @@ final class RemoteSessionTests: XCTestCase {
         XCTAssertFalse(RemoteNetworkEndpointDiscovery.isPrivateIPv4("172.15.10.4"))
         XCTAssertFalse(RemoteNetworkEndpointDiscovery.isPrivateIPv4("8.8.8.8"))
         XCTAssertFalse(RemoteNetworkEndpointDiscovery.isPrivateIPv4("192.168.1.999"))
+    }
+
+    func testRemoteUnlockRequiresTailscalePeer() {
+        XCTAssertTrue(RemoteSessionHost.isSecureRemoteUnlockPeer("100.90.4.3"))
+        XCTAssertFalse(RemoteSessionHost.isSecureRemoteUnlockPeer("192.168.1.44"))
+        XCTAssertFalse(RemoteSessionHost.isSecureRemoteUnlockPeer("8.8.8.8"))
+        XCTAssertFalse(RemoteSessionHost.isSecureRemoteUnlockPeer("unknown"))
+    }
+
+    func testRemoteUnlockLimiterAllowsFiveAttemptsThenRecovers() {
+        var limiter = RemoteUnlockAttemptLimiter()
+        let start = Date(timeIntervalSince1970: 1_000)
+
+        for offset in 0..<RemoteUnlockAttemptLimiter.maximumAttempts {
+            XCTAssertTrue(limiter.accept(
+                clientID: "paired-phone",
+                now: start.addingTimeInterval(Double(offset))))
+        }
+        XCTAssertFalse(limiter.accept(
+            clientID: "paired-phone",
+            now: start.addingTimeInterval(5)))
+        XCTAssertTrue(limiter.accept(
+            clientID: "other-phone",
+            now: start.addingTimeInterval(5)))
+        XCTAssertTrue(limiter.accept(
+            clientID: "paired-phone",
+            now: start.addingTimeInterval(RemoteUnlockAttemptLimiter.window + 1)))
     }
 
     func testLANPeersRemainAllowedWhenTailscaleIsAdvertised() {

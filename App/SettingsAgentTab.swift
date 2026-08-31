@@ -6,7 +6,7 @@ struct AgentTab: View {
 
     var body: some View {
         TabScroll {
-            SettingsCard(title: "Autonomy", icon: "shield.lefthalf.filled", footer: "Reads run automatically. Writes and commands need approval unless you enable the safe-command policy.") {
+            SettingsCard(title: "Autonomy", icon: "shield.lefthalf.filled", footer: "Reads run automatically. Auto mode and Full Access continue routine actions without approval cards; destructive safeguards, imported denies, and macOS privacy permissions still apply.") {
                 SettingRow(label: "Agent mode", value: settings.agentMode.help) {
                     Picker("Agent mode", selection: $settings.agentMode) {
                         ForEach(AgentMode.allCases) { mode in
@@ -68,7 +68,7 @@ struct AgentTab: View {
                     isOn: $settings.intelligenceInspectorEnabled)
             }
 
-            SettingsCard(title: "Safety", icon: "checkmark.seal", footer: "Snapshots the working tree before each approved edit batch so any agent action can be undone. Verification runs the detected build or test checks after each successful edit — through the same approval card as any other command, never silently.") {
+            SettingsCard(title: "Safety", icon: "checkmark.seal", footer: "Snapshots the working tree before each edit batch so any agent action can be undone. Verification runs detected build or test checks after successful edits; destructive safeguards remain visible in every mode.") {
                 SettingToggle(label: "Git checkpoints before edits", isOn: $settings.checkpointingEnabled)
                 SettingToggle(label: "Verify edits with project checks", isOn: $settings.verifyAfterEdits)
             }
@@ -204,7 +204,7 @@ private struct ComputerControlCard: View {
             title: "Computer control",
             icon: "desktopcomputer.and.arrow.down",
             footer: settings.computerControlEnabled
-                ? "Off the coding path by default. Observation is automatic; clicks, keys, and scrolls still need approval. Revoke in System Settings → Privacy & Security."
+                ? "Off the coding path by default. Auto mode and Full Access run routine clicks, keys, and scrolls without approval cards once macOS access is granted. Revoke in System Settings → Privacy & Security."
                 : "Off by default. When enabled, the agent can inspect and drive other Mac apps through the approval card."
         ) {
             SettingToggle(

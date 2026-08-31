@@ -33,6 +33,7 @@ enum ToolError: Error, LocalizedError, Equatable {
     case binaryFile(String)
     case fileNotFound(String)
     case fileTooLarge(String, size: Int, limit: Int)
+    case contentTooLarge(size: Int, limit: Int)
     case missingArgument(String)
     case timeout(Int)
     case commandFailed(exitCode: Int)
@@ -51,6 +52,8 @@ enum ToolError: Error, LocalizedError, Equatable {
             return "File not found: \(path)"
         case .fileTooLarge(let path, let size, let limit):
             return "'\(path)' is \(ByteFormatter.bytes(Int64(size))) — larger than the \(ByteFormatter.bytes(Int64(limit))) read limit."
+        case .contentTooLarge(let size, let limit):
+            return "The generated document is \(ByteFormatter.bytes(Int64(size))) — larger than the \(ByteFormatter.bytes(Int64(limit))) save limit."
         case .missingArgument(let name):
             return "Missing required argument '\(name)'."
         case .timeout(let seconds):

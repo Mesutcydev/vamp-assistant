@@ -48,6 +48,7 @@ struct SimulatorPanelView: View {
             }
             .controlSize(.small)
             .help("Refresh the device list")
+            .accessibilityLabel("Refresh the device list")
             if let onClose {
                 PanelCloseButton(action: onClose)
                 // No .cancelAction here: Esc is owned by the composer's

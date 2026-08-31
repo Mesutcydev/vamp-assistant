@@ -32,6 +32,17 @@ enum ComputerPermission {
     /// Screen Recording: required for ScreenCaptureKit captures.
     static var screenRecordingGranted: Bool { CGPreflightScreenCaptureAccess() }
 
+    /// The secure login window cannot be captured or driven by third-party
+    /// processes. Report that state explicitly instead of letting remote
+    /// control hang on a stream that macOS has suspended.
+    static var sessionLocked: Bool {
+        sessionIsLocked(CGSessionCopyCurrentDictionary() as? [String: Any])
+    }
+
+    static func sessionIsLocked(_ session: [String: Any]?) -> Bool {
+        session?["CGSSessionScreenIsLocked"] as? Bool ?? false
+    }
+
     /// Triggers the system prompt for Accessibility (shows the Settings pane).
     static func requestAccessibility() {
         // NOTE: the SDK declares kAXTrustedCheckOptionPrompt as a mutable
@@ -144,6 +155,47 @@ enum ComputerKey {
 // MARK: - Event posting
 
 enum ComputerEvents {
+    struct PhysicalKey: Equatable {
+        let keyCode: CGKeyCode
+        let modifiers: CGEventFlags
+    }
+
+    /// Standard ANSI key positions used by macOS's secure login field. A
+    /// Unicode payload alone is sufficient inside an ordinary app, but
+    /// loginwindow also requires the corresponding physical key position.
+    private static let ansiUnshiftedKeyCodes: [Character: CGKeyCode] = [
+        "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5,
+        "z": 6, "x": 7, "c": 8, "v": 9, "b": 11,
+        "q": 12, "w": 13, "e": 14, "r": 15, "y": 16, "t": 17,
+        "1": 18, "2": 19, "3": 20, "4": 21, "6": 22, "5": 23,
+        "=": 24, "9": 25, "7": 26, "-": 27, "8": 28, "0": 29,
+        "]": 30, "o": 31, "u": 32, "[": 33, "i": 34, "p": 35,
+        "l": 37, "j": 38, "'": 39, "k": 40, ";": 41, "\\": 42,
+        ",": 43, "/": 44, "n": 45, "m": 46, ".": 47, " ": 49,
+        "`": 50,
+    ]
+
+    private static let ansiShiftedKeyCodes: [Character: CGKeyCode] = [
+        "A": 0, "S": 1, "D": 2, "F": 3, "H": 4, "G": 5,
+        "Z": 6, "X": 7, "C": 8, "V": 9, "B": 11,
+        "Q": 12, "W": 13, "E": 14, "R": 15, "Y": 16, "T": 17,
+        "!": 18, "@": 19, "#": 20, "$": 21, "^": 22, "%": 23,
+        "+": 24, "(": 25, "&": 26, "_": 27, "*": 28, ")": 29,
+        "}": 30, "O": 31, "U": 32, "{": 33, "I": 34, "P": 35,
+        "L": 37, "J": 38, "\"": 39, "K": 40, ":": 41, "|": 42,
+        "<": 43, "?": 44, "N": 45, "M": 46, ">": 47, "~": 50,
+    ]
+
+    static func loginWindowPhysicalKey(for character: Character) -> PhysicalKey? {
+        if let keyCode = ansiUnshiftedKeyCodes[character] {
+            return PhysicalKey(keyCode: keyCode, modifiers: [])
+        }
+        if let keyCode = ansiShiftedKeyCodes[character] {
+            return PhysicalKey(keyCode: keyCode, modifiers: .maskShift)
+        }
+        return nil
+    }
+
     /// Union of attached displays in Quartz space (top-left origin of the
     /// main display, y increasing downward). Matches AX frames and CGEvent.
     static func quartzDisplayUnion() -> CGRect {

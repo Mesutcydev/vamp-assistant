@@ -1,3 +1,4 @@
+import AppKit
 import AudioToolbox
 import CoreMedia
 import Foundation
@@ -20,6 +21,19 @@ final class RemoteMacAudio: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
+
+    override init() {
+        super.init()
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(sessionDidLock),
+            name: Notification.Name("com.apple.screenIsLocked"),
+            object: nil)
+    }
+
+    deinit {
+        DistributedNotificationCenter.default().removeObserver(self)
+    }
 
     func outputStream() -> AsyncStream<Chunk> {
         AsyncStream(bufferingPolicy: .bufferingNewest(12)) { continuation in
@@ -48,6 +62,10 @@ final class RemoteMacAudio: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     }
 
     private func startIfNeeded() async {
+        guard !ComputerPermission.sessionLocked else {
+            finishListeners()
+            return
+        }
         guard ComputerPermission.screenRecordingGranted else {
             finishListeners()
             return
@@ -85,13 +103,15 @@ final class RemoteMacAudio: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     }
 
     private func finishListeners() {
-        let listeners = state.withLock { state -> [AsyncStream<Chunk>.Continuation] in
+        let (stream, listeners) = state.withLock { state -> (SCStream?, [AsyncStream<Chunk>.Continuation]) in
+            let stream = state.stream
             state.stream = nil
             state.starting = false
             let listeners = Array(state.continuations.values)
             state.continuations.removeAll()
-            return listeners
+            return (stream, listeners)
         }
+        if let stream { Task { try? await stream.stopCapture() } }
         listeners.forEach { $0.finish() }
     }
 
@@ -109,6 +129,14 @@ final class RemoteMacAudio: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         guard type == .audio, let chunk = Self.pcmChunk(from: sampleBuffer) else { return }
         let listeners = state.withLock { Array($0.continuations.values) }
         listeners.forEach { $0.yield(chunk) }
+    }
+
+    func stream(_ stream: SCStream, didStopWithError error: any Error) {
+        finishListeners()
+    }
+
+    @objc private func sessionDidLock() {
+        finishListeners()
     }
 
     private static func pcmChunk(from sampleBuffer: CMSampleBuffer) -> Chunk? {

@@ -95,6 +95,47 @@ enum BrowserTools {
         }
     }
 
+    /// Download a resource discovered in the browser into the confined
+    /// workspace. This is intentionally not implemented as a click: WKWebView
+    /// treats a binary response as navigation, so the old flow could report a
+    /// successful click while never creating a file (notably for Hugging Face
+    /// `.gguf` links). URLSession follows redirects and streams to a temporary
+    /// file, then BrowserController moves it into the workspace and reports
+    /// the final path.
+    struct DownloadTool: AgentTool {
+        let name = "browser_download"
+        let summary = "Download a URL discovered in the browser to the workspace and verify it was saved"
+        let risk = ToolRisk.write
+        let schemaText = """
+            {"type":"object","properties":{
+              "url":{"type":"string","description":"Direct http/https resource URL, usually from browser_read links"},
+              "filename":{"type":"string","description":"Optional safe filename; defaults to the server or URL filename"},
+              "directory":{"type":"string","description":"Optional workspace-relative destination directory; defaults to .beetcode/downloads"}
+            },"required":["url"]}
+            """
+
+        func execute(_ call: ParsedToolCall, in context: ToolContext) async throws -> String {
+            guard let rawURL = call.string("url"), !rawURL.isEmpty else {
+                throw ToolError.missingArgument("url")
+            }
+            let directory = call.string("directory")
+            let filename = call.string("filename")
+            return try await Task { @MainActor in
+                let controller = BrowserTools.controller(in: context)
+                let destination = try await controller.download(
+                    rawURL,
+                    workspace: context.workspace,
+                    directory: directory,
+                    filename: filename)
+                let size = (try? destination.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+                guard size > 0 else {
+                    throw BrowserController.BrowserError.downloadFailed("The server returned an empty file.")
+                }
+                return "downloaded \(destination.path) (\(ByteFormatter.bytes(Int64(size))))"
+            }.value
+        }
+    }
+
     // MARK: Actions (approval-gated)
 
     struct NavigateTool: AgentTool {

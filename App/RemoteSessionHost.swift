@@ -10,6 +10,29 @@ enum RemoteNetworkKind: String, Equatable, Sendable {
     case localNetwork
 }
 
+struct RemoteUnlockAttemptLimiter: Sendable {
+    static let maximumAttempts = 5
+    static let window: TimeInterval = 30
+
+    private var attemptsByClient: [String: [Date]] = [:]
+
+    mutating func accept(clientID: String, now: Date = Date()) -> Bool {
+        let cutoff = now.addingTimeInterval(-Self.window)
+        var attempts = attemptsByClient[clientID, default: []].filter { $0 > cutoff }
+        guard attempts.count < Self.maximumAttempts else {
+            attemptsByClient[clientID] = attempts
+            return false
+        }
+        attempts.append(now)
+        attemptsByClient[clientID] = attempts
+        return true
+    }
+
+    mutating func removeAll() {
+        attemptsByClient.removeAll(keepingCapacity: false)
+    }
+}
+
 struct RemoteStartModel: Sendable, Equatable {
     let id: String
     let name: String
@@ -90,6 +113,8 @@ final class RemoteSessionHost {
     static let maxRemoteFileBytes = 20 * 1024 * 1024
     static let maxRemoteBodyBytes = maxRemoteFileBytes
     static let maxClipboardCharacters = 200_000
+    static let maxUnlockBodyBytes = 2 * 1024
+    static let maxUnlockPasswordCharacters = 256
     static let maxPairedClients = 8
     static let maxPairFailuresPerWindow = 8
     static let pairFailureWindow: TimeInterval = 60
@@ -128,6 +153,8 @@ final class RemoteSessionHost {
     var clipboardSharingAllowedHandler: (() -> Bool)?
     var fileSharingAllowedHandler: (() -> Bool)?
     var macControlAllowedHandler: (() -> Bool)?
+    var remoteMacUnlockAllowedHandler: (() -> Bool)?
+    var remoteMacUnlockHandler: ((String) async throws -> Void)?
     var botRunsHandler: (() -> [BotRunRecord])?
     var startBotRunHandler: ((String, String?, String) async -> (UUID?, String?))?
     var orchestrateBotRunsHandler: ((String?, String) async -> (UUID?, String?))?
@@ -149,6 +176,14 @@ final class RemoteSessionHost {
     /// phones keep their streams.
     private var eventStreamGeneration = 0
     private var revokedEventDigests: Set<String> = []
+    private struct CachedSessionSnapshot {
+        let content: String
+        let revision: UInt64
+        let detail: [String: LFJSONValue]
+        let encoded: String
+    }
+    private var sessionSnapshotSequence: UInt64 = 0
+    private var sessionSnapshotCache: [UUID: CachedSessionSnapshot] = [:]
     /// Invalidates an in-flight bind when Settings changes or the host is
     /// stopped. LocalAPIServer.start awaits socket setup, so this guard keeps
     /// an older start from publishing itself after a newer request wins.
@@ -158,6 +193,7 @@ final class RemoteSessionHost {
         var firstAt: Date
     }
     private var pairFailuresByAddress: [String: PairFailureWindow] = [:]
+    private var remoteUnlockAttemptLimiter = RemoteUnlockAttemptLimiter()
     private(set) var boundPort: Int?
     private(set) var pairingCode = RemoteSessionHost.makePairingCode()
     private(set) var pairingExpiresAt = Date().addingTimeInterval(RemoteSessionHost.pairingLifetime)
@@ -291,6 +327,7 @@ final class RemoteSessionHost {
         networkHost = nil
         networkKind = nil
         pairFailuresByAddress.removeAll()
+        remoteUnlockAttemptLimiter.removeAll()
     }
 
     func rotatePairingCode() {
@@ -310,6 +347,7 @@ final class RemoteSessionHost {
     func revokeAllClients() {
         cancelEventStreams(matching: nil)
         tokens.removeAll()
+        remoteUnlockAttemptLimiter.removeAll()
         persistPairedClients()
         rotatePairingCode()
     }
@@ -346,7 +384,7 @@ final class RemoteSessionHost {
                 "isRunning": .bool(sessions.isRunning),
                 "phase": .string(sessions.currentPhase.rawValue),
                 "queuedTasks": .number(Double(taskQueueCount)),
-                "macControl": macControlStatusJSON(),
+                "macControl": macControlStatusJSON(request: request),
             ]))
         case ("GET", "/api/sessions"):
             guard authorized(request) else { return unauthorized() }
@@ -440,7 +478,7 @@ final class RemoteSessionHost {
             }
         case ("GET", "/api/control"):
             guard authorized(request) else { return unauthorized() }
-            return .response(json(macControlStatusFields()))
+            return .response(json(macControlStatusFields(request: request)))
         case ("GET", "/api/control/apps"):
             guard authorized(request) else { return unauthorized() }
             return await macControlApplications()
@@ -459,6 +497,9 @@ final class RemoteSessionHost {
         case ("POST", "/api/control/input"):
             guard authorized(request) else { return unauthorized() }
             return await macControlInput(request)
+        case ("POST", "/api/control/unlock"):
+            guard authorized(request) else { return unauthorized() }
+            return await macControlUnlock(request)
         case ("GET", "/api/control/audio"):
             guard authorized(request) else { return unauthorized() }
             return macControlAudio()
@@ -666,13 +707,45 @@ final class RemoteSessionHost {
                 record = try await botComputers.start(id: id)
             case ("POST", "stop"):
                 record = try await botComputers.stop(id: id)
+
+            // Console. The path is client-supplied; `BotComputerService` confines it to the
+            // bot's workspace and returns relative paths, so the host layout never crosses
+            // the wire and a traversal is refused rather than served.
+            case ("POST", "exec"):
+                let command = request.bodyJSON?.objectValue?["command"]?.stringValue ?? ""
+                let output = try await botComputers.exec(id: id, command: command)
+                return .response(json(["output": .string(output)]))
+            case ("GET", "files"):
+                let entries = try await botComputers.listWorkspace(
+                    id: id, relativePath: request.query["path"] ?? "")
+                return .response(json([
+                    "path": .string(request.query["path"] ?? ""),
+                    "entries": .array(entries.map(Self.botWorkspaceEntryJSON)),
+                ]))
+            case ("GET", "file"):
+                guard let path = request.query["path"], !path.isEmpty else {
+                    return .response(json(["error": .string("Missing path.")], status: 400))
+                }
+                let contents = try await botComputers.readWorkspaceFile(id: id, relativePath: path)
+                return .response(json(["path": .string(path), "contents": .string(contents)]))
+
             default:
-                return .response(json(["error": .string("Use POST start or stop.")], status: 405))
+                return .response(json(["error": .string("Unknown bot computer endpoint.")], status: 405))
             }
             return .response(json(["accepted": .bool(true), "computer": Self.botComputerJSON(record)]))
         } catch {
             return .response(json(["error": .string(error.localizedDescription)], status: 409))
         }
+    }
+
+    private static func botWorkspaceEntryJSON(_ entry: BotWorkspaceEntry) -> LFJSONValue {
+        .object([
+            "path": .string(entry.path),
+            "name": .string(entry.name),
+            "isDirectory": .bool(entry.isDirectory),
+            "byteSize": .number(Double(entry.byteSize)),
+            "modifiedAt": .number(entry.modifiedAt.timeIntervalSince1970),
+        ])
     }
 
     private func prepareBotComputers(_ request: LocalAPIServer.Request) async -> LocalAPIServer.RouteResult {
@@ -761,19 +834,25 @@ final class RemoteSessionHost {
         ], status: 403))
     }
 
-    private func macControlStatusJSON() -> LFJSONValue {
-        .object(macControlStatusFields())
+    private func macControlStatusJSON(request: LocalAPIServer.Request) -> LFJSONValue {
+        .object(macControlStatusFields(request: request))
     }
 
-    private func macControlStatusFields() -> [String: LFJSONValue] {
+    private func macControlStatusFields(request: LocalAPIServer.Request) -> [String: LFJSONValue] {
         let enabled = macControlAllowedHandler?() ?? false
         let screen = ComputerPermission.screenRecordingGranted
         let accessibility = ComputerPermission.accessibilityGranted
-        let ready = enabled && screen && accessibility
+        let locked = ComputerPermission.sessionLocked
+        let unlockEnabled = remoteMacUnlockAllowedHandler?() ?? false
+        let secureUnlockPath = Self.isSecureRemoteUnlockPeer(request.remoteAddress)
+        let unlockAvailable = enabled && unlockEnabled && accessibility && secureUnlockPath
+        let ready = enabled && screen && accessibility && !locked
         let bounds = ComputerEvents.quartzDisplayUnion()
         let message: String?
         if !enabled {
             message = "Turn on Mac Control in Vamp Assistant → Remote Sessions."
+        } else if locked {
+            message = "The Mac is locked. Unlock it to resume Vamp Stream and Remote Control."
         } else if !screen || !accessibility {
             message = "Grant Screen Recording and Accessibility for Vamp Assistant in System Settings."
         } else {
@@ -793,6 +872,14 @@ final class RemoteSessionHost {
             "enabled": .bool(enabled),
             "screenRecording": .bool(screen),
             "accessibility": .bool(accessibility),
+            "locked": .bool(locked),
+            "remoteUnlockEnabled": .bool(unlockEnabled),
+            "remoteUnlockAvailable": .bool(unlockAvailable),
+            "remoteUnlockMessage": .string(remoteUnlockMessage(
+                enabled: enabled,
+                unlockEnabled: unlockEnabled,
+                accessibility: accessibility,
+                securePath: secureUnlockPath)),
             "ready": .bool(ready),
             "displayX": .number(bounds.minX),
             "displayY": .number(bounds.minY),
@@ -801,6 +888,27 @@ final class RemoteSessionHost {
             "displays": .array(displays),
             "message": message.map { .string($0) } ?? .null,
         ]
+    }
+
+    private func remoteUnlockMessage(
+        enabled: Bool,
+        unlockEnabled: Bool,
+        accessibility: Bool,
+        securePath: Bool
+    ) -> String {
+        if !enabled {
+            return "Turn on Mac Control in Vamp Assistant → Remote Sessions."
+        }
+        if !unlockEnabled {
+            return "Turn on Remote Unlock in Vamp Assistant → Remote Sessions."
+        }
+        if !accessibility {
+            return "Grant Accessibility to Vamp Assistant on the Mac."
+        }
+        if !securePath {
+            return "Remote Unlock requires the encrypted Tailscale connection."
+        }
+        return "Enter the Mac login password. It is used once and never stored."
     }
 
     private func macControlDenied(_ reason: String) -> LocalAPIServer.RouteResult {
@@ -888,6 +996,9 @@ final class RemoteSessionHost {
         guard macControlAllowedHandler?() ?? false else {
             return macControlDenied("Mac Control is off on this Mac. Enable it in Remote Sessions.")
         }
+        guard !ComputerPermission.sessionLocked else {
+            return .response(json(["error": .string("The Mac is locked. Unlock it to resume streaming.")], status: 423))
+        }
         let displayID = request.query["display"].flatMap(UInt32.init)
         let windowID = request.query["window"].flatMap(UInt32.init)
         do {
@@ -911,6 +1022,9 @@ final class RemoteSessionHost {
     private func macControlScreenStream(_ request: LocalAPIServer.Request) -> LocalAPIServer.RouteResult {
         guard macControlAllowedHandler?() ?? false else {
             return macControlDenied("Mac Control is off on this Mac. Enable it in Remote Sessions.")
+        }
+        guard !ComputerPermission.sessionLocked else {
+            return .response(json(["error": .string("The Mac is locked. Unlock it to resume streaming.")], status: 423))
         }
         let displayID = request.query["display"].flatMap(UInt32.init)
         let windowID = request.query["window"].flatMap(UInt32.init)
@@ -996,6 +1110,9 @@ final class RemoteSessionHost {
     private func macControlAudio() -> LocalAPIServer.RouteResult {
         guard macControlAllowedHandler?() ?? false else {
             return macControlDenied("Mac Control is off on this Mac. Enable it in Remote Sessions.")
+        }
+        guard !ComputerPermission.sessionLocked else {
+            return .response(json(["error": .string("The Mac is locked. Unlock it to resume audio streaming.")], status: 423))
         }
         let lines = AsyncStream<Data>(bufferingPolicy: .bufferingNewest(12)) { continuation in
             let task = Task.detached {
@@ -1088,6 +1205,12 @@ final class RemoteSessionHost {
         guard macControlAllowedHandler?() ?? false else {
             return macControlDenied("Mac Control is off on this Mac. Enable it in Remote Sessions.")
         }
+        guard !ComputerPermission.sessionLocked else {
+            return .response(json(["error": .string("The Mac is locked. Unlock it before sending input.")], status: 423))
+        }
+        guard ComputerPermission.accessibilityGranted else {
+            return macControlDenied("Accessibility permission is required to control this Mac.")
+        }
         guard let object = request.bodyJSON?.objectValue else {
             return .response(json(["error": .string("A control command is required.")], status: 400))
         }
@@ -1119,15 +1242,73 @@ final class RemoteSessionHost {
             }
         }
 
-        // Ack immediately so the phone can pipeline the next batch; execute
-        // serially on the input actor so relative moves stay ordered.
-        Task {
-            try? await RemoteMacControl.perform(commands)
+        // The phone serializes batches already. Await the input actor so a 2xx
+        // means macOS accepted the commands, not merely that a detached task
+        // was created. This also provides natural backpressure.
+        do {
+            try await RemoteMacControl.perform(commands)
+        } catch {
+            return .response(json([
+                "error": .string(error.localizedDescription),
+            ], status: 409))
         }
         if isBatch {
             return .response(json(["accepted": .bool(true), "count": .number(Double(commands.count))]))
         }
         return .response(json(["accepted": .bool(true)]))
+    }
+
+    private func macControlUnlock(_ request: LocalAPIServer.Request) async -> LocalAPIServer.RouteResult {
+        guard request.body.count <= Self.maxUnlockBodyBytes else {
+            return .response(json(["error": .string("Remote Unlock requests must be under 2 KB.")], status: 413))
+        }
+        guard Self.isSecureRemoteUnlockPeer(request.remoteAddress) else {
+            return .response(json([
+                "error": .string("Remote Unlock requires the encrypted Tailscale connection."),
+            ], status: 403))
+        }
+        guard macControlAllowedHandler?() ?? false else {
+            return macControlDenied("Mac Control is off on this Mac. Enable it in Remote Sessions.")
+        }
+        guard remoteMacUnlockAllowedHandler?() ?? false else {
+            return macControlDenied("Remote Unlock is off on this Mac. Enable it in Remote Sessions.")
+        }
+        guard ComputerPermission.accessibilityGranted else {
+            return macControlDenied("Accessibility permission is required for Remote Unlock.")
+        }
+        guard ComputerPermission.sessionLocked else {
+            return .response(json(["error": .string("The Mac is no longer locked.")], status: 423))
+        }
+        guard let password = request.bodyJSON?.objectValue?["password"]?.stringValue,
+              !password.isEmpty,
+              password.count <= Self.maxUnlockPasswordCharacters,
+              !password.contains("\n"),
+              !password.contains("\r"),
+              !password.contains("\0") else {
+            return .response(json([
+                "error": .string("Enter a login password between 1 and 256 characters."),
+            ], status: 400))
+        }
+        guard let clientID = tokenDigest(from: request) else { return unauthorized() }
+        guard remoteUnlockAttemptLimiter.accept(clientID: clientID) else {
+            return .response(json([
+                "error": .string("Too many Remote Unlock attempts. Wait 30 seconds, then try again."),
+            ], status: 429))
+        }
+        guard let remoteMacUnlockHandler else {
+            return .response(json([
+                "error": .string("Remote Unlock is unavailable in this build."),
+            ], status: 501))
+        }
+
+        do {
+            try await remoteMacUnlockHandler(password)
+            return .response(json(["accepted": .bool(true)], status: 202))
+        } catch {
+            return .response(json([
+                "error": .string("Remote Unlock could not deliver the login keystrokes. Check Accessibility and try again."),
+            ], status: 409))
+        }
     }
 
     private func pair(_ request: LocalAPIServer.Request) -> LocalAPIServer.RouteResult {
@@ -1180,7 +1361,7 @@ final class RemoteSessionHost {
             guard let record = ownedRecord(id) else {
                 return .response(json(["error": .string("Session not found.")], status: 404))
             }
-            return .response(json(sessionDetail(record)))
+            return .response(json(sessionSnapshot(record).detail))
         }
 
         // Delete and rename mirror the Mac sidebar exactly: a hard delete of
@@ -1197,6 +1378,7 @@ final class RemoteSessionHost {
                 ], status: 409))
             }
             SessionStore.shared.delete(record)
+            sessionSnapshotCache.removeValue(forKey: record.id)
             NotificationCenter.default.post(name: .remoteSessionsChanged, object: record.id)
             return .response(json(["ok": .bool(true), "deleted": .bool(true)]))
         }
@@ -1234,6 +1416,33 @@ final class RemoteSessionHost {
             }
             guard let digest = tokenDigest(from: request) else { return unauthorized() }
             return sessionEventStream(id: id, digest: digest)
+        }
+
+        if components.count == 4, components[3] == "options", request.method == "POST" {
+            guard sessions.activeSessionID == id, sessions.isRunning else {
+                return .response(json(["error": .string("That session is not running.")], status: 409))
+            }
+            guard let object = request.bodyJSON?.objectValue,
+                  let autoMode = object["autoMode"]?.boolValue,
+                  let fullAccess = object["fullAccess"]?.boolValue else {
+                return .response(json(["error": .string("Provide autoMode and fullAccess.")], status: 400))
+            }
+            configureRunHandler?(RemoteRunOptions(
+                autoMode: autoMode,
+                fullAccess: fullAccess,
+                reasoningEffort: nil,
+                botProfileID: nil,
+                botComputerID: nil,
+                botWorkspacePath: nil,
+                botContainerName: nil,
+                botContainerExecutable: nil,
+                workspacePath: nil,
+                botBrowser: nil))
+            return .response(json([
+                "accepted": .bool(true),
+                "autoMode": .bool(autoMode),
+                "fullAccess": .bool(fullAccess),
+            ]))
         }
 
         if components.count == 4, components[3] == "messages", request.method == "POST" {
@@ -1321,6 +1530,14 @@ final class RemoteSessionHost {
                   let approved = request.bodyJSON?.objectValue?["approved"]?.boolValue else {
                 return .response(json(["error": .string("That approval is no longer pending.")], status: 409))
             }
+            // New companion clients may change Auto/Full Access from the
+            // approval card itself. Apply those optional run-scoped values
+            // before resuming the loop; an old client that omits them keeps
+            // the existing mode untouched.
+            let approvalBody = request.bodyJSON?.objectValue
+            if approvalBody?["autoMode"] != nil || approvalBody?["fullAccess"] != nil {
+                configureRunHandler?(runOptions(from: request))
+            }
             let always = request.bodyJSON?.objectValue?["always"]?.boolValue ?? false
             sessions.approve(approved, always: always)
             return .response(json(["accepted": .bool(true)]))
@@ -1348,6 +1565,10 @@ final class RemoteSessionHost {
                   let action = request.bodyJSON?.objectValue?["action"]?.stringValue else {
                 return .response(json(["error": .string("That plan is no longer pending.")], status: 409))
             }
+            let planBody = request.bodyJSON?.objectValue
+            if planBody?["autoMode"] != nil || planBody?["fullAccess"] != nil {
+                configureRunHandler?(runOptions(from: request))
+            }
             switch action {
             case "approve":
                 guard sessions.approvePlan(requestID: UUID(uuidString: requestID)) else {
@@ -1373,6 +1594,22 @@ final class RemoteSessionHost {
                 return .response(json(["error": .string("That session is not running.")], status: 409))
             }
             sessions.stop()
+            return .response(json(["accepted": .bool(true)]))
+        }
+
+        // Undo the last git checkpoint. Refused while the agent is running: the
+        // loop would keep writing into a tree that had just been rewound.
+        if components.count == 4, components[3] == "undo", request.method == "POST" {
+            guard sessions.activeSessionID == id else {
+                return .response(json(["error": .string("Open that session on the Mac first.")], status: 409))
+            }
+            guard !sessions.isRunning else {
+                return .response(json(["error": .string("Stop the run before undoing a checkpoint.")], status: 409))
+            }
+            guard SessionStore.shared.load(id: id)?.checkpoints.last != nil else {
+                return .response(json(["error": .string("This session has no checkpoint to restore.")], status: 404))
+            }
+            sessions.undoLastCheckpoint()
             return .response(json(["accepted": .bool(true)]))
         }
 
@@ -1422,6 +1659,12 @@ final class RemoteSessionHost {
         let liveText = isRunning
             ? String(SessionStore.redact(sessions.streamingText).prefix(16_000))
             : ""
+        let remoteAgentMode = isCurrent
+            ? sessions.remoteRunAgentMode
+            : nil
+        let remoteFullAccess = isCurrent
+            ? sessions.remoteRunHasFullAccess
+            : nil
         var detail: [String: LFJSONValue] = [
             "id": .string(record.id.uuidString),
             "title": .string(Self.displayTitle(record)),
@@ -1435,10 +1678,14 @@ final class RemoteSessionHost {
             "isRunning": .bool(isRunning),
             "phase": .string(isCurrent ? sessions.currentPhase.rawValue : AgentPhase.idle.rawValue),
             "streamingText": .string(liveText),
-            "agentMode": .string(SettingsStore.shared.agentMode.rawValue),
+            // Active remote options are session-scoped. Falling back to the
+            // Mac's global settings here made the phone show the wrong mode,
+            // then send a new turn with unexpected approval behavior.
+            "agentMode": .string(remoteAgentMode ?? SettingsStore.shared.agentMode.rawValue),
             "fullAccess": .bool(
-                SettingsStore.shared.autoApproveEdits
-                    && SettingsStore.shared.autoApproveCommands),
+                remoteFullAccess
+                    ?? (SettingsStore.shared.remoteFullAccessEnabled
+                        || SettingsStore.shared.agentMode == .auto)),
         ]
         detail["pending"] = pendingInteraction(for: record.id)
         detail["error"] = errorPresentation(for: record)
@@ -1463,13 +1710,14 @@ final class RemoteSessionHost {
     }
 
     private func persistedMessages(_ record: SessionRecord) -> [LFJSONValue] {
-        record.messages.suffix(120).compactMap { message -> LFJSONValue? in
-            guard message.role != .system else { return nil }
+        let messages = record.messages.enumerated().filter { $0.element.role != .system }
+        return messages.suffix(120).map { offset, message in
             let content = String(SessionStore.redact(message.content).prefix(16_000))
             let role = message.role == .assistant && content.lowercased().hasPrefix("error:")
                 ? "error"
                 : message.role.rawValue
             return .object([
+                "id": .string("\(record.id.uuidString):message:\(offset)"),
                 "role": .string(role),
                 "content": .string(content),
                 "toolName": message.toolName.map { .string($0) } ?? .null,
@@ -1486,6 +1734,11 @@ final class RemoteSessionHost {
             let role: String
             let content: String
             let toolName: String?
+            // Extra structure the flat role/content pair cannot carry: whether a
+            // tool failed, and which checkpoint a revert would target. Clients
+            // that do not know these keys ignore them.
+            var failed: Bool?
+            var checkpointID: String?
             switch item.kind {
             case .user(let text):
                 role = "user"; content = text; toolName = nil
@@ -1494,23 +1747,88 @@ final class RemoteSessionHost {
                 content = text; toolName = nil
             case .toolCall(let invocation):
                 role = "toolCall"; content = invocation.argumentsJSON; toolName = invocation.name
-            case .toolResult(_, let output, _, let name):
+            case .toolResult(_, let output, let didFail, let name):
                 role = "toolResult"; content = output; toolName = name
+                failed = didFail
             case .reasoning(let text):
                 role = "reasoning"; content = text; toolName = nil
             case .checkpoint(let checkpoint):
-                role = "notice"; content = "Checkpoint: \(checkpoint.summary)"; toolName = nil
+                // A real kind, not a stringified notice: the client needs the id
+                // to offer a revert.
+                role = "checkpoint"; content = checkpoint.summary; toolName = nil
+                checkpointID = checkpoint.id.uuidString
             case .notice(let text):
                 role = text.lowercased().hasPrefix("error:") ? "error" : "notice"
                 content = text; toolName = nil
             }
             return .object([
+                "id": .string(item.id.uuidString),
                 "role": .string(role),
                 "content": .string(String(SessionStore.redact(content).prefix(16_000))),
                 "toolName": toolName.map { .string($0) } ?? .null,
+                "failed": failed.map { .bool($0) } ?? .null,
+                "checkpointID": checkpointID.map { .string($0) } ?? .null,
                 "timestamp": .number(baseTimestamp + Double(offset) / 1_000),
             ])
         }
+    }
+
+    /// Gives GET and SSE responses one ordering domain. The client can reject
+    /// an older in-flight event after a newer approval/detail response lands.
+    /// Older clients ignore the additive revision and message-id fields.
+    private func sessionSnapshot(_ record: SessionRecord) -> CachedSessionSnapshot {
+        let baseDetail = sessionDetail(record)
+        let content = LFJSONValue.object(baseDetail).encoded()
+        if let cached = sessionSnapshotCache[record.id], cached.content == content {
+            return cached
+        }
+        // Session history can be large and long lived. The cache only exists to
+        // avoid rebuilding snapshots for currently active clients, so keep a
+        // modest ceiling instead of retaining every session opened since launch.
+        if sessionSnapshotCache[record.id] == nil,
+           sessionSnapshotCache.count >= 128,
+           let oldestID = sessionSnapshotCache.min(by: { $0.value.revision < $1.value.revision })?.key {
+            sessionSnapshotCache.removeValue(forKey: oldestID)
+        }
+        sessionSnapshotSequence &+= 1
+        var detail = baseDetail
+        detail["revision"] = .number(Double(sessionSnapshotSequence))
+        let snapshot = CachedSessionSnapshot(
+            content: content,
+            revision: sessionSnapshotSequence,
+            detail: detail,
+            encoded: LFJSONValue.object(detail).encoded())
+        sessionSnapshotCache[record.id] = snapshot
+        return snapshot
+    }
+
+    /// A bounded change detector for the hot SSE loop. It intentionally hashes
+    /// only live/tail state; the expensive 120-message JSON is rebuilt only
+    /// when this signal changes or the persisted record is refreshed.
+    private func sessionEventSignal(_ record: SessionRecord) -> String {
+        let tail = sessions.transcript.last.map {
+            "\($0.id.uuidString):\(String(describing: $0.kind).hashValue)"
+        } ?? "none"
+        let task = taskLookupHandler?(record.id)
+        let queued = (queuedTasksHandler?(record.id) ?? []).map {
+            "\($0.id.uuidString):\($0.state.rawValue):\($0.phase ?? "")"
+        }.joined(separator: ",")
+        return [
+            String(record.updatedAt.timeIntervalSince1970),
+            String(record.messages.count),
+            sessions.activeSessionID?.uuidString ?? "none",
+            String(sessions.isRunning),
+            sessions.currentPhase.rawValue,
+            String(sessions.streamingText.hashValue),
+            String(sessions.transcript.count),
+            tail,
+            String(pendingInteraction(for: record.id).encoded().hashValue),
+            String(errorPresentation(for: record).encoded().hashValue),
+            sessions.remoteRunAgentMode ?? "none",
+            String(sessions.remoteRunHasFullAccess ?? false),
+            task.map { "\($0.id.uuidString):\($0.state.rawValue):\($0.phase ?? "")" } ?? "none",
+            queued,
+        ].joined(separator: "|")
     }
 
     private func errorPresentation(
@@ -1539,24 +1857,39 @@ final class RemoteSessionHost {
         let generation = eventStreamGeneration
         let lines = AsyncStream<Data>(bufferingPolicy: .bufferingNewest(8)) { continuation in
             let task = Task { @MainActor [weak self] in
-                var previousSnapshot = ""
+                guard let self, var record = self.ownedRecord(id) else {
+                    continuation.finish()
+                    return
+                }
+                var previousSignal: String?
+                var previousRevision: UInt64?
                 var heartbeatTick = 0
+                var persistedRecordTick = 0
                 while !Task.isCancelled {
-                    guard let self,
-                          self.eventStreamGeneration == generation,
+                    guard self.eventStreamGeneration == generation,
                           !self.revokedEventDigests.contains(digest) else { break }
                     self.pruneExpiredTokens()
-                    guard self.tokens[digest] != nil,
-                          let record = self.ownedRecord(id) else { break }
-                    let snapshot = LFJSONValue.object(self.sessionDetail(record)).encoded()
-                    if snapshot != previousSnapshot {
-                        continuation.yield(Data("event: session\ndata: \(snapshot)\n\n".utf8))
-                        previousSnapshot = snapshot
-                    } else if heartbeatTick >= 100 {
+                    guard self.tokens[digest] != nil else { break }
+                    if persistedRecordTick >= 14 {
+                        guard let refreshed = self.ownedRecord(id) else { break }
+                        record = refreshed
+                        persistedRecordTick = 0
+                    }
+                    let signal = self.sessionEventSignal(record)
+                    if signal != previousSignal {
+                        let snapshot = self.sessionSnapshot(record)
+                        if snapshot.revision != previousRevision {
+                            continuation.yield(Data("event: session\ndata: \(snapshot.encoded)\n\n".utf8))
+                            previousRevision = snapshot.revision
+                        }
+                        previousSignal = signal
+                        heartbeatTick = 0
+                    } else if heartbeatTick >= 40 {
                         continuation.yield(Data(": keep-alive\n\n".utf8))
                         heartbeatTick = 0
                     }
                     heartbeatTick += 1
+                    persistedRecordTick += 1
                     try? await Task.sleep(for: .milliseconds(150))
                 }
                 continuation.finish()
@@ -1624,6 +1957,17 @@ final class RemoteSessionHost {
         pruneExpiredTokens()
         guard let digest = tokenDigest(from: request) else { return false }
         return tokens[digest] != nil
+    }
+
+    static func isSecureRemoteUnlockPeer(_ address: String) -> Bool {
+        if RemoteNetworkEndpointDiscovery.isTailscale(address) { return true }
+        #if DEBUG
+        // Unit tests and the iOS Simulator can exercise the route without
+        // weakening release builds for ordinary LAN peers.
+        return address == "127.0.0.1" || address == "::1"
+        #else
+        return false
+        #endif
     }
 
     private func tokenDigest(from request: LocalAPIServer.Request) -> String? {

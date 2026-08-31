@@ -17,8 +17,9 @@ actor AgentLoop {
         var contextWindowTokens: Int = 32_768
         var thermalTokenCeiling: Int?
         /// When true, successful edits trigger a build-diagnostics pass. The
-        /// diagnostics command still runs through the normal approval path —
-        /// never silently.
+        /// diagnostics command still runs through the same permission gate;
+        /// Auto/Full Access may continue it automatically, while hard safety
+        /// denials remain enforced.
         var verifyAfterEdits: Bool = false
         /// Reliability V2: a project mutation creates verification debt.
         /// Completion is gated until the latest workspace generation passes
@@ -69,7 +70,11 @@ actor AgentLoop {
     private let engine: any LLMEngine
     private let workspace: Workspace
     private let executor: ToolExecutor
-    private let permissionGate: PermissionGate
+    /// Mutable for the one legitimate mid-run transition: a remote client
+    /// can switch Auto/Full Access on while an approval card is visible. The
+    /// controller updates this actor before resolving that card, so the next
+    /// tool call uses the selected mode without rebuilding the session.
+    private var permissionGate: PermissionGate
     private let checkpointer: GitCheckpointer
     private let configuration: Configuration
     private let commandPolicy: CommandPolicy
@@ -108,6 +113,14 @@ actor AgentLoop {
     private var changedPaths = Set<String>()
     private var failedActionCounts: [String: Int] = [:]
     private var successfulMutationSignatures = Set<String>()
+
+    /// Applies a remote run's uninterrupted-access choice to the live loop.
+    /// Hard OpenCode denies and workspace confinement are still enforced by
+    /// `PermissionGate`; this only changes whether an otherwise allowed action
+    /// needs an interactive approval card.
+    func updatePermissionMode(fullAccess: Bool) {
+        permissionGate.fullAccess = fullAccess
+    }
 
     private func setPhase(_ newPhase: AgentPhase) {
         guard newPhase != phase else { return }
@@ -220,6 +233,18 @@ actor AgentLoop {
             responseReserveTokens: effectiveConfiguration.maxTokensPerTurn,
             leanPrompt: effectiveConfiguration.leanPrompt,
             chatOnly: effectiveConfiguration.chatOnly)
+        if effectivePermissions.fullAccess {
+            assembledPrompt += """
+
+
+            ## Uninterrupted access
+            Auto mode or Full Access is enabled for this run. Execute routine
+            tool actions directly; do not ask the user to approve an app card
+            or narrate an approval request. Continue to honor hard denies,
+            workspace confinement, destructive safeguards, and macOS privacy
+            permissions. Verify each result before reporting success.
+            """
+        }
         if linuxContainer != nil {
             assembledPrompt += """
 
@@ -1199,10 +1224,15 @@ actor AgentLoop {
         case .tool, .mutation:
             break
         }
-        let inspectedBrowser = successfulToolNames.contains("browser_navigate")
+        // A verified browser download is itself observable evidence: the
+        // tool only succeeds after the redirected response has been streamed
+        // and a non-empty file exists on disk. Do not force a model to open a
+        // binary in WKWebView (which is exactly the old stuck-download path).
+        let verifiedBrowserDownload = successfulToolNames.contains("browser_download")
+        let inspectedBrowser = verifiedBrowserDownload || (successfulToolNames.contains("browser_navigate")
             && !successfulToolNames.isDisjoint(with: [
                 "browser_read", "browser_screenshot", "browser_click",
-            ])
+            ]))
         if requiresBrowserEvidence, !inspectedBrowser {
             return "error: completion rejected — this task requested a browser preview, but the rendered page has not been inspected. Open it with browser_navigate, then verify it with browser_read or browser_screenshot before completing."
         }
@@ -1660,8 +1690,10 @@ actor AgentLoop {
         let childGate = PermissionGate(
             autoApproveEdits: permissionGate.autoApproveEdits,
             autoApproveCommands: permissionGate.autoApproveCommands,
+            fullAccess: permissionGate.fullAccess,
             commandPolicy: commandPolicy,
             workspace: childWorkspace,
+            guestShell: permissionGate.guestShell,
             overrides: permissionGate.overrides,
             openCodePermissions: role.allowsWrites
                 ? permissionGate.openCodePermissions
@@ -1676,6 +1708,8 @@ actor AgentLoop {
                 ReadFileTool(),
                 ListDirectoryTool(),
                 SearchTool(),
+                TinyFishSearchTool(),
+                WebFetchTool(),
                 FindFilesTool(),
                 FindFilesTool(name: "glob"),
             ]
@@ -1687,6 +1721,8 @@ actor AgentLoop {
                 ApplyPatchTool(),
                 ListDirectoryTool(),
                 SearchTool(),
+                TinyFishSearchTool(),
+                WebFetchTool(),
                 FindFilesTool(),
                 FindFilesTool(name: "glob"),
                 RunCommandTool(),
@@ -1697,6 +1733,8 @@ actor AgentLoop {
                 ReadFileTool(),
                 ListDirectoryTool(),
                 SearchTool(),
+                TinyFishSearchTool(),
+                WebFetchTool(),
                 FindFilesTool(),
                 FindFilesTool(name: "glob"),
                 RunCommandTool(),

@@ -11,7 +11,7 @@ final class BeetCodeUITests: XCTestCase {
 
         XCTAssertTrue(app.textFields["Task description"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Attach files"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["Chat only mode"].exists)
+        XCTAssertTrue(app.menuButtons["composer-commands"].exists)
         XCTAssertTrue(app.buttons["Send"].exists)
     }
 
@@ -21,44 +21,55 @@ final class BeetCodeUITests: XCTestCase {
 
         XCTAssertTrue(composer.waitForExistence(timeout: 10))
         XCTAssertTrue(composer.isEnabled)
-        XCTAssertTrue(app.descendants(matching: .any)["Chat only mode"].exists)
-        XCTAssertFalse(app.descendants(matching: .any)["Agent setup"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["Composer commands"].exists)
+        XCTAssertTrue(app.menuButtons["composer-commands"].exists)
+        XCTAssertTrue(app.menuButtons["Tools and capabilities"].exists)
     }
 
     func testHistoryNavigationIsAccessible() {
         let app = launchApp()
-        let myChats = app.buttons["My chats"]
+        let imported = app.buttons["Imported"]
 
-        if !myChats.waitForExistence(timeout: 2), app.buttons["Show Sidebar"].exists {
-            app.activate()
-            app.buttons["Show Sidebar"].click()
-        }
+        revealHistory(in: app, ifNeeded: imported)
 
-        XCTAssertTrue(myChats.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["Other tools"].exists)
-        XCTAssertTrue(app.textFields["Search all history"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["More chat actions"].exists)
+        XCTAssertTrue(imported.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Search, ⌘F"].exists)
+        XCTAssertTrue(app.buttons["Switch workspace"].exists)
+        XCTAssertTrue(app.buttons["New chat"].exists)
     }
 
     func testCommandFFocusesChatSearch() {
         let app = launchApp()
         let search = app.textFields["Search all history"]
-        if !search.waitForExistence(timeout: 2), app.buttons["Show Sidebar"].exists {
-            app.buttons["Show Sidebar"].click()
-        }
-        XCTAssertTrue(search.waitForExistence(timeout: 10))
 
         app.typeKey("f", modifierFlags: .command)
-        app.typeText("visual-check")
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        app.typeText("x")
 
-        XCTAssertEqual(search.value as? String, "visual-check")
+        XCTAssertEqual(search.value as? String, "x")
     }
 
     private func launchApp() -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchEnvironment["XCTestConfigurationFilePath"] = "ui-smoke"
+        app.launchArguments += [
+            "--ui-smoke",
+            "-ApplePersistenceIgnoreState", "YES",
+            "-NSQuitAlwaysKeepsWindows", "NO",
+        ]
         app.launch()
+        app.activate()
+        if !app.windows.firstMatch.waitForExistence(timeout: 2) {
+            app.menuBars.menuBarItems["File"].click()
+            app.menuItems["New Window"].click()
+        }
         return app
+    }
+
+    private func revealHistory(in app: XCUIApplication, ifNeeded element: XCUIElement) {
+        guard !element.waitForExistence(timeout: 2) else { return }
+        if app.buttons["Chats"].exists {
+            app.buttons["Chats"].click()
+        } else if app.buttons["Toggle sidebar"].exists {
+            app.buttons["Toggle sidebar"].click()
+        }
     }
 }

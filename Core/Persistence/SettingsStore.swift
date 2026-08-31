@@ -117,43 +117,6 @@ enum AgentMode: String, CaseIterable, Codable, Identifiable, Sendable {
     }
 }
 
-/// Accent color palettes. Every entry ships a light+dark hex pair for both
-/// the accent and its brighter variant; `Theme` resolves them at draw time.
-/// Old case names remain decodable for settings compatibility, but every case
-/// resolves to the single monochrome palette.
-/// Foundation-only (no SwiftUI) so the CLI target can compile this file;
-/// the SwiftUI swatch extension lives in App/Theme.swift.
-enum AccentPalette: String, CaseIterable, Codable, Identifiable, Sendable {
-    case beetRed
-    case indigo
-    case ocean
-    case forest
-    case amber
-    case graphite
-
-    static var allCases: [AccentPalette] { [.graphite] }
-
-    var id: String { rawValue }
-
-    struct Hexes: Sendable, Equatable {
-        var accentLight: UInt32
-        var accentDark: UInt32
-        var brightLight: UInt32
-        var brightDark: UInt32
-    }
-
-    var label: String {
-        switch self {
-        case .beetRed, .indigo, .ocean, .forest, .amber, .graphite: "Monochrome"
-        }
-    }
-
-    var hexes: Hexes {
-        Hexes(accentLight: 0x303030, accentDark: 0x686868,
-              brightLight: 0x505050, brightDark: 0x888888)
-    }
-}
-
 /// User-facing settings. Defaults encode the safety posture: edits and shell
 /// commands always ask, reads never do.
 @MainActor
@@ -162,12 +125,27 @@ final class SettingsStore: ObservableObject {
     static let shared = SettingsStore()
 
     private let defaults: UserDefaults
+    private let apiTokenService: String
+    private var cachedAPIServerToken: String?
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        persistentDomainName: String? = Bundle.main.bundleIdentifier,
+        apiTokenService: String = "com.beetcode.local-api"
+    ) {
         self.defaults = defaults
+        self.apiTokenService = apiTokenService
         let storedAppearance = defaults.string(forKey: DefaultsKeys.appearance)
         let appearanceMigrationApplied =
             defaults.object(forKey: DefaultsKeys.appearanceDefaultMigration) != nil
+        let persistentSettings = persistentDomainName.flatMap {
+            defaults.persistentDomain(forName: $0)
+        }
+        let storedRemoteSessionLAN =
+            persistentSettings?[DefaultsKeys.remoteSessionAllowLAN] as? Bool
+        let hadRemoteSessionSetup =
+            defaults.bool(forKey: DefaultsKeys.remoteSessionEnabled)
+                || defaults.bool(forKey: DefaultsKeys.remoteAccessConsentCompleted)
 
         // Register defaults so first read is well-defined.
         defaults.register(defaults: [
@@ -188,18 +166,20 @@ final class SettingsStore: ObservableObject {
             DefaultsKeys.planMode: false,
             DefaultsKeys.agentMode: AgentMode.auto.rawValue,
             DefaultsKeys.appearance: AppAppearance.dark.rawValue,
-            DefaultsKeys.accentPalette: AccentPalette.beetRed.rawValue,
+            DefaultsKeys.accentPalette: AccentPalette.graphite.rawValue,
             DefaultsKeys.textSize: AppTextSize.comfortable.rawValue,
+            DefaultsKeys.typeface: AppTypeface.serif.rawValue,
             DefaultsKeys.composerBorderAnimation: true,
             DefaultsKeys.apiServerEnabled: false,
             DefaultsKeys.apiServerPort: 1234,
             DefaultsKeys.remoteSessionEnabled: false,
             DefaultsKeys.remoteSessionPort: RemoteSessionPorts.defaultPort,
-            DefaultsKeys.remoteSessionAllowLAN: true,
+            DefaultsKeys.remoteSessionAllowLAN: false,
             DefaultsKeys.remoteAccessConsentCompleted: false,
             DefaultsKeys.remoteClipboardSharingEnabled: false,
             DefaultsKeys.remoteFileSharingEnabled: false,
             DefaultsKeys.remoteMacControlEnabled: false,
+            DefaultsKeys.remoteMacUnlockEnabled: false,
             DefaultsKeys.computerControlEnabled: false,
             DefaultsKeys.intelligenceInspectorEnabled: false,
             DefaultsKeys.enterSends: true,
@@ -240,6 +220,17 @@ final class SettingsStore: ObservableObject {
             }
             defaults.set(true, forKey: DefaultsKeys.remoteSessionPortVampMigration)
         }
+
+        // LAN fallback used to be implicitly on. New installs now follow the
+        // documented opt-in posture, while an existing installation that had
+        // already configured Remote Sessions keeps working until the user
+        // changes the toggle. An explicit prior true or false is never altered.
+        if defaults.object(forKey: DefaultsKeys.remoteSessionLANOptInMigration) == nil {
+            if storedRemoteSessionLAN == nil, hadRemoteSessionSetup {
+                defaults.set(true, forKey: DefaultsKeys.remoteSessionAllowLAN)
+            }
+            defaults.set(true, forKey: DefaultsKeys.remoteSessionLANOptInMigration)
+        }
     }
 
     /// Color appearance. Defaults to native Dark; `system` follows macOS.
@@ -257,14 +248,27 @@ final class SettingsStore: ObservableObject {
         }
     }
 
-    /// Old stored palette values migrate to the single monochrome palette.
-    /// `Theme.applyPalette` is invoked from the app layer on change.
+    /// Accent palette. The app layer mirrors this into its draw-time theme
+    /// globals on change, so the dynamic colors re-resolve live.
     var accentPalette: AccentPalette {
         get {
-            .graphite
+            AccentPalette(rawValue: defaults.string(forKey: DefaultsKeys.accentPalette)
+                ?? AccentPalette.graphite.rawValue) ?? .graphite
         }
         set {
-            defaults.set(AccentPalette.graphite.rawValue, forKey: DefaultsKeys.accentPalette)
+            defaults.set(newValue.rawValue, forKey: DefaultsKeys.accentPalette)
+            objectWillChange.send()
+        }
+    }
+
+    /// Proportional typeface for reading and navigation text.
+    var typeface: AppTypeface {
+        get {
+            AppTypeface(rawValue: defaults.string(forKey: DefaultsKeys.typeface)
+                ?? AppTypeface.serif.rawValue) ?? .serif
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: DefaultsKeys.typeface)
             objectWillChange.send()
         }
     }
@@ -448,11 +452,57 @@ final class SettingsStore: ObservableObject {
     /// Bearer required by the local API. Generated on first use so browser
     /// origins cannot CSRF the loopback endpoint.
     var apiServerToken: String {
-        get { defaults.string(forKey: DefaultsKeys.apiServerToken) ?? "" }
-        set {
-            defaults.set(newValue, forKey: DefaultsKeys.apiServerToken)
-            objectWillChange.send()
+        get {
+            if let cachedAPIServerToken { return cachedAPIServerToken }
+            if let secured = Keychain.read(
+                service: apiTokenService,
+                account: DefaultsKeys.apiServerToken),
+               !secured.isEmpty {
+                cachedAPIServerToken = secured
+                defaults.removeObject(forKey: DefaultsKeys.apiServerToken)
+                return secured
+            }
+
+            let legacy = defaults.string(forKey: DefaultsKeys.apiServerToken) ?? ""
+            if !legacy.isEmpty,
+               Keychain.write(
+                   legacy,
+                   service: apiTokenService,
+                   account: DefaultsKeys.apiServerToken) {
+                defaults.removeObject(forKey: DefaultsKeys.apiServerToken)
+            }
+            cachedAPIServerToken = legacy
+            return legacy
         }
+        set {
+            _ = setAPIServerToken(newValue)
+        }
+    }
+
+    /// Returns false only when Keychain storage is unavailable. In that case
+    /// the legacy preference remains as a compatibility fallback so an
+    /// existing sideloaded server is never silently locked out.
+    @discardableResult
+    func setAPIServerToken(_ value: String) -> Bool {
+        if value.isEmpty {
+            Keychain.delete(service: apiTokenService, account: DefaultsKeys.apiServerToken)
+            defaults.removeObject(forKey: DefaultsKeys.apiServerToken)
+            cachedAPIServerToken = ""
+            objectWillChange.send()
+            return true
+        }
+        let secured = Keychain.write(
+            value,
+            service: apiTokenService,
+            account: DefaultsKeys.apiServerToken)
+        if secured {
+            defaults.removeObject(forKey: DefaultsKeys.apiServerToken)
+        } else {
+            defaults.set(value, forKey: DefaultsKeys.apiServerToken)
+        }
+        cachedAPIServerToken = value
+        objectWillChange.send()
+        return secured
     }
 
     @discardableResult
@@ -552,6 +602,17 @@ final class SettingsStore: ObservableObject {
         get { defaults.bool(forKey: DefaultsKeys.remoteMacControlEnabled) }
         set {
             defaults.set(newValue, forKey: DefaultsKeys.remoteMacControlEnabled)
+            objectWillChange.send()
+        }
+    }
+
+    /// Off by default. A paired iPhone may submit the Mac login password only
+    /// over the encrypted Tailscale path, while the Mac is actually locked.
+    /// The password remains request-scoped and is never persisted.
+    var remoteMacUnlockEnabled: Bool {
+        get { defaults.bool(forKey: DefaultsKeys.remoteMacUnlockEnabled) }
+        set {
+            defaults.set(newValue, forKey: DefaultsKeys.remoteMacUnlockEnabled)
             objectWillChange.send()
         }
     }
@@ -668,6 +729,7 @@ final class SettingsStore: ObservableObject {
         static let appearanceDefaultMigration = "appearanceDefaultMigration.v1"
         static let accentPalette = "accentPalette"
         static let textSize = "textSize"
+        static let typeface = "typeface"
         static let composerBorderAnimation = "composerBorderAnimation"
         static let apiServerEnabled = "apiServerEnabled"
         static let apiServerPort = "apiServerPort"
@@ -676,10 +738,12 @@ final class SettingsStore: ObservableObject {
         static let remoteSessionPort = "remoteSessionPort"
         static let remoteSessionPortVampMigration = "remoteSessionPortVampMigration.v1"
         static let remoteSessionAllowLAN = "remoteSessionAllowLAN"
+        static let remoteSessionLANOptInMigration = "remoteSessionLANOptInMigration.v1"
         static let remoteAccessConsentCompleted = "remoteAccessConsentCompleted.v1"
         static let remoteClipboardSharingEnabled = "remoteClipboardSharingEnabled"
         static let remoteFileSharingEnabled = "remoteFileSharingEnabled"
         static let remoteMacControlEnabled = "remoteMacControlEnabled"
+        static let remoteMacUnlockEnabled = "remoteMacUnlockEnabled"
         static let computerControlEnabled = "computerControlEnabled"
         static let intelligenceInspectorEnabled = "intelligenceInspectorEnabled"
         static let enterSends = "enterSends"

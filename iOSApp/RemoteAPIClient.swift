@@ -1,9 +1,31 @@
 import Foundation
 import Security
 
+enum RemoteSessionStreamEvent {
+    case snapshot(RemoteSessionDetail)
+    case heartbeat
+}
+
 struct RemoteAPIClient {
     let baseURL: URL
     var token: String?
+
+    /// The paired Mac never redirects API calls. Refusing redirects prevents
+    /// URLSession from replaying a bearer-authenticated request to a host the
+    /// user did not pair with.
+    private final class RedirectBlocker: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+        func urlSession(
+            _ session: URLSession,
+            task: URLSessionTask,
+            willPerformHTTPRedirection response: HTTPURLResponse,
+            newRequest request: URLRequest,
+            completionHandler: @escaping (URLRequest?) -> Void
+        ) {
+            completionHandler(nil)
+        }
+    }
+
+    private static let redirectBlocker = RedirectBlocker()
 
     /// Single-connection session so pipelined input stays ordered and snappy.
     private static let controlSession: URLSession = {
@@ -13,7 +35,10 @@ struct RemoteAPIClient {
         configuration.timeoutIntervalForResource = 15
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.waitsForConnectivity = false
-        return URLSession(configuration: configuration)
+        return URLSession(
+            configuration: configuration,
+            delegate: redirectBlocker,
+            delegateQueue: nil)
     }()
 
     /// Ordinary companion requests must not share a connection pool with
@@ -29,7 +54,10 @@ struct RemoteAPIClient {
         configuration.timeoutIntervalForResource = 45
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.waitsForConnectivity = true
-        return URLSession(configuration: configuration)
+        return URLSession(
+            configuration: configuration,
+            delegate: redirectBlocker,
+            delegateQueue: nil)
     }()
 
     private static let streamSession: URLSession = {
@@ -37,7 +65,10 @@ struct RemoteAPIClient {
         configuration.timeoutIntervalForRequest = 24 * 60 * 60
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.waitsForConnectivity = true
-        return URLSession(configuration: configuration)
+        return URLSession(
+            configuration: configuration,
+            delegate: redirectBlocker,
+            delegateQueue: nil)
     }()
 
     func pair(code: String) async throws -> RemotePairResponse {
@@ -72,6 +103,35 @@ struct RemoteAPIClient {
     func stopBotRun(_ id: UUID) async throws -> RemoteAcceptedResponse {
         try await request("api/bot-runs/\(id.uuidString)/stop", method: "POST", body: [:])
     }
+    // A bot computer is a headless container — there is no screen to stream. "Viewing" one means
+    // its shell, its workspace, and its output.
+    func execInBotComputer(_ id: UUID, command: String) async throws -> RemoteBotExecResult {
+        try await request(
+            "api/bot-computers/\(id.uuidString)/exec",
+            method: "POST",
+            body: ["command": command])
+    }
+
+    func botComputerFiles(_ id: UUID, path: String) async throws -> RemoteBotFileListing {
+        try await request("api/bot-computers/\(id.uuidString)/files?path=\(Self.escape(path))")
+    }
+
+    func botComputerFile(_ id: UUID, path: String) async throws -> RemoteBotFileContents {
+        try await request("api/bot-computers/\(id.uuidString)/file?path=\(Self.escape(path))")
+    }
+
+    /// Percent-encode a query *value*. `.urlQueryAllowed` passes `&`, `=`, `+` and `?` through,
+    /// which would let a workspace path with those characters split the query.
+    private static let queryValueAllowed: CharacterSet = {
+        var set = CharacterSet.urlQueryAllowed
+        set.remove(charactersIn: "&=+?#")
+        return set
+    }()
+
+    private static func escape(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: queryValueAllowed) ?? ""
+    }
+
     func orchestrateBots(modelID: String?, prompt: String) async throws -> RemoteAcceptedResponse {
         var body: [String: Any] = ["prompt": prompt]
         if let modelID, !modelID.isEmpty { body["modelID"] = modelID }
@@ -101,6 +161,34 @@ struct RemoteAPIClient {
         try await request("api/control/apps")
     }
 
+    func launchControlApplication(
+        bundleIdentifier: String,
+        clientViewportAspect: Double
+    ) async throws -> RemoteMacApplicationResponse {
+        try await request(
+            "api/control/apps/launch",
+            method: "POST",
+            body: [
+                "bundleIdentifier": bundleIdentifier,
+                "clientViewportAspect": clientViewportAspect,
+            ],
+            timeout: 15)
+    }
+
+    func resizeControlApplication(
+        windowID: UInt32,
+        clientViewportAspect: Double
+    ) async throws -> RemoteMacApplicationResponse {
+        try await request(
+            "api/control/apps/resize",
+            method: "POST",
+            body: [
+                "windowID": windowID,
+                "clientViewportAspect": clientViewportAspect,
+            ],
+            timeout: 10)
+    }
+
     func controlScreen(
         displayID: UInt32? = nil,
         windowID: UInt32? = nil,
@@ -121,9 +209,7 @@ struct RemoteAPIClient {
         let (data, response) = try await Self.apiSession.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw RemoteClientError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
-            let message = (try? JSONDecoder().decode(RemoteErrorBody.self, from: data).error)
-                ?? "Remote request failed (\(http.statusCode))."
-            throw RemoteClientError.server(message)
+            throw Self.responseError(statusCode: http.statusCode, data: data)
         }
         return RemoteMacControlFrame(
             payload: .jpeg(data),
@@ -156,6 +242,14 @@ struct RemoteAPIClient {
 
     func sendControlBatch(_ commands: [[String: Any]]) async throws -> RemoteAcceptedResponse {
         try await controlRequest("api/control/input", body: ["commands": commands])
+    }
+
+    func unlockMac(password: String) async throws -> RemoteAcceptedResponse {
+        try await request(
+            "api/control/unlock",
+            method: "POST",
+            body: ["password": password],
+            timeout: 8)
     }
 
     private func controlRequest(_ path: String, body: [String: Any]) async throws -> RemoteAcceptedResponse {
@@ -202,7 +296,9 @@ struct RemoteAPIClient {
                         switch event {
                         case .headers(let http):
                             guard (200..<300).contains(http.statusCode) else {
-                                throw RemoteClientError.server("Stream HTTP \(http.statusCode)")
+                                throw Self.responseError(
+                                    statusCode: http.statusCode,
+                                    fallback: "Stream HTTP \(http.statusCode)")
                             }
                             let contentType = (http.value(forHTTPHeaderField: "Content-Type") ?? "")
                                 .lowercased()
@@ -376,6 +472,15 @@ struct RemoteAPIClient {
                 }
                 func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
                     continuation.yield(.data(data))
+                }
+                func urlSession(
+                    _ session: URLSession,
+                    task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void
+                ) {
+                    completionHandler(nil)
                 }
                 func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
                     if let error {
@@ -579,10 +684,17 @@ struct RemoteAPIClient {
                     var request = try authorizedRequest(url: url, method: "GET")
                     request.timeoutInterval = 24 * 60 * 60
                     request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                    // Keep the event stream on its own long-lived session. The
+                    // shared URLSession can be busy with model/file requests;
+                    // when it is, snapshots arrive in bursts and the iOS
+                    // transcript appears to stop until the user taps Latest.
+                    let (bytes, response) = try await Self.streamSession.bytes(for: request)
                     guard let http = response as? HTTPURLResponse,
                           (200..<300).contains(http.statusCode) else {
-                        throw RemoteClientError.server("The remote stream could not be opened.")
+                        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                        throw Self.responseError(
+                            statusCode: statusCode,
+                            fallback: "The remote stream could not be opened.")
                     }
                     for try await line in bytes.lines {
                         try Task.checkCancellation()
@@ -619,19 +731,17 @@ struct RemoteAPIClient {
         request.timeoutInterval = 60
         request.httpBody = data
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-        let (responseData, response) = try await URLSession.shared.data(for: request)
+        let (responseData, response) = try await Self.apiSession.data(for: request)
         return try decode(RemoteFileAcceptedResponse.self, data: responseData, response: response)
     }
 
     func downloadFile(named name: String) async throws -> Data {
         let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
         let request = try authorizedRequest(url: baseURL.appending(path: "api/files/\(encoded)"), method: "GET")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.apiSession.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw RemoteClientError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
-            let message = (try? JSONDecoder().decode(RemoteErrorBody.self, from: data).error)
-                ?? "Remote request failed (\(http.statusCode))."
-            throw RemoteClientError.server(message)
+            throw Self.responseError(statusCode: http.statusCode, data: data)
         }
         return data
     }
@@ -687,6 +797,21 @@ struct RemoteAPIClient {
         return try await request("api/sessions/\(id.uuidString)/messages", method: "POST", body: body)
     }
 
+    /// Updates the active session's run-scoped authority without sending a
+    /// message. This lets a companion switch Auto/Full Access while a model
+    /// is already working, instead of waiting for the next prompt (or leaving
+    /// the live PermissionGate on the old mode).
+    func updateSessionOptions(
+        _ id: UUID,
+        autoMode: Bool,
+        fullAccess: Bool
+    ) async throws -> RemoteAcceptedResponse {
+        try await request(
+            "api/sessions/\(id.uuidString)/options",
+            method: "POST",
+            body: ["autoMode": autoMode, "fullAccess": fullAccess])
+    }
+
     func cancelQueuedTask(_ taskID: UUID, sessionID: UUID) async throws -> RemoteAcceptedResponse {
         try await request(
             "api/sessions/\(sessionID.uuidString)/queue",
@@ -694,7 +819,7 @@ struct RemoteAPIClient {
             body: ["taskID": taskID.uuidString, "action": "cancel"])
     }
 
-    func sessionEvents(_ id: UUID) -> AsyncThrowingStream<RemoteSessionDetail, Error> {
+    func sessionEvents(_ id: UUID) -> AsyncThrowingStream<RemoteSessionStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
@@ -703,18 +828,34 @@ struct RemoteAPIClient {
                         method: "GET")
                     request.timeoutInterval = 24 * 60 * 60
                     request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                    // Keep the long-lived transcript stream on its own
+                    // connection pool. File/model requests on the regular
+                    // session must never delay SSE snapshots, otherwise the
+                    // phone appears frozen until the user taps Latest.
+                    let (bytes, response) = try await Self.streamSession.bytes(for: request)
                     guard let http = response as? HTTPURLResponse,
                           (200..<300).contains(http.statusCode) else {
-                        throw RemoteClientError.server("The live conversation stream could not be opened.")
+                        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                        throw Self.responseError(
+                            statusCode: statusCode,
+                            fallback: "The live conversation stream could not be opened.")
                     }
                     for try await line in bytes.lines {
                         try Task.checkCancellation()
+                        if line.hasPrefix(":") {
+                            continuation.yield(.heartbeat)
+                            continue
+                        }
                         guard line.hasPrefix("data:") else { continue }
                         let payload = line.dropFirst("data:".count)
                             .trimmingCharacters(in: .whitespaces)
-                        guard let data = payload.data(using: .utf8) else { continue }
-                        continuation.yield(try JSONDecoder().decode(RemoteSessionDetail.self, from: data))
+                        guard payload.utf8.count <= 8 * 1024 * 1024,
+                              let data = payload.data(using: .utf8) else {
+                            throw RemoteClientError.invalidResponseReason(
+                                "conversation snapshot exceeded 8 MB")
+                        }
+                        let detail = try JSONDecoder().decode(RemoteSessionDetail.self, from: data)
+                        continuation.yield(.snapshot(detail))
                     }
                     continuation.finish()
                 } catch is CancellationError {
@@ -731,7 +872,18 @@ struct RemoteAPIClient {
         try await request("api/sessions/\(id.uuidString)/stop", method: "POST", body: [:])
     }
 
-    func resolve(_ pending: RemotePendingInteraction, sessionID: UUID, value: String) async throws {
+    /// Restores the session's most recent git checkpoint on the Mac.
+    func undoCheckpoint(_ id: UUID) async throws -> RemoteAcceptedResponse {
+        try await request("api/sessions/\(id.uuidString)/undo", method: "POST", body: [:])
+    }
+
+    func resolve(
+        _ pending: RemotePendingInteraction,
+        sessionID: UUID,
+        value: String,
+        autoMode: Bool? = nil,
+        fullAccess: Bool? = nil
+    ) async throws {
         guard let requestID = pending.requestID else { throw RemoteClientError.invalidResponse }
         let body: [String: Any]
         switch pending.kind {
@@ -740,8 +892,14 @@ struct RemoteAPIClient {
         case "plan": body = ["requestID": requestID, "action": value, "feedback": ""]
         default: throw RemoteClientError.invalidResponse
         }
+        var requestBody = body
+        // Optional for backward compatibility with older hosts. New clients
+        // include both values when a mode toggle is used so the host can apply
+        // the choice to the live loop before continuing it.
+        if let autoMode { requestBody["autoMode"] = autoMode }
+        if let fullAccess { requestBody["fullAccess"] = fullAccess }
         let _: RemoteAcceptedResponse = try await request(
-            "api/sessions/\(sessionID.uuidString)/\(pending.kind)", method: "POST", body: body)
+            "api/sessions/\(sessionID.uuidString)/\(pending.kind)", method: "POST", body: requestBody)
     }
 
     func deleteSession(_ id: UUID) async throws -> RemoteAcceptedResponse {
@@ -799,9 +957,7 @@ struct RemoteAPIClient {
     ) throws -> Response {
         guard let http = response as? HTTPURLResponse else { throw RemoteClientError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
-            let message = (try? JSONDecoder().decode(RemoteErrorBody.self, from: data).error)
-                ?? "Remote request failed (\(http.statusCode))."
-            throw RemoteClientError.server(message)
+            throw Self.responseError(statusCode: http.statusCode, data: data)
         }
         do { return try JSONDecoder().decode(Response.self, from: data) }
         catch { throw RemoteClientError.invalidResponse }
@@ -813,6 +969,21 @@ struct RemoteAPIClient {
 
     private func headerDouble(_ response: HTTPURLResponse, _ name: String) -> Double? {
         Double(response.value(forHTTPHeaderField: name) ?? "")
+    }
+
+    static func responseError(
+        statusCode: Int,
+        data: Data? = nil,
+        fallback: String? = nil
+    ) -> RemoteClientError {
+        let message = data.flatMap {
+            try? JSONDecoder().decode(RemoteErrorBody.self, from: $0).error
+        } ?? fallback ?? "Remote request failed (\(statusCode))."
+        if statusCode == 401 {
+            return .authenticationRequired(
+                message.isEmpty ? "This Mac needs to be paired again." : message)
+        }
+        return .server(message)
     }
 }
 

@@ -195,7 +195,9 @@ enum LegacyMigration {
         if SecItemCopyMatching(check as CFDictionary, nil) == errSecSuccess { return false }
         check[kSecValueData as String] = data
         check[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        return SecItemAdd(check as CFDictionary, nil) == errSecSuccess
+        return Keychain.withAuthenticationUI(false) {
+            SecItemAdd(check as CFDictionary, nil)
+        } == errSecSuccess
     }
 
     // MARK: Application Support

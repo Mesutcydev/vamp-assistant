@@ -16,7 +16,7 @@ A native, assistant-first **Apple Silicon macOS companion**. Vamp Assistant runs
 
 ## Product previews
 
-Vamp Assistant keeps chats, specialist bots, browser and Mac control together, with projects, shell, files, and Simulator available through the optional Code capability.
+Vamp Assistant keeps chats, specialist bots, browser and Mac control together. Assistant mode can search and browse the web and save generated text documents through a user-controlled native Save panel; projects, shell, files, and Simulator remain available through the optional Code capability.
 
 | Homepage | Imported chats |
 | --- | --- |
@@ -36,7 +36,7 @@ The [Vamp Assistant site](https://mesutcydev.github.io/vamp-assistant/) has the 
 
 The repository includes a native SwiftUI companion app that connects to the Mac app's existing private Remote Sessions endpoint. It supports camera QR pairing, one-tap reconnection, secure token storage, session browsing, new local/API sessions, live responses, prompts, stop controls, approvals/questions, and permission-gated clipboard and file exchange.
 
-[Download the latest unsigned iPhone/iPad IPA](https://github.com/Mesutcydev/vamp-assistant/releases/download/ios-v0.1.33/Vamp-Assistant-iOS-0.1.33-build-50-unsigned.ipa)
+[Download the latest unsigned iPhone/iPad IPA](https://github.com/Mesutcydev/vamp-assistant/releases/download/ios-v0.1.35/Vamp-Assistant-iOS-0.1.35-build-57-unsigned.ipa)
 
 Build an unsigned sideloadable IPA:
 
@@ -46,11 +46,29 @@ Build an unsigned sideloadable IPA:
 
 The resulting `Vamp-Assistant-iOS-*-unsigned.ipa` can be re-signed with AltStore, SideStore, Sideloadly, or a personal Apple development profile. Keep both devices on the same trusted LAN or Tailscale network, then paste the address or scan the QR shown by **Vamp Assistant → Remote Sessions**.
 
-**Install:** [download the latest Apple-silicon DMG](https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.24/Vamp-Assistant-0.10.24-build-72.dmg) or [ZIP](https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.24/Vamp-Assistant-0.10.24-build-72.zip), open it, and move **Vamp Assistant.app** to Applications. Apple Silicon + macOS 15+.
+### Optional TinyFish web search
+
+Vamp Assistant can use [TinyFish Search](https://docs.tinyfish.ai/search-api) for current, ranked web sources, snippets, and URLs. Add the key in **Settings → Providers → TinyFish Search**; it is stored in the Mac Keychain and the read-only `web_search` tool is then available in Assistant, Code, browser-control, and bot runs. The assistant can pass a returned URL to `web_fetch` or the in-app browser for verification. For headless/CLI use, set `TINYFISH_API_KEY` before launching the host. No TinyFish key is bundled with the app.
+
+**Install:** [download the latest Apple-silicon DMG](https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.25/Vamp-Assistant-0.10.25-build-78.dmg) or [ZIP](https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.25/Vamp-Assistant-0.10.25-build-78.zip), open it, and move **Vamp Assistant.app** to Applications. Apple Silicon + macOS 15+.
 
 > Gatekeeper will warn — this build is Apple Development–signed, **not notarized** (Developer ID certs are revoked). Right-click → Open, or `xattr -dr com.apple.quarantine "/path/to/Vamp Assistant.app"`.
 
 > Phase 1 deliberately focuses on one polished path: MLX + MLX-quantized safetensors + core coding tools. GGUF/llama.cpp has since shipped (v0.2+, see the GGUF entries in the model catalog).
+
+## v0.10.25 — Remote unlock and richer mobile control
+
+- Remote unlock now enters credentials at the physical macOS login window and
+  is accepted only through an authenticated Tailscale session when the host
+  toggle is enabled. Attempts are rate-limited and submitted passwords are
+  cleared immediately.
+- The iPhone and iPad companion shows the unlock form only when the host reports
+  that secure remote unlock is available, then refreshes the session after a
+  successful unlock.
+- Remote settings, model selection, bot console, approval previews, app-window
+  control, and stream recovery are expanded across the native companion.
+- TinyFish Search can be enabled with a Keychain-stored API key for current web
+  results without bundling provider credentials in the app.
 
 
 ## v0.2 — safety, durability, diagnostics

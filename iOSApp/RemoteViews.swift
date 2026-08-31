@@ -65,7 +65,12 @@ private extension View {
             .overlay {
                 shape.stroke(
                     LinearGradient(
-                        colors: [.white.opacity(appearance == .light ? 0.58 : 0.18), BeetTheme.line(appearance)],
+                        // ponytail: a white highlight is invisible on the light
+                        // backdrop, so light mode lost the top-left edge entirely.
+                        // Light gets a plain hairline; dark keeps the lit rim.
+                        colors: appearance == .light
+                            ? [BeetTheme.line(appearance), BeetTheme.line(appearance).opacity(0.45)]
+                            : [.white.opacity(0.18), BeetTheme.line(appearance)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing),
                     lineWidth: 0.75)
@@ -154,12 +159,12 @@ struct RemoteBackdrop: View {
 }
 
 struct AppearanceMenuButton: View {
-    @AppStorage("remoteAppearance") private var appearance = RemoteAppearance.dark
+    @AppStorage("remoteAppearanceSetting") private var setting = RemoteAppearanceSetting.dark
     @Environment(\.remoteAppearance) private var current
     var body: some View {
         Menu {
-            Picker("Appearance", selection: $appearance) {
-                ForEach(RemoteAppearance.allCases) { option in
+            Picker("Appearance", selection: $setting) {
+                ForEach(RemoteAppearanceSetting.allCases) { option in
                     Label(option.label, systemImage: option.symbol).tag(option)
                 }
             }
@@ -197,11 +202,23 @@ struct PairingView: View {
                         PairingActions(address: $address, code: $code, showManual: $showManual,
                             focusedField: $focusedField,
                             savedAddress: store.savedMacAddress,
+                            requiresPairing: store.requiresPairing,
                             isConnecting: store.isConnecting, onScan: { showScanner = true },
-                            onReconnect: { Task { await store.connectSaved() } },
+                            onReconnect: {
+                                if store.requiresPairing {
+                                    address = store.savedMacAddress ?? address
+                                    showManual = true
+                                    focusedField = .code
+                                } else {
+                                    Task { await store.connectSaved() }
+                                }
+                            },
                             onForget: { store.forgetSavedMac() },
                             onConnect: { Task { await store.connect(address: address, code: code) } })
                         PairingAssurances()
+                        RemoteAppVersionFooter(
+                            version: RemoteAppVersion.current.version,
+                            build: RemoteAppVersion.current.build)
                     }.frame(maxWidth: 560).padding(.horizontal, 18).padding(.vertical, 28).frame(maxWidth: .infinity)
                 }
             }
@@ -228,6 +245,11 @@ struct PairingView: View {
             .sheet(isPresented: $showComputers) { ComputerSwitcherSheet(store: store) }
             .keyboardDismissToolbar()
             .scrollDismissesKeyboard(.interactively)
+            .onAppear {
+                guard store.requiresPairing else { return }
+                address = store.savedMacAddress ?? address
+                showManual = true
+            }
         }
     }
     private var errorBinding: Binding<Bool> { Binding(get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } }) }
@@ -260,6 +282,7 @@ struct PairingActions: View {
     @Binding var showManual: Bool
     var focusedField: FocusState<PairingField?>.Binding
     let savedAddress: String?
+    let requiresPairing: Bool
     let isConnecting: Bool
     let onScan: () -> Void
     let onReconnect: () -> Void
@@ -270,6 +293,7 @@ struct PairingActions: View {
             if let savedAddress {
                 SavedMacReconnectCard(
                     address: savedAddress,
+                    requiresPairing: requiresPairing,
                     isConnecting: isConnecting,
                     onReconnect: onReconnect,
                     onForget: onForget
@@ -311,6 +335,7 @@ struct PairingActions: View {
 struct SavedMacReconnectCard: View {
     @Environment(\.remoteAppearance) private var appearance
     let address: String
+    let requiresPairing: Bool
     let isConnecting: Bool
     let onReconnect: () -> Void
     let onForget: () -> Void
@@ -324,7 +349,8 @@ struct SavedMacReconnectCard: View {
                     Image(systemName: "desktopcomputer").font(.subheadline.weight(.semibold)).foregroundStyle(BeetTheme.accentBright)
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Your paired Mac").font(.subheadline.weight(.semibold))
+                    Text(requiresPairing ? "Pair this Mac again" : "Your paired Mac")
+                        .font(.subheadline.weight(.semibold))
                     Text(address).font(.caption).foregroundStyle(BeetTheme.secondaryText(appearance)).lineLimit(1)
                 }
                 Spacer()
@@ -339,7 +365,9 @@ struct SavedMacReconnectCard: View {
             Button(action: onReconnect) {
                 HStack(spacing: 8) {
                     if isConnecting { ProgressView().tint(.white).controlSize(.small) }
-                    Label(isConnecting ? "Looking for your Mac…" : "Connect again", systemImage: "bolt.horizontal.circle.fill")
+                    Label(
+                        isConnecting ? "Looking for your Mac…" : (requiresPairing ? "Enter new pairing code" : "Connect again"),
+                        systemImage: requiresPairing ? "key.fill" : "bolt.horizontal.circle.fill")
                 }
                 .font(.headline).frame(maxWidth: .infinity, minHeight: 50)
             }
@@ -395,11 +423,20 @@ struct RemoteField: View {
 
 struct PairingAssurances: View {
     @Environment(\.remoteAppearance) private var appearance
-    let items = [("lock.shield.fill", "Private", "Direct to your Mac"), ("checkmark.shield.fill", "In control", "Approve every action"), ("bolt.horizontal.fill", "No cloud relay", "LAN or Tailscale")]
+    let items = [("lock.shield.fill", "Private", "Direct to your Mac"), ("checkmark.shield.fill", "In control", "Approve every action"), ("bolt.shield.fill", "No cloud relay", "LAN or Tailscale")]
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: 10) {
             ForEach(items, id: \.1) { item in
-                VStack(spacing: 6) { Image(systemName: item.0).foregroundStyle(BeetTheme.accentBright); Text(item.1).font(.caption.weight(.bold)); Text(item.2).font(.caption2).foregroundStyle(BeetTheme.secondaryText(appearance)).multilineTextAlignment(.center) }.frame(maxWidth: .infinity)
+                VStack(spacing: 6) {
+                    // ponytail: fixed box. Glyph heights differ, and under .top a
+                    // short one pulled its whole column ~5pt above the others.
+                    Image(systemName: item.0)
+                        .font(.system(size: 15))
+                        .frame(height: 18)
+                        .foregroundStyle(BeetTheme.accentBright)
+                    Text(item.1).font(.caption.weight(.bold))
+                    Text(item.2).font(.caption2).foregroundStyle(BeetTheme.secondaryText(appearance)).multilineTextAlignment(.center)
+                }.frame(maxWidth: .infinity)
             }
         }.accessibilityElement(children: .combine)
     }
@@ -464,8 +501,8 @@ struct SessionListView: View {
     @State private var showAppStream = false
     @State private var showBotRuns = false
     @State private var showDiagnostics = false
+    @State private var showSettings = false
     @State private var startBotID = ""
-    @State private var showForgetMac = false
     @State private var deferredSessionID: UUID?
     private var visible: [RemoteSessionSummary] { search.isEmpty ? store.sessions : store.sessions.filter { $0.title.localizedCaseInsensitiveContains(search) || $0.workspace.localizedCaseInsensitiveContains(search) } }
     var body: some View {
@@ -476,6 +513,7 @@ struct SessionListView: View {
                     store: store,
                     search: $search,
                     onControl: { showControl = true },
+                    onSettings: { showSettings = true },
                     onStart: {
                         startBotID = ""
                         showStartSession = true
@@ -518,11 +556,11 @@ struct SessionListView: View {
                     .accessibilityLabel("Choose a Vamp Assistant computer")
                     Button { showSharing = true } label: { Image(systemName: "square.and.arrow.up") }
                         .accessibilityLabel("Share clipboard or files")
-                    Menu {
-                        Button("App Stream", systemImage: "macwindow.on.rectangle") { showAppStream = true }
-                        Button("Control Diagnostics", systemImage: "stethoscope") { showDiagnostics = true }
-                        Button("Forget this Mac", systemImage: "iphone.slash", role: .destructive) { showForgetMac = true }
-                    } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Session options")
+                    // Diagnostics and unpairing moved into Settings, which left
+                    // this menu holding one item — a menu wrapping a single
+                    // action is just an extra tap.
+                    Button { showAppStream = true } label: { Image(systemName: "macwindow.on.rectangle") }
+                        .accessibilityLabel("App Stream")
                 }
             }
             .sheet(isPresented: $showStartSession, onDismiss: openDeferredSession) {
@@ -532,6 +570,12 @@ struct SessionListView: View {
                 }
             }
             .sheet(isPresented: $showSharing) { RemoteShareSheet(store: store) }
+            .sheet(isPresented: $showSettings) {
+                RemoteSettingsSheet(
+                    store: store,
+                    onSwitchComputer: { showComputers = true },
+                    onDiagnostics: { showDiagnostics = true })
+            }
             .sheet(isPresented: $showBotRuns, onDismiss: openDeferredSession) {
                 RemoteBotsView(store: store) { sessionID in
                     deferredSessionID = sessionID
@@ -549,15 +593,6 @@ struct SessionListView: View {
                         }
                 }
             }
-            .confirmationDialog(
-                "Forget this Mac?",
-                isPresented: $showForgetMac,
-                titleVisibility: .visible) {
-                    Button("Forget this Mac", role: .destructive) { Task { await store.revoke() } }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("This device is unpaired and its access token is deleted. You will need the pairing code from your Mac to connect again.")
-                }
             .fullScreenCover(isPresented: $showControl) { RemoteControlView(store: store) }
             .fullScreenCover(isPresented: $showAppStream) {
                 RemoteControlView(store: store, sourceMode: .application)
@@ -1138,6 +1173,7 @@ struct PairAnotherMacSheet: View {
                             showManual: $showManual,
                             focusedField: $focusedField,
                             savedAddress: nil,
+                            requiresPairing: false,
                             isConnecting: store.isConnecting,
                             onScan: { showScanner = true },
                             onReconnect: {},
@@ -1313,6 +1349,7 @@ struct SessionControlHeader: View {
     @Bindable var store: RemoteStore
     @Binding var search: String
     let onControl: () -> Void
+    let onSettings: () -> Void
     let onStart: () -> Void
     @Environment(\.remoteAppearance) private var appearance
 
@@ -1364,7 +1401,14 @@ struct SessionControlHeader: View {
                 .opacity(store.isConnected ? 1 : 0.62)
                 .accessibilityLabel("Control Mac")
                 .accessibilityHint(store.isConnected ? "Open a live view of this Mac" : "Connect to your Mac first")
-                RemoteAppearanceSwitcher()
+                Button(action: onSettings) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 15, weight: .semibold))
+                        .frame(width: 36, height: 36)
+                        .hitTarget(4)
+                }
+                .buttonStyle(RemoteChromeButtonStyle())
+                .accessibilityLabel("Settings")
                 Button { Task { try? await store.refresh() } } label: {
                     Group {
                         if store.isRefreshing { ProgressView().controlSize(.small) }
@@ -1391,7 +1435,10 @@ struct SessionControlHeader: View {
             }
             .dynamicTypeSize(...DynamicTypeSize.xxLarge)
             SearchField(text: $search)
-            RemoteModeSwitcher(mode: $store.sessionMode)
+            // No Chat/Code switcher here: the mode belongs to a session, and every session is
+            // created through the New session sheet, which asks for it there. On the home screen
+            // it decided nothing — the list is not filtered by it — so it read as a filter that
+            // did not work.
         }
         .frame(maxWidth: 720)
         .frame(maxWidth: .infinity)
@@ -1402,44 +1449,6 @@ struct SessionControlHeader: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(BeetTheme.line(appearance)).frame(height: 0.75)
         }
-    }
-}
-
-struct RemoteAppearanceSwitcher: View {
-    @AppStorage("remoteAppearance") private var appearance = RemoteAppearance.dark
-    @Environment(\.remoteAppearance) private var current
-
-    var body: some View {
-        HStack(spacing: 2) {
-            ForEach(RemoteAppearance.allCases) { option in
-                Button {
-                    guard appearance != option else { return }
-                    UISelectionFeedbackGenerator().selectionChanged()
-                    appearance = option
-                } label: {
-                    Image(systemName: option.symbol)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(option == current ? Color.white : BeetTheme.secondaryText(current))
-                        .frame(width: 34, height: 32)
-                        .background(
-                            option == current ? BeetTheme.accent : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .padding(.vertical, 6)
-                        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .padding(.vertical, -6)
-                }
-                .buttonStyle(RemotePressButtonStyle())
-                .accessibilityLabel("\(option.label) appearance")
-                .accessibilityAddTraits(option == current ? .isSelected : [])
-            }
-        }
-        .padding(3)
-        .background(BeetTheme.surfaceStrong(current), in: Capsule())
-        .overlay { Capsule().stroke(BeetTheme.line(current).opacity(0.72), lineWidth: 0.75) }
-        .shadow(color: .black.opacity(current == .light ? 0.07 : 0.16), radius: 7, y: 3)
-        .animation(.easeOut(duration: 0.16), value: current)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Appearance")
     }
 }
 
@@ -1529,10 +1538,12 @@ struct StartSessionSheet: View {
     @State private var source = "local"
     @State private var selectedModelID = ""
     @State private var selectedReasoningEffort: String?
+    @State private var showModelPicker = false
     @State private var prompt = ""
     @State private var botComputers: [RemoteBotComputer] = []
     @State private var selectedBotComputerID: UUID?
     @State private var botComputerBusyID: UUID?
+    @State private var consoleComputer: RemoteBotComputer?
     @State private var keyProviderID = "openAI"
     @State private var keyDraft = ""
     @State private var isSavingKey = false
@@ -1621,9 +1632,13 @@ struct StartSessionSheet: View {
                             appearance: appearance,
                             prompt: $prompt)
                         Picker("Model source", selection: $source) {
-                            Label("Local", systemImage: "cpu").tag("local")
-                            Label("ChatGPT", systemImage: "person.crop.circle").tag("chatgpt")
-                            Label("API", systemImage: "cloud").tag("api")
+                            ForEach(RemoteModelPickerSheet.sources, id: \.self) { option in
+                                let count = store.startModels.filter { $0.source == option }.count
+                                Text(count > 0
+                                     ? "\(RemoteModelPickerSheet.sourceLabel(option)) \(count)"
+                                     : RemoteModelPickerSheet.sourceLabel(option))
+                                    .tag(option)
+                            }
                         }.pickerStyle(.segmented)
 
                         botComputerSection
@@ -1635,19 +1650,15 @@ struct StartSessionSheet: View {
                             if models.isEmpty {
                                 ContentUnavailableView(emptyModelsTitle, systemImage: sourceIcon, description: Text(emptyModelsDescription))
                                     .frame(maxWidth: .infinity).padding(.vertical, 18)
-                            } else if source == "api", groupedAPIModels.count > 1 {
-                                VStack(alignment: .leading, spacing: 12) {
-                                    ForEach(groupedAPIModels, id: \.detail) { group in
-                                        VStack(alignment: .leading, spacing: 6) {
-                                            Text(group.detail.uppercased())
-                                                .font(.caption2.bold()).tracking(0.8)
-                                                .foregroundStyle(BeetTheme.secondaryText(appearance))
-                                            modelList(group.models)
-                                        }
-                                    }
-                                }
                             } else {
-                                modelList(models)
+                                // A summary row into the searchable picker, not
+                                // the whole catalog inline: a few hundred API
+                                // models made this form scroll for minutes with
+                                // no way to find a known name.
+                                RemoteModelSummaryRow(
+                                    models: store.startModels,
+                                    selectedModelID: selectedModelID,
+                                    action: { showModelPicker = true })
                             }
                         }
 
@@ -1677,6 +1688,18 @@ struct StartSessionSheet: View {
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
             .toolbarBackground(BeetTheme.background(appearance).opacity(0.94), for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
+            .sheet(item: $consoleComputer) { computer in
+                RemoteBotConsoleView(store: store, computer: computer)
+            }
+            .sheet(isPresented: $showModelPicker) {
+                RemoteModelPickerSheet(
+                    models: store.startModels,
+                    source: $source,
+                    selectedModelID: $selectedModelID,
+                    onSelect: { selectedReasoningEffort = $0.defaultReasoningEffort },
+                    onRefresh: { await store.loadStartModels() })
+                    .environment(\.remoteAppearance, appearance)
+            }
             .task {
                 selectedBotID = initialBotID
                 async let models: Void = store.loadStartModels()
@@ -1722,30 +1745,6 @@ struct StartSessionSheet: View {
         let first = source == "api" ? groupedAPIModels.first?.models.first : models.first
         selectedModelID = first?.id ?? ""
         selectedReasoningEffort = first?.defaultReasoningEffort
-    }
-
-    private func modelList(_ models: [RemoteStartModelOption]) -> some View {
-        VStack(spacing: 0) {
-            ForEach(models) { model in
-                Button {
-                    selectedModelID = model.id
-                    selectedReasoningEffort = model.defaultReasoningEffort
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: selectedModelID == model.id ? "checkmark.circle.fill" : sourceIcon)
-                            .foregroundStyle(selectedModelID == model.id ? BeetTheme.accentBright : BeetTheme.secondaryText(appearance)).frame(width: 24)
-                            .accessibilityHidden(true)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(model.name).font(.body.weight(.semibold))
-                            Text(model.detail).font(.caption).foregroundStyle(BeetTheme.secondaryText(appearance))
-                        }
-                        Spacer()
-                    }.padding(13).contentShape(Rectangle())
-                        .accessibilityAddTraits(selectedModelID == model.id ? .isSelected : [])
-                }.buttonStyle(.plain)
-                if model.id != models.last?.id { Divider().overlay(BeetTheme.line(appearance)) }
-            }
-        }.background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 16)).overlay { RoundedRectangle(cornerRadius: 16).stroke(BeetTheme.line(appearance)) }
     }
 
     @ViewBuilder
@@ -1862,6 +1861,15 @@ struct StartSessionSheet: View {
                                     .font(.caption).foregroundStyle(BeetTheme.secondaryText(appearance))
                             }
                             Spacer()
+                            // A bot computer has no screen to stream; its console is the shell,
+                            // the workspace, and the output.
+                            Button {
+                                consoleComputer = computer
+                            } label: {
+                                Image(systemName: "terminal")
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityLabel("Open \(displayName(for: computer)) console")
                             if computer.state == "running" {
                                 Button(botComputerBusyID == computer.id ? "Stopping…" : "Stop") { stopBotComputer(computer) }
                                     .buttonStyle(.bordered)
@@ -1925,7 +1933,6 @@ struct StartSessionSheet: View {
         switch computer.backend {
         case "appleContainer": backend = "Linux micro-VM"
         case "isolatedWorkspace": backend = "Private workspace"
-        case "macOSVirtualMachine": backend = "macOS VM"
         default: backend = computer.backend
         }
         return computer.state.capitalized + " · " + backend + " · private browser"
@@ -2426,11 +2433,6 @@ struct RemoteEmptySessions: View {
     }
 }
 
-struct AppearancePickerMenu: View {
-    @AppStorage("remoteAppearance") private var appearance = RemoteAppearance.dark
-    var body: some View { Picker("Appearance", selection: $appearance) { ForEach(RemoteAppearance.allCases) { Label($0.label, systemImage: $0.symbol).tag($0) } } }
-}
-
 struct ConversationView: View {
     @Bindable var store: RemoteStore
     let sessionID: UUID
@@ -2449,15 +2451,30 @@ struct ConversationView: View {
                         detail: detail,
                         models: store.startModels,
                         selectedModelID: $selectedModelID,
-                        onStop: { Task { await store.stop() } })
+                        onStop: { Task { await store.stop() } },
+                        onRefreshModels: { await store.loadStartModels() })
                     if !store.isConnected {
                         RemoteReconnectBanner(store: store)
                     }
                     MessageTranscript(
                         detail: detail,
                         dismissedErrorMessage: dismissedErrorMessage,
-                        onDismissError: { dismissedErrorMessage = detail.error?.message })
-                    if let pending = detail.pending { PendingInteractionView(pending: pending) { value in Task { await store.resolvePending(value) } } }
+                        onDismissError: { dismissedErrorMessage = detail.error?.message },
+                        onRevertCheckpoint: detail.isRunning
+                            ? nil
+                            : { Task { await store.undoCheckpoint() } })
+                    if let pending = detail.pending {
+                        PendingInteractionView(
+                            pending: pending,
+                            isResolving: store.isResolvingPending(pending, sessionID: detail.id)) { value in
+                                Task { await store.resolvePending(value) }
+                            }
+                            // Approval is a state transition, not a card
+                            // insertion animation. Disabling the card while
+                            // the POST and SSE acknowledgement settle keeps
+                            // the transcript from jumping or flashing.
+                            .transaction { transaction in transaction.animation = nil }
+                    }
                 }
             } else { ProgressView("Opening conversation…").frame(maxWidth: .infinity, maxHeight: .infinity) }
         }.navigationTitle(store.sessions.first(where: { $0.id == sessionID })?.title ?? "Conversation").navigationBarTitleDisplayMode(.inline)
@@ -2515,8 +2532,29 @@ struct ConversationView: View {
                 dismissedErrorMessage = store.selectedSession?.error?.message ?? dismissedErrorMessage
             }
             .onChange(of: store.fullAccess) { _, enabled in
-                guard enabled, store.selectedSession?.pending?.kind == "approval" else { return }
-                Task { await store.resolvePending("approve") }
+                // Access mode is live session state while a turn is running.
+                // Push the new value to the Mac before auto-resolving the
+                // visible gate so the loop cannot recreate the same prompt.
+                Task {
+                    await store.updateRunOptionsIfNeeded()
+                    guard enabled,
+                          let kind = store.selectedSession?.pending?.kind,
+                          kind == "approval" || kind == "plan" else { return }
+                    await store.resolvePending("approve")
+                }
+            }
+            .onChange(of: store.autoMode) { _, enabled in
+                // Turning Auto on while a request is already waiting should
+                // take effect immediately. Otherwise the user sees an
+                // approval card that no longer matches the selected mode and
+                // has to approve the same action manually.
+                Task {
+                    await store.updateRunOptionsIfNeeded()
+                    guard enabled,
+                          let kind = store.selectedSession?.pending?.kind,
+                          kind == "approval" || kind == "plan" else { return }
+                    await store.resolvePending("approve")
+                }
             }
             .sheet(isPresented: $showSharing) { RemoteShareSheet(store: store) }
             .sheet(isPresented: $showComputers) { ComputerSwitcherSheet(store: store) }
@@ -2537,7 +2575,10 @@ struct ConversationStatus: View {
     let models: [RemoteStartModelOption]
     @Binding var selectedModelID: String
     var onStop: (() -> Void)? = nil
+    var onRefreshModels: (() async -> Void)? = nil
     @Environment(\.remoteAppearance) private var appearance
+    @State private var showPicker = false
+    @State private var pickerSource = "local"
 
     private var selectedName: String {
         models.first(where: { $0.id == selectedModelID })?.name ?? detail.modelID
@@ -2558,25 +2599,11 @@ struct ConversationStatus: View {
             if models.isEmpty {
                 Text(detail.modelID).lineLimit(1)
             } else {
-                Menu {
-                    ForEach(["local", "chatgpt", "api"], id: \.self) { source in
-                        let group = models.filter { $0.source == source }
-                        if !group.isEmpty {
-                            Section(source == "chatgpt" ? "ChatGPT" : source.capitalized) {
-                                ForEach(group) { model in
-                                    Button {
-                                        selectedModelID = model.id
-                                    } label: {
-                                        if selectedModelID == model.id {
-                                            Label(model.name, systemImage: "checkmark")
-                                        } else {
-                                            Text(model.name)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                // A sheet, not a Menu: a Menu listing a few hundred gateway
+                // models is unscrollable and unsearchable on a phone.
+                Button {
+                    pickerSource = models.first { $0.id == selectedModelID }?.source ?? "local"
+                    showPicker = true
                 } label: {
                     HStack(spacing: 3) {
                         Text(selectedName).lineLimit(1)
@@ -2584,8 +2611,10 @@ struct ConversationStatus: View {
                             .font(.caption2.weight(.bold))
                     }
                 }
+                .buttonStyle(.plain)
                 .disabled(detail.isRunning)
                 .accessibilityLabel("Model, \(selectedName)")
+                .accessibilityHint("Opens the searchable model list")
             }
             Spacer(minLength: 8)
             if detail.isRunning {
@@ -2607,6 +2636,14 @@ struct ConversationStatus: View {
         .font(.caption).foregroundStyle(BeetTheme.secondaryText(appearance))
         .padding(.horizontal, 16).frame(minHeight: 34)
         .background(BeetTheme.surface(appearance).opacity(0.62))
+        .sheet(isPresented: $showPicker) {
+            RemoteModelPickerSheet(
+                models: models,
+                source: $pickerSource,
+                selectedModelID: $selectedModelID,
+                onRefresh: onRefreshModels)
+                .environment(\.remoteAppearance, appearance)
+        }
     }
 }
 
@@ -2614,16 +2651,38 @@ struct MessageTranscript: View {
     let detail: RemoteSessionDetail
     var dismissedErrorMessage: String? = nil
     var onDismissError: (() -> Void)? = nil
+    /// Nil while the agent is running — the Mac refuses an undo mid-run, so the
+    /// button should not be offered rather than offered and rejected.
+    var onRevertCheckpoint: (() -> Void)? = nil
     @Environment(\.remoteAppearance) private var appearance
-    // ponytail: one flag, no scroll bookkeeping. Auto-follow was unconditional,
-    // so reading scrollback during a run yanked you back on every token.
-    @State private var isAtBottom = true
+    /// Whether the transcript should keep the newest response in view. This is
+    /// deliberately separate from the scroll geometry: content height grows
+    /// while a response streams, and treating that growth as user scrolling
+    /// makes the “Latest” affordance appear even when the user never touched
+    /// the transcript.
+    @State private var followsLatest = true
+    @State private var userIsInteracting = false
+    @State private var scrollRequestGeneration = 0
+    @State private var scrollWorkScheduled = false
+    @State private var scrollNeedsFollowUp = false
+    @State private var scrollAnimationRequested = false
+
+    private struct ScrollMetrics: Equatable {
+        let offsetY: CGFloat
+        let bottomDistance: CGFloat
+    }
+
+    private static let followThreshold: CGFloat = 64
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 24) {
-                    ForEach(detail.messages) { MessageBubble(message: $0) }
+                    ForEach(detail.messages) { message in
+                        MessageBubble(
+                            message: message,
+                            onRevert: message.checkpointID == nil ? nil : onRevertCheckpoint)
+                    }
                     if detail.isRunning { StreamingBubble(text: detail.streamingText, phase: detail.phase) }
                     if let error = detail.error, error.message != dismissedErrorMessage {
                         RemoteChatErrorCard(error: error, onDismiss: onDismissError)
@@ -2635,32 +2694,142 @@ struct MessageTranscript: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .defaultScrollAnchor(.bottom)
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                geometry.contentOffset.y + geometry.containerSize.height
-                    >= geometry.contentSize.height - 32
-            } action: { _, atBottom in
-                guard isAtBottom != atBottom else { return }
-                withAnimation(.easeOut(duration: 0.16)) { isAtBottom = atBottom }
+            // Geometry is sampled independently from the scroll phase. The
+            // phase tells us whether a change could have come from a finger;
+            // without that distinction, every streamed token looks like the
+            // user scrolled away from the bottom.
+            .onScrollGeometryChange(for: ScrollMetrics.self) { geometry in
+                ScrollMetrics(
+                    offsetY: geometry.contentOffset.y,
+                    bottomDistance: max(0, geometry.contentSize.height - geometry.visibleRect.maxY))
+            } action: { previous, atBottom in
+                guard userIsInteracting else { return }
+                if atBottom.bottomDistance <= Self.followThreshold {
+                    if !followsLatest { followsLatest = true }
+                } else if atBottom.offsetY < previous.offsetY - 1 {
+                    // Only a real upward drag disables follow. Content height
+                    // changes during streaming leave the offset untouched.
+                    if followsLatest { followsLatest = false }
+                }
             }
-            .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
+            .onScrollPhaseChange { _, phase, context in
+                let geometry = context.geometry
+                let bottomDistance = max(0, geometry.contentSize.height - geometry.visibleRect.maxY)
+                switch phase {
+                case .tracking, .interacting:
+                    userIsInteracting = true
+                    if bottomDistance <= Self.followThreshold, !followsLatest {
+                        followsLatest = true
+                    }
+                case .idle:
+                    userIsInteracting = false
+                    if bottomDistance <= Self.followThreshold, !followsLatest {
+                        followsLatest = true
+                    }
+                case .decelerating, .animating:
+                    break
+                @unknown default:
+                    break
+                }
+            }
+            .onAppear { requestScroll(proxy) }
             // Unanimated: a spring restarted per token was also the jitter.
             .onChange(of: detail.streamingText) { _, _ in
-                guard isAtBottom else { return }
-                proxy.scrollTo("bottom", anchor: .bottom)
+                guard followsLatest else { return }
+                requestScroll(proxy)
             }
             .onChange(of: detail.messages.count) { _, _ in
-                guard isAtBottom else { return }
-                withAnimation(.easeOut(duration: 0.16)) { proxy.scrollTo("bottom", anchor: .bottom) }
+                guard followsLatest else { return }
+                requestScroll(proxy, animated: true)
+            }
+            .onChange(of: detail.isRunning) { _, _ in
+                guard followsLatest else { return }
+                requestScroll(proxy, animated: true)
+            }
+            .onChange(of: detail.id) { _, _ in
+                // A reused navigation cell can keep @State from the previous
+                // session. A newly opened conversation should always begin at
+                // its newest message.
+                scrollRequestGeneration &+= 1
+                scrollWorkScheduled = false
+                scrollNeedsFollowUp = false
+                scrollAnimationRequested = false
+                followsLatest = true
+                userIsInteracting = false
+                requestScroll(proxy)
             }
             .overlay(alignment: .bottom) {
-                if !isAtBottom { jumpToLatest(proxy) }
+                if !followsLatest { jumpToLatest(proxy) }
+            }
+            .onDisappear {
+                scrollRequestGeneration &+= 1
+                scrollWorkScheduled = false
+                scrollNeedsFollowUp = false
+                scrollAnimationRequested = false
+            }
+        }
+    }
+
+    /// Coalesce token-driven scroll requests and wait for the lazy stack to
+    /// finish laying out the new text. Calling `scrollTo` in the same update
+    /// that changes a token can target the previous content height, which is
+    /// the source of the old “press Latest” behavior.
+    private func requestScroll(
+        _ proxy: ScrollViewProxy,
+        animated: Bool = false,
+        delay: TimeInterval = 0.04
+    ) {
+        // Do not compete with a finger or trackpad drag. If the user keeps
+        // following the latest message, the next streamed delta will request
+        // the anchor again after the interaction has ended.
+        guard followsLatest, !userIsInteracting else { return }
+        // A trailing debounce alone never fires when model deltas arrive
+        // faster than the debounce interval: every token cancels the previous
+        // request. Keep one small main-actor worker alive instead. It drains
+        // follow-up requests at a steady cadence and performs a second pass
+        // after layout, so the bottom anchor tracks both fast local models and
+        // slower network streams without animation jitter.
+        scrollNeedsFollowUp = true
+        scrollAnimationRequested = scrollAnimationRequested || animated
+        guard !scrollWorkScheduled else { return }
+        scrollWorkScheduled = true
+        let generation = scrollRequestGeneration
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(delay))
+            while generation == scrollRequestGeneration, followsLatest, !userIsInteracting {
+                scrollNeedsFollowUp = false
+                let shouldAnimate = scrollAnimationRequested
+                scrollAnimationRequested = false
+                if shouldAnimate {
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        proxy.scrollTo("bottom", anchor: .bottom)
+                    }
+                } else {
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                }
+                // Lazy stacks may publish their final height one run-loop
+                // turn after the first scroll. Re-anchoring once prevents the
+                // user from having to press Latest after a long response.
+                try? await Task.sleep(for: .milliseconds(55))
+                guard generation == scrollRequestGeneration,
+                      followsLatest,
+                      !userIsInteracting else { break }
+                proxy.scrollTo("bottom", anchor: .bottom)
+                if !scrollNeedsFollowUp { break }
+                try? await Task.sleep(for: .milliseconds(35))
+            }
+            if generation == scrollRequestGeneration {
+                scrollWorkScheduled = false
+                scrollAnimationRequested = false
             }
         }
     }
 
     private func jumpToLatest(_ proxy: ScrollViewProxy) -> some View {
         Button {
-            withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
+            followsLatest = true
+            userIsInteracting = false
+            requestScroll(proxy, animated: true, delay: 0)
         } label: {
             Label(detail.isRunning ? "Jump to latest" : "Latest", systemImage: "arrow.down")
                 .font(.caption.weight(.semibold))
@@ -2680,6 +2849,9 @@ struct MessageTranscript: View {
 
 struct MessageBubble: View {
     let message: RemoteMessage
+    /// Only supplied where a revert is actually possible (an open session that
+    /// is not running); nil elsewhere, and the checkpoint row hides the button.
+    var onRevert: (() -> Void)? = nil
     @Environment(\.remoteAppearance) private var appearance
     var body: some View {
         if message.role == "user" {
@@ -2696,7 +2868,30 @@ struct MessageBubble: View {
             }
         }
         else if message.role == "toolCall" || message.role == "toolResult" { ToolMessageCard(message: message) }
-        else if message.role == "error" { EmptyView() }
+        // Reasoning is the model's working, not its answer. It used to fall
+        // through to the assistant bubble below, which presented thinking as
+        // conclusions.
+        else if message.role == "reasoning" { ReasoningMessageCard(message: message) }
+        else if message.role == "checkpoint" { CheckpointMessageRow(message: message, onRevert: onRevert) }
+        // Errors used to render as EmptyView(), so scrolling back through a
+        // session showed no trace of anything that had gone wrong.
+        else if message.role == "error" {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.red)
+                    .accessibilityHidden(true)
+                Text(message.content)
+                    .font(.caption)
+                    .foregroundStyle(BeetTheme.secondaryText(appearance))
+                    .textSelection(.enabled)
+                Spacer(minLength: 4)
+            }
+            .padding(11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.red.opacity(0.09), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.red.opacity(0.3), lineWidth: 0.75) }
+        }
         else if message.role == "notice" {
             HStack(spacing: 8) {
                 Image(systemName: "arrow.uturn.up")
@@ -2719,6 +2914,107 @@ struct MessageBubble: View {
                 }
                 Spacer(minLength: 4)
             }
+        }
+    }
+}
+
+/// The model's visible working, collapsed by default. It is deliberately
+/// quieter than an answer bubble: smaller type, no avatar, muted colour.
+struct ReasoningMessageCard: View {
+    let message: RemoteMessage
+    @Environment(\.remoteAppearance) private var appearance
+    @State private var expanded = false
+
+    private var preview: String {
+        message.content
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Button {
+                withAnimation(.easeOut(duration: 0.16)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "brain")
+                        .font(.caption.weight(.semibold))
+                        .accessibilityHidden(true)
+                    Text("Reasoning")
+                        .font(.caption.weight(.semibold))
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        .font(.caption2.weight(.bold))
+                        .accessibilityHidden(true)
+                    Spacer(minLength: 4)
+                }
+                .foregroundStyle(BeetTheme.secondaryText(appearance))
+                .frame(minHeight: 30)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(expanded ? "Hide reasoning" : "Show reasoning")
+
+            Text(expanded ? message.content : preview)
+                .font(.caption)
+                .italic()
+                .lineSpacing(3)
+                .foregroundStyle(BeetTheme.secondaryText(appearance))
+                .lineLimit(expanded ? nil : 2)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(BeetTheme.surfaceStrong(appearance).opacity(0.45),
+                    in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+    }
+}
+
+/// A git checkpoint the agent took before mutating the tree. Carries the revert
+/// affordance, which the phone could not offer while checkpoints arrived as
+/// stringified notices.
+struct CheckpointMessageRow: View {
+    let message: RemoteMessage
+    var onRevert: (() -> Void)? = nil
+    @Environment(\.remoteAppearance) private var appearance
+    @State private var confirming = false
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(BeetTheme.accentBright)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Checkpoint")
+                    .font(.caption2.weight(.bold))
+                    .tracking(0.5)
+                    .foregroundStyle(BeetTheme.secondaryText(appearance))
+                Text(message.content)
+                    .font(.caption)
+                    .foregroundStyle(BeetTheme.secondaryText(appearance))
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 6)
+            if onRevert != nil {
+                Button("Revert") { confirming = true }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(BeetTheme.surfaceStrong(appearance).opacity(0.45),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .confirmationDialog("Restore this checkpoint?",
+                            isPresented: $confirming,
+                            titleVisibility: .visible) {
+            Button("Restore", role: .destructive) { onRevert?() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Your Mac's working tree is rolled back to this point. Changes made after it are lost.")
         }
     }
 }
@@ -2769,8 +3065,9 @@ struct ToolMessageCard: View {
     @Environment(\.remoteAppearance) private var appearance
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(displayName, systemImage: message.role == "toolCall" ? "hammer" : "checkmark.circle.fill")
-                .font(.caption.weight(.semibold)).foregroundStyle(BeetTheme.accentBright)
+            Label(displayName, systemImage: symbol)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(message.didFail ? Color.red : BeetTheme.accentBright)
             if !displayContent.isEmpty {
                 Text(displayContent).font(.caption.monospaced()).lineSpacing(3)
                     .textSelection(.enabled).lineLimit(12)
@@ -2779,6 +3076,13 @@ struct ToolMessageCard: View {
         .padding(13).frame(maxWidth: .infinity, alignment: .leading)
         .background(BeetTheme.surfaceStrong(appearance).opacity(0.64), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(BeetTheme.line(appearance).opacity(0.7), lineWidth: 0.75) }
+    }
+
+    /// A failed tool used to render with the same checkmark as a successful
+    /// one — the Mac tracked the failure but it never crossed the wire.
+    private var symbol: String {
+        if message.role == "toolCall" { return "hammer" }
+        return message.didFail ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"
     }
 
     private var displayName: String {
@@ -3066,6 +3370,7 @@ private struct RemoteCommandPalette: View {
 
 struct PendingInteractionView: View {
     let pending: RemotePendingInteraction
+    var isResolving = false
     let onResolve: (String) -> Void
     @Environment(\.remoteAppearance) private var appearance
     @State private var answer = ""
@@ -3096,7 +3401,24 @@ struct PendingInteractionView: View {
                 .lineSpacing(3)
                 .textSelection(.enabled)
 
-            if pending.kind == "question" {
+            // The change itself, not a description of it.
+            if let preview = pending.preview {
+                RemoteApprovalPreviewView(preview: preview)
+            }
+
+            if isResolving {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(BeetTheme.accentBright)
+                    Text("Continuing…")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(BeetTheme.secondaryText(appearance))
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .accessibilityLabel("Continuing")
+            } else if pending.kind == "question" {
                 if let options = pending.options, !options.isEmpty {
                     VStack(spacing: 8) {
                         ForEach(options, id: \.self) { option in
@@ -3124,6 +3446,7 @@ struct PendingInteractionView: View {
         .shadow(color: .black.opacity(appearance == .light ? 0.08 : 0.2), radius: 14, y: 6)
         .padding(.horizontal, 12)
         .padding(.bottom, 8)
+        .animation(nil, value: isResolving)
     }
 
     @ViewBuilder private var actionButtons: some View {

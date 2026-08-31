@@ -327,7 +327,9 @@ enum SessionCrypto {
                 kSecValueData as String: newKey,
                 kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
             ]
-            let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+            let addStatus = Keychain.withAuthenticationUI(false) {
+                SecItemAdd(addQuery as CFDictionary, nil)
+            }
             guard addStatus == errSecSuccess else {
                 throw SessionCryptoError.keyStorageFailed(addStatus)
             }

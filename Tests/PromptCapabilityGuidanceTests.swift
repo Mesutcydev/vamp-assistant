@@ -50,6 +50,23 @@ final class PromptCapabilityGuidanceTests: XCTestCase {
         XCTAssertFalse(text.contains("`describe_image`"))
     }
 
+    func testBrowserDownloadIsAdvertisedAndSelectedForDownloadRequests() {
+        let guidance = PromptBuilder.capabilityGuidance(
+            tools: [StubTool(name: "browser_download")]) ?? ""
+        XCTAssertTrue(guidance.contains("`browser_download`"))
+
+        let names = Set(ToolRouter.select(
+            from: [
+                StubTool(name: "browser_read"),
+                StubTool(name: "browser_download"),
+                StubTool(name: "attempt_completion"),
+            ],
+            for: "Find and download the model file from Hugging Face").map(\.name))
+        XCTAssertTrue(names.contains("browser_download"))
+        XCTAssertTrue(ToolRouter.requiresBrowserEvidence(
+            for: "Download the selected model from the browser"))
+    }
+
     func testSimulatorGuidanceAppearsWithSimTools() {
         let text = PromptBuilder.capabilityGuidance(
             tools: [StubTool(name: "sim_build_run")]) ?? ""
@@ -122,6 +139,7 @@ final class PromptCapabilityGuidanceTests: XCTestCase {
         XCTAssertTrue(chatOnlyNames.contains("tailscale_status"))
         XCTAssertTrue(chatOnlyNames.contains("disk_space_status"))
         XCTAssertTrue(chatOnlyNames.contains("mac_system_status"))
+        XCTAssertTrue(chatOnlyNames.contains("save_document"))
         XCTAssertFalse(chatOnlyNames.contains("read_file"))
         XCTAssertFalse(chatOnlyNames.contains("run_command"))
     }
@@ -130,7 +148,19 @@ final class PromptCapabilityGuidanceTests: XCTestCase {
         XCTAssertTrue(PromptBuilder.isChatOnlyTool("tailscale_status"))
         XCTAssertTrue(PromptBuilder.isChatOnlyTool("disk_space_status"))
         XCTAssertTrue(PromptBuilder.isChatOnlyTool("mac_system_status"))
+        XCTAssertTrue(PromptBuilder.isChatOnlyTool("save_document"))
         XCTAssertFalse(PromptBuilder.isChatOnlyTool("run_command"))
+    }
+
+    func testChatOnlyPromptAdvertisesUserChosenDocumentSaving() {
+        let text = PromptBuilder.systemPrompt(
+            tools: [StubTool(name: "save_document")],
+            workspace: Workspace(root: tempRoot),
+            chatOnly: true)
+        XCTAssertTrue(text.contains("Save generated documents"))
+        XCTAssertTrue(text.contains("native Save panel"))
+        XCTAssertTrue(text.contains("`save_document`"))
+        XCTAssertFalse(text.contains(tempRoot.path))
     }
 
     func testChatOnlyPromptPrefersDirectStatusToolsOverComputerUI() {
@@ -276,7 +306,7 @@ final class PromptCapabilityGuidanceTests: XCTestCase {
         XCTAssertTrue(text.contains("each item on its own bullet"))
     }
 
-    func testChatOnlyPromptAllowsOnlyBrowserAndComputerTools() {
+    func testChatOnlyPromptAllowsOnlyAssistantOwnedTools() {
         let text = PromptBuilder.systemPrompt(
             tools: [
                 StubTool(name: "read_file"),

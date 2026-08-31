@@ -1,12 +1,44 @@
 import SwiftUI
 
 /// Application delegate for lifecycle events SwiftUI's `App` can't express.
+@MainActor
 final class BeetCodeAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // SwiftUI can restore a previous "all windows closed" state and leave
+        // this regular GUI app running with only its menu bar. Defer one turn
+        // so WindowGroup gets the first chance to create its scene, then use
+        // the scene's own New Window command when no window exists.
+        DispatchQueue.main.async {
+            Self.openMainWindowIfNeeded(in: NSApplication.shared)
+        }
+    }
+
+    func applicationShouldHandleReopen(
+        _ sender: NSApplication,
+        hasVisibleWindows flag: Bool
+    ) -> Bool {
+        if !flag {
+            Self.openMainWindowIfNeeded(in: sender)
+        }
+        return true
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         // Synchronous best-effort: engines' async unload path can't run on
         // the way out, so registered child processes (llama-server) get a
         // plain SIGTERM here.
         ChildProcessRegistry.terminateAll()
+    }
+
+    private static func openMainWindowIfNeeded(in application: NSApplication) {
+        guard application.windows.isEmpty,
+              let item = application.mainMenu?
+                .item(withTitle: "File")?
+                .submenu?
+                .item(withTitle: "New Window"),
+              let action = item.action else { return }
+        application.sendAction(action, to: item.target, from: item)
+        application.activate(ignoringOtherApps: true)
     }
 }
 
@@ -48,7 +80,8 @@ struct BeetCodeApp: App {
     var body: some Scene {
         WindowGroup {
             MainWindowView()
-                .fontDesign(.serif)
+                // Root face for text that never went through AppFont/.app().
+                .fontDesign(Font.resolvedDesign(.serif))
                 .tint(Theme.accent)
                 .environmentObject(appState)
                 .environmentObject(appState.sessions)
@@ -58,10 +91,12 @@ struct BeetCodeApp: App {
                 // Keep AppKit's appearance in sync so Theme's dynamic NSColors
                 // resolve to the forced scheme, not just the OS one.
                 .task(id: settings.appearance) { Theme.applyAppearance(settings.appearance) }
-                // Apply the accent palette at launch and on every change —
-                // Theme's palette-driven colors resolve live.
-                .task(id: settings.accentPalette) { Theme.applyPalette(settings.accentPalette) }
-                .task(id: settings.textSize) { Theme.applyTextSize(settings.textSize) }
+                // Palette / typeface / text size live in Theme globals that
+                // SwiftUI cannot observe, so mirroring them from a `.task`
+                // would land a frame late and never force a redraw.
+                .modifier(ThemeSync(palette: settings.accentPalette,
+                                    typeface: settings.typeface,
+                                    textSize: settings.textSize))
                 .task {
                     DiagnosticsCenter.shared.record(
                         .system, "App launched",
@@ -149,4 +184,28 @@ extension Notification.Name {
     static let openBotsDashboard = Notification.Name("com.beetcode.openBotsDashboard")
     static let openAssistantHome = Notification.Name("com.beetcode.openAssistantHome")
     static let openAppSettings = Notification.Name("com.beetcode.openAppSettings")
+}
+
+/// Mirrors the user's theme settings into `Theme`'s draw-time globals. The
+/// mirroring happens in `body` — on the main actor, before any descendant
+/// resolves a font or color — which is exactly the contract those
+/// `nonisolated(unsafe)` globals document.
+///
+/// Deliberately does NOT `.id()` the subtree to force a redraw: that would
+/// give `MainWindowView` a new identity and reset every piece of its `@State`,
+/// so changing the accent from inside Settings would close Settings. The
+/// redraw comes from the surfaces that already observe `SettingsStore` —
+/// `MainWindowView` and `SettingsView` both do — which re-create their
+/// children with the new values.
+private struct ThemeSync: ViewModifier {
+    let palette: AccentPalette
+    let typeface: AppTypeface
+    let textSize: AppTextSize
+
+    func body(content: Content) -> some View {
+        Theme.currentPalette = palette
+        Theme.currentTypeface = typeface
+        Theme.currentTextSize = textSize
+        return content
+    }
 }

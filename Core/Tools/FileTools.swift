@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 // MARK: - read_file
@@ -139,6 +140,78 @@ struct WriteFileTool: AgentTool {
 
         let lineCount = content.components(separatedBy: "\n").count
         return "wrote \(path) (\(lineCount) lines)"
+    }
+}
+
+// MARK: - save_document
+
+/// Creates a bounded text artifact outside project mode without granting the
+/// model general filesystem access. The user chooses the exact destination in
+/// a native Save panel, which also owns overwrite confirmation.
+struct SaveDocumentTool: AgentTool {
+    typealias SaveHandler = @MainActor @Sendable (String, Data) throws -> URL?
+
+    let name = "save_document"
+    let summary = "Save a generated text document to a location the user chooses"
+    let risk = ToolRisk.write
+    let schemaText = """
+        {"type":"object","properties":{
+          "suggested_name":{"type":"string","description":"Suggested filename including an appropriate extension, for example index.html or notes.md"},
+          "content":{"type":"string","description":"The complete UTF-8 document content to save"}
+        },"required":["suggested_name","content"]}
+        """
+
+    static let maxContentBytes = 4 * 1024 * 1024
+    private let saveHandler: SaveHandler
+
+    init() {
+        saveHandler = { suggestedName, data in
+            let panel = NSSavePanel()
+            panel.title = "Save Generated Document"
+            panel.message = "Choose where Vamp Assistant should save this document."
+            panel.prompt = "Save"
+            panel.canCreateDirectories = true
+            panel.nameFieldStringValue = suggestedName
+            guard panel.runModal() == .OK, let url = panel.url else { return nil }
+            try data.write(to: url, options: .atomic)
+            return url
+        }
+    }
+
+    init(saveHandler: @escaping SaveHandler) {
+        self.saveHandler = saveHandler
+    }
+
+    func execute(_ call: ParsedToolCall, in context: ToolContext) async throws -> String {
+        guard let rawName = call.string("suggested_name"), !rawName.isEmpty else {
+            throw ToolError.missingArgument("suggested_name")
+        }
+        guard let content = call.string("content") else {
+            throw ToolError.missingArgument("content")
+        }
+        let suggestedName = Self.suggestedFilename(rawName)
+        let data = Data(content.utf8)
+        guard data.count <= Self.maxContentBytes else {
+            throw ToolError.contentTooLarge(size: data.count, limit: Self.maxContentBytes)
+        }
+
+        guard let savedURL = try await saveHandler(suggestedName, data) else {
+            return "cancelled: no document was saved"
+        }
+        return "saved \(savedURL.path) (\(ByteFormatter.bytes(Int64(data.count))))"
+    }
+
+    static func suggestedFilename(_ rawName: String) -> String {
+        let trimmed = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let component = URL(fileURLWithPath: trimmed).lastPathComponent
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !component.isEmpty,
+              component != ".",
+              component != "..",
+              component != "/" else {
+            return "document.txt"
+        }
+        return String(component.prefix(180))
     }
 }
 

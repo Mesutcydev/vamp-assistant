@@ -261,7 +261,7 @@ struct ChatView: View {
                         .accessibilityAddTraits(.isHeader)
                 }
 
-                Text("Ask anything, browse the web, control your Mac with permission, or open a project when you want Code.")
+                Text("Ask anything, browse the web, create and save documents, control your Mac with permission, or open a project when you want Code.")
                     .font(AppFont.homeInvitation)
                     .foregroundStyle(Theme.textSecondary)
                     .multilineTextAlignment(.center)
@@ -409,6 +409,12 @@ struct ChatView: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
+        // Approval responses can arrive at the same time as the live session
+        // snapshot. Keep the gate's geometry stable while that state settles;
+        // a disappearing action row should never make the composer jump.
+        .transaction { transaction in
+            transaction.animation = nil
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Pending approval")
     }

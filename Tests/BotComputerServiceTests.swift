@@ -230,8 +230,91 @@ final class BotComputerServiceTests: XCTestCase {
         XCTAssertEqual(started, [first, second])
     }
 
+    /// The console's file browser takes a path from the paired client, so escaping the
+    /// workspace is the thing that must not be possible.
+    func testWorkspaceBrowsingIsConfinedToTheWorkspace() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BeetCodeBotConsoleTests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let service = BotComputerService(root: root)
+        let bot = try await service.prepare(
+            profileID: "builder", name: "Builder", backend: .isolatedWorkspace)
+        let workspace = URL(fileURLWithPath: bot.workspacePath, isDirectory: true)
+
+        try "inside".write(
+            to: workspace.appendingPathComponent("notes.txt"), atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(
+            at: workspace.appendingPathComponent("src"), withIntermediateDirectories: true)
+        // A secret next to the workspace, and a symlink inside it pointing at that secret.
+        let outside = root.appendingPathComponent("outside.txt")
+        try "secret".write(to: outside, atomically: true, encoding: .utf8)
+        try? FileManager.default.createSymbolicLink(
+            at: workspace.appendingPathComponent("escape"), withDestinationURL: outside)
+
+        let listing = try await service.listWorkspace(id: bot.id)
+        XCTAssertEqual(listing.first?.name, "src", "directories sort first")
+        XCTAssertTrue(listing.contains { $0.name == "notes.txt" })
+        XCTAssertTrue(
+            listing.allSatisfy { !$0.path.hasPrefix("/") },
+            "paths must stay relative so the host layout never crosses the wire")
+
+        let contents = try await service.readWorkspaceFile(id: bot.id, relativePath: "notes.txt")
+        XCTAssertEqual(contents, "inside")
+
+        for escape in ["../outside.txt", "src/../../outside.txt", "/etc/hosts", "escape"] {
+            do {
+                _ = try await service.readWorkspaceFile(id: bot.id, relativePath: escape)
+                XCTFail("\(escape) must not resolve outside the workspace")
+            } catch {
+                // expected
+            }
+        }
+    }
+
+    /// Four specialists sharing one Mac. The old fixed 4 CPU / 4 GB asked for 16 GB and 16
+    /// cores no matter what the host had.
+    func testContainerResourcesLeaveHeadroomForFourBots() {
+        let sixteenGigEightCore = ProcessInfoStub(cores: 8, bytes: 16 * 1_073_741_824)
+        let small = BotComputerService.containerResources(processInfo: sixteenGigEightCore)
+        XCTAssertEqual(small.cpus, "2")
+        XCTAssertEqual(small.memory, "2G")
+
+        // Even a very large Mac stays inside the per-bot ceiling.
+        let huge = BotComputerService.containerResources(
+            processInfo: ProcessInfoStub(cores: 128, bytes: 512 * 1_073_741_824))
+        XCTAssertEqual(huge.cpus, "8")
+        XCTAssertEqual(huge.memory, "8G")
+
+        // And a small machine still gets a usable floor rather than zero.
+        let tiny = BotComputerService.containerResources(
+            processInfo: ProcessInfoStub(cores: 2, bytes: 4 * 1_073_741_824))
+        XCTAssertEqual(tiny.cpus, "2")
+        XCTAssertEqual(tiny.memory, "2G")
+    }
+
+    func testGuestImageIsPinned() {
+        XCTAssertFalse(
+            BotComputerService.guestImage.hasSuffix(":latest"),
+            "a moving base image breaks apk provisioning inside a container nobody is watching")
+    }
+
     @MainActor
     private func settle() async {
         try? await Task.sleep(for: .milliseconds(100))
     }
+}
+
+/// Stands in for the host so container sizing can be checked on any machine.
+private final class ProcessInfoStub: ProcessInfo, @unchecked Sendable {
+    private let cores: Int
+    private let bytes: UInt64
+
+    init(cores: Int, bytes: UInt64) {
+        self.cores = cores
+        self.bytes = bytes
+        super.init()
+    }
+
+    override var activeProcessorCount: Int { cores }
+    override var physicalMemory: UInt64 { bytes }
 }

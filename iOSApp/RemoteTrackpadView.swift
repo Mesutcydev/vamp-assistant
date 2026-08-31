@@ -3,6 +3,7 @@ import UIKit
 
 /// Relative trackpad: 1-finger move, tap/double/right/middle click, 2-finger scroll, long-press drag-lock.
 struct RemoteTrackpadView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var onMove: (Double, Double) -> Void
     var onClick: () -> Void
     var onDoubleClick: () -> Void
@@ -58,7 +59,21 @@ struct RemoteTrackpadView: View {
         }
         .contentShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .onAppear {
-            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { pulse = true }
+            updatePulse(for: reduceMotion)
+        }
+        .onChange(of: reduceMotion) { _, reduced in
+            updatePulse(for: reduced)
+        }
+    }
+
+    private func updatePulse(for reduced: Bool) {
+        if reduced {
+            withAnimation(nil) { pulse = false }
+        } else {
+            pulse = false
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
         }
     }
 }

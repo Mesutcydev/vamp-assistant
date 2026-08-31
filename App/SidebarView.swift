@@ -1219,13 +1219,14 @@ struct SidebarHeaderView: View {
     let onRemoveQueuedTask: (UUID) -> Void
     let onClose: () -> Void
     @FocusState private var searchFocused: Bool
+    @State private var searchPresented = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             identityRow
             primaryActions
             quietNavigation
-            if searchFocused || !historySearch.isEmpty {
+            if searchPresented || !historySearch.isEmpty {
                 searchField
             }
             if !queuedTasks.isEmpty {
@@ -1236,6 +1237,9 @@ struct SidebarHeaderView: View {
         .padding(.top, Spacing.md)
         .padding(.bottom, Spacing.md)
         .background(Color.clear)
+        .onReceive(NotificationCenter.default.publisher(for: .focusChatSearch)) { _ in
+            presentSearch()
+        }
     }
 
     private var identityRow: some View {
@@ -1291,7 +1295,7 @@ struct SidebarHeaderView: View {
     private var quietNavigation: some View {
         VStack(spacing: 2) {
             quietNavigationRow("Search", icon: "magnifyingglass", trailing: "⌘F") {
-                searchFocused = true
+                presentSearch()
             }
             quietNavigationRow(
                 sidebarTab == .imported ? "My chats" : "Imported",
@@ -1408,6 +1412,7 @@ struct SidebarHeaderView: View {
             Image(systemName: "magnifyingglass")
                 .font(.app(size: 12, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.textTertiary)
+                .accessibilityHidden(true)
             TextField("Search all history", text: $historySearch)
                 .textFieldStyle(.plain)
                 .font(.app(size: 13, design: .serif))
@@ -1429,7 +1434,11 @@ struct SidebarHeaderView: View {
             .strokeBorder(Theme.hairline.opacity(0.8), lineWidth: 1))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Search chat history")
-        .onReceive(NotificationCenter.default.publisher(for: .focusChatSearch)) { _ in
+    }
+
+    private func presentSearch() {
+        searchPresented = true
+        DispatchQueue.main.async {
             searchFocused = true
         }
     }

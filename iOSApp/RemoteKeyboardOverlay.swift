@@ -64,6 +64,7 @@ struct RemoteKeyboardOverlay: View {
                     .background(Self.chip, in: Circle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Close the keyboard overlay")
         }
     }
 
@@ -88,6 +89,7 @@ struct RemoteKeyboardOverlay: View {
             }
             .buttonStyle(.plain)
             .disabled(textInput.isEmpty)
+            .accessibilityLabel("Send text to the Mac")
         }
     }
 

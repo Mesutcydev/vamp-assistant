@@ -8,6 +8,9 @@ final class BotComputerManager: ObservableObject {
     @Published var errorMessage: String?
 
     private let service: BotComputerService
+    /// Tail of the work chain, and how many operations are still queued behind it.
+    private var workTask: Task<Void, Never>?
+    private var inFlight = 0
 
     init(service: BotComputerService = BotComputerService()) {
         self.service = service
@@ -49,22 +52,48 @@ final class BotComputerManager: ObservableObject {
         }
     }
 
+    // MARK: - Console
+    //
+    // Deliberately outside `perform`: that path serialises lifecycle work behind `isWorking` and
+    // silently drops anything requested while it is busy, which is right for start/stop and wrong
+    // for a console the user is typing into.
+
+    func exec(computerID: UUID, command: String) async throws -> String {
+        try await service.exec(id: computerID, command: command)
+    }
+
+    func listWorkspace(computerID: UUID, path: String) async throws -> [BotWorkspaceEntry] {
+        try await service.listWorkspace(id: computerID, relativePath: path)
+    }
+
+    func readWorkspaceFile(computerID: UUID, path: String) async throws -> String {
+        try await service.readWorkspaceFile(id: computerID, relativePath: path)
+    }
+
     private func perform(
         _ operation: @escaping @Sendable (BotComputerService) async throws
             -> (BotHostCapabilities, [BotComputerRecord])
     ) {
-        guard !isWorking else { return }
+        // Queued, not dropped. `guard !isWorking else { return }` discarded any request that
+        // arrived mid-flight — a reload() during a start() vanished silently and left the UI on
+        // stale state with no error and no retry. Chaining keeps call order and keeps every
+        // request; `inFlight` keeps the spinner up until the last one lands.
+        inFlight += 1
         isWorking = true
         errorMessage = nil
-        Task {
+        let previous = workTask
+        workTask = Task { [weak self] in
+            await previous?.value
+            guard let self else { return }
             do {
-                let result = try await operation(service)
-                capabilities = result.0
-                computers = result.1
+                let result = try await operation(self.service)
+                self.capabilities = result.0
+                self.computers = result.1
             } catch {
-                errorMessage = error.localizedDescription
+                self.errorMessage = error.localizedDescription
             }
-            isWorking = false
+            self.inFlight -= 1
+            self.isWorking = self.inFlight > 0
         }
     }
 }

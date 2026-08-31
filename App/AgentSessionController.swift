@@ -165,6 +165,30 @@ final class AgentSessionController: ObservableObject {
         remoteRunActive = true
         remoteAutoMode = autoMode
         remoteFullAccess = fullAccess
+        // A phone may change Auto/Full Access while the current loop is
+        // waiting on an approval. Propagate that choice into the actor before
+        // the approval is resolved so the following tool call does not create
+        // another card under the old mode.
+        let uninterrupted = fullAccess || autoMode
+        if let loop {
+            Task { await loop.updatePermissionMode(fullAccess: uninterrupted) }
+        }
+    }
+
+    /// Effective permissions for the currently selected remote run. Remote
+    /// clients use this metadata to keep their controls in sync with the run
+    /// that is actually executing instead of falling back to the Mac's global
+    /// settings (which may intentionally be in Goal mode).
+    var remoteRunAgentMode: String? {
+        guard remoteRunActive else { return nil }
+        return remoteAutoMode ? "auto" : "goal"
+    }
+
+    var remoteRunHasFullAccess: Bool? {
+        guard remoteRunActive else { return nil }
+        // Auto mode is the uninterrupted assistant path and therefore carries
+        // the same routine-action authority as an explicit Full Access choice.
+        return remoteFullAccess || remoteAutoMode
     }
 
     func applyRemoteIsolation(
@@ -199,7 +223,11 @@ final class AgentSessionController: ObservableObject {
     }
 
     private var effectivePlanMode: Bool {
-        remoteRunActive ? !remoteAutoMode : settings.planMode
+        // Full Access is an explicit uninterrupted-run choice. A plan card is
+        // an approval gate too, so keeping it enabled here would make the
+        // setting appear ineffective even though every tool is auto-approved.
+        if effectiveFullAccess { return false }
+        return remoteRunActive ? !remoteAutoMode : settings.planMode
     }
 
     private var effectiveFullAccess: Bool {
@@ -414,7 +442,12 @@ final class AgentSessionController: ObservableObject {
         let selectedAgent = chatOnly
             ? nil
             : catalog.agent(named: preferredAgentName) ?? catalog.agent(named: "build")
+        // Full Access/Auto is explicitly an uninterrupted run. A project
+        // policy may still select the Plan specialist, but that specialist
+        // must not re-introduce a plan approval card after the user chose the
+        // no-interruption mode.
         let planMode = !chatOnly
+            && !effectiveFullAccess
             && (effectivePlanMode || selectedAgent?.name.caseInsensitiveCompare("plan") == .orderedSame)
         let goalMode = !chatOnly && effectiveAgentIsGoal
         let outputStyle = projectPolicy?.outputStyle ?? settings.outputStyle
@@ -1140,7 +1173,10 @@ final class AgentSessionController: ObservableObject {
         return """
         You are Vamp Assistant in project-free assistant mode. Answer the user directly. No
         project is connected. Do not inspect files, run commands, change code,
-        or claim workspace access. The in-app browser_* tools are available.
+        or claim workspace access. You may create a new text artifact with
+        save_document; the user chooses its exact destination in a native Save
+        panel. Use it when asked to save generated HTML, Markdown, text, or JSON
+        instead of claiming you cannot create files. The in-app browser_* tools are available.
         \(computerBoundary) Use only those app-owned tools in chat-only mode.
         For Mac tasks, behave as a persistent computer-use agent:
         - preserve the user's objective across short replies such as a number, yes, or continue;
@@ -1627,7 +1663,7 @@ final class AgentSessionController: ObservableObject {
 
         case .auto:
             settings.agentMode = .auto
-            notice("Auto mode ON — direct execution with normal approval gates.")
+            notice("Auto mode ON — routine actions run continuously. macOS privacy and destructive safeguards still apply.")
 
         case .goal:
             settings.agentMode = .goal
@@ -2235,6 +2271,7 @@ final class AgentSessionController: ObservableObject {
         FindFilesTool(),
         FindFilesTool(name: "glob"),
         WebFetchTool(),
+        TinyFishSearchTool(),
         BackgroundProcessTool(),
         BackgroundStatusTool(),
         ApplyPatchTool(),
@@ -2258,6 +2295,7 @@ final class AgentSessionController: ObservableObject {
         // type/eval go through the approval card like every other mutation.
         BrowserTools.ReadTool(),
         BrowserTools.ScreenshotTool(),
+        BrowserTools.DownloadTool(),
         BrowserTools.NavigateTool(),
         BrowserTools.ClickTool(),
         BrowserTools.TypeTool(),
@@ -2279,12 +2317,15 @@ final class AgentSessionController: ObservableObject {
         ComputerScrollTool(),
     ]
 
-    /// Browser control is safe to offer without a project because it is
-    /// app-owned and every mutation still uses the approval card. Computer
-    /// control joins it only after the explicit Settings opt-in.
+    /// Project-free Assistant tools stay app-owned: bounded search/browser
+    /// operations plus a native user-chosen document Save panel. Computer
+    /// control can request its own least-privilege macOS access in context.
     static let browserControlTools: [any AgentTool] = [
+        TinyFishSearchTool(),
+        SaveDocumentTool(),
         BrowserTools.ReadTool(),
         BrowserTools.ScreenshotTool(),
+        BrowserTools.DownloadTool(),
         BrowserTools.NavigateTool(),
         BrowserTools.ClickTool(),
         BrowserTools.TypeTool(),
@@ -2310,10 +2351,12 @@ final class AgentSessionController: ObservableObject {
         FindFilesTool(),
         FindFilesTool(name: "glob"),
         WebFetchTool(),
+        TinyFishSearchTool(),
         ApplyPatchTool(),
         RunCommandTool(),
         BrowserTools.ReadTool(),
         BrowserTools.ScreenshotTool(),
+        BrowserTools.DownloadTool(),
         BrowserTools.NavigateTool(),
         BrowserTools.ClickTool(),
         BrowserTools.TypeTool(),
@@ -2357,6 +2400,7 @@ final class AgentSessionController: ObservableObject {
         WriteFileTool(),
         ListDirectoryTool(),
         SearchTool(),
+        TinyFishSearchTool(),
         FindFilesTool(),
         ApplyPatchTool(),
         RunCommandTool(),
@@ -2365,6 +2409,7 @@ final class AgentSessionController: ObservableObject {
         BrowserTools.NavigateTool(),
         BrowserTools.ReadTool(),
         BrowserTools.ScreenshotTool(),
+        BrowserTools.DownloadTool(),
         BrowserTools.ClickTool(),
         BrowserTools.TypeTool(),
         BrowserTools.ScrollTool(),

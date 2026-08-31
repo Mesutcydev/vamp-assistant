@@ -134,6 +134,7 @@ struct ToolExecutor {
         case .timeout: .timeout
         case .commandFailed(let code): .commandFailed(Int32(code))
         case .missingArgument(let name): .invalidArguments(name)
+        case .contentTooLarge: .invalidArguments(error.localizedDescription)
         case .invalidWorkspaceRoot, .pathOutsideWorkspace, .notPreviouslyRead,
              .binaryFile, .fileNotFound, .fileTooLarge:
             .workspace(error.localizedDescription)

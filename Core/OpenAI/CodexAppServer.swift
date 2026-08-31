@@ -636,7 +636,10 @@ actor CodexAppServerClient {
         Vamp Assistant may provide native browser_* and computer_* tools. Prefer
         those tools for the in-app browser and Mac UI tasks. For browser work,
         navigate, read elements, and act with fresh document-scoped refs. For
-        computer work, call computer_status first, inspect with
+        an explicit file download, read the page's links and pass the direct
+        http(s) href (not a page or binary navigation click) to
+        browser_download. Wait for its saved path and byte count; clicking a
+        binary URL only navigates and is not proof that a file was saved. For computer work, call computer_status first, inspect with
         computer_ui_tree, and prefer its latest refs for clicks, typing, and scrolling. Actions return
         a bounded fresh observation by default; never reuse an older ref after
         state changes. Do not claim success until that observation confirms it.

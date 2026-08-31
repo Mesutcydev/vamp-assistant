@@ -3,13 +3,11 @@ import Foundation
 enum BotComputerBackend: String, Codable, CaseIterable, Sendable {
     case isolatedWorkspace
     case appleContainer
-    case macOSVirtualMachine
 
     var title: String {
         switch self {
         case .isolatedWorkspace: "Workspace"
         case .appleContainer: "Linux micro-VM"
-        case .macOSVirtualMachine: "macOS VM"
         }
     }
 }
@@ -32,6 +30,18 @@ struct BotHostCapabilities: Codable, Equatable, Sendable {
     }
 }
 
+/// One entry in a bot's workspace, as shown by the console file browser.
+struct BotWorkspaceEntry: Codable, Identifiable, Equatable, Sendable {
+    var id: String { path }
+    /// Path relative to the workspace root — never absolute, so a client can neither see the
+    /// host layout nor round-trip a path that escapes the workspace.
+    var path: String
+    var name: String
+    var isDirectory: Bool
+    var byteSize: Int
+    var modifiedAt: Date
+}
+
 struct BotComputerRecord: Codable, Identifiable, Equatable, Sendable {
     var id: UUID
     var profileID: String
@@ -50,6 +60,8 @@ enum BotComputerError: Error, LocalizedError {
     case commandFailed(String)
     case recordMissing
     case unknownProfile
+    case pathOutsideWorkspace
+    case notReadable(String)
 
     var errorDescription: String? {
         switch self {
@@ -58,6 +70,8 @@ enum BotComputerError: Error, LocalizedError {
         case .commandFailed(let message): message
         case .recordMissing: "That bot computer no longer exists."
         case .unknownProfile: "Choose Builder, Reviewer, Navigator, or Researcher."
+        case .pathOutsideWorkspace: "That path is outside the bot's workspace."
+        case .notReadable(let name): "\(name) could not be read as text."
         }
     }
 }
@@ -230,6 +244,7 @@ actor BotComputerService {
             workingDirectory: root,
             timeout: 8,
             maxOutputBytes: 512 * 1024)
+        let resources = Self.containerResources()
         let result: CommandResult
         if existing.output.contains(containerName) {
             result = try ShellRunner.runProcess(
@@ -242,11 +257,12 @@ actor BotComputerService {
                 executable: executable,
                 arguments: [
                     "run", "--detach", "--name", containerName,
-                    "--cpus", "4", "--memory", "4G",
+                    "--cpus", resources.cpus,
+                    "--memory", resources.memory,
                     "--volume", "\(record.workspacePath):/workspace",
                     "--workdir", "/workspace",
                     "--label", "com.beetcode.bot=\(record.profileID)",
-                    "docker.io/library/alpine:latest", "sleep", "infinity",
+                    Self.guestImage, "sleep", "infinity",
                 ],
                 workingDirectory: root,
                 timeout: 180,
@@ -296,12 +312,145 @@ actor BotComputerService {
         return record
     }
 
+    // MARK: - Console
+
+    /// Run one command inside a bot's computer and return its combined output.
+    ///
+    /// This grants no capability the bot does not already have — `BotRunTools` executes in the
+    /// same place — it only makes that surface visible and manual. Container-backed bots run
+    /// through `container exec`; a workspace-backed bot runs on the host with its working
+    /// directory pinned to the workspace, which is exactly how its own commands already run.
+    func exec(id: UUID, command: String, timeout: TimeInterval = 30) throws -> String {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        guard let record = try load().first(where: { $0.id == id }) else {
+            throw BotComputerError.recordMissing
+        }
+        let workspace = URL(fileURLWithPath: record.workspacePath, isDirectory: true)
+        let result: CommandResult
+        if record.backend == .appleContainer,
+           let executable = Self.containerExecutable(fileManager: fileManager),
+           let containerName = record.containerName {
+            result = try ShellRunner.runProcess(
+                executable: executable,
+                arguments: Self.execArguments(
+                    containerName: containerName,
+                    command: Self.rewriteCommandForContainer(
+                        trimmed, hostWorkspacePath: record.workspacePath)),
+                workingDirectory: root,
+                timeout: timeout,
+                maxOutputBytes: 512 * 1024)
+        } else {
+            result = try ShellRunner.runProcess(
+                executable: "/bin/sh",
+                arguments: ["-lc", trimmed],
+                workingDirectory: workspace,
+                timeout: timeout,
+                maxOutputBytes: 512 * 1024)
+        }
+        return result.output
+    }
+
+    /// List one directory of a bot's workspace.
+    ///
+    /// The workspace is a host directory bind-mounted at `/workspace`, so this reads it directly
+    /// instead of paying for a container round-trip — and it keeps working for a workspace-backed
+    /// bot, and for a container that is currently stopped.
+    func listWorkspace(id: UUID, relativePath: String = "") throws -> [BotWorkspaceEntry] {
+        let (root, directory) = try workspaceLocation(id: id, relativePath: relativePath)
+        let keys: [URLResourceKey] = [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey]
+        let contents = try fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: keys,
+            options: [.skipsSubdirectoryDescendants])
+        return contents.map { url in
+            let values = try? url.resourceValues(forKeys: Set(keys))
+            return BotWorkspaceEntry(
+                path: Self.relativePath(of: url, under: root),
+                name: url.lastPathComponent,
+                isDirectory: values?.isDirectory ?? false,
+                byteSize: values?.fileSize ?? 0,
+                modifiedAt: values?.contentModificationDate ?? Date(timeIntervalSince1970: 0))
+        }
+        .sorted {
+            $0.isDirectory == $1.isDirectory
+                ? $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+                : $0.isDirectory
+        }
+    }
+
+    /// Read one workspace file as text, capped so a stray binary or a multi-gigabyte log cannot
+    /// be pulled into the app or across the wire.
+    func readWorkspaceFile(
+        id: UUID,
+        relativePath: String,
+        maxBytes: Int = 256 * 1024
+    ) throws -> String {
+        let (_, file) = try workspaceLocation(id: id, relativePath: relativePath)
+        let handle = try FileHandle(forReadingFrom: file)
+        defer { try? handle.close() }
+        let data = try handle.read(upToCount: maxBytes) ?? Data()
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw BotComputerError.notReadable(file.lastPathComponent)
+        }
+        return text
+    }
+
+    /// Resolve a client-supplied relative path against a bot's workspace, refusing anything that
+    /// escapes it.
+    ///
+    /// This is the trust boundary for the console: `relativePath` arrives from the paired client.
+    /// Both sides are symlink-resolved before comparison, so neither `../` nor a symlink planted
+    /// inside the workspace can walk out of it.
+    private func workspaceLocation(id: UUID, relativePath: String) throws -> (root: URL, target: URL) {
+        guard let record = try load().first(where: { $0.id == id }) else {
+            throw BotComputerError.recordMissing
+        }
+        let root = URL(fileURLWithPath: record.workspacePath, isDirectory: true)
+            .resolvingSymlinksInPath().standardizedFileURL
+        let cleaned = relativePath.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+        guard !cleaned.isEmpty else { return (root, root) }
+        let target = root.appendingPathComponent(cleaned)
+            .resolvingSymlinksInPath().standardizedFileURL
+        guard target.path == root.path || target.path.hasPrefix(root.path + "/") else {
+            throw BotComputerError.pathOutsideWorkspace
+        }
+        return (root, target)
+    }
+
+    static func relativePath(of url: URL, under root: URL) -> String {
+        let resolved = url.resolvingSymlinksInPath().standardizedFileURL.path
+        let base = root.path
+        guard resolved.hasPrefix(base + "/") else { return url.lastPathComponent }
+        return String(resolved.dropFirst(base.count + 1))
+    }
+
     static func containerCLI(fileManager: FileManager = .default) -> String? {
         containerExecutable(fileManager: fileManager)
     }
 
     static func execArguments(containerName: String, command: String) -> [String] {
         ["exec", "-w", "/workspace", containerName, "sh", "-lc", command]
+    }
+
+    /// Pinned base image.
+    ///
+    /// `alpine:latest` moves. A bot computer prepared today and started next month could come up
+    /// on a different Alpine than the one `provisionGuestIfNeeded` was written against, and the
+    /// failure would land as an `apk add` error inside a container nobody is watching. Existing
+    /// containers are unaffected — they are restarted by name, never re-created.
+    static let guestImage = "docker.io/library/alpine:3.21"
+
+    /// Per-bot CPU and memory, sized against this Mac.
+    ///
+    /// This was a hardcoded 4 CPUs / 4 GB. With four specialists that is 16 GB and 16 cores
+    /// requested regardless of what the machine has, so starting every specialist on a 16 GB Mac
+    /// swapped the host. An eighth of RAM and a quarter of the cores per bot leaves room for
+    /// macOS, the app, and the other three bots.
+    static func containerResources(processInfo: ProcessInfo = .processInfo) -> (cpus: String, memory: String) {
+        let cores = min(max(processInfo.activeProcessorCount / 4, 2), 8)
+        let gigabytes = min(max(Int(processInfo.physicalMemory / 1_073_741_824) / 8, 2), 8)
+        return (String(cores), "\(gigabytes)G")
     }
 
     static let guestPackages = [

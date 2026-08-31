@@ -71,6 +71,70 @@ final class FileOperationToolTests: XCTestCase {
         }
     }
 
+    // MARK: save_document
+
+    func testSaveDocumentWritesOnlyToTheUserChosenURL() async throws {
+        let chosenURL = tempDir.appendingPathComponent("chosen-output.html")
+        let tool = SaveDocumentTool { _, data in
+            try data.write(to: chosenURL, options: .atomic)
+            return chosenURL
+        }
+        let context = ToolContext(workspace: workspace)
+        let output = try await tool.execute(
+            call("save_document", [
+                "suggested_name": .string("nested/index.html"),
+                "content": .string("<h1>Ready</h1>"),
+            ]),
+            in: context)
+
+        XCTAssertEqual(
+            try String(contentsOf: chosenURL, encoding: .utf8),
+            "<h1>Ready</h1>")
+        XCTAssertTrue(output.contains(chosenURL.path), output)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: tempDir.appendingPathComponent("nested/index.html").path))
+    }
+
+    func testSaveDocumentCancellationIsReportedHonestly() async throws {
+        let tool = SaveDocumentTool { _, _ in nil }
+        let output = try await tool.execute(
+            call("save_document", [
+                "suggested_name": .string("notes.md"),
+                "content": .string("hello"),
+            ]),
+            in: ToolContext(workspace: workspace))
+        XCTAssertEqual(output, "cancelled: no document was saved")
+    }
+
+    func testSaveDocumentSanitizesSuggestedFilename() {
+        XCTAssertEqual(SaveDocumentTool.suggestedFilename("../unsafe/index.html"), "index.html")
+        XCTAssertEqual(SaveDocumentTool.suggestedFilename("/"), "document.txt")
+    }
+
+    func testSaveDocumentRefusesOversizedContentBeforeSaving() async {
+        let tool = SaveDocumentTool { _, _ in nil }
+        let oversized = String(
+            repeating: "x",
+            count: SaveDocumentTool.maxContentBytes + 1)
+        do {
+            _ = try await tool.execute(
+                call("save_document", [
+                    "suggested_name": .string("large.txt"),
+                    "content": .string(oversized),
+                ]),
+                in: ToolContext(workspace: workspace))
+            XCTFail("Expected the document size guard to reject the save")
+        } catch let error as ToolError {
+            guard case .contentTooLarge(let size, let limit) = error else {
+                return XCTFail("Expected contentTooLarge, got \(error)")
+            }
+            XCTAssertEqual(size, SaveDocumentTool.maxContentBytes + 1)
+            XCTAssertEqual(limit, SaveDocumentTool.maxContentBytes)
+        } catch {
+            XCTFail("Expected ToolError, got \(error)")
+        }
+    }
+
     // MARK: find_files
 
     func testFindFilesByGlob() async throws {

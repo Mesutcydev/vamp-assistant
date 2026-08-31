@@ -11,10 +11,10 @@ struct SettingsView: View {
 
     enum Tab: String, CaseIterable, Identifiable, Hashable {
         case general = "General"
-        case models = "Models"
+        case models = "Models & Providers"
         case agent = "Agent"
         case bots = "Bots"
-        case providers = "Providers"
+        case network = "Network"
         case plugins = "Plugins"
         var id: String { rawValue }
 
@@ -24,13 +24,17 @@ struct SettingsView: View {
             case .models: "square.stack.3d.up"
             case .agent: "cpu"
             case .bots: "person.3"
-            case .providers: "key"
+            case .network: "network"
             case .plugins: "puzzlepiece"
             }
         }
     }
 
     @State private var tab: Tab
+    /// Which half of the merged Models & Providers tab to show. Held here so
+    /// a `.openProviderSettings` posted while another tab is on screen still
+    /// lands on Providers once the tab switches.
+    @State private var modelsSection: ModelsAndProvidersTab.Section = .library
 
     init(initialTab: Tab = .general, onClose: @escaping () -> Void = {
         NotificationCenter.default.post(name: .openAssistantHome, object: nil)
@@ -103,11 +107,11 @@ struct SettingsView: View {
                     switch tab {
                     case .general: GeneralTab()
                     case .models:
-                        ModelManagerView(embedded: true)
+                        ModelsAndProvidersTab(section: $modelsSection)
                             .environmentObject(appState)
                     case .agent: AgentTab()
                     case .bots: BotsTab()
-                    case .providers: ProvidersTab()
+                    case .network: NetworkTab()
                     case .plugins: PluginsTab()
                     }
                 }
@@ -119,21 +123,25 @@ struct SettingsView: View {
         .background { AtmosphereBackground(intensity: .conversation) }
         .tint(Theme.accent)
         .onExitCommand(perform: onClose)
+        // Both destinations live on one tab now; ModelsAndProvidersTab reads
+        // the same notifications to decide which half of it to show.
         .onReceive(NotificationCenter.default.publisher(for: .openProviderSettings)) { _ in
-            tab = .providers
+            tab = .models
+            modelsSection = .providers
         }
         .onReceive(NotificationCenter.default.publisher(for: .openModelManager)) { _ in
             tab = .models
+            modelsSection = .library
         }
     }
 
     private var detailSubtitle: String {
         switch tab {
-        case .general: "Appearance, composer, shortcuts, downloads, and remote access"
-        case .models: "Local models, memory budget, downloads, and remote providers"
+        case .general: "Theme, composer, keyboard, and launch behaviour"
+        case .models: "Everything that answers what runs your next message"
         case .agent: "Autonomy, generation, safety, memory, and Mac control"
         case .bots: "Specialist computers, browser profiles, and orchestration"
-        case .providers: "Local, account, and API model connections"
+        case .network: "The local API server and remote iPhone sessions"
         case .plugins: "Tools, integrations, and capability extensions"
         }
     }

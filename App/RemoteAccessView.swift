@@ -11,6 +11,12 @@ struct RemoteAccessView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var settings = SettingsStore.shared
     @State private var copied = false
+    @State private var accessibilityGranted = false
+    @State private var screenRecordingGranted = false
+    // Whether this session asked for Screen Recording. Distinguishes "never granted" from
+    // "granted, but it only takes effect on relaunch". Accessibility needs no equivalent —
+    // AXIsProcessTrusted() goes true for the running process as soon as it is granted.
+    @State private var requestedScreenRecording = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
@@ -177,7 +183,21 @@ struct RemoteAccessView: View {
                     }
                     if !ComputerPermission.screenRecordingGranted {
                         ComputerPermission.requestScreenRecording()
+                        requestedScreenRecording = true
                     }
+                }
+                Toggle(isOn: $settings.remoteMacUnlockEnabled) {
+                    Label("Remote Unlock from iPhone", systemImage: "lock.open.fill")
+                }
+                .disabled(!settings.remoteMacControlEnabled)
+                if settings.remoteMacControlEnabled {
+                    Text("Off by default. A paired iPhone can submit your Mac login password only through Tailscale while the Mac is locked. The password is never stored or logged.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if settings.remoteMacControlEnabled {
+                    remotePermissionRows
                 }
             }
             .font(.callout)
@@ -244,6 +264,66 @@ struct RemoteAccessView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
         }
+    }
+
+    /// Where remote access actually stands on the two permissions it cannot work without.
+    ///
+    /// The Mac Control toggle fired both TCC requests and then said nothing at all, so a granted
+    /// permission and a denied one looked identical — and streaming just returned nothing.
+    /// Screen Recording is the worse of the two: `CGPreflightScreenCaptureAccess()` cannot return
+    /// true for an already-running process, so after granting it correctly in System Settings the
+    /// app still reads "not granted" until it is relaunched. Without saying so, that reads as a
+    /// grant that failed, and the obvious response — click Grant again — never helps.
+    @ViewBuilder
+    private var remotePermissionRows: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            permissionRow(
+                label: "Accessibility",
+                granted: accessibilityGranted,
+                pending: false,
+                grant: { ComputerPermission.requestAccessibility() })
+            permissionRow(
+                label: "Screen Recording",
+                granted: screenRecordingGranted,
+                pending: requestedScreenRecording && !screenRecordingGranted,
+                grant: {
+                    ComputerPermission.requestScreenRecording()
+                    requestedScreenRecording = true
+                })
+        }
+        .padding(.top, Spacing.xs)
+        .onAppear(perform: refreshPermissions)
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification)) { _ in refreshPermissions() }
+    }
+
+    private func permissionRow(
+        label: String,
+        granted: Bool,
+        pending: Bool,
+        grant: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: Spacing.sm) {
+            Circle()
+                .fill(granted ? Theme.accentBright : (pending ? Color.orange : Theme.textTertiary))
+                .frame(width: 7, height: 7)
+            Text(label)
+            Spacer()
+            if granted {
+                Text("Granted").foregroundStyle(Theme.textSecondary)
+            } else if pending {
+                Text("Quit and reopen to finish")
+                    .foregroundStyle(Theme.textSecondary)
+            } else {
+                Button("Grant…", action: grant).controlSize(.small)
+            }
+        }
+        .font(.callout)
+    }
+
+    private func refreshPermissions() {
+        accessibilityGranted = ComputerPermission.accessibilityGranted
+        screenRecordingGranted = ComputerPermission.screenRecordingGranted
     }
 
     private func copyPairingURL() {

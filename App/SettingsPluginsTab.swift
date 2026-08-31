@@ -31,7 +31,7 @@ struct PluginsTab: View {
                         Text(commands.isEmpty ? "No capabilities detected" : "Automatically enabled")
                             .font(.callout.weight(.semibold))
                             .foregroundStyle(Theme.textPrimary)
-                        Text(commands.isEmpty ? "Connect a folder or scan the standard coding-tool locations." : "(commands.count) capabilities are ready in the composer.")
+                        Text(commands.isEmpty ? "Connect a folder or scan the standard coding-tool locations." : "\(commands.count) capabilities are ready in the composer.")
                             .font(.caption)
                             .foregroundStyle(Theme.textSecondary)
                     }

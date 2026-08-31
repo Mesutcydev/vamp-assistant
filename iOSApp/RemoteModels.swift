@@ -8,6 +8,7 @@ struct RemotePairResponse: Decodable {
 struct RemoteStatus: Decodable {
     let pairedClients: Int
     let networkKind: String
+    let tokenExpiresAt: Double?
     let isRunning: Bool
     let phase: String
     let queuedTasks: Int
@@ -19,12 +20,23 @@ struct RemoteMacControlStatus: Decodable, Equatable {
     let screenRecording: Bool
     let accessibility: Bool
     let ready: Bool
+    let locked: Bool?
+    let remoteUnlockEnabled: Bool?
+    let remoteUnlockAvailable: Bool?
+    let remoteUnlockMessage: String?
     let displayX: Double?
     let displayY: Double?
     let displayWidth: Double?
     let displayHeight: Double?
     let displays: [RemoteMacDisplay]?
     let message: String?
+
+    /// Both full Mac Control and app-only Vamp Stream use this same policy.
+    /// The explicit host capability keeps the password field off unencrypted
+    /// LAN paths while ensuring neither surface forgets the locked-state form.
+    var shouldOfferRemoteUnlock: Bool {
+        locked == true && remoteUnlockAvailable == true
+    }
 }
 
 struct RemoteMacDisplay: Decodable, Equatable, Identifiable {
@@ -40,19 +52,40 @@ struct RemoteMacApplicationEnvelope: Decodable, Equatable {
     let applications: [RemoteMacApplication]
 }
 
+struct RemoteMacApplicationResponse: Decodable, Equatable {
+    let application: RemoteMacApplication
+}
+
 struct RemoteMacApplication: Decodable, Equatable, Identifiable {
-    let windowID: Int
+    /// Installed applications do not have a window until the Mac launches
+    /// them. The host intentionally encodes that state as `null`.
+    let windowID: Int?
     let bundleIdentifier: String?
     let name: String
     let windowTitle: String?
     let width: Double
     let height: Double
+    let isRunning: Bool?
+    let isActive: Bool?
+    let iconPNGBase64: String?
 
-    var id: Int { windowID }
+    /// Bundle identifiers stay stable while launch/resize replaces the
+    /// registry snapshot. Older hosts may omit one, so retain a window-based
+    /// fallback for protocol compatibility.
+    var id: String {
+        bundleIdentifier ?? windowID.map { "window:\($0)" } ?? "name:\(name)"
+    }
+
+    var isStreamable: Bool { windowID != nil }
 
     var detail: String {
+        guard let windowID else {
+            return isRunning == true ? "Open a window to stream" : "Ready to launch"
+        }
         guard let windowTitle, !windowTitle.isEmpty, windowTitle != name else {
-            return "\(Int(width))×\(Int(height))"
+            return width > 0 && height > 0
+                ? "\(Int(width))×\(Int(height))"
+                : "Window \(windowID)"
         }
         return "\(windowTitle) · \(Int(width))×\(Int(height))"
     }
@@ -83,6 +116,25 @@ struct RemoteMacControlFrame {
         if case .jpeg(let data) = payload { return data }
         return nil
     }
+
+    var geometry: RemoteMacControlGeometry {
+        RemoteMacControlGeometry(
+            imageWidth: imageWidth,
+            imageHeight: imageHeight,
+            displayX: displayX,
+            displayY: displayY,
+            displayWidth: displayWidth,
+            displayHeight: displayHeight)
+    }
+}
+
+struct RemoteMacControlGeometry: Equatable, Sendable {
+    let imageWidth: Int
+    let imageHeight: Int
+    let displayX: Double
+    let displayY: Double
+    let displayWidth: Double
+    let displayHeight: Double
 }
 
 struct RemoteMacAudioChunk: Sendable {
@@ -165,6 +217,19 @@ struct RemoteBotRun: Decodable, Identifiable, Hashable {
 
     var isTerminal: Bool { ["completed", "failed", "stopped", "interrupted"].contains(state) }
 }
+struct RemoteBotWorkspaceEntry: Decodable, Identifiable, Hashable {
+    var id: String { path }
+    let path: String
+    let name: String
+    let isDirectory: Bool
+    let byteSize: Int
+    let modifiedAt: Double
+}
+
+struct RemoteBotFileListing: Decodable { let path: String; let entries: [RemoteBotWorkspaceEntry] }
+struct RemoteBotFileContents: Decodable { let path: String; let contents: String }
+struct RemoteBotExecResult: Decodable { let output: String }
+
 struct RemoteBotComputer: Decodable, Identifiable, Hashable {
     let id: UUID
     let profileID: String
@@ -257,6 +322,9 @@ struct RemoteSessionSummary: Decodable, Identifiable, Hashable {
 
 struct RemoteSessionDetail: Decodable, Identifiable {
     let id: UUID
+    /// Monotonic server snapshot revision. Older Mac hosts omit it, so the
+    /// companion keeps accepting unversioned snapshots for compatibility.
+    let revision: UInt64?
     let title: String
     let workspace: String
     let workspacePath: String?
@@ -286,12 +354,32 @@ struct RemoteErrorPresentation: Decodable {
 }
 
 struct RemoteMessage: Decodable, Identifiable {
+    /// Stable identity supplied by current Mac hosts. The legacy fallback is
+    /// retained so a newly sideloaded phone can still open an older host.
+    private let messageID: String?
     let role: String
     let content: String
     let toolName: String?
     let timestamp: Double
+    /// Set on `toolResult`. Older Macs omit it, so a nil is "unknown", not
+    /// "succeeded" — the card only shows a failure when it is explicitly true.
+    let failed: Bool?
+    /// Set on `checkpoint`. Its presence is what lets the client offer a revert.
+    let checkpointID: String?
 
-    var id: String { "\(timestamp)-\(role)-\(content.hashValue)" }
+    var id: String { messageID ?? "\(timestamp)-\(role)-\(content.hashValue)" }
+
+    var didFail: Bool { failed == true }
+
+    private enum CodingKeys: String, CodingKey {
+        case messageID = "id"
+        case role
+        case content
+        case toolName
+        case timestamp
+        case failed
+        case checkpointID
+    }
 }
 
 struct RemotePendingInteraction: Decodable {
@@ -301,6 +389,32 @@ struct RemotePendingInteraction: Decodable {
     let summary: String?
     let content: String?
     let options: [String]?
+    /// What the agent is actually asking to do: the unified diff for an edit,
+    /// or the exact command for a shell run. The Mac has always sent this; the
+    /// client used to drop it, which meant every approval on the phone was made
+    /// against a one-line summary.
+    let preview: RemoteApprovalPreview?
+}
+
+/// The concrete change behind an approval request.
+struct RemoteApprovalPreview: Decodable {
+    let kind: String            // "diff" | "command" | "none"
+    let path: String?
+    let content: String?
+    let added: Int?
+    let removed: Int?
+
+    var isDiff: Bool { kind == "diff" }
+    var isCommand: Bool { kind == "command" }
+    var hasContent: Bool { !(content ?? "").isEmpty }
+
+    /// Split into renderable lines, capped so a huge diff cannot lock up the
+    /// transcript. The remainder is reported rather than silently dropped.
+    func lines(limit: Int = 400) -> (shown: [String], hidden: Int) {
+        let all = (content ?? "").split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        guard all.count > limit else { return (all, 0) }
+        return (Array(all.prefix(limit)), all.count - limit)
+    }
 }
 
 struct RemoteAcceptedResponse: Decodable {
@@ -322,6 +436,7 @@ enum RemoteClientError: LocalizedError {
     case insecurePublicAddress
     case invalidPairingCode
     case notConnected
+    case authenticationRequired(String)
     case server(String)
     case invalidResponse
     case invalidResponseReason(String)
@@ -332,9 +447,16 @@ enum RemoteClientError: LocalizedError {
         case .insecurePublicAddress: "Plain HTTP is allowed only for private Tailscale or local-network addresses."
         case .invalidPairingCode: "Enter the six-digit pairing code shown by Vamp Assistant."
         case .notConnected: "Connect to your Mac first."
+        case .authenticationRequired(let message): message
         case .server(let message): message
         case .invalidResponse: "Vamp Assistant returned an unreadable response."
         case .invalidResponseReason(let reason): "Vamp Assistant stream error: \(reason)"
         }
+    }
+
+
+    var requiresPairing: Bool {
+        if case .authenticationRequired = self { return true }
+        return false
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import SwiftUI
 
 #if canImport(UIKit)
@@ -6,7 +7,8 @@ import UIKit
 
 /// Vamp-style ordered input pipeline: motion coalesces and flushes once per display refresh.
 @MainActor
-final class RemoteInputSender: ObservableObject {
+@Observable
+final class RemoteInputSender {
     typealias Command = RemoteInputCommand
     typealias SendCommand = @MainActor @Sendable (Command) async throws -> Void
     typealias SendCommands = @MainActor @Sendable ([Command]) async throws -> Void
@@ -21,12 +23,12 @@ final class RemoteInputSender: ObservableObject {
     static let maxBatchSize = 64
     static let maxPendingMotion = 64
 
-    @Published private(set) var pendingCount = 0
-    @Published private(set) var sentCount: UInt64 = 0
-    @Published private(set) var coalescedCount: UInt64 = 0
-    @Published private(set) var failedCount: UInt64 = 0
-    @Published private(set) var lastRoundTripMilliseconds: Int?
-    @Published private(set) var lastError: String?
+    private(set) var pendingCount = 0
+    private(set) var sentCount: UInt64 = 0
+    private(set) var coalescedCount: UInt64 = 0
+    private(set) var failedCount: UInt64 = 0
+    private(set) var lastRoundTripMilliseconds: Int?
+    private(set) var lastError: String?
 
     init(sendCommand: @escaping SendCommand) {
         self.sendCommands = { commands in
@@ -40,7 +42,7 @@ final class RemoteInputSender: ObservableObject {
         self.sendCommands = sendCommands
     }
 
-    deinit {
+    isolated deinit {
         // CADisplayLink isn't Sendable; invalidate from MainActor teardown paths instead.
         sendChain?.cancel()
     }

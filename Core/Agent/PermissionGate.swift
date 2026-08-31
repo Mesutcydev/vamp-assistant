@@ -55,9 +55,14 @@ struct PermissionGate: Sendable {
 
         // Full Access is an explicit user choice from Remote controls. It is
         // broader than the ordinary safe-command toggle, but never overrides
-        // a hard OpenCode deny or workspace/path validation in the tools.
-        if fullAccess, risk != nil { return .auto }
-        if case .needsApproval = compatibility { return compatibility }
+        // a hard OpenCode deny or workspace/path validation in the tools. The
+        // nil-risk branch is intentional too: a hallucinated/unknown tool
+        // cannot execute (ToolExecutor rejects it), so it must not create a
+        // pointless approval card in an otherwise uninterrupted run. Imported
+        // `ask` rules are also bypassed here; Full Access is the explicit
+        // per-run choice to continue without app approval cards. Hard denies
+        // returned above remain authoritative.
+        if fullAccess { return .auto }
 
         switch risk {
         case .read:

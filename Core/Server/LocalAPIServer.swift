@@ -40,6 +40,12 @@ public actor LocalAPIServer {
         /// The remote session page is same-origin and deliberately disables
         /// cross-origin access.
         public var allowCORS: Bool
+        /// Hard cap for accepted sockets. This bounds file descriptors and
+        /// detached blocking tasks when a local or LAN client misbehaves.
+        public var maxConcurrentConnections: Int
+        /// Per-operation socket timeout. It also retires idle HTTP keep-alive
+        /// clients so they cannot occupy a connection slot forever.
+        public var socketTimeoutSeconds: Int
         /// Optional idle TTL: when no request arrives for this many seconds,
         /// the engine is unloaded (model leaves RAM/Metal). nil = keep
         /// resident. Mirrors LM Studio's "unload after idle".
@@ -54,7 +60,9 @@ public actor LocalAPIServer {
             idleTTLSeconds: Int? = nil,
             exposeStandardRoutes: Bool = true,
             maxBodyBytes: Int = 32 * 1024 * 1024,
-            allowCORS: Bool = false
+            allowCORS: Bool = false,
+            maxConcurrentConnections: Int = 64,
+            socketTimeoutSeconds: Int = 30
         ) {
             self.port = port
             self.bindIPv6 = bindIPv6
@@ -65,6 +73,8 @@ public actor LocalAPIServer {
             self.exposeStandardRoutes = exposeStandardRoutes
             self.maxBodyBytes = max(0, maxBodyBytes)
             self.allowCORS = allowCORS
+            self.maxConcurrentConnections = max(1, maxConcurrentConnections)
+            self.socketTimeoutSeconds = max(1, socketTimeoutSeconds)
         }
     }
 
@@ -178,6 +188,7 @@ public actor LocalAPIServer {
     private(set) public var isRunning = false
     /// The real bound port — differs from config.port when it was 0.
     private(set) public var actualPort: Int = 0
+    var activeConnectionCount: Int { connectionTasks.count }
     /// Shared with off-actor connection handlers so requests can stamp the
     /// last-activity time without hopping to the actor per byte.
     private let activity = ActivityBox()
@@ -346,6 +357,13 @@ public actor LocalAPIServer {
         allowCORS: Bool,
         activity: ActivityBox
     ) {
+        guard connectionTasks.count < config.maxConcurrentConnections else {
+            _ = shutdown(fd, SHUT_RDWR)
+            close(fd)
+            Log.app.warning("[api] Connection limit reached; rejecting \(remoteAddress, privacy: .public)")
+            return
+        }
+        Self.applySocketTimeout(fd, seconds: config.socketTimeoutSeconds)
         let connectionID = UUID()
         let task = Task.detached(priority: .utility) { [weak self] in
             await Self.serveConnection(
@@ -379,6 +397,24 @@ public actor LocalAPIServer {
         }
         guard clientFD >= 0 else { return (clientFD, "unknown") }
         return (clientFD, numericAddress(storage, length: length))
+    }
+
+    private nonisolated static func applySocketTimeout(_ fd: Int32, seconds: Int) {
+        var timeout = timeval(tv_sec: seconds, tv_usec: 0)
+        withUnsafePointer(to: &timeout) { pointer in
+            _ = setsockopt(
+                fd,
+                SOL_SOCKET,
+                SO_RCVTIMEO,
+                pointer,
+                socklen_t(MemoryLayout<timeval>.size))
+            _ = setsockopt(
+                fd,
+                SOL_SOCKET,
+                SO_SNDTIMEO,
+                pointer,
+                socklen_t(MemoryLayout<timeval>.size))
+        }
     }
 
     private nonisolated static func numericAddress(

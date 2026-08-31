@@ -124,6 +124,14 @@ enum RemoteMacControl {
         await inputExecutor.releaseAll()
     }
 
+    /// Mirrors Vamp Control's direct-distribution unlock path. The caller is
+    /// responsible for authenticating and rate-limiting the request; this
+    /// method only delivers the already-validated password to loginwindow.
+    /// Nothing is persisted or logged.
+    static func unlockLoginWindow(password: String) async throws {
+        try await inputExecutor.unlockLoginWindow(password: password)
+    }
+
     private actor RemoteInputExecutor {
         private var heldButton: CGMouseButton?
         private var scrollRemainderX = 0.0
@@ -204,6 +212,71 @@ enum RemoteMacControl {
             self.heldButton = nil
             let point = lastPostedPoint ?? ComputerEvents.cursor()
             postButton(heldButton, down: false, at: point)
+        }
+
+        func unlockLoginWindow(password: String) async throws {
+            guard ComputerPermission.accessibilityGranted else {
+                throw ComputerUseError.accessibilityNotGranted
+            }
+            guard ComputerPermission.sessionLocked else {
+                throw ParseError.message("The Mac is no longer locked.")
+            }
+            guard !password.isEmpty, password.count <= 256 else {
+                throw ParseError.message("The login password must be 1 to 256 characters.")
+            }
+
+            // loginwindow rejects Unicode-only events whose virtual key is 0.
+            // Pair printable ASCII with its physical ANSI key position, retain
+            // the Unicode payload for the intended character, and pace the
+            // events exactly as Vamp Control does.
+            for character in password {
+                try postLoginWindowCharacter(character)
+                try await Task.sleep(for: .milliseconds(18))
+            }
+            try await Task.sleep(for: .milliseconds(80))
+            guard let returnCode = ComputerKey.keyCode(for: "return") else {
+                throw ComputerUseError.unknownKey("return")
+            }
+            try postLoginWindowKey(returnCode, isDown: true)
+            try await Task.sleep(for: .milliseconds(20))
+            try postLoginWindowKey(returnCode, isDown: false)
+        }
+
+        private func postLoginWindowCharacter(_ character: Character) throws {
+            let physicalKey = ComputerEvents.loginWindowPhysicalKey(for: character)
+            var utf16 = Array(String(character).utf16)
+            guard let down = CGEvent(
+                keyboardEventSource: eventSource,
+                virtualKey: physicalKey?.keyCode ?? 0,
+                keyDown: true
+            ) else {
+                throw ParseError.message("Remote Unlock could not create a password key event.")
+            }
+            down.flags = physicalKey?.modifiers ?? []
+            down.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
+            down.post(tap: .cghidEventTap)
+
+            guard let up = CGEvent(
+                keyboardEventSource: eventSource,
+                virtualKey: physicalKey?.keyCode ?? 0,
+                keyDown: false
+            ) else {
+                throw ParseError.message("Remote Unlock could not create a password key event.")
+            }
+            up.flags = physicalKey?.modifiers ?? []
+            up.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
+            up.post(tap: .cghidEventTap)
+        }
+
+        private func postLoginWindowKey(_ code: CGKeyCode, isDown: Bool) throws {
+            guard let event = CGEvent(
+                keyboardEventSource: eventSource,
+                virtualKey: code,
+                keyDown: isDown
+            ) else {
+                throw ParseError.message("Remote Unlock could not create the Return key event.")
+            }
+            event.post(tap: .cghidEventTap)
         }
 
         private func mouseButton(_ button: String) -> CGMouseButton {

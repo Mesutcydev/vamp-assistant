@@ -27,6 +27,8 @@ final class BotRunCoordinator: ObservableObject {
     private var activeRunIDs: Set<UUID> = []
     private var activeLocalRunID: UUID?
     private var budgetTasks: [UUID: Task<Void, Never>] = [:]
+    /// Tail of the persistence chain. See `persist()`.
+    private var persistTask: Task<Void, Never>?
 
     init(store: BotRunStore = .shared) {
         self.store = store
@@ -113,8 +115,11 @@ final class BotRunCoordinator: ObservableObject {
 
     func steer(runID: UUID, message: String) -> Bool {
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A queued run has no session to steer. Accepting it wrote an optimistic
+        // "Steering queued: ..." onto the card that the runtime then quietly rejected, leaving
+        // text on screen that was never true.
         guard !text.isEmpty, let run = record(runID), !run.state.isTerminal,
-              steerHandler != nil else { return false }
+              run.sessionID != nil, steerHandler != nil else { return false }
         update(runID) {
             $0.latestOutput = "Steering queued: \(text)"
             $0.updatedAt = Date()
@@ -138,16 +143,30 @@ final class BotRunCoordinator: ObservableObject {
         pendingIDs.removeAll { $0 == runID }
         update(runID) { $0.phase = "Cancelling"; $0.updatedAt = Date() }
         Task {
-            guard let command = try? await store.enqueueCommand(
-                runID: runID, kind: .cancel) else { return }
+            // The command log is an audit trail, not the mechanism. It used to gate the whole
+            // cancel behind `guard let ... else { return }`, so a failed write left the run
+            // parked in "Cancelling" forever — off the queue, never dispatched, never terminal,
+            // and with nothing shown to the user.
+            let command = try? await store.enqueueCommand(runID: runID, kind: .cancel)
             let accepted = await MainActor.run {
                 activeRunIDs.contains(runID) ? (stopHandler?(runID) ?? false) : true
             }
-            try? await store.acknowledgeCommand(
-                command.id, accepted: accepted,
-                result: accepted ? "Cancellation requested." : "Runtime rejected cancellation.")
+            if let command {
+                try? await store.acknowledgeCommand(
+                    command.id, accepted: accepted,
+                    result: accepted ? "Cancellation requested." : "Runtime rejected cancellation.")
+            }
             await MainActor.run {
-                guard accepted else { return }
+                guard accepted else {
+                    // The runtime refused. Put the run back the way it was rather than leaving
+                    // a phase that never resolves.
+                    update(runID) {
+                        $0.phase = "Stop rejected"
+                        $0.errorMessage = "The runtime would not cancel this run."
+                        $0.updatedAt = Date()
+                    }
+                    return
+                }
                 update(runID) {
                     $0.state = .stopped
                     $0.phase = "Stopped"
@@ -295,7 +314,7 @@ final class BotRunCoordinator: ObservableObject {
     }
 
     private func restore() async {
-        let isTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        let isTestHost = AppState.isTestHost
         let restored = await store.loadAll(recoverInterrupted: !isTestHost)
         let restoredEvents = await store.loadEvents()
         // Startup restoration is asynchronous. Preserve runs accepted while the
@@ -460,8 +479,31 @@ final class BotRunCoordinator: ObservableObject {
         budgetTasks[run.id] = Task { [weak self] in
             try? await Task.sleep(for: .seconds(seconds))
             guard !Task.isCancelled else { return }
-            await MainActor.run { _ = self?.stop(runID: run.id) }
+            await MainActor.run { self?.expireBudget(runID: run.id) }
         }
+    }
+
+    /// End a run that has used up its time budget.
+    ///
+    /// This deliberately does not go through `stop()`. `stop()` leaves the run untouched when
+    /// the runtime declines the cancel — right for a user pressing Stop, wrong for a deadline:
+    /// the timer has already fired and nothing will fire again, so a declining runtime kept the
+    /// run `.running` past its budget indefinitely and held its queue slot with it.
+    private func expireBudget(runID: UUID) {
+        guard let run = record(runID), !run.state.isTerminal else { return }
+        _ = stopHandler?(runID)
+        pendingIDs.removeAll { $0 == runID }
+        update(runID) {
+            $0.state = .failed
+            $0.phase = "Budget exceeded"
+            $0.evidence?.confidence = .failed
+            $0.errorMessage = "Run exceeded its time budget."
+            $0.queuePosition = nil
+            $0.pendingInteraction = nil
+            $0.updatedAt = Date()
+        }
+        recordEvent(runID: runID, kind: .failed, phase: "Budget exceeded", detail: run.profileName)
+        finishScheduling(runID)
     }
 
     private func finishScheduling(_ runID: UUID) {
@@ -502,9 +544,20 @@ final class BotRunCoordinator: ObservableObject {
         persist()
     }
 
+    /// Persist the current snapshot, preserving call order.
+    ///
+    /// `BotRunStore` is an actor, so each save is atomic — but independent Tasks enter an actor
+    /// in no guaranteed order, and `update()` and `refreshQueuePositions()` between them fire a
+    /// save on every mutation. A single `drain()` therefore raced a dozen overlapping writes,
+    /// any of which could land after a newer one and walk run state backwards on disk. Chaining
+    /// each write behind the previous one costs nothing and makes the last writer the newest.
     private func persist() {
         let snapshot = runs
-        Task { try? await store.save(snapshot) }
+        let previous = persistTask
+        persistTask = Task { [store] in
+            await previous?.value
+            try? await store.save(snapshot)
+        }
     }
 
     private static func evidenceContract(for profileID: String) -> BotRunEvidence {

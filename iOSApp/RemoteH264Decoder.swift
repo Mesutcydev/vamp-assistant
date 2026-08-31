@@ -16,6 +16,21 @@ final class RemoteH264Decoder: @unchecked Sendable {
     private var outputHandler: PixelHandler?
     private var eventHandler: EventHandler?
     private var requestedKeyframe = false
+    private struct PendingFrame {
+        let data: Data
+        let keyframe: Bool
+        let parameterSets: Data?
+
+        var isRecoveryPoint: Bool {
+            keyframe || parameterSets?.isEmpty == false || RemoteH264Decoder.avccContainsIDR(data)
+        }
+    }
+    /// Video is live, so stale frames are less useful than the newest one.
+    /// Keep a recovery frame plus the latest delta instead of allowing the
+    /// serial decode queue to grow without bound during a burst.
+    private var pendingFrames: [PendingFrame] = []
+    private var drainScheduled = false
+    private var resetPending = false
 
     func setOutputHandler(_ handler: @escaping PixelHandler) {
         lock.lock()
@@ -30,19 +45,69 @@ final class RemoteH264Decoder: @unchecked Sendable {
     }
 
     func reset() {
+        lock.lock()
+        pendingFrames.removeAll(keepingCapacity: true)
+        resetPending = true
+        lock.unlock()
         queue.async { [weak self] in
-            self?.tearDownSession()
-            self?.lock.lock()
-            self?.lastParameterSets = nil
-            self?.requestedKeyframe = false
-            self?.lock.unlock()
-            self?.emit("decoder reset")
+            guard let self else { return }
+            self.tearDownSession()
+            self.lock.lock()
+            self.lastParameterSets = nil
+            self.requestedKeyframe = false
+            self.resetPending = false
+            let shouldDrain = !self.pendingFrames.isEmpty && !self.drainScheduled
+            if shouldDrain { self.drainScheduled = true }
+            self.lock.unlock()
+            self.emit("decoder reset")
+            if shouldDrain { self.drainPendingFrames() }
         }
     }
 
     func decode(data: Data, keyframe: Bool, parameterSets: Data?) {
+        let frame = PendingFrame(data: data, keyframe: keyframe, parameterSets: parameterSets)
+        lock.lock()
+        enqueueBounded(frame)
+        let shouldSchedule = !drainScheduled && !resetPending
+        if shouldSchedule { drainScheduled = true }
+        lock.unlock()
+        guard shouldSchedule else { return }
         queue.async { [weak self] in
-            self?.decodeOnQueue(data: data, keyframe: keyframe, parameterSets: parameterSets)
+            self?.drainPendingFrames()
+        }
+    }
+
+    /// Called with `lock` held. The queue never exceeds two waiting frames.
+    private func enqueueBounded(_ frame: PendingFrame) {
+        if frame.isRecoveryPoint {
+            pendingFrames = [frame]
+            return
+        }
+        if pendingFrames.count < 2 {
+            pendingFrames.append(frame)
+            return
+        }
+        if let recovery = pendingFrames.first(where: \.isRecoveryPoint) {
+            pendingFrames = [recovery, frame]
+        } else {
+            pendingFrames = [frame]
+        }
+    }
+
+    private func drainPendingFrames() {
+        while true {
+            lock.lock()
+            if resetPending || pendingFrames.isEmpty {
+                drainScheduled = false
+                lock.unlock()
+                return
+            }
+            let frame = pendingFrames.removeFirst()
+            lock.unlock()
+            decodeOnQueue(
+                data: frame.data,
+                keyframe: frame.keyframe,
+                parameterSets: frame.parameterSets)
         }
     }
 

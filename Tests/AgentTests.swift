@@ -219,6 +219,32 @@ final class PermissionGateTests: XCTestCase {
         XCTAssertEqual(
             gate.decision(for: call(name: "computer_click"), risk: .execute),
             .auto)
+        XCTAssertEqual(
+            gate.decision(for: call(name: "model_hallucinated_tool"), risk: nil),
+            .auto,
+            "Unknown tools are rejected by ToolExecutor and should not surface an approval card in Full Access.")
+    }
+
+    func testFullAccessBypassesImportedAskButKeepsHardDeny() {
+        let workspace = Workspace(root: FileManager.default.temporaryDirectory)
+        var gate = PermissionGate(fullAccess: true, workspace: workspace)
+        gate.openCodePermissions = .init(rules: [
+            .init(action: "shell", resource: "*", effect: .ask),
+        ])
+        XCTAssertEqual(
+            gate.decision(for: call(name: "run_command", command: "custom-tool --inspect"), risk: .execute),
+            .auto,
+            "Full Access must not leave an imported ask rule as a second approval prompt.")
+
+        gate.openCodePermissions = .init(rules: [
+            .init(action: "shell", resource: "*", effect: .deny),
+        ])
+        guard case .denied = gate.decision(
+            for: call(name: "run_command", command: "custom-tool --inspect"), risk: .execute)
+        else {
+            XCTFail("Hard imported denies must remain authoritative in Full Access.")
+            return
+        }
     }
 
     func testGuestShellRunsFullCommandsWithoutHostAllowlist() {

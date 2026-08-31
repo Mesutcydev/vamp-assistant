@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import XCTest
 @testable import BeetCode
@@ -11,13 +12,14 @@ final class LocalAPIServerTests: XCTestCase {
     private var server: LocalAPIServer!
     private var engine: FakeLLMEngine!
     private var baseURL = ""
+    private var port = 0
 
     override func setUp() async throws {
         engine = FakeLLMEngine()
         server = LocalAPIServer(engine: engine)
         // Port 0 → OS assigns a free port; no conflicts with other tests.
         try await server.start(.init(port: 0, bindIPv6: false, modelIDOverride: nil))
-        let port = await server.actualPort
+        port = await server.actualPort
         baseURL = "http://127.0.0.1:\(port)"
     }
 
@@ -45,6 +47,36 @@ final class LocalAPIServerTests: XCTestCase {
         return (status, data)
     }
 
+    private func openRawSocket() throws -> Int32 {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+        var address = sockaddr_in()
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = in_port_t(UInt16(port).bigEndian)
+        _ = "127.0.0.1".withCString { inet_pton(AF_INET, $0, &address.sin_addr) }
+        let result = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard result == 0 else {
+            let code = errno
+            close(fd)
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(code))
+        }
+        return fd
+    }
+
+    private func waitForConnectionCount(_ expected: Int) async -> Bool {
+        for _ in 0..<100 {
+            if await server.activeConnectionCount == expected { return true }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return false
+    }
+
     // MARK: Models & health
 
     func testModelsEndpointListsOverrideModel() async throws {
@@ -69,6 +101,47 @@ final class LocalAPIServerTests: XCTestCase {
     func testUnknownEndpointIs404() async throws {
         let (status, _) = try await get("/v1/nope")
         XCTAssertEqual(status, 404)
+    }
+
+    func testConnectionCapRejectsAdditionalIdleSocket() async throws {
+        await server.stop()
+        try await server.start(.init(
+            port: 0,
+            bindIPv6: false,
+            modelIDOverride: nil,
+            maxConcurrentConnections: 1,
+            socketTimeoutSeconds: 2))
+        port = await server.actualPort
+
+        let first = try openRawSocket()
+        defer { close(first) }
+        let acceptedFirst = await waitForConnectionCount(1)
+        XCTAssertTrue(acceptedFirst)
+
+        let second = try openRawSocket()
+        defer { close(second) }
+        try await Task.sleep(for: .milliseconds(100))
+
+        let activeCount = await server.activeConnectionCount
+        XCTAssertEqual(activeCount, 1)
+    }
+
+    func testIdleSocketTimeoutReleasesConnection() async throws {
+        await server.stop()
+        try await server.start(.init(
+            port: 0,
+            bindIPv6: false,
+            modelIDOverride: nil,
+            maxConcurrentConnections: 1,
+            socketTimeoutSeconds: 1))
+        port = await server.actualPort
+
+        let idle = try openRawSocket()
+        defer { close(idle) }
+        let accepted = await waitForConnectionCount(1)
+        XCTAssertTrue(accepted)
+        let released = await waitForConnectionCount(0)
+        XCTAssertTrue(released)
     }
 
     // MARK: Non-streaming completions

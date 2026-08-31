@@ -122,6 +122,7 @@ struct MainWindowView: View {
                             Image(systemName: "sidebar.left")
                         }
                         .help("Toggle sidebar")
+                        .accessibilityLabel("Toggle sidebar")
                         .keyboardShortcut("s", modifiers: [.command, .control])
                     }
                 }
@@ -219,6 +220,7 @@ struct MainWindowView: View {
         }
         .menuStyle(.borderlessButton)
         .help("More app actions")
+        .accessibilityLabel("More app actions")
     }
 
     private func topToolButton(
@@ -360,8 +362,8 @@ struct MainWindowView: View {
     }
 
     private func presentWelcomeIfNeeded() {
-        let isTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
-        guard !isTestHost, !AppPreferencesStore.shared.current.hasCompletedWelcome else { return }
+        guard !AppState.isTestHost,
+              !AppPreferencesStore.shared.current.hasCompletedWelcome else { return }
         readinessIsOnboarding = true
         showReadiness = true
     }

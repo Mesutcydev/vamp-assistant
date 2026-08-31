@@ -15,7 +15,9 @@ fi
 
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
 BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
-NAME="Vamp-Assistant-${VERSION}"
+# Build number in the filename, matching package-beetcode-remote-ios.sh. Without it two
+# different builds share one name and silently replace each other in dist/.
+NAME="Vamp-Assistant-${VERSION}-build-${BUILD}"
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/beetcode-dmg.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
 

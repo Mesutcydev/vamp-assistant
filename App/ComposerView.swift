@@ -447,6 +447,7 @@ private struct ComposerCommandMenu: View {
         .lfHoverLift()
         .help("Open composer commands and guidance presets")
         .accessibilityLabel("Composer commands")
+        .accessibilityIdentifier("composer-commands")
         .sheet(isPresented: $showsDeliverySetup) {
             AppleDeliverySetupView { prompt in
                 settings.agentMode = .goal
@@ -826,26 +827,30 @@ private struct AccessoryRow: View {
     let store: ComposerStore
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: Spacing.sm) {
-                AttachChip(store: store)
-                ModelSelectionPill()
+        // A plain row, not a horizontal ScrollView: a scroll view proposes an
+        // unbounded width, so the model pill's truncation never engaged and the
+        // last chip was sliced mid-word at the trailing edge instead. Laying
+        // out in the real width lets the one flexible label — the model name —
+        // give way, and every chip beside it stays whole.
+        HStack(spacing: Spacing.sm) {
+            AttachChip(store: store)
+            ModelSelectionPill()
+                .environmentObject(appState)
+                .layoutPriority(-1)
+            AssistantCapabilityMenu()
+            if controller.workspaceURL == nil {
+                Label("Assistant", systemImage: "sparkles")
+                    .lfComposerPill(active: true)
+                    .help("Vamp Assistant can use its browser and optional Mac control without a project folder")
+                    .accessibilityLabel("Vamp Assistant mode")
+            } else {
+                IntentChipButton(store: store)
+                AgentSetupMenu()
                     .environmentObject(appState)
-                AssistantCapabilityMenu()
-                if controller.workspaceURL == nil {
-                    Label("Assistant", systemImage: "sparkles")
-                        .lfComposerPill(active: true)
-                        .help("Vamp Assistant can use its browser and optional Mac control without a project folder")
-                        .accessibilityLabel("Vamp Assistant mode")
-                } else {
-                    IntentChipButton(store: store)
-                    AgentSetupMenu()
-                        .environmentObject(appState)
-                        .environmentObject(controller)
-                }
+                    .environmentObject(controller)
             }
-            .padding(.trailing, 2)
         }
+        .padding(.trailing, 2)
         .frame(minHeight: 28)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -857,12 +862,16 @@ private struct AssistantCapabilityMenu: View {
 
     var body: some View {
         Menu {
+            Section("Available now") {
+                Label("Browser and optional web search", systemImage: "safari")
+                if controller.workspaceURL == nil {
+                    Label("Create and save documents", systemImage: "doc.badge.plus")
+                }
+                Label("Mac and network status", systemImage: "gauge")
+            }
             Section("Vamp Assistant") {
                 Button("New Assistant Chat", systemImage: "square.and.pencil") {
                     NotificationCenter.default.post(name: .newChat, object: nil)
-                }
-                Button("Open Project in Code…", systemImage: "folder.badge.gearshape") {
-                    NotificationCenter.default.post(name: .openWorkspace, object: nil)
                 }
                 Button("Bots Dashboard", systemImage: "person.3.sequence.fill") {
                     NotificationCenter.default.post(name: .openBotsDashboard, object: nil)
@@ -884,18 +893,29 @@ private struct AssistantCapabilityMenu: View {
                 }
             }
             if controller.workspaceURL != nil {
-                Divider()
-                Button("Return to Assistant", systemImage: "arrow.uturn.backward") {
-                    NotificationCenter.default.post(name: .newChat, object: nil)
+                Section("Code") {
+                    Label("Project files, terminal, and Simulator", systemImage: "checkmark.circle.fill")
+                    Button("Open or Switch Project…", systemImage: "folder.badge.gearshape") {
+                        NotificationCenter.default.post(name: .openWorkspace, object: nil)
+                    }
+                    Button("Return to Assistant", systemImage: "arrow.uturn.backward") {
+                        NotificationCenter.default.post(name: .newChat, object: nil)
+                    }
+                }
+            } else {
+                Section("Available with Code") {
+                    Button("Project files, terminal, and Simulator…", systemImage: "folder.badge.gearshape") {
+                        NotificationCenter.default.post(name: .openWorkspace, object: nil)
+                    }
                 }
             }
         } label: {
-            Label("Vamp", systemImage: "sparkles")
+            Label("Tools", systemImage: "wrench.and.screwdriver")
                 .lfComposerPill(active: controller.workspaceURL == nil)
         }
         .menuStyle(.borderlessButton)
-        .help("Assistant capabilities")
-        .accessibilityLabel("Vamp Assistant capabilities")
+        .help("Tools and capabilities")
+        .accessibilityLabel("Tools and capabilities")
     }
 }
 
@@ -1043,6 +1063,7 @@ private struct AgentSetupMenu: View {
         .menuIndicator(.hidden)
         .help(selected?.description ?? "Agent setup")
         .accessibilityLabel("Agent setup")
+        .accessibilityIdentifier("agent-setup")
         .accessibilityValue("\(settings.agentMode.label), \(selected?.name.capitalized ?? "Build")\(settings.planMode ? ", plan on" : "")")
     }
 }
