@@ -1,4 +1,5 @@
 import XCTest
+import Carbon
 @testable import BeetCode
 
 /// Computer-use unit tests. Everything here is hermetic: key mapping, AX-tree
@@ -40,20 +41,23 @@ final class ComputerToolsTests: XCTestCase {
         XCTAssertEqual(ComputerKey.modifiers(for: ["bogus"]), [])
     }
 
-    func testLoginWindowCharactersUsePhysicalANSIKeys() {
+    @MainActor
+    func testLoginWindowUSAndTurkishLayoutsResolveDifferentPhysicalKeys() throws {
+        func layout(_ id: String) throws -> CFData {
+            let filter = [kTISPropertyInputSourceID as String: id] as CFDictionary
+            let sources = try XCTUnwrap(TISCreateInputSourceList(filter, true)).takeRetainedValue() as NSArray
+            let source = try XCTUnwrap(sources.firstObject) as! TISInputSource
+            let raw = try XCTUnwrap(TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData))
+            return Unmanaged<CFData>.fromOpaque(raw).takeUnretainedValue()
+        }
+        let us = try layout("com.apple.keylayout.US")
+        let turkish = try layout("com.apple.keylayout.Turkish-QWERTY-PC")
+        XCTAssertEqual(try LoginWindowInputService.keys("i", layoutData: us), [.init(code: 34)])
         XCTAssertEqual(
-            ComputerEvents.loginWindowPhysicalKey(for: "a"),
-            .init(keyCode: 0, modifiers: []))
-        XCTAssertEqual(
-            ComputerEvents.loginWindowPhysicalKey(for: "A"),
-            .init(keyCode: 0, modifiers: .maskShift))
-        XCTAssertEqual(
-            ComputerEvents.loginWindowPhysicalKey(for: "9"),
-            .init(keyCode: 25, modifiers: []))
-        XCTAssertEqual(
-            ComputerEvents.loginWindowPhysicalKey(for: "!"),
-            .init(keyCode: 18, modifiers: .maskShift))
-        XCTAssertNil(ComputerEvents.loginWindowPhysicalKey(for: "ğ"))
+            try LoginWindowInputService.keys("ı", layoutData: turkish),
+            [.init(code: 34)])
+        XCTAssertEqual(try LoginWindowInputService.keys("şğıİç", layoutData: turkish).count, 5)
+        XCTAssertThrowsError(try LoginWindowInputService.keys("🙂", layoutData: us))
     }
 
     // MARK: AX tree rendering
@@ -299,5 +303,99 @@ final class ComputerToolsTests: XCTestCase {
         XCTAssertTrue(text.contains("Password"))
         XCTAssertTrue(text.contains("(redacted)"))
         XCTAssertFalse(text.contains("hunter2"))
+    }
+}
+
+@MainActor
+final class LoginWindowInputServiceTests: XCTestCase {
+    private typealias Key = LoginWindowInputService.Key
+
+    @MainActor private final class Fixture {
+        var locked = true
+        var accessibility = true
+        var events: [(Key, Bool)] = []
+        var waits: [Duration] = []
+        var onWait: (() throws -> Void)?
+        var keys = [Key(code: 18), Key(code: 19, modifiers: .maskShift)]
+
+        func service() -> LoginWindowInputService {
+            LoginWindowInputService(
+                isLocked: { self.locked },
+                hasAccessibility: { self.accessibility },
+                resolveKeys: { $0 == "a" ? [Key(code: 0)] : self.keys },
+                postKey: { self.events.append(($0, $1)) },
+                sleep: { duration in
+                    self.waits.append(duration)
+                    try self.onWait?()
+                }
+            )
+        }
+    }
+
+    func testWakeClearPasswordAndReturnSequenceIsBalancedAndRepeatable() async throws {
+        let fixture = Fixture()
+        let service = fixture.service()
+        for _ in 0..<2 {
+            fixture.events = []
+            try await service.submit(password: "example")
+            let downs = fixture.events.filter(\.1).map(\.0)
+            XCTAssertEqual(
+                downs,
+                [Key(code: 49), Key(code: 0, modifiers: .maskCommand), Key(code: 51)]
+                    + fixture.keys + [Key(code: 36)])
+            XCTAssertEqual(fixture.events.count, downs.count * 2)
+            for index in stride(from: 0, to: fixture.events.count, by: 2) {
+                XCTAssertEqual(fixture.events[index].0, fixture.events[index + 1].0)
+                XCTAssertFalse(fixture.events[index + 1].1)
+            }
+        }
+        XCTAssertTrue(fixture.waits.contains(.milliseconds(750)))
+    }
+
+    func testLocalUnlockStopsBeforePasswordAndBalancesWakeKey() async {
+        let fixture = Fixture()
+        fixture.onWait = { fixture.locked = false }
+        do {
+            try await fixture.service().submit(password: "example")
+            XCTFail("Must stop when the Mac unlocks locally")
+        } catch {
+            XCTAssertEqual(fixture.events.map(\.0.code), [49, 49])
+            XCTAssertFalse(fixture.events.last?.1 ?? true)
+        }
+    }
+
+    func testPermissionLossAndCancellationStopBeforePassword() async {
+        for error in [false, true] {
+            let fixture = Fixture()
+            fixture.onWait = {
+                if error { throw CancellationError() }
+                fixture.accessibility = false
+            }
+            do {
+                try await fixture.service().submit(password: "example")
+                XCTFail("Must stop safely")
+            } catch {
+                XCTAssertEqual(fixture.events.map(\.0.code), [49, 49])
+                XCTAssertFalse(fixture.events.last?.1 ?? true)
+            }
+        }
+    }
+
+    func testLayoutFailurePostsNothingAndDoesNotExposePassword() async {
+        var posted = false
+        let service = LoginWindowInputService(
+            isLocked: { true }, hasAccessibility: { true },
+            resolveKeys: { _ in
+                throw RemoteMacControl.ParseError.message("Unsupported keyboard layout")
+            },
+            postKey: { _, _ in posted = true }, sleep: { _ in }
+        )
+        do {
+            try await service.submit(password: "never-log-this")
+            XCTFail("Must reject unsupported input before posting")
+        } catch {
+            XCTAssertFalse(posted)
+            XCTAssertFalse(error.localizedDescription.contains("never-log-this"))
+        }
     }
 }

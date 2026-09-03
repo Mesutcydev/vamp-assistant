@@ -1,7 +1,164 @@
 import AppKit
+import Carbon
 import CoreGraphics
 import Foundation
 @preconcurrency import ScreenCaptureKit
+
+/// A paced physical-key path for loginwindow. It is deliberately separate from
+/// ordinary remote input because secure fields may ignore Unicode event payloads.
+@MainActor
+final class LoginWindowInputService {
+    struct Key: Equatable {
+        let code: CGKeyCode
+        var modifiers: CGEventFlags = []
+    }
+
+    private let isLocked: () -> Bool
+    private let hasAccessibility: () -> Bool
+    private let resolveKeys: (String) throws -> [Key]
+    private let postKey: (Key, Bool) throws -> Void
+    private let sleep: (Duration) async throws -> Void
+    private var isSubmitting = false
+
+    convenience init() {
+        let source = CGEventSource(stateID: .hidSystemState)
+        self.init(
+            isLocked: { ComputerPermission.sessionLocked },
+            hasAccessibility: { ComputerPermission.accessibilityGranted },
+            resolveKeys: Self.keysForCurrentLayout,
+            postKey: { key, isDown in
+                guard let event = CGEvent(
+                    keyboardEventSource: source,
+                    virtualKey: key.code,
+                    keyDown: isDown
+                ) else {
+                    throw RemoteMacControl.ParseError.message(
+                        "Remote Unlock could not create a login key event.")
+                }
+                event.flags = key.modifiers
+                event.post(tap: .cghidEventTap)
+            },
+            sleep: { try await Task.sleep(for: $0) }
+        )
+    }
+
+    init(
+        isLocked: @escaping () -> Bool,
+        hasAccessibility: @escaping () -> Bool,
+        resolveKeys: @escaping (String) throws -> [Key],
+        postKey: @escaping (Key, Bool) throws -> Void,
+        sleep: @escaping (Duration) async throws -> Void
+    ) {
+        self.isLocked = isLocked
+        self.hasAccessibility = hasAccessibility
+        self.resolveKeys = resolveKeys
+        self.postKey = postKey
+        self.sleep = sleep
+    }
+
+    func submit(password: String) async throws {
+        guard !isSubmitting else {
+            throw RemoteMacControl.ParseError.message("An unlock attempt is already in progress.")
+        }
+        isSubmitting = true
+        defer { isSubmitting = false }
+        try checkCanType()
+        guard !password.isEmpty, password.count <= 256,
+              !password.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+            throw RemoteMacControl.ParseError.message("Unsupported login password input.")
+        }
+        // Resolve everything before posting anything. A layout failure must not
+        // type a partial password or expose the unsupported character in logs.
+        let keys = try resolveKeys(password)
+        guard var selectAll = try resolveKeys("a").first else {
+            throw RemoteMacControl.ParseError.message("The Mac keyboard layout is unavailable.")
+        }
+        selectAll.modifiers.insert(.maskCommand)
+
+        // Wake/reveal the login form, then remove both the wake key and any
+        // partial input left by an earlier failed attempt.
+        try await stroke(Key(code: 49))
+        try await sleep(.milliseconds(750))
+        try await stroke(selectAll)
+        try await stroke(Key(code: 51))
+        try await sleep(.milliseconds(100))
+        for key in keys {
+            try await stroke(key)
+            try await sleep(.milliseconds(25))
+        }
+        try await sleep(.milliseconds(100))
+        try await stroke(Key(code: 36))
+    }
+
+    private func checkCanType() throws {
+        try Task.checkCancellation()
+        guard hasAccessibility() else { throw ComputerUseError.accessibilityNotGranted }
+        guard isLocked() else {
+            throw RemoteMacControl.ParseError.message(
+                "The Mac is no longer locked; password entry stopped.")
+        }
+    }
+
+    private func stroke(_ key: Key) async throws {
+        try checkCanType()
+        try postKey(key, true)
+        do {
+            try await sleep(.milliseconds(20))
+        } catch {
+            try? postKey(key, false)
+            throw error
+        }
+        // Balance every down event even if a local unlock happened while the
+        // key was held. The next suspension rechecks the lock state.
+        try postKey(key, false)
+    }
+
+    static func keysForCurrentLayout(_ text: String) throws -> [Key] {
+        guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+              let rawData = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else {
+            throw RemoteMacControl.ParseError.message("The Mac keyboard layout is unavailable.")
+        }
+        let data = Unmanaged<CFData>.fromOpaque(rawData).takeUnretainedValue()
+        return try keys(text, layoutData: data)
+    }
+
+    static func keys(_ text: String, layoutData data: CFData) throws -> [Key] {
+        guard let bytes = CFDataGetBytePtr(data) else {
+            throw RemoteMacControl.ParseError.message("The Mac keyboard layout is unavailable.")
+        }
+        let layout = UnsafeRawPointer(bytes).assumingMemoryBound(to: UCKeyboardLayout.self)
+        let modifiers: [(UInt32, CGEventFlags)] = [
+            (0, []), (UInt32(shiftKey >> 8), .maskShift),
+            (UInt32(optionKey >> 8), .maskAlternate),
+            (UInt32((shiftKey | optionKey) >> 8), [.maskShift, .maskAlternate]),
+        ]
+        var mapping: [String: Key] = [:]
+        for (carbonFlags, flags) in modifiers {
+            for code: CGKeyCode in 0..<128 {
+                var deadKeyState: UInt32 = 0
+                var count = 0
+                var units = [UniChar](repeating: 0, count: 8)
+                let result = UCKeyTranslate(
+                    layout, code, UInt16(kUCKeyActionDown), carbonFlags,
+                    UInt32(LMGetKbdType()), 0, &deadKeyState,
+                    units.count, &count, &units
+                )
+                guard result == noErr, deadKeyState == 0, count > 0 else { continue }
+                let character = String(utf16CodeUnits: units, count: count)
+                if mapping[character] == nil {
+                    mapping[character] = Key(code: code, modifiers: flags)
+                }
+            }
+        }
+        return try text.map { character in
+            guard let key = mapping[String(character)] else {
+                throw RemoteMacControl.ParseError.message(
+                    "The password cannot be typed with the Mac's current keyboard layout.")
+            }
+            return key
+        }
+    }
+}
 
 /// Phone-driven Mac control over the existing Remote Sessions host.
 /// Capture and input reuse the computer-use stack; pairing still gates every call.
@@ -128,8 +285,10 @@ enum RemoteMacControl {
     /// responsible for authenticating and rate-limiting the request; this
     /// method only delivers the already-validated password to loginwindow.
     /// Nothing is persisted or logged.
-    static func unlockLoginWindow(password: String) async throws {
-        try await inputExecutor.unlockLoginWindow(password: password)
+    @MainActor private static let loginWindowInput = LoginWindowInputService()
+
+    @MainActor static func unlockLoginWindow(password: String) async throws {
+        try await loginWindowInput.submit(password: password)
     }
 
     private actor RemoteInputExecutor {
@@ -212,71 +371,6 @@ enum RemoteMacControl {
             self.heldButton = nil
             let point = lastPostedPoint ?? ComputerEvents.cursor()
             postButton(heldButton, down: false, at: point)
-        }
-
-        func unlockLoginWindow(password: String) async throws {
-            guard ComputerPermission.accessibilityGranted else {
-                throw ComputerUseError.accessibilityNotGranted
-            }
-            guard ComputerPermission.sessionLocked else {
-                throw ParseError.message("The Mac is no longer locked.")
-            }
-            guard !password.isEmpty, password.count <= 256 else {
-                throw ParseError.message("The login password must be 1 to 256 characters.")
-            }
-
-            // loginwindow rejects Unicode-only events whose virtual key is 0.
-            // Pair printable ASCII with its physical ANSI key position, retain
-            // the Unicode payload for the intended character, and pace the
-            // events exactly as Vamp Control does.
-            for character in password {
-                try postLoginWindowCharacter(character)
-                try await Task.sleep(for: .milliseconds(18))
-            }
-            try await Task.sleep(for: .milliseconds(80))
-            guard let returnCode = ComputerKey.keyCode(for: "return") else {
-                throw ComputerUseError.unknownKey("return")
-            }
-            try postLoginWindowKey(returnCode, isDown: true)
-            try await Task.sleep(for: .milliseconds(20))
-            try postLoginWindowKey(returnCode, isDown: false)
-        }
-
-        private func postLoginWindowCharacter(_ character: Character) throws {
-            let physicalKey = ComputerEvents.loginWindowPhysicalKey(for: character)
-            var utf16 = Array(String(character).utf16)
-            guard let down = CGEvent(
-                keyboardEventSource: eventSource,
-                virtualKey: physicalKey?.keyCode ?? 0,
-                keyDown: true
-            ) else {
-                throw ParseError.message("Remote Unlock could not create a password key event.")
-            }
-            down.flags = physicalKey?.modifiers ?? []
-            down.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
-            down.post(tap: .cghidEventTap)
-
-            guard let up = CGEvent(
-                keyboardEventSource: eventSource,
-                virtualKey: physicalKey?.keyCode ?? 0,
-                keyDown: false
-            ) else {
-                throw ParseError.message("Remote Unlock could not create a password key event.")
-            }
-            up.flags = physicalKey?.modifiers ?? []
-            up.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
-            up.post(tap: .cghidEventTap)
-        }
-
-        private func postLoginWindowKey(_ code: CGKeyCode, isDown: Bool) throws {
-            guard let event = CGEvent(
-                keyboardEventSource: eventSource,
-                virtualKey: code,
-                keyDown: isDown
-            ) else {
-                throw ParseError.message("Remote Unlock could not create the Return key event.")
-            }
-            event.post(tap: .cghidEventTap)
         }
 
         private func mouseButton(_ button: String) -> CGMouseButton {
