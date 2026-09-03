@@ -19,19 +19,22 @@ final class RemoteMacScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate, 
         var maxWidth: Int?
         var averageBitrate: Int
         var framesPerSecond: Int
+        var showsCursor: Bool
 
         init(
             displayID: CGDirectDisplayID? = nil,
             windowID: CGWindowID? = nil,
             maxWidth: Int? = RemoteStreamResolution.high.maxWidth,
             averageBitrate: Int = RemoteStreamResolution.high.averageBitrate,
-            framesPerSecond: Int = RemoteStreamResolution.high.framesPerSecond
+            framesPerSecond: Int = RemoteStreamResolution.high.framesPerSecond,
+            showsCursor: Bool = true
         ) {
             self.displayID = displayID
             self.windowID = windowID
             self.maxWidth = maxWidth
             self.averageBitrate = max(averageBitrate, 250_000)
             self.framesPerSecond = min(max(framesPerSecond, 5), 60)
+            self.showsCursor = showsCursor
         }
     }
 
@@ -197,7 +200,7 @@ final class RemoteMacScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate, 
                 pixelHeight = max(display.height, 1)
             }
             let streamConfig = SCStreamConfiguration()
-            streamConfig.showsCursor = true
+            streamConfig.showsCursor = config.showsCursor
             streamConfig.queueDepth = 2
             streamConfig.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(config.framesPerSecond))
             // Cap the longest axis rather than the width. A whole display is always landscape,

@@ -875,6 +875,7 @@ final class RemoteSessionHost {
             "locked": .bool(locked),
             "remoteUnlockEnabled": .bool(unlockEnabled),
             "remoteUnlockAvailable": .bool(unlockAvailable),
+            "supportsCursorlessCapture": .bool(true),
             "remoteUnlockMessage": .string(remoteUnlockMessage(
                 enabled: enabled,
                 unlockEnabled: unlockEnabled,
@@ -1084,7 +1085,8 @@ final class RemoteSessionHost {
             windowID: windowID,
             maxWidth: profile.maxWidth,
             averageBitrate: profile.averageBitrate,
-            framesPerSecond: profile.framesPerSecond)
+            framesPerSecond: profile.framesPerSecond,
+            showsCursor: request.query["cursor"] != "0")
     }
 
     private func screenJPEGResponse(
