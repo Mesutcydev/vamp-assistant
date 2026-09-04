@@ -84,3 +84,20 @@ These ideas from the audit are not represented as shipped functionality:
 - **Artifacts:** `/tmp/vamp-release-audit-derived/Build/Products/Release/Vamp Assistant.app` and `/tmp/vamp-release-audit-ios/Build/Products/Release-iphoneos/Vamp Assistant.app`. These verification builds are unsigned; no public package was produced.
 
 - **Post-fix XXL visual check passed for the main actions:** `/tmp/vamp-ui-audit/pairing-accessibility-xxl-fixed.png` shows QR scanning, Tailscale, and manual connection controls in the initial viewport. The supporting assurance cards now stack vertically at accessibility sizes, and their access description no longer promises approval for every action when Auto/Full Access can be enabled. Simulator was restored to dark/medium; text-size restore command exited successfully.
+
+## Publication follow-up — authorized 2026-09-04
+
+The user subsequently requested publication of the latest builds and updates to thevamp.app. Publication is now complete.
+
+- Merged upstream commits through `bb0cb81` before release to retain remote unlock and cursor fixes. Release source commit: `ff14b5c704e2338f351ab37190d5676831dc8269`.
+- macOS **0.10.29 (82)**: Apple Development-signed, hardened-runtime preview, not notarized. Same signing identity/team as the installed app. DMG mount, embedded app signature/version, and ZIP integrity checked.
+- iOS **0.1.36 (58)**: unsigned arm64 IPA for sideload re-signing. Exact top-level structure `Payload/Vamp Assistant.app/`; verified executable, Info.plist, resources, entitlement companions, no provisioning profile or code signature, ZIP CRC, version/build, and SHA-256.
+- Merged-source local checks: **935 Mac tests** (926 passed, 9 opt-in live smoke skips), **22 iOS tests passed**, both Release builds passed.
+- Public DMG and IPA were downloaded again and hashes matched local artifacts. DMG SHA-256: `53a725e994f1ece6ff95ec693d28bbc61cd15de4e762b1d48c6edeb209ac0ce9`. IPA SHA-256: `ffff94cfee34415d55ff050e71f04a28ace6f8b9d8b5117554a98a6a0caa2c0a`.
+- Updated the Assistant repository README, download page, and AltStore feed; updated thevamp.app's Assistant page, release manifest, and AltStore feed in `Mesutcydev/vamp-suite`.
+- Verified canonical live URLs `https://thevamp.app/assistant/`, `/release.json`, and `/apps.json` contain both new versions/links. Website validation: 8 release-selection tests passed; 10 pages and 24 download/checksum URLs checked with zero errors.
+- GitHub Pages deployment passed. Apple app hosted CI using the newer Xcode runner remains queued; only local tests/builds are claimed as passed. Real-device control/model QA and notarization remain outside this preview release.
+
+Downloads:
+- https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.29/Vamp-Assistant-0.10.29-build-82-preview.dmg
+- https://github.com/Mesutcydev/vamp-assistant/releases/download/ios-v0.1.36/Vamp-Assistant-iOS-0.1.36-build-58-unsigned.ipa
