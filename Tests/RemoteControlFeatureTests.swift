@@ -90,6 +90,11 @@ final class RemoteControlFeatureTests: XCTestCase {
         XCTAssertLessThanOrEqual(RemoteStreamResolution.balanced.refreshIntervalMilliseconds, 50)
     }
 
+    func testScreenCaptureCursorDefaultsOnAndCanBeDisabledPerViewer() {
+        XCTAssertTrue(RemoteMacScreenCapture.Config().showsCursor)
+        XCTAssertFalse(RemoteMacScreenCapture.Config(showsCursor: false).showsCursor)
+    }
+
     func testAnnexBParameterSetRoundTrip() {
         let sps = Data([0x67, 0x64, 0x00, 0x1f, 0xac, 0xd9])
         let pps = Data([0x68, 0xee, 0x3c, 0xb0])
