@@ -547,7 +547,10 @@ extension AppleShipTool {
     }
 
     static func failure(stage: Stage, report: URL) -> String {
-        let diagnostics = DiagnosticParser.render(DiagnosticParser.parse(stage.result.output))
+        let parsed = DiagnosticParser.parse(stage.result.output)
+        let diagnostics = parsed.isEmpty
+            ? String(stage.result.output.suffix(4_000))
+            : DiagnosticParser.render(parsed)
         return """
         error: Ship Center stopped at \(stage.name.lowercased()).
         \(diagnostics)

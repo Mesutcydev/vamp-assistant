@@ -6,6 +6,10 @@ struct RemotePairResponse: Decodable {
 }
 
 struct RemoteStatus: Decodable {
+    let protocolVersion: Int?
+    let appVersion: String?
+    let appBuild: String?
+    let capabilities: [String]?
     let pairedClients: Int
     let networkKind: String
     let tokenExpiresAt: Double?

@@ -171,6 +171,7 @@ final class RemoteSessionHost {
     private var server: LocalAPIServer?
     private let macControlApplicationRegistry = RemoteControlApplicationRegistry()
     private var tokens: [String: Date] = [:]
+    private let streamRegistry = RemoteStreamRegistry()
     /// Bumped to drop every live SSE loop when the host stops or all clients
     /// are revoked. Per-token revoke uses `revokedEventDigests` so other
     /// phones keep their streams.
@@ -355,6 +356,38 @@ final class RemoteSessionHost {
     // MARK: HTTP routes
 
     private func route(_ request: LocalAPIServer.Request) async -> LocalAPIServer.RouteResult {
+        let result = await routeRequest(request)
+        guard case .stream(let response, let source) = result else { return result }
+        guard let digest = tokenDigest(from: request) else { return unauthorized() }
+        let isControl = request.path.hasPrefix("/api/control/")
+        let capacity = request.path == "/api/control/screen/stream" ? 2 : 32
+        let protected = streamRegistry.protect(
+            source,
+            clientID: digest,
+            capability: isControl ? .control : .session,
+            bufferingPolicy: .bufferingNewest(capacity)
+        ) { [weak self] in
+            guard let self else { return false }
+            self.pruneExpiredTokens()
+            guard self.tokens[digest] != nil else { return false }
+            if isControl, !(self.macControlAllowedHandler?() ?? false) {
+                self.disableMacControl()
+                return false
+            }
+            return true
+        }
+        return .stream(response, lines: protected)
+    }
+
+    /// Also called directly by the local switch, so existing connections close
+    /// without waiting for the periodic capability check.
+    func disableMacControl() {
+        streamRegistry.cancel(capability: .control)
+        RemoteMacTerminal.close()
+        Task { await RemoteMacControl.releaseAll() }
+    }
+
+    private func routeRequest(_ request: LocalAPIServer.Request) async -> LocalAPIServer.RouteResult {
         refreshPairingState()
         guard allowedPeer(request.remoteAddress) else {
             return .response(json(["error": .string("This network path is not allowed for Vamp Assistant remote sessions.")], status: 403))
@@ -377,6 +410,9 @@ final class RemoteSessionHost {
             return .response(json([
                 "product": .string("Vamp Assistant"),
                 "protocolVersion": .number(1),
+                "appVersion": .string(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"),
+                "appBuild": .string(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"),
+                "capabilities": .array(["sessions", "bots", "workspaces", "sharing", "stream-revocation"].map(LFJSONValue.string)),
                 "pairedClients": .number(Double(pairedClientCount)),
                 "networkKind": .string(networkKind?.rawValue ?? "unknown"),
                 "tokenExpiresAt": tokenDigest(from: request).flatMap { tokens[$0] }.map { .number($0.timeIntervalSince1970) } ?? .null,
@@ -1854,6 +1890,8 @@ final class RemoteSessionHost {
     }
 
     private func cancelEventStreams(matching digest: String?) {
+        streamRegistry.cancel(clientID: digest)
+        Task { await RemoteMacControl.releaseAll() }
         if let digest {
             revokedEventDigests.insert(digest)
         } else {
@@ -1990,6 +2028,9 @@ final class RemoteSessionHost {
         let now = Date()
         let next = tokens.filter { $0.value > now }
         guard next.count != tokens.count else { return }
+        for digest in tokens.keys where next[digest] == nil {
+            cancelEventStreams(matching: digest)
+        }
         tokens = next
         persistPairedClients()
     }

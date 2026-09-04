@@ -72,16 +72,20 @@ final class ModelDownloadManager: ObservableObject {
     /// activation live in AppState).
     var onCompletion: (@MainActor (String) -> Void)?
 
+    private let manifestDirectoryOverride: URL?
     private let tokenProvider: @Sendable () -> String?
     private let hubOverride: (any HubServing)?
     private var orchestrationTasks: [String: Task<Void, Never>] = [:]
     private var activeDownloaders: [String: any FileDownloading] = [:]
     private var cancelledModelIDs: Set<String> = []
+    private var pauseRequestedModelIDs: Set<String> = []
 
     init(
         tokenProvider: @escaping @Sendable () -> String?,
-        hub: (any HubServing)? = nil
+        hub: (any HubServing)? = nil,
+        manifestDirectory: URL? = nil
     ) {
+        self.manifestDirectoryOverride = manifestDirectory
         self.tokenProvider = tokenProvider
         self.hubOverride = hub
         restorePausedDownloads()
@@ -94,7 +98,7 @@ final class ModelDownloadManager: ObservableObject {
     // MARK: Manifest persistence
 
     private var manifestsDirectory: URL {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let dir = manifestDirectoryOverride ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("BeetCode/Downloads", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
@@ -153,6 +157,7 @@ final class ModelDownloadManager: ObservableObject {
     func start(model: CatalogModel, into directory: URL) {
         guard state(for: model.id).isActive == false else { return }
         cancelledModelIDs.remove(model.id)
+        pauseRequestedModelIDs.remove(model.id)
         let modelID = model.id
         states[modelID] = .preparing
         saveManifest(
@@ -173,6 +178,8 @@ final class ModelDownloadManager: ObservableObject {
     /// Pauses the in-flight file transfer; the orchestrator observes the
     /// pause and settles into `.paused` with the exact byte count.
     func pause(modelID: String) {
+        guard state(for: modelID).isActive else { return }
+        pauseRequestedModelIDs.insert(modelID)
         activeDownloaders[modelID]?.pause()
     }
 
@@ -180,6 +187,7 @@ final class ModelDownloadManager: ObservableObject {
     /// model can never be overwritten as `.paused` by the finishing task.
     func cancel(modelID: String, directory: URL) {
         cancelledModelIDs.insert(modelID)
+        pauseRequestedModelIDs.remove(modelID)
         activeDownloaders[modelID]?.cancel()
         orchestrationTasks[modelID]?.cancel()
         orchestrationTasks[modelID] = nil
@@ -215,6 +223,7 @@ final class ModelDownloadManager: ObservableObject {
         directory: URL,
         hub: any HubServing
     ) async -> FileOutcome {
+        guard !pauseRequestedModelIDs.contains(modelID) else { return .paused }
         let destination = directory.appendingPathComponent(file.path)
         let source = hub.resolveURL(repo: repo, path: file.path)
         let fileName = (file.path as NSString).lastPathComponent
@@ -243,6 +252,7 @@ final class ModelDownloadManager: ObservableObject {
         fileName: String,
         hub: any HubServing
     ) async -> FileOutcome {
+        guard !pauseRequestedModelIDs.contains(modelID) else { return .paused }
         let downloader = SmartFileDownloader(
             hub: hub, file: file, sourceURL: source, destination: destination)
         activeDownloaders[modelID] = downloader
@@ -252,7 +262,8 @@ final class ModelDownloadManager: ObservableObject {
                 downloader.start(
                     progress: { [weak self] done, _ in
                         Task { @MainActor [weak self] in
-                            guard let self else { return }
+                            guard let self, !self.pauseRequestedModelIDs.contains(modelID),
+                                  self.activeDownloaders[modelID] === downloader else { return }
                             // The downloader's `done` is relative to the
                             // ACTUAL resumed offset (0 after an ETag
                             // restart), so progress never over-reports stale
@@ -286,6 +297,7 @@ final class ModelDownloadManager: ObservableObject {
         fileName: String,
         hub: any HubServing
     ) async -> FileOutcome {
+        guard !pauseRequestedModelIDs.contains(modelID) else { return .paused }
         let downloader = ParallelChunkDownloader(
             hub: hub, file: file, sourceURL: source, destination: destination)
         activeDownloaders[modelID] = downloader
@@ -293,7 +305,8 @@ final class ModelDownloadManager: ObservableObject {
         do {
             try await downloader.run { [weak self] done, _ in
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
+                    guard let self, !self.pauseRequestedModelIDs.contains(modelID),
+                          self.activeDownloaders[modelID] === downloader else { return }
                     self.states[modelID] = .downloading(
                         Progress(
                             completedBytes: fileBase + done,

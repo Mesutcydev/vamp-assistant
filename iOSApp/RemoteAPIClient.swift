@@ -9,6 +9,8 @@ enum RemoteSessionStreamEvent {
 struct RemoteAPIClient {
     let baseURL: URL
     var token: String?
+    /// Injectable transport for deterministic delayed-response tests.
+    var session: URLSession?
 
     /// The paired Mac never redirects API calls. Refusing redirects prevents
     /// URLSession from replaying a bearer-authenticated request to a host the
@@ -688,7 +690,7 @@ struct RemoteAPIClient {
                     // shared URLSession can be busy with model/file requests;
                     // when it is, snapshots arrive in bursts and the iOS
                     // transcript appears to stop until the user taps Latest.
-                    let (bytes, response) = try await Self.streamSession.bytes(for: request)
+                    let (bytes, response) = try await (session ?? Self.streamSession).bytes(for: request)
                     guard let http = response as? HTTPURLResponse,
                           (200..<300).contains(http.statusCode) else {
                         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -832,7 +834,7 @@ struct RemoteAPIClient {
                     // connection pool. File/model requests on the regular
                     // session must never delay SSE snapshots, otherwise the
                     // phone appears frozen until the user taps Latest.
-                    let (bytes, response) = try await Self.streamSession.bytes(for: request)
+                    let (bytes, response) = try await (session ?? Self.streamSession).bytes(for: request)
                     guard let http = response as? HTTPURLResponse,
                           (200..<300).contains(http.statusCode) else {
                         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -931,7 +933,7 @@ struct RemoteAPIClient {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
         do {
-            let (data, response) = try await Self.apiSession.data(for: request)
+            let (data, response) = try await (session ?? Self.apiSession).data(for: request)
             return try decode(Response.self, data: data, response: response)
         } catch is CancellationError {
             throw CancellationError()

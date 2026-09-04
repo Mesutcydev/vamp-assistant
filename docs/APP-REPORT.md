@@ -1,3 +1,7 @@
+> 2026-09-04 maintenance note: this document describes historical architecture.
+> Current fixes, dependency pins, validation, and remaining release work are tracked
+> in [RELEASE-IMPROVEMENTS-2026-09-04.md](RELEASE-IMPROVEMENTS-2026-09-04.md).
+
 # Beet Code — Application Information Report
 
 > Purpose: a precise, current description of BeetCode's structure,

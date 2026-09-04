@@ -58,6 +58,29 @@ Vamp Assistant can use [TinyFish Search](https://docs.tinyfish.ai/search-api) fo
 
 > Phase 1 deliberately focuses on one polished path: MLX + MLX-quantized safetensors + core coding tools. GGUF/llama.cpp has since shipped (v0.2+, see the GGUF entries in the model catalog).
 
+### Release verification
+
+Run the Apple apps CI matrix before release. It tests the macOS and iOS targets
+and builds both Release configurations with Xcode 26.6. Local test runs that
+exercise Ship Center must export both `DEVELOPER_DIR` and
+`TEST_RUNNER_DEVELOPER_DIR` to the full Xcode developer directory.
+
+The DMG packager defaults to a clearly named `preview` artifact. Public packaging
+requires a Developer ID signed app with hardened runtime and a stapled
+notarization ticket:
+
+```sh
+VAMP_DISTRIBUTION_CHANNEL=public ./scripts/package-beetcode-dmg.sh "/path/to/Vamp Assistant.app"
+```
+
+The gate validates signatures, entitlements, notarization, and Gatekeeper before
+creating the DMG. Packaging never signs or submits the app. Both packagers refuse
+to overwrite an existing version/build artifact; choose a new build number.
+
+See [release audit](docs/RELEASE-AUDIT-2026-09-04.md) and
+[implementation and verification log](docs/RELEASE-IMPROVEMENTS-2026-09-04.md)
+for the current release work.
+
 ## v0.10.25 — Remote unlock and richer mobile control
 
 - Remote unlock now enters credentials at the physical macOS login window and

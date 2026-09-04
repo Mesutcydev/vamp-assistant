@@ -33,8 +33,7 @@ enum ShellRunner {
     /// stripped of Git override variables: ambient GIT_DIR/GIT_WORK_TREE/
     /// GIT_INDEX_FILE (e.g. exported by a terminal the app was launched from)
     /// must never redirect git commands run by the agent.
-    static func sanitizedEnvironment() -> [String: String] {
-        let inherited = ProcessInfo.processInfo.environment
+    static func sanitizedEnvironment(inherited: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
         let inheritedPath = inherited["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
         let pathEntries = inheritedPath.split(separator: ":").map(String.init)
         let toolDirectories = ["/usr/local/bin", "/opt/homebrew/bin"]
@@ -45,7 +44,7 @@ enum ShellRunner {
             "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
             "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_PREFIX", "GIT_SHALLOW_FILE",
         ]
-        return [
+        var environment = [
             "PATH": commandPath,
             "HOME": inherited["HOME"] ?? NSHomeDirectory(),
             "TMPDIR": inherited["TMPDIR"] ?? NSTemporaryDirectory(),
@@ -56,6 +55,13 @@ enum ShellRunner {
             "USER": inherited["USER"] ?? NSUserName(),
             "LOGNAME": inherited["LOGNAME"] ?? NSUserName(),
         ].filter { key, _ in !gitOverrides.contains(key) }
+        // Honor the toolchain explicitly chosen by the app's launcher or CI.
+        // Dropping this value makes nested xcodebuild use Command Line Tools
+        // even though the parent build is running under a full Xcode install.
+        if let developerDirectory = inherited["DEVELOPER_DIR"], developerDirectory.hasPrefix("/") {
+            environment["DEVELOPER_DIR"] = developerDirectory
+        }
+        return environment
     }
 
     /// Runs the command until exit or timeout, then returns a typed result.

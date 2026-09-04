@@ -1,4 +1,4 @@
-name: macOS
+name: Apple apps
 
 on:
   push:
@@ -8,37 +8,65 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: apple-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
-    name: Build and test
-    runs-on: macos-15
-    timeout-minutes: 45
-
+    name: ${{ matrix.platform }} tests and Release build
+    runs-on: macos-26
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [macOS, iOS]
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      # XCTest must forward this for tests that invoke xcodebuild themselves.
+      TEST_RUNNER_DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
-      - name: Check out
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
+      - name: Verify selected toolchain
+        run: xcodebuild -version
       - name: Install XcodeGen
         run: brew install xcodegen
-
-      - name: Generate the Xcode project
-        run: xcodegen generate
-
-      - name: Check formatting hygiene
-        run: git diff --check
-
-      # macOS UI tests require an interactive WindowServer session and can hang on
-      # GitHub's headless hosted runners. Keep CI deterministic here; UI flows are
-      # exercised on a real signed build before release.
-      - name: Build and test
+      - name: Generate project and check hygiene
+        run: |
+          xcodegen generate
+          git diff --check
+          for script in scripts/*.sh; do bash -n "$script"; done
+      - name: macOS unit tests
+        if: matrix.platform == 'macOS'
         run: >-
-          xcodebuild
-          -project BeetCode.xcodeproj
-          -scheme BeetCode
-          -destination 'platform=macOS'
-          -derivedDataPath "$RUNNER_TEMP/BeetCodeDerivedData"
-          CODE_SIGNING_ALLOWED=NO
-          CODE_SIGNING_REQUIRED=NO
-          ONLY_ACTIVE_ARCH=YES
-          -only-testing:BeetCodeTests
-          test
+          xcodebuild -project BeetCode.xcodeproj -scheme BeetCode
+          -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/Derived"
+          -resultBundlePath "$RUNNER_TEMP/Tests.xcresult"
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO ONLY_ACTIVE_ARCH=YES
+          -only-testing:BeetCodeTests test
+      - name: iOS simulator tests
+        if: matrix.platform == 'iOS'
+        run: >-
+          xcodebuild -project BeetCode.xcodeproj -scheme BeetCodeRemoteIOS
+          -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5'
+          -derivedDataPath "$RUNNER_TEMP/Derived" -resultBundlePath "$RUNNER_TEMP/Tests.xcresult"
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
+      - name: macOS Release build
+        if: matrix.platform == 'macOS'
+        run: >-
+          xcodebuild -project BeetCode.xcodeproj -scheme BeetCode -configuration Release
+          -destination 'generic/platform=macOS' ARCHS=arm64 EXCLUDED_ARCHS=x86_64 -derivedDataPath "$RUNNER_TEMP/Derived"
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+      - name: iOS device Release build
+        if: matrix.platform == 'iOS'
+        run: >-
+          xcodebuild -project BeetCode.xcodeproj -scheme BeetCodeRemoteIOS -configuration Release
+          -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/Derived"
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+      - name: Save test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-test-results
+          path: ${{ runner.temp }}/Tests.xcresult
+          retention-days: 7

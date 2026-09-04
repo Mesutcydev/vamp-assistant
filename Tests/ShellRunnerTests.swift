@@ -11,6 +11,19 @@ import XCTest
 /// loudly at the scene instead of surfacing as a random crash report.
 final class ShellRunnerTests: XCTestCase {
 
+    func testSelectedXcodeIsPreservedWithoutRestoringGitOverrides() {
+        let environment = ShellRunner.sanitizedEnvironment(inherited: [
+            "DEVELOPER_DIR": "/Applications/Xcode-beta.app/Contents/Developer",
+            "GIT_DIR": "/unexpected/repository",
+            "GIT_CONFIG_GLOBAL": "/unexpected/config",
+            "DYLD_INSERT_LIBRARIES": "/unexpected/library",
+        ])
+        XCTAssertEqual(environment["DEVELOPER_DIR"], "/Applications/Xcode-beta.app/Contents/Developer")
+        XCTAssertNil(environment["GIT_DIR"])
+        XCTAssertNil(environment["GIT_CONFIG_GLOBAL"])
+        XCTAssertNil(environment["DYLD_INSERT_LIBRARIES"])
+    }
+
     private var workspace: TempWorkspace!
 
     override func setUpWithError() throws {

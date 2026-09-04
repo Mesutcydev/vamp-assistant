@@ -159,7 +159,8 @@ final class AppleShipToolTests: XCTestCase {
         let report = try String(
             contentsOf: release.appendingPathComponent("Ship-Report.md"),
             encoding: .utf8)
-        XCTAssertTrue(report.contains("Release archive: **Passed**"), report)
+        let archiveLog = (try? String(contentsOf: release.appendingPathComponent("archive.log"), encoding: .utf8)) ?? "No archive log"
+        XCTAssertTrue(report.contains("Release archive: **Passed**"), report + "\n" + archiveLog)
         XCTAssertTrue(report.contains("Package: **Passed**"), report)
     }
 }

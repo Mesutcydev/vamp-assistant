@@ -28,6 +28,7 @@ VERSION="$(plutil -extract CFBundleShortVersionString raw "$APP/Info.plist")"
 BUILD="$(plutil -extract CFBundleVersion raw "$APP/Info.plist")"
 NAME="Vamp-Assistant-iOS-${VERSION}-build-${BUILD}-unsigned.ipa"
 IPA="$OUTPUT/$NAME"
+[[ ! -e "$IPA" ]] || { echo "Artifact already exists: $IPA. Choose a new build number." >&2; exit 1; }
 
 find "$STAGING" -depth -delete 2>/dev/null || true
 mkdir -p "$STAGING/Payload"

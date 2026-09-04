@@ -110,8 +110,28 @@ final class EndToEndTests: XCTestCase {
         XCTAssertEqual(appState.sessions.finishReason, .completed("All done here."))
     }
 
+    func testPauseImmediatelyAfterStartIsRememberedDuringPreparation() async throws {
+        let fixture = TempWorkspace()
+        fixture.write("weights", to: "weights.bin")
+        let model = try XCTUnwrap(ModelCatalog.all.first)
+        let destination = appSupport.url(for: "preparation-download")
+        let manager = ModelDownloadManager(tokenProvider: { nil },
+            hub: FixtureHub(directory: fixture.url),
+            manifestDirectory: appSupport.url(for: "preparation-manifests"))
+        manager.start(model: model, into: destination)
+        manager.pause(modelID: model.id)
+        defer { manager.cancel(modelID: model.id, directory: destination) }
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            if case .paused = manager.state(for: model.id) { return }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTFail("Pause during preparation was lost: \(manager.state(for: model.id))")
+    }
+
     func testPausedDownloadManifestSurvivesRelaunch() async throws {
-        // A fixture large enough that the transfer takes well over a second.
+        // Wait for observed progress instead of assuming metadata/transfer
+        // timing on a developer machine that may also be compiling.
         let fixture = TempWorkspace()
         let bigFile = fixture.url(for: "weights.bin")
         try FileManager.default.createDirectory(
@@ -120,18 +140,23 @@ final class EndToEndTests: XCTestCase {
         FileManager.default.createFile(atPath: bigFile.path, contents: nil)
         let chunk = Data(repeating: 0x61, count: 1_048_576)  // 1 MiB
         let handle = try FileHandle(forWritingTo: bigFile)
-        for _ in 0..<256 { try handle.write(contentsOf: chunk) }  // 256 MiB
+        for _ in 0..<8 { try handle.write(contentsOf: chunk) }
         try handle.close()
 
         let model = try XCTUnwrap(ModelCatalog.all.first)
         let manager = ModelDownloadManager(
             tokenProvider: { nil },
-            hub: FixtureHub(directory: fixture.url))
+            hub: FixtureHub(directory: fixture.url),
+            manifestDirectory: appSupport.url(for: "manifests"))
         manager.start(model: model, into: appSupport.url(for: "dl"))
         XCTAssertTrue(manager.hasInterruptedDownload(modelID: model.id), "manifest written on start")
 
         // Pause mid-transfer; poll until the orchestrator settles.
-        try? await Task.sleep(for: .milliseconds(400))
+        let startedDeadline = Date().addingTimeInterval(10)
+        while manager.state(for: model.id).progress?.completedBytes ?? 0 == 0,
+              Date() < startedDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         manager.pause(modelID: model.id)
         let pauseDeadline = Date().addingTimeInterval(10)
         var settled = false
@@ -140,12 +165,17 @@ final class EndToEndTests: XCTestCase {
             try? await Task.sleep(for: .milliseconds(100))
         }
         XCTAssertTrue(settled, "download did not settle into paused (state: \(manager.state(for: model.id)))")
+        guard settled else {
+            manager.cancel(modelID: model.id, directory: appSupport.url(for: "dl"))
+            return
+        }
 
         // A fresh manager (simulated relaunch) must see the paused state
         // from the persisted manifest.
         let relaunched = ModelDownloadManager(
             tokenProvider: { nil },
-            hub: FixtureHub(directory: fixture.url))
+            hub: FixtureHub(directory: fixture.url),
+            manifestDirectory: appSupport.url(for: "manifests"))
         guard case .paused(let progress) = relaunched.state(for: model.id) else {
             return XCTFail("paused state did not survive relaunch: \(relaunched.state(for: model.id))")
         }

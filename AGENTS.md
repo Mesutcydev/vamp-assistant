@@ -14,7 +14,11 @@ This is a native macOS coding agent (Swift 6 / SwiftUI / MLX + BYOK).
    xcodebuild -project BeetCode.xcodeproj -scheme BeetCode \
      -destination 'platform=macOS' -derivedDataPath .derived test
    ```
-   Suite: 370 tests, all deterministic (no weights, no Metal, no network).
+   Run both `BeetCodeTests` and `BeetCodeRemoteIOSTests`; see the Apple apps
+   workflow for simulator and Release build gates. Set `DEVELOPER_DIR` to a full
+   Xcode installation. Forward it as `TEST_RUNNER_DEVELOPER_DIR` when testing:
+   Ship Center integration tests invoke Xcode from inside the test host.
+   Do not regenerate the project while a build is running.
 
 ## Architecture in 30 seconds
 

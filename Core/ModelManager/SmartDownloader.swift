@@ -169,7 +169,7 @@ final class SmartFileDownloader: @unchecked Sendable {
     func pause() {
         lock.lock()
         defer { lock.unlock() }
-        guard case .downloading = _phase else { return }
+        guard currentTask != nil else { return }
         currentTask?.cancel()
         _phase = .paused
         persistSidecar()
@@ -195,6 +195,10 @@ final class SmartFileDownloader: @unchecked Sendable {
         var lastError: DownloadError = .cancelled
 
         while attempt < maxAttempts {
+            if Task.isCancelled {
+                setPhase(.paused)
+                return .failure(.paused)
+            }
             attempt += 1
             setPhase(.downloading)
             do {

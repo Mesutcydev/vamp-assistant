@@ -42,7 +42,9 @@ final class SystemReadinessModel {
                           !result.failed
                     else { return nil }
                     let path = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else { return nil }
+                    guard !path.isEmpty,
+                          FileManager.default.fileExists(atPath: path + "/usr/bin/xcodebuild"),
+                          FileManager.default.fileExists(atPath: path + "/Platforms/MacOSX.platform") else { return nil }
                     return path
                 }()
                 let identities = (try? AppleDeliverySupport.signingIdentities()) ?? []

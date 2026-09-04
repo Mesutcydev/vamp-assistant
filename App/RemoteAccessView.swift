@@ -177,7 +177,10 @@ struct RemoteAccessView: View {
                     Label("Mac Control from iPhone", systemImage: "display.and.arrow.down")
                 }
                 .onChange(of: settings.remoteMacControlEnabled) { _, enabled in
-                    guard enabled else { return }
+                    guard enabled else {
+                        appState.remoteSessionHost.disableMacControl()
+                        return
+                    }
                     if !ComputerPermission.accessibilityGranted {
                         ComputerPermission.requestAccessibility()
                     }

@@ -21,6 +21,7 @@ private struct RemoteRootShell: View {
     @AppStorage("remoteAppearanceSetting") private var setting = RemoteAppearanceSetting.dark
     @AppStorage("remoteAccent") private var accent = AccentPalette.graphite
     @Environment(\.colorScheme) private var systemScheme
+    @Environment(\.scenePhase) private var scenePhase
 
     private var appearance: RemoteAppearance { setting.resolved(systemScheme) }
 
@@ -31,23 +32,16 @@ private struct RemoteRootShell: View {
             .tint(BeetTheme.accentBright)
             .environment(\.remoteAppearance, appearance)
             .preferredColorScheme(setting.colorScheme)
-            .modifier(AccentSync(palette: accent))
+            .onChange(of: accent, initial: true) { _, palette in
+                BeetTheme.currentPalette = palette
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active { Task { await store.drafts.flush() } }
+            }
             .task {
                 RemoteAppearanceSetting.migrateLegacyDefault()
                 await store.restore()
             }
-    }
-}
-
-/// Mirrors the stored palette into `BeetTheme`'s draw-time global and re-keys
-/// the tree, since SwiftUI cannot observe a plain static. Mirroring happens in
-/// `body` — on the main actor, before any descendant resolves a color.
-private struct AccentSync: ViewModifier {
-    let palette: AccentPalette
-
-    func body(content: Content) -> some View {
-        BeetTheme.currentPalette = palette
-        return content.id(palette.rawValue)
     }
 }
 
@@ -124,40 +118,43 @@ enum RemoteAppearance: String, CaseIterable, Identifiable {
     var colorScheme: ColorScheme { self == .light ? .light : .dark }
 }
 
-private struct RemoteAppearanceKey: EnvironmentKey {
-    static let defaultValue = RemoteAppearance.dark
+extension EnvironmentValues {
+    @Entry var remoteAppearance: RemoteAppearance = .dark
 }
 
-extension EnvironmentValues {
-    var remoteAppearance: RemoteAppearance {
-        get { self[RemoteAppearanceKey.self] }
-        set { self[RemoteAppearanceKey.self] = newValue }
-    }
+@MainActor
+@Observable
+private final class RemotePaletteState {
+    var palette = UserDefaults.standard.string(forKey: "remoteAccent")
+        .flatMap(AccentPalette.init(rawValue:)) ?? .graphite
 }
 
 enum BeetTheme {
-    /// The active accent palette, mirrored from `@AppStorage("remoteAccent")`
-    /// by `AccentSync`. Read at draw time by the dynamic colors below, so a
-    /// palette switch re-tints live. Only mutated from the main actor.
-    nonisolated(unsafe) static var currentPalette: AccentPalette = .graphite
+    @MainActor private static let paletteState = RemotePaletteState()
+    @MainActor static var currentPalette: AccentPalette {
+        get { paletteState.palette }
+        set { paletteState.palette = newValue }
+    }
 
     /// Dynamic UIColor rather than an `accent(_ appearance:)` function so the
     /// ~20 call sites stay untouched. `accent` always sits behind white glyphs;
     /// every palette's pair is contrast-checked for exactly that (see
     /// `AccentPalette`), which is why dark mode uses the lighter of the two.
-    static let accent = Color(uiColor: UIColor { trait in
-        uiColor(trait.userInterfaceStyle == .dark
-                ? currentPalette.hexes.accentDark
-                : currentPalette.hexes.accentLight)
-    })
+    @MainActor static var accent: Color {
+        let hexes = currentPalette.hexes
+        return Color(uiColor: UIColor { trait in
+            uiColor(trait.userInterfaceStyle == .dark ? hexes.accentDark : hexes.accentLight)
+        })
+    }
 
     /// Foreground step — text, glyphs, and status dots. `accent` is a fill, so
     /// using it the other way round fails contrast on the app's surfaces.
-    static let accentBright = Color(uiColor: UIColor { trait in
-        uiColor(trait.userInterfaceStyle == .dark
-                ? currentPalette.hexes.brightDark
-                : currentPalette.hexes.accentLight)
-    })
+    @MainActor static var accentBright: Color {
+        let hexes = currentPalette.hexes
+        return Color(uiColor: UIColor { trait in
+            uiColor(trait.userInterfaceStyle == .dark ? hexes.brightDark : hexes.accentLight)
+        })
+    }
 
     static let wash = Color.white.opacity(0.08)
 
