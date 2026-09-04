@@ -36,7 +36,7 @@ The [Vamp Assistant site](https://mesutcydev.github.io/vamp-assistant/) has the 
 
 The repository includes a native SwiftUI companion app that connects to the Mac app's existing private Remote Sessions endpoint. It supports camera QR pairing, one-tap reconnection, secure token storage, session browsing, new local/API sessions, live responses, prompts, stop controls, approvals/questions, and permission-gated clipboard and file exchange.
 
-[Download the latest unsigned iPhone/iPad IPA](https://github.com/Mesutcydev/vamp-assistant/releases/download/ios-v0.1.35/Vamp-Assistant-iOS-0.1.35-build-57-unsigned.ipa)
+[Download the latest unsigned iPhone/iPad IPA](https://github.com/Mesutcydev/vamp-assistant/releases/download/ios-v0.1.36/Vamp-Assistant-iOS-0.1.36-build-58-unsigned.ipa)
 
 [Add the Vamp Assistant AltStore source](https://mesutcydev.github.io/vamp-assistant/apps.json)
 
@@ -52,7 +52,7 @@ The resulting `Vamp-Assistant-iOS-*-unsigned.ipa` can be re-signed with AltStore
 
 Vamp Assistant can use [TinyFish Search](https://docs.tinyfish.ai/search-api) for current, ranked web sources, snippets, and URLs. Add the key in **Settings → Providers → TinyFish Search**; it is stored in the Mac Keychain and the read-only `web_search` tool is then available in Assistant, Code, browser-control, and bot runs. The assistant can pass a returned URL to `web_fetch` or the in-app browser for verification. For headless/CLI use, set `TINYFISH_API_KEY` before launching the host. No TinyFish key is bundled with the app.
 
-**Install:** [download the latest Apple-silicon DMG](https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.28/Vamp-Assistant-0.10.28-build-81.dmg) or [ZIP](https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.28/Vamp-Assistant-0.10.28-build-81.zip), open it, and move **Vamp Assistant.app** to Applications. Apple Silicon + macOS 15+.
+**Install:** [download the latest Apple-silicon DMG](https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.29/Vamp-Assistant-0.10.29-build-82-preview.dmg) or [ZIP](https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.29/Vamp-Assistant-0.10.29-build-82-preview.zip), open it, and move **Vamp Assistant.app** to Applications. Apple Silicon + macOS 15+.
 
 > Gatekeeper will warn — this build is Apple Development–signed, **not notarized** (Developer ID certs are revoked). Right-click → Open, or `xattr -dr com.apple.quarantine "/path/to/Vamp Assistant.app"`.
 
