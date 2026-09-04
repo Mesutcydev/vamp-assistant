@@ -10,7 +10,18 @@ import Foundation
 final class LoginWindowInputService {
     struct Key: Equatable {
         let code: CGKeyCode
-        var modifiers: CGEventFlags = []
+        var modifiers: CGEventFlags
+        var unicodeString: String?
+
+        init(
+            code: CGKeyCode,
+            modifiers: CGEventFlags = [],
+            unicodeString: String? = nil
+        ) {
+            self.code = code
+            self.modifiers = modifiers
+            self.unicodeString = unicodeString
+        }
     }
 
     private let isLocked: () -> Bool
@@ -36,6 +47,12 @@ final class LoginWindowInputService {
                         "Remote Unlock could not create a login key event.")
                 }
                 event.flags = key.modifiers
+                if let unicodeString = key.unicodeString {
+                    var units = Array(unicodeString.utf16)
+                    event.keyboardSetUnicodeString(
+                        stringLength: units.count,
+                        unicodeString: &units)
+                }
                 event.post(tap: .cghidEventTap)
             },
             sleep: { try await Task.sleep(for: $0) }
@@ -74,6 +91,7 @@ final class LoginWindowInputService {
             throw RemoteMacControl.ParseError.message("The Mac keyboard layout is unavailable.")
         }
         selectAll.modifiers.insert(.maskCommand)
+        selectAll.unicodeString = nil
 
         // Wake/reveal the login form, then remove both the wake key and any
         // partial input left by an earlier failed attempt.
@@ -146,7 +164,10 @@ final class LoginWindowInputService {
                 guard result == noErr, deadKeyState == 0, count > 0 else { continue }
                 let character = String(utf16CodeUnits: units, count: count)
                 if mapping[character] == nil {
-                    mapping[character] = Key(code: code, modifiers: flags)
+                    mapping[character] = Key(
+                        code: code,
+                        modifiers: flags,
+                        unicodeString: character)
                 }
             }
         }

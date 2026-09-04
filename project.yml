@@ -56,8 +56,8 @@ targets:
       properties:
         CFBundleDisplayName: "Vamp Assistant"
         CFBundleIconName: AppIcon
-        CFBundleShortVersionString: "0.10.27"
-        CFBundleVersion: "80"
+        CFBundleShortVersionString: "0.10.28"
+        CFBundleVersion: "81"
         LSApplicationCategoryType: public.app-category.developer-tools
         LSMinimumSystemVersion: "15.0"
         NSHumanReadableCopyright: "Copyright © 2026 Vamp Assistant contributors"

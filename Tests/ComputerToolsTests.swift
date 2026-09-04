@@ -52,10 +52,12 @@ final class ComputerToolsTests: XCTestCase {
         }
         let us = try layout("com.apple.keylayout.US")
         let turkish = try layout("com.apple.keylayout.Turkish-QWERTY-PC")
-        XCTAssertEqual(try LoginWindowInputService.keys("i", layoutData: us), [.init(code: 34)])
+        XCTAssertEqual(
+            try LoginWindowInputService.keys("i", layoutData: us),
+            [.init(code: 34, unicodeString: "i")])
         XCTAssertEqual(
             try LoginWindowInputService.keys("ı", layoutData: turkish),
-            [.init(code: 34)])
+            [.init(code: 34, unicodeString: "ı")])
         XCTAssertEqual(try LoginWindowInputService.keys("şğıİç", layoutData: turkish).count, 5)
         XCTAssertThrowsError(try LoginWindowInputService.keys("🙂", layoutData: us))
     }
