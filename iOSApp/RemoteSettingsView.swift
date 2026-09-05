@@ -14,53 +14,6 @@ struct RemoteAppVersion: Equatable, Sendable {
     }()
 }
 
-struct RemoteAppVersionCard: View {
-    @Environment(\.remoteAppearance) private var appearance
-    let version: String
-    let build: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            RemoteSectionLabel(title: "ABOUT")
-            HStack(spacing: 12) {
-                Image(systemName: "info.circle.fill")
-                    .font(.title2)
-                    .foregroundStyle(BeetTheme.accentBright)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Vamp Assistant")
-                        .font(.body.weight(.semibold))
-                    Text("iPhone and iPad companion")
-                        .font(.caption)
-                        .foregroundStyle(BeetTheme.secondaryText(appearance))
-                }
-                Spacer(minLength: 0)
-            }
-
-            Divider()
-
-            HStack {
-                Text("Version")
-                    .foregroundStyle(BeetTheme.secondaryText(appearance))
-                Spacer()
-                Text(verbatim: version)
-                    .font(.body.monospacedDigit())
-            }
-            HStack {
-                Text("Build")
-                    .foregroundStyle(BeetTheme.secondaryText(appearance))
-                Spacer()
-                Text(verbatim: build)
-                    .font(.body.monospacedDigit())
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 18))
-        .overlay { RoundedRectangle(cornerRadius: 18).stroke(BeetTheme.line(appearance)) }
-    }
-}
-
 struct RemoteAppVersionFooter: View {
     @Environment(\.remoteAppearance) private var appearance
     let version: String
@@ -77,13 +30,16 @@ struct RemoteAppVersionFooter: View {
 
 /// One destination for everything that was scattered across the header, the
 /// toolbar, and an overflow menu: theme, the paired Mac, and diagnostics.
+///
+/// It is a stock `Form`. The hand-built cards it replaced re-derived row
+/// heights, separators, section labels and a switch that the platform draws
+/// better — and drew them at four different corner radii.
 struct RemoteSettingsSheet: View {
     @Bindable var store: RemoteStore
     var onSwitchComputer: () -> Void
     var onDiagnostics: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.remoteAppearance) private var appearance
     @AppStorage("remoteAppearanceSetting") private var appearanceSetting = RemoteAppearanceSetting.dark
     @AppStorage("remoteAccent") private var accent = AccentPalette.graphite
     @AppStorage(RemoteBackdropSetting.key) private var showsBackdrop = true
@@ -91,28 +47,16 @@ struct RemoteSettingsSheet: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                RemoteBackdrop()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 22) {
-                        appearanceSection
-                        connectionSection
-                        RemoteAppVersionCard(
-                            version: RemoteAppVersion.current.version,
-                            build: RemoteAppVersion.current.build)
-                    }
-                    .frame(maxWidth: 620)
-                    .padding(.horizontal, 18)
-                    .padding(.top, 8)
-                    .padding(.bottom, 30)
-                    .frame(maxWidth: .infinity)
-                }
+            Form {
+                appearanceSection
+                connectionSection
+                aboutSection
             }
+            .scrollContentBackground(.hidden)
+            .background { RemoteBackdrop() }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-            .toolbarBackground(BeetTheme.background(appearance).opacity(0.94), for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
             .confirmationDialog(
                 "Forget this Mac?",
                 isPresented: $showForgetMac,
@@ -142,111 +86,70 @@ struct RemoteSettingsSheet: View {
     // MARK: Appearance
 
     private var appearanceSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            RemoteSectionLabel(title: "APPEARANCE")
+        Section {
             Picker("Appearance", selection: $appearanceSetting) {
                 ForEach(RemoteAppearanceSetting.allCases) { option in
-                    Label(option.label, systemImage: option.symbol).tag(option)
+                    Text(option.label).tag(option)
                 }
             }
             .pickerStyle(.segmented)
-
-            Text("ACCENT")
-                .font(.caption2.bold())
-                .tracking(0.8)
-                .foregroundStyle(BeetTheme.secondaryText(appearance))
-                .padding(.top, 4)
+            .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
             AccentSwatchPicker(selection: $accent)
-            Text(accent.label)
-                .font(.caption)
-                .foregroundStyle(BeetTheme.secondaryText(appearance))
-
-            Divider().padding(.top, 4)
-
-            Toggle(isOn: $showsBackdrop) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Background image")
-                        .font(.body)
-                    Text(showsBackdrop
-                         ? "The engraved atmosphere sits behind every screen."
-                         : "Screens draw on a plain surface instead.")
-                        .font(.caption)
-                        .foregroundStyle(BeetTheme.secondaryText(appearance))
-                }
-            }
-            .tint(BeetTheme.accentBright)
-            .accessibilityHint("Turns the app's background image off for a plain surface")
+            Toggle("Background image", isOn: $showsBackdrop)
+        } header: {
+            Text("Appearance")
+        } footer: {
+            Text(showsBackdrop
+                 ? "The engraved atmosphere sits behind every screen."
+                 : "Screens draw on the plain system background instead.")
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 18))
-        .overlay { RoundedRectangle(cornerRadius: 18).stroke(BeetTheme.line(appearance)) }
+        .remoteListRow()
     }
 
     // MARK: Connection
 
     private var connectionSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            RemoteSectionLabel(title: "MAC")
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(store.isConnected ? BeetTheme.accentBright : BeetTheme.secondaryText(appearance))
-                    .frame(width: 8, height: 8)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(store.activeComputerName).font(.body.weight(.semibold))
-                    Text(store.isConnected ? store.connectionSubtitle : store.connectionLabel)
-                        .font(.caption)
-                        .foregroundStyle(BeetTheme.secondaryText(appearance))
+        Section {
+            LabeledContent {
+                Text(store.isConnected ? store.connectionSubtitle : store.connectionLabel)
+            } label: {
+                HStack(spacing: 10) {
+                    Circle()
+                        .fill(store.isConnected ? Color.green : Color.secondary)
+                        .frame(width: 10, height: 10)
+                        .accessibilityHidden(true)
+                    Text(store.activeComputerName)
                 }
-                Spacer(minLength: 0)
             }
-
-            settingsRow("Switch computer", symbol: "desktopcomputer.and.macbook") {
+            RemoteDisclosureRow(title: "Switch computer") {
                 dismiss()
                 onSwitchComputer()
             }
-            settingsRow("Control diagnostics", symbol: "stethoscope") {
+            RemoteDisclosureRow(title: "Control diagnostics") {
                 dismiss()
                 onDiagnostics()
             }
-            settingsRow("Forget this Mac", symbol: "iphone.slash", destructive: true) {
-                showForgetMac = true
-            }
+            Button("Forget this Mac", role: .destructive) { showForgetMac = true }
+        } header: {
+            Text("Mac")
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 18))
-        .overlay { RoundedRectangle(cornerRadius: 18).stroke(BeetTheme.line(appearance)) }
+        .remoteListRow()
     }
 
-    private func settingsRow(
-        _ title: String,
-        symbol: String,
-        destructive: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: symbol)
-                    .frame(width: 24)
-                    .foregroundStyle(destructive ? Color.red : BeetTheme.accentBright)
-                    .accessibilityHidden(true)
-                Text(title)
-                    .font(.body)
-                    .foregroundStyle(destructive ? Color.red : Color.primary)
-                Spacer(minLength: 0)
-                if !destructive {
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(BeetTheme.secondaryText(appearance))
-                        .accessibilityHidden(true)
-                }
-            }
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
+    private var aboutSection: some View {
+        Section {
+            LabeledContent("Version", value: RemoteAppVersion.current.version)
+                .monospacedDigit()
+            LabeledContent("Build", value: RemoteAppVersion.current.build)
+                .monospacedDigit()
+        } header: {
+            Text("About")
+        } footer: {
+            Text("Vamp Assistant for iPhone and iPad.")
         }
-        .buttonStyle(.plain)
+        .remoteListRow()
     }
+
 }
 
 /// Accent swatches. Each shows the palette's light-mode accent, which is a

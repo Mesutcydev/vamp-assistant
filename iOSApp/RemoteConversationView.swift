@@ -2,29 +2,58 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+/// One session.
+///
+/// The transcript used to be framed by three stacked chrome layers: a
+/// navigation bar with two icon buttons, a status strip of seven inline items,
+/// and the composer. The strip is gone — a two-line bar title carries phase,
+/// folder and model, and Stop moved onto the run bar, where the run is.
 struct ConversationView: View {
     @Bindable var store: RemoteStore
     let sessionID: UUID
-    @Environment(\.remoteAppearance) private var appearance
     private var draft: String { store[draftFor: sessionID] }
     @State private var showSharing = false
     @State private var showComputers = false
+    @State private var showModelPicker = false
+    @State private var pickerSource = "local"
     @State private var selectedModelID = ""
     @State private var dismissedErrorMessage: String?
+
+    private var detail: RemoteSessionDetail? {
+        guard let detail = store.selectedSession, detail.id == sessionID else { return nil }
+        return detail
+    }
+
+    private var title: String {
+        store.sessions.first(where: { $0.id == sessionID })?.title ?? "Conversation"
+    }
+
+    /// Phase, where it works, and the model — the three things the status strip
+    /// existed to say, in the space the navigation bar already reserves.
+    private var subtitle: String {
+        guard let detail else { return "Opening…" }
+        var parts: [String] = [detail.isRunning ? detail.phase.capitalized : "Ready"]
+        if detail.mode == "code" || !(detail.workspacePath ?? "").isEmpty {
+            parts.append(detail.workspace)
+        } else {
+            parts.append("Chat")
+        }
+        parts.append(selectedModelName)
+        return parts.joined(separator: " · ")
+    }
+
+    private var selectedModelName: String {
+        store.startModels.first(where: { $0.id == selectedModelID })?.name
+            ?? detail?.modelID
+            ?? ""
+    }
+
     var body: some View {
         ZStack {
             RemoteBackdrop()
-            if let detail = store.selectedSession, detail.id == sessionID {
+            if let detail {
                 VStack(spacing: 0) {
-                    ConversationStatus(
-                        detail: detail,
-                        models: store.startModels,
-                        selectedModelID: $selectedModelID,
-                        onStop: { Task { await store.stop() } },
-                        onRefreshModels: { await store.loadStartModels() })
-                    if !store.isConnected {
-                        RemoteReconnectBanner(store: store)
-                    }
+                    if !store.isConnected { RemoteReconnectBanner(store: store) }
                     MessageTranscript(
                         detail: detail,
                         dismissedErrorMessage: dismissedErrorMessage,
@@ -45,73 +74,124 @@ struct ConversationView: View {
                             .transaction { transaction in transaction.animation = nil }
                     }
                 }
-            } else { ProgressView("Opening conversation…").frame(maxWidth: .infinity, maxHeight: .infinity) }
-        }.navigationTitle(store.sessions.first(where: { $0.id == sessionID })?.title ?? "Conversation").navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(BeetTheme.background(appearance).opacity(0.92), for: .navigationBar).toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showComputers = true } label: {
-                        Image(systemName: "desktopcomputer.and.macbook")
+            } else {
+                ProgressView("Opening conversation…").frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 1) {
+                    Text(title)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isHeader)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Toggle("Auto mode", isOn: Binding(get: { store.autoMode }, set: { value in
+                        Task { await store.setAccessMode(autoMode: value) }
+                    })).disabled(store.isUpdatingAccess || !store.isConnected)
+                    Toggle("Full Access", isOn: Binding(get: { store.fullAccess }, set: { value in
+                        Task { await store.setAccessMode(fullAccess: value) }
+                    })).disabled(store.isUpdatingAccess || !store.isConnected)
+                    Divider()
+                    Button("Model: \(selectedModelName)", systemImage: "cpu") {
+                        pickerSource = store.startModels.first { $0.id == selectedModelID }?.source ?? "local"
+                        showModelPicker = true
                     }
-                    .accessibilityLabel("Switch or add a Vamp Assistant computer")
+                    .disabled(detail?.isRunning == true || store.startModels.isEmpty)
+                    Divider()
+                    Button("Share clipboard or files", systemImage: "square.and.arrow.up") { showSharing = true }
+                    Button("Switch computer", systemImage: "desktopcomputer.and.macbook") { showComputers = true }
+                } label: {
+                    Image(systemName: store.fullAccess ? "lock.open.fill" : "ellipsis.circle")
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Toggle("Auto mode", isOn: Binding(get: { store.autoMode }, set: { value in
-                            Task { await store.setAccessMode(autoMode: value) }
-                        })).disabled(store.isUpdatingAccess || !store.isConnected)
-                        Toggle("Full Access", isOn: Binding(get: { store.fullAccess }, set: { value in
-                            Task { await store.setAccessMode(fullAccess: value) }
-                        })).disabled(store.isUpdatingAccess || !store.isConnected)
-                        Divider()
-                        Button { showSharing = true } label: {
-                            Label("Share clipboard or files", systemImage: "square.and.arrow.up")
-                        }
-                    } label: {
-                        Image(systemName: store.fullAccess ? "lock.open.fill" : "ellipsis.circle")
-                    }
-                    .accessibilityLabel("Chat controls")
-                }
+                .accessibilityLabel("Chat controls")
             }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                if let detail = store.selectedSession, detail.id == sessionID {
-                    VStack(spacing: 8) {
-                        if let queued = detail.queued, !queued.isEmpty {
-                            QueuedFollowUpsView(items: queued) { taskID in
-                                Task { await store.cancelQueuedTask(taskID) }
-                            }
-                        }
-                        if let warning = store.drafts.errorMessage {
-                            Text(warning).font(.caption).foregroundStyle(.orange)
-                                .padding(.horizontal, 16).accessibilityLabel(warning)
-                        }
-                        RemoteComposer(
-                            draft: $store[draftFor: sessionID],
-                            isRunning: detail.isRunning,
-                            isReachable: store.isConnected,
-                            isSending: store.sendingSessionIDs.contains(sessionID),
-                            onSend: { send() },
-                            onQueue: { send(action: "queue") },
-                            onSteer: { send(action: "steer") },
-                            onStop: { Task { await store.stop() } })
-                    }
-                }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
+        .task(id: sessionID) {
+            dismissedErrorMessage = nil
+            await store.select(sessionID: sessionID)
+            await store.loadStartModels()
+            if selectedModelID.isEmpty {
+                selectedModelID = store.startModels.matching(sessionModelID: store.selectedSession?.modelID ?? "")?.id ?? ""
             }
-            .task(id: sessionID) {
-                dismissedErrorMessage = nil
-                await store.select(sessionID: sessionID)
-                await store.loadStartModels()
-                if selectedModelID.isEmpty {
-                    selectedModelID = store.startModels.matching(sessionModelID: store.selectedSession?.modelID ?? "")?.id ?? ""
-                }
-            }
-            .onChange(of: selectedModelID) { old, new in
-                guard !old.isEmpty, old != new else { return }
-                dismissedErrorMessage = store.selectedSession?.error?.message ?? dismissedErrorMessage
-            }
-            .sheet(isPresented: $showSharing) { RemoteShareSheet(store: store) }
-            .sheet(isPresented: $showComputers) { ComputerSwitcherSheet(store: store) }
+        }
+        .onChange(of: selectedModelID) { old, new in
+            guard !old.isEmpty, old != new else { return }
+            dismissedErrorMessage = store.selectedSession?.error?.message ?? dismissedErrorMessage
+        }
+        .sheet(isPresented: $showSharing) { RemoteShareSheet(store: store) }
+        .sheet(isPresented: $showComputers) { ComputerSwitcherSheet(store: store) }
+        .sheet(isPresented: $showModelPicker) {
+            RemoteModelPickerSheet(
+                models: store.startModels,
+                source: $pickerSource,
+                selectedModelID: $selectedModelID,
+                onRefresh: { await store.loadStartModels() })
+        }
     }
+
+    @ViewBuilder
+    private var bottomBar: some View {
+        if let detail {
+            VStack(spacing: 8) {
+                if let queued = detail.queued, !queued.isEmpty {
+                    QueuedFollowUpsView(items: queued) { taskID in
+                        Task { await store.cancelQueuedTask(taskID) }
+                    }
+                }
+                if let warning = store.drafts.errorMessage {
+                    Text(warning).font(.caption).foregroundStyle(.orange)
+                        .padding(.horizontal, 16).accessibilityLabel(warning)
+                }
+                if detail.isRunning { runBar(detail) }
+                RemoteComposer(
+                    draft: $store[draftFor: sessionID],
+                    isRunning: detail.isRunning,
+                    isReachable: store.isConnected,
+                    isSending: store.sendingSessionIDs.contains(sessionID),
+                    onSend: { send() },
+                    onQueue: { send(action: "queue") },
+                    onSteer: { send(action: "steer") })
+            }
+        }
+    }
+
+    /// What the agent is doing right now, and the only control that matters
+    /// while it does. Stop lived in the status strip and the composer both;
+    /// this is the one place it exists.
+    private func runBar(_ detail: RemoteSessionDetail) -> some View {
+        HStack(spacing: 10) {
+            ProgressView().controlSize(.small)
+            Text(detail.phase.capitalized)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Button("Stop") { Task { await store.stop() } }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .accessibilityLabel("Stop the agent")
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 8)
+        .padding(.vertical, 7)
+        .background(
+            Color(uiColor: .secondarySystemGroupedBackground).opacity(0.9),
+            in: Capsule())
+        .padding(.horizontal, 12)
+        .accessibilityElement(children: .contain)
+    }
+
     private func send(action: String? = nil) {
         let message = draft
         let modelID = selectedModelID.isEmpty ? nil : selectedModelID
@@ -120,83 +200,6 @@ struct ConversationView: View {
                 if draft == message { store[draftFor: sessionID] = "" }
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
             }
-        }
-    }
-}
-
-struct ConversationStatus: View {
-    let detail: RemoteSessionDetail
-    let models: [RemoteStartModelOption]
-    @Binding var selectedModelID: String
-    var onStop: (() -> Void)? = nil
-    var onRefreshModels: (() async -> Void)? = nil
-    @Environment(\.remoteAppearance) private var appearance
-    @State private var showPicker = false
-    @State private var pickerSource = "local"
-
-    private var selectedName: String {
-        models.first(where: { $0.id == selectedModelID })?.name ?? detail.modelID
-    }
-
-    var body: some View {
-        HStack(spacing: 7) {
-            Circle().fill(detail.isRunning ? BeetTheme.accentBright : BeetTheme.secondaryText(appearance)).frame(width: 7, height: 7)
-            Text(detail.isRunning ? detail.phase.capitalized : "Ready").fontWeight(.semibold)
-            Text("·")
-            Text(detail.mode == "code" || !(detail.workspacePath ?? "").isEmpty ? "Code" : "Chat")
-                .fontWeight(.semibold)
-            if detail.mode == "code" || !(detail.workspacePath ?? "").isEmpty {
-                Text("·")
-                Text(detail.workspace).lineLimit(1)
-            }
-            Text("·")
-            if models.isEmpty {
-                Text(detail.modelID).lineLimit(1)
-            } else {
-                // A sheet, not a Menu: a Menu listing a few hundred gateway
-                // models is unscrollable and unsearchable on a phone.
-                Button {
-                    pickerSource = models.first { $0.id == selectedModelID }?.source ?? "local"
-                    showPicker = true
-                } label: {
-                    HStack(spacing: 3) {
-                        Text(selectedName).lineLimit(1)
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.caption2.weight(.bold))
-                    }
-                }
-                .buttonStyle(.plain)
-                .disabled(detail.isRunning)
-                .accessibilityLabel("Model, \(selectedName)")
-                .accessibilityHint("Opens the searchable model list")
-            }
-            Spacer(minLength: 8)
-            if detail.isRunning {
-                Button(action: { onStop?() }) {
-                    Label("Stop", systemImage: "stop.fill")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .frame(minHeight: 30)
-                        .background(BeetTheme.accent, in: Capsule())
-                        .hitTarget(7)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Stop the agent")
-            } else {
-                Label("\(detail.messages.count)", systemImage: "text.bubble")
-            }
-        }
-        .font(.caption).foregroundStyle(BeetTheme.secondaryText(appearance))
-        .padding(.horizontal, 16).frame(minHeight: 34)
-        .background(BeetTheme.surface(appearance).opacity(0.62))
-        .sheet(isPresented: $showPicker) {
-            RemoteModelPickerSheet(
-                models: models,
-                source: $pickerSource,
-                selectedModelID: $selectedModelID,
-                onRefresh: onRefreshModels)
-                .environment(\.remoteAppearance, appearance)
         }
     }
 }

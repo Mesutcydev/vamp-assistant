@@ -99,6 +99,79 @@ extension View {
     func remoteListRow() -> some View { modifier(RemoteListRowBackground()) }
 }
 
+/// A row that opens something else: label, optional current value, chevron.
+///
+/// `NavigationLink` draws this for a push; nothing in SwiftUI draws it for a
+/// row that presents a sheet, and a bare `Button` tints the label and drops the
+/// accessory. Four screens were each drawing their own version.
+struct RemoteDisclosureRow: View {
+    let title: String
+    var value: String? = nil
+    var detail: String? = nil
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Text(title).foregroundStyle(.primary)
+                Spacer(minLength: 8)
+                if let value {
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text(value).foregroundStyle(.secondary).lineLimit(1)
+                        if let detail {
+                            Text(detail)
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
+        }
+        .accessibilityLabel(value.map { "\(title), \($0)" } ?? title)
+    }
+}
+
+/// The platform's selection row: title, optional subtitle, and a trailing
+/// checkmark in the tint colour when chosen. Replaces five hand-drawn versions,
+/// only two of which told VoiceOver they were selected.
+struct RemoteSelectionRow: View {
+    let title: String
+    var subtitle: String? = nil
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).foregroundStyle(.primary)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 8)
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(BeetTheme.accentBright)
+                        .accessibilityHidden(true)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
 /// Surface roles for the companion glass. Each role owns how much of the
 /// backdrop it lets through: broad surfaces stay transparent enough for the
 /// engraving to read, compact controls keep a visible optical rim.

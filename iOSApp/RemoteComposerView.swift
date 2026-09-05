@@ -2,6 +2,12 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+/// The input bar: one field, one primary action.
+///
+/// It used to hold up to four conditional buttons — a hide-keyboard glyph, a
+/// Steer capsule, and a primary circle that meant Send, Queue or Stop depending
+/// on state without ever saying which. Stop now belongs to the run bar, and the
+/// keyboard dismisses on scroll, so what is left is a field and a send button.
 struct RemoteComposer: View {
     @Binding var draft: String
     let isRunning: Bool
@@ -10,8 +16,6 @@ struct RemoteComposer: View {
     let onSend: () -> Void
     var onQueue: (() -> Void)? = nil
     var onSteer: (() -> Void)? = nil
-    let onStop: () -> Void
-    @Environment(\.remoteAppearance) private var appearance
     @FocusState private var isComposerFocused: Bool
     @State private var showCommands = false
 
@@ -20,68 +24,67 @@ struct RemoteComposer: View {
     }
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 7) {
-            Button { showCommands = true } label: {
+        HStack(alignment: .bottom, spacing: 10) {
+            Button {
+                showCommands = true
+            } label: {
                 Image(systemName: "plus")
-                    .font(.subheadline.weight(.bold))
-                    .frame(width: 40, height: 44)
-                    .hitTarget(2)
+                    .font(.body.weight(.semibold))
+                    .frame(width: 32, height: 32)
+                    .background(Color(uiColor: .tertiarySystemFill), in: Circle())
             }
-            .foregroundStyle(BeetTheme.accentBright)
-            .buttonStyle(RemotePressButtonStyle())
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .padding(.bottom, 3)
             .accessibilityLabel("Commands and context")
-            TextField(placeholder, text: $draft, axis: .vertical)
-                .font(.body).lineLimit(1...6).padding(.vertical, 12)
-                .focused($isComposerFocused)
-            if isComposerFocused {
-                Button {
-                    isComposerFocused = false
-                } label: {
-                    Image(systemName: "keyboard.chevron.compact.down")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
+
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField(placeholder, text: $draft, axis: .vertical)
+                    .font(.body)
+                    .lineLimit(1...6)
+                    .padding(.vertical, 8)
+                    .focused($isComposerFocused)
+
+                if isRunning, hasDraft {
+                    // The alternative to the default, so it is bordered rather
+                    // than filled: Send queues for after this turn, Steer
+                    // redirects the turn now.
+                    Button("Steer") { (onSteer ?? onSend)() }
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.capsule)
+                        .controlSize(.small)
+                        .disabled(!isReachable || isSending)
+                        .padding(.bottom, 3)
+                        .accessibilityHint("Redirects the current task instead of waiting")
                 }
-                .foregroundStyle(BeetTheme.secondaryText(appearance))
-                .buttonStyle(RemotePressButtonStyle())
-                .accessibilityLabel("Hide keyboard")
-                .transition(.opacity.combined(with: .scale(scale: 0.92)))
-            }
-            if isRunning, hasDraft {
-                Button {
-                    if let onSteer { onSteer() } else { onSend() }
-                } label: {
-                    Text("Steer")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(BeetTheme.accentBright)
-                        .padding(.horizontal, 10)
-                        .frame(height: 36)
-                        .background(BeetTheme.surfaceStrong(appearance), in: Capsule())
+
+                Button(action: primaryAction) {
+                    Image(systemName: isRunning ? "text.badge.plus" : "arrow.up")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 30, height: 30)
+                        .background(BeetTheme.accent, in: Circle())
                 }
-                .buttonStyle(RemotePressButtonStyle())
-                .disabled(!isReachable || isSending)
-                .accessibilityLabel("Steer this turn")
-                .accessibilityHint("Redirects the current task instead of waiting")
+                .buttonStyle(.plain)
+                .disabled(!isReachable || isSending || !hasDraft)
+                .opacity(hasDraft && isReachable && !isSending ? 1 : 0.35)
+                .padding(.bottom, 4)
+                .accessibilityLabel(isRunning ? "Queue follow-up" : "Send")
             }
-            Button(action: primaryAction) {
-                Image(systemName: primarySymbol)
-                    .font(.subheadline.weight(.bold)).foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(primaryColor, in: Circle())
-            }
-            .disabled(!isReachable || isSending || (!isRunning && !hasDraft))
-            .buttonStyle(RemotePressButtonStyle())
-            .accessibilityLabel(primaryLabel)
-            .padding(.trailing, 4).padding(.vertical, 4)
+            .padding(.leading, 14)
+            .padding(.trailing, 5)
+            .background(
+                Capsule()
+                    .fill(Color(uiColor: .secondarySystemGroupedBackground).opacity(0.7)))
+            .overlay(Capsule().stroke(Color(uiColor: .separator), lineWidth: 0.5))
         }
-        .animation(.easeOut(duration: 0.16), value: isComposerFocused)
         .animation(.easeOut(duration: 0.16), value: isRunning && hasDraft)
         .frame(maxWidth: 720)
-        .remoteGlass(appearance, radius: 21, strong: true)
-        .shadow(color: .black.opacity(appearance == .light ? 0.10 : 0.22), radius: 18, y: 8)
-        .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 6)
+        .padding(.horizontal, 12)
+        .padding(.top, 6)
+        .padding(.bottom, 8)
         .frame(maxWidth: .infinity)
-        .background(.ultraThinMaterial)
+        .background(.bar)
         .sheet(isPresented: $showCommands) {
             RemoteCommandPalette(draft: $draft) {
                 showCommands = false
@@ -104,29 +107,9 @@ struct RemoteComposer: View {
         return "Message your assistant…"
     }
 
-    private var primarySymbol: String {
-        if isRunning, hasDraft { return "text.badge.plus" }
-        if isRunning { return "stop.fill" }
-        return "arrow.up"
-    }
-
-    private var primaryColor: Color {
-        if isRunning, hasDraft { return BeetTheme.accent }
-        if isRunning { return BeetTheme.accent }
-        return BeetTheme.accent
-    }
-
-    private var primaryLabel: String {
-        if isRunning, hasDraft { return "Queue follow-up" }
-        if isRunning { return "Stop the agent" }
-        return "Send"
-    }
-
     private func primaryAction() {
-        if isRunning, hasDraft {
+        if isRunning {
             if let onQueue { onQueue() } else { onSend() }
-        } else if isRunning {
-            onStop()
         } else {
             submit()
         }
@@ -168,7 +151,6 @@ private struct RemoteComposerCommand: Identifiable {
 private struct RemoteCommandPalette: View {
     @Binding var draft: String
     let onChoose: () -> Void
-    @Environment(\.remoteAppearance) private var appearance
 
     var body: some View {
         NavigationStack {
@@ -184,7 +166,7 @@ private struct RemoteCommandPalette: View {
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(BeetTheme.background(appearance))
+            .background { RemoteBackdrop() }
             .navigationTitle("Commands")
             .navigationBarTitleDisplayMode(.inline)
         }
@@ -198,18 +180,19 @@ private struct RemoteCommandPalette: View {
             } label: {
                 HStack(spacing: 12) {
                     Image(systemName: command.symbol)
-                        .font(.subheadline.weight(.semibold))
+                        .font(.body)
                         .foregroundStyle(BeetTheme.accentBright)
-                        .frame(width: 34, height: 34)
-                        .background(BeetTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                        .frame(width: 26)
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(command.title).font(.subheadline.weight(.semibold))
-                        Text(command.detail).font(.caption).foregroundStyle(BeetTheme.secondaryText(appearance))
+                        Text(command.title).foregroundStyle(.primary)
+                        Text(command.detail).font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .remoteListRow()
         }
     }
 }
@@ -218,32 +201,27 @@ struct PendingInteractionView: View {
     let pending: RemotePendingInteraction
     var isResolving = false
     let onResolve: (String) -> Void
-    @Environment(\.remoteAppearance) private var appearance
     @State private var answer = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 13) {
             HStack(spacing: 10) {
                 Image(systemName: symbol)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(BeetTheme.accentBright)
-                    .frame(width: 34, height: 34)
-                    .background(BeetTheme.accent.opacity(0.13), in: Circle())
+                    .frame(width: 26)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.subheadline.weight(.semibold))
                     if let toolName = pending.toolName, !toolName.isEmpty {
                         Text(toolName).font(.caption.monospaced())
-                            .foregroundStyle(BeetTheme.secondaryText(appearance))
+                            .foregroundStyle(.secondary)
                     }
                 }
-                Spacer()
-                Text(pending.kind == "approval" ? "REVIEW" : "INPUT")
-                    .font(.caption2.monospaced().weight(.bold))
-                    .foregroundStyle(BeetTheme.accentBright)
+                Spacer(minLength: 0)
             }
 
             Text(pending.summary ?? pending.content ?? "Vamp Assistant needs your input.")
                 .font(.subheadline)
-                .foregroundStyle(BeetTheme.secondaryText(appearance))
+                .foregroundStyle(.secondary)
                 .lineSpacing(3)
                 .textSelection(.enabled)
 
@@ -256,10 +234,9 @@ struct PendingInteractionView: View {
                 HStack(spacing: 10) {
                     ProgressView()
                         .controlSize(.small)
-                        .tint(BeetTheme.accentBright)
                     Text("Continuing…")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(BeetTheme.secondaryText(appearance))
+                        .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
                 }
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -275,8 +252,7 @@ struct PendingInteractionView: View {
                     }
                 }
                 TextField("Your answer", text: $answer)
-                    .padding(11)
-                    .background(BeetTheme.surfaceStrong(appearance), in: RoundedRectangle(cornerRadius: 11))
+                    .textFieldStyle(.roundedBorder)
                 Button("Send answer") { onResolve(answer) }
                     .buttonStyle(.borderedProminent)
                     .disabled(answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -288,8 +264,9 @@ struct PendingInteractionView: View {
             }
         }
         .padding(14)
-        .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 18))
-        .shadow(color: .black.opacity(appearance == .light ? 0.08 : 0.2), radius: 14, y: 6)
+        .background(
+            Color(uiColor: .secondarySystemGroupedBackground).opacity(0.92),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .padding(.horizontal, 12)
         .padding(.bottom, 8)
         .animation(nil, value: isResolving)

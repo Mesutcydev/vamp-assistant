@@ -209,18 +209,18 @@ struct MessageBubble: View {
     var onRevert: (() -> Void)? = nil
     @Environment(\.remoteAppearance) private var appearance
     var body: some View {
+        // The prompt sits in a container and the answer does not — that
+        // contrast is the speaker cue, the way Cursor and Codex do it. A
+        // right-aligned bubble reads as a text message, which an agent run
+        // is not.
         if message.role == "user" {
-            HStack(alignment: .top) {
-                Spacer(minLength: 46)
-                VStack(alignment: .trailing, spacing: 6) {
-                    Text("You")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(BeetTheme.accentBright)
-                    MarkdownText(message.content)
-                        .multilineTextAlignment(.trailing)
-                }
-                .frame(maxWidth: 600, alignment: .trailing)
-            }
+            MarkdownText(message.content)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(
+                    Color(uiColor: .secondarySystemGroupedBackground).opacity(0.86),
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .accessibilityLabel("You: \(message.content)")
         }
         else if message.role == "toolCall" || message.role == "toolResult" { ToolMessageCard(message: message) }
         // Reasoning is the model's working, not its answer. It used to fall
@@ -259,69 +259,55 @@ struct MessageBubble: View {
             }
         }
         else {
-            HStack(alignment: .top, spacing: 11) {
-                Image(systemName: "sparkles").font(.system(size: 14, weight: .semibold))
-                    .frame(width: 30, height: 30)
-                    .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Vamp Assistant").font(.caption.weight(.semibold)).foregroundStyle(BeetTheme.secondaryText(appearance))
-                    MarkdownText(message.content)
-                }
-                Spacer(minLength: 4)
-            }
+            MarkdownText(message.content)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityLabel("Vamp Assistant: \(message.content)")
         }
     }
 }
 
-/// The model's visible working, collapsed by default. It is deliberately
-/// quieter than an answer bubble: smaller type, no avatar, muted colour.
+/// The model's working, collapsed by default and quieter than an answer:
+/// a disclosure line, and the text itself behind a hairline rule.
 struct ReasoningMessageCard: View {
     let message: RemoteMessage
-    @Environment(\.remoteAppearance) private var appearance
     @State private var expanded = false
 
-    private var preview: String {
-        message.content
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 6) {
             Button {
                 withAnimation(.easeOut(duration: 0.16)) { expanded.toggle() }
             } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: "brain")
-                        .font(.caption.weight(.semibold))
-                        .accessibilityHidden(true)
-                    Text("Reasoning")
-                        .font(.caption.weight(.semibold))
+                HStack(spacing: 6) {
+                    Text("Thinking")
                     Image(systemName: expanded ? "chevron.up" : "chevron.down")
                         .font(.caption2.weight(.bold))
                         .accessibilityHidden(true)
                     Spacer(minLength: 4)
                 }
-                .foregroundStyle(BeetTheme.secondaryText(appearance))
-                .frame(minHeight: 30)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(minHeight: 34)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(expanded ? "Hide reasoning" : "Show reasoning")
+            .accessibilityLabel(expanded ? "Hide thinking" : "Show thinking")
 
-            Text(expanded ? message.content : preview)
-                .font(.caption)
-                .italic()
-                .lineSpacing(3)
-                .foregroundStyle(BeetTheme.secondaryText(appearance))
-                .lineLimit(expanded ? nil : 2)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if expanded {
+                Text(message.content)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(3)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 12)
+                    .overlay(alignment: .leading) {
+                        Rectangle()
+                            .fill(Color.secondary.opacity(0.35))
+                            .frame(width: 2)
+                    }
+            }
         }
-        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(BeetTheme.surfaceStrong(appearance).opacity(0.45),
-                    in: RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
 }
 
@@ -415,29 +401,75 @@ struct MarkdownText: View {
     var body: some View { if let value = try? AttributedString(markdown: content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) { Text(value).font(.body).lineSpacing(5).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) } else { Text(content).font(.body).lineSpacing(5).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) } }
 }
 
+/// One step of a run, as a ledger row: status, the tool in mono, and its
+/// output behind a disclosure. It used to be a card that printed up to twelve
+/// lines of JSON whether anyone wanted them or not.
 struct ToolMessageCard: View {
     let message: RemoteMessage
-    @Environment(\.remoteAppearance) private var appearance
+    @State private var expanded = false
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(displayName, systemImage: symbol)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(message.didFail ? Color.red : BeetTheme.accentBright)
-            if !displayContent.isEmpty {
-                Text(displayContent).font(.caption.monospaced()).lineSpacing(3)
-                    .textSelection(.enabled).lineLimit(12)
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                guard !displayContent.isEmpty else { return }
+                withAnimation(.easeOut(duration: 0.16)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 9) {
+                    Image(systemName: symbol)
+                        .font(.footnote.weight(.bold))
+                        .foregroundStyle(statusTint)
+                        .accessibilityHidden(true)
+                    Text(displayName)
+                        .font(.footnote.monospaced())
+                        .lineLimit(1)
+                    Spacer(minLength: 6)
+                    if !displayContent.isEmpty {
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.tertiary)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .frame(minHeight: 34)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(statusWord) \(displayName)")
+            .accessibilityHint(displayContent.isEmpty ? "" : (expanded ? "Hide output" : "Show output"))
+
+            if expanded, !displayContent.isEmpty {
+                Text(displayContent)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(3)
+                    .textSelection(.enabled)
+                    .lineLimit(24)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.bottom, 8)
             }
         }
-        .padding(13).frame(maxWidth: .infinity, alignment: .leading)
-        .background(BeetTheme.surfaceStrong(appearance).opacity(0.64), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(BeetTheme.line(appearance).opacity(0.7), lineWidth: 0.75) }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            Color(uiColor: .secondarySystemGroupedBackground).opacity(0.86),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     /// A failed tool used to render with the same checkmark as a successful
     /// one — the Mac tracked the failure but it never crossed the wire.
     private var symbol: String {
-        if message.role == "toolCall" { return "hammer" }
-        return message.didFail ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"
+        if message.role == "toolCall" { return "circle.dashed" }
+        return message.didFail ? "xmark.circle.fill" : "checkmark.circle.fill"
+    }
+
+    private var statusTint: Color {
+        if message.role == "toolCall" { return .secondary }
+        return message.didFail ? .red : .green
+    }
+
+    private var statusWord: String {
+        if message.role == "toolCall" { return "Running" }
+        return message.didFail ? "Failed" : "Finished"
     }
 
     private var displayName: String {
@@ -460,7 +492,18 @@ struct ToolMessageCard: View {
 struct StreamingBubble: View {
     let text: String, phase: String
     @Environment(\.remoteAppearance) private var appearance
-    var body: some View { HStack(alignment: .top, spacing: 11) { Color.clear.frame(width: 30, height: 30).accessibilityHidden(true); VStack(alignment: .leading, spacing: 8) { HStack(spacing: 7) { ProgressView().controlSize(.small); Text(phase.capitalized) }.font(.caption.weight(.semibold)).foregroundStyle(BeetTheme.accentBright); if text.isEmpty { Text("Vamp Assistant is working…").foregroundStyle(BeetTheme.secondaryText(appearance)) } else { MarkdownText(text) } }; Spacer(minLength: 4) } }
+    var body: some View {
+        // No phase line here any more: the run bar above the composer says
+        // what is happening, and said it twice before.
+        VStack(alignment: .leading, spacing: 8) {
+            if text.isEmpty {
+                Text("Working…").foregroundStyle(BeetTheme.secondaryText(appearance))
+            } else {
+                MarkdownText(text)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 }
 
 struct QueuedFollowUpsView: View {

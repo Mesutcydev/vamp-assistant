@@ -89,7 +89,7 @@ struct StartSessionSheet: View {
 
     private var locationDetail: String? {
         if attachedComputer != nil { return "Bot computer" }
-        if selectedWorkspacePath.isEmpty { return "No project folder" }
+        if selectedWorkspacePath.isEmpty { return nil }
         return selectedWorkspacePath
     }
 
@@ -97,34 +97,19 @@ struct StartSessionSheet: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                RemoteBackdrop()
-                VStack(spacing: 0) {
-                    if !store.isConnected { RemoteReconnectBanner(store: store) }
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 16) {
-                            promptCard
-                            RemoteBotStarters(
-                                starters: botProfile.starters,
-                                tint: botProfile.tint,
-                                appearance: appearance,
-                                prompt: $prompt)
-                            setupCard
-                            moreOptionsButton
-                        }
-                        .padding(18)
-                        .frame(maxWidth: 720)
-                        .frame(maxWidth: .infinity)
-                    }
-                    .scrollDismissesKeyboard(.interactively)
-                    startBar
-                }
+            Form {
+                if !store.isConnected { reconnectSection }
+                promptSection
+                setupSection
+                moreSection
             }
+            .scrollContentBackground(.hidden)
+            .scrollDismissesKeyboard(.interactively)
+            .background { RemoteBackdrop() }
             .navigationTitle("New session")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
-            .toolbarBackground(BeetTheme.background(appearance).opacity(0.94), for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            .safeAreaInset(edge: .bottom) { startBar }
             .sheet(isPresented: $showModelPicker) {
                 RemoteModelPickerSheet(
                     models: store.startModels,
@@ -153,8 +138,6 @@ struct StartSessionSheet: View {
                     store: store,
                     botComputers: $botComputers,
                     selectedBotComputerID: $selectedBotComputerID,
-                    reasoningEffort: $selectedReasoningEffort,
-                    model: selectedModel,
                     botProfile: botProfile,
                     reload: loadBotComputers)
                     .environment(\.remoteAppearance, appearance)
@@ -170,108 +153,129 @@ struct StartSessionSheet: View {
                 preferences.botID = id
                 attachMatchingBotComputer()
             }
-            .keyboardDismissToolbar()
         }
     }
 
     // MARK: Sections
 
-    private var promptCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("What should Vamp Assistant do?")
-                .font(.subheadline.weight(.semibold))
-            TextField("Describe the task, or pick a suggestion below", text: $prompt, axis: .vertical)
-                .lineLimit(4...9)
-                .font(.body)
-                .focused($promptFocused)
-                .padding(14)
-                .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 16))
-                .overlay { RoundedRectangle(cornerRadius: 16).stroke(BeetTheme.line(appearance)) }
-                .accessibilityLabel("First prompt")
+    private var reconnectSection: some View {
+        Section {
+            Button {
+                Task { await store.connectSaved() }
+            } label: {
+                Label(store.isConnecting ? "Reconnecting…" : "Reconnect",
+                      systemImage: "wifi.exclamationmark")
+            }
+            .disabled(store.isConnecting)
+        } footer: {
+            Text(store.connectionSubtitle)
         }
+        .remoteListRow()
     }
 
-    private var setupCard: some View {
-        VStack(spacing: 0) {
-            RemoteStartSetupRow(
-                icon: isChatOnly ? "bubble.left.and.bubble.right.fill" : "folder.fill",
+    private var promptSection: some View {
+        Section {
+            TextField("Describe the task", text: $prompt, axis: .vertical)
+                .lineLimit(3...8)
+                .focused($promptFocused)
+                .accessibilityLabel("First prompt")
+            if !botProfile.starters.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(botProfile.starters, id: \.self) { starter in
+                            Button(starter) {
+                                prompt = starter
+                                UISelectionFeedbackGenerator().selectionChanged()
+                            }
+                            .buttonStyle(.bordered)
+                            .buttonBorderShape(.capsule)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                }
+                .scrollIndicators(.hidden)
+                .listRowInsets(EdgeInsets())
+                .accessibilityLabel("Suggested tasks")
+            }
+        } header: {
+            Text("Task")
+        }
+        .remoteListRow()
+    }
+
+    private var setupSection: some View {
+        Section {
+            RemoteDisclosureRow(
                 title: "Works in",
                 value: locationValue,
                 detail: locationDetail,
                 action: { showWorkspacePicker = true })
-            Divider().overlay(BeetTheme.line(appearance))
-            RemoteStartSetupRow(
-                icon: "person.crop.square.filled.and.at.rectangle",
+            RemoteDisclosureRow(
                 title: "Bot",
                 value: botProfile.name,
-                detail: botProfile.instruction == nil ? "Plain chat" : botProfile.subtitle,
                 action: { showBotPicker = true })
-            Divider().overlay(BeetTheme.line(appearance))
-            RemoteStartSetupRow(
-                icon: RemoteModelPickerSheet.sourceIcon(selectedModel?.source ?? selectedSource),
+            RemoteDisclosureRow(
                 title: "Model",
                 value: selectedModel?.name ?? (isLoading ? "Loading…" : "Choose a model"),
-                detail: selectedModel?.detail ?? "\(store.startModels.count) available",
-                isPlaceholder: selectedModel == nil,
+                detail: selectedModel?.detail,
                 action: { showModelPicker = true })
+        } header: {
+            Text("Setup")
+        } footer: {
+            Text("Starts with the folder, bot and model you used last.")
         }
-        .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 18))
-        .overlay { RoundedRectangle(cornerRadius: 18).stroke(BeetTheme.line(appearance)) }
+        .remoteListRow()
     }
 
-    private var moreOptionsButton: some View {
-        Button { showAdvanced = true } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "slider.horizontal.3")
-                Text("More options")
-                if let effort = selectedReasoningEffort {
-                    Text("· \(effort.capitalized) reasoning")
-                        .foregroundStyle(BeetTheme.secondaryText(appearance))
+    @ViewBuilder
+    private var moreSection: some View {
+        Section {
+            // Inline rather than behind another sheet: it is a short list of
+            // named values, which is exactly what a menu picker is for.
+            if let model = selectedModel, let efforts = model.reasoningEfforts, !efforts.isEmpty {
+                Picker("Reasoning", selection: $selectedReasoningEffort) {
+                    Text("Auto").tag(String?.none)
+                    ForEach(efforts, id: \.self) { effort in
+                        Text(effort.capitalized).tag(String?.some(effort))
+                    }
                 }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.caption.weight(.semibold))
             }
-            .font(.subheadline.weight(.semibold))
-            .padding(.horizontal, 14)
-            .frame(minHeight: 46)
-            .contentShape(Rectangle())
+            RemoteDisclosureRow(
+                title: "Bot computers & API keys",
+                action: { showAdvanced = true })
+        } header: {
+            Text("More")
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(BeetTheme.secondaryText(appearance))
-        .accessibilityHint("Reasoning effort, bot computers, and API keys")
+        .remoteListRow()
     }
 
     private var startBar: some View {
         VStack(spacing: 8) {
             if let blockedReason {
                 Text(blockedReason)
-                    .font(.caption)
-                    .foregroundStyle(BeetTheme.secondaryText(appearance))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityHidden(true)
             }
-            Button { start() } label: {
+            Button {
+                start()
+            } label: {
                 HStack(spacing: 8) {
                     if isStarting { ProgressView().tint(.white) }
-                    Label(isStarting ? "Starting…" : "Start session", systemImage: "arrow.up.circle.fill")
+                    Text(isStarting ? "Starting…" : "Start session")
                 }
-                .font(.headline)
-                .frame(maxWidth: .infinity, minHeight: 52)
+                .frame(maxWidth: .infinity)
             }
-            .buttonStyle(RemotePrimaryButtonStyle())
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
             .disabled(!canStart)
-            .opacity(canStart ? 1 : 0.55)
             .accessibilityHint(blockedReason ?? "")
         }
-        .padding(.horizontal, 18)
-        .padding(.top, 10)
-        .padding(.bottom, 12)
-        .frame(maxWidth: 720)
-        .frame(maxWidth: .infinity)
-        .background(BeetTheme.background(appearance).opacity(0.94))
-        .overlay(alignment: .top) {
-            Rectangle().fill(BeetTheme.line(appearance)).frame(height: 0.75)
-        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(.bar)
     }
 
     // MARK: Loading

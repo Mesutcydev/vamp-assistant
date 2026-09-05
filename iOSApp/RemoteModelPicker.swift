@@ -110,12 +110,9 @@ struct RemoteModelPickerSheet: View {
                                         row(model)
                                     }
                                 } header: {
-                                    Text("\(group.title.uppercased()) · \(group.models.count)")
-                                        .font(.caption2.bold())
-                                        .tracking(0.8)
-                                        .foregroundStyle(BeetTheme.secondaryText(appearance))
+                                    Text("\(group.title) · \(group.models.count)")
                                 }
-                                .listRowBackground(BeetTheme.surface(appearance))
+                                .remoteListRow()
                             }
                         }
                         .listStyle(.insetGrouped)
@@ -138,74 +135,13 @@ struct RemoteModelPickerSheet: View {
     }
 
     private func row(_ model: RemoteStartModelOption) -> some View {
-        Button {
-            selectedModelID = model.id
-            onSelect(model)
-            dismiss()
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: selectedModelID == model.id
-                      ? "checkmark.circle.fill" : Self.sourceIcon(model.source))
-                    .foregroundStyle(selectedModelID == model.id
-                                     ? BeetTheme.accentBright : BeetTheme.secondaryText(appearance))
-                    .frame(width: 24)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(model.name).font(.body.weight(.semibold))
-                    Text(model.detail)
-                        .font(.caption)
-                        .foregroundStyle(BeetTheme.secondaryText(appearance))
-                }
-                Spacer(minLength: 0)
+        RemoteSelectionRow(
+            title: model.name,
+            subtitle: model.detail,
+            isSelected: selectedModelID == model.id) {
+                selectedModelID = model.id
+                onSelect(model)
+                dismiss()
             }
-            .contentShape(Rectangle())
-            .accessibilityAddTraits(selectedModelID == model.id ? .isSelected : [])
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-/// The summary row that opens the picker. Shows the current model, its source,
-/// and how many are available, so the size of the catalog is visible without
-/// opening anything.
-struct RemoteModelSummaryRow: View {
-    let models: [RemoteStartModelOption]
-    let selectedModelID: String
-    let action: () -> Void
-    @Environment(\.remoteAppearance) private var appearance
-
-    private var selected: RemoteStartModelOption? {
-        models.first { $0.id == selectedModelID }
-    }
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: RemoteModelPickerSheet.sourceIcon(selected?.source ?? "local"))
-                    .foregroundStyle(BeetTheme.accentBright)
-                    .frame(width: 24)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(selected?.name ?? "Choose a model")
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    Text(selected?.detail ?? "\(models.count) available")
-                        .font(.caption)
-                        .foregroundStyle(BeetTheme.secondaryText(appearance))
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(BeetTheme.secondaryText(appearance))
-                    .accessibilityHidden(true)
-            }
-            .padding(14)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 16))
-        .overlay { RoundedRectangle(cornerRadius: 16).stroke(BeetTheme.line(appearance)) }
-        .accessibilityLabel("Model, \(selected?.name ?? "none chosen")")
-        .accessibilityHint("Opens the searchable model list")
     }
 }

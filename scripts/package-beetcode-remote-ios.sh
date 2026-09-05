@@ -4,6 +4,26 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Toolchain. With an Xcode beta installed alongside a release Xcode, the one on
+# PATH is whatever `xcode-select` points at, which is usually not the beta — so
+# resolve it explicitly and say which one built the artifact. Override with
+# DEVELOPER_DIR to pin a specific install.
+if [[ -z "${DEVELOPER_DIR:-}" ]]; then
+  for candidate in /Applications/Xcode-beta.app /Applications/Xcode.app; do
+    if [[ -d "$candidate/Contents/Developer" ]]; then
+      export DEVELOPER_DIR="$candidate/Contents/Developer"
+      break
+    fi
+  done
+fi
+[[ "$(uname -s)" == "Darwin" ]] || { echo "This script needs macOS with Xcode; found $(uname -s)." >&2; exit 1; }
+command -v xcodebuild >/dev/null || { echo "xcodebuild not found. Install Xcode and run xcode-select --install." >&2; exit 1; }
+command -v xcodegen >/dev/null || { echo "xcodegen not found. brew install xcodegen" >&2; exit 1; }
+echo "Toolchain: ${DEVELOPER_DIR:-$(xcode-select -p)}"
+xcodebuild -version | tr '\n' ' '; echo
+xcodebuild -showsdks 2>/dev/null | grep -E 'iphoneos[0-9]' | head -1 || {
+  echo "No iphoneos SDK in this toolchain." >&2; exit 1; }
 PROJECT="$ROOT/BeetCode.xcodeproj"
 WORK="$ROOT/.packaging-beetcode-remote-ios"
 DERIVED="${BEETCODE_IOS_DERIVED_DATA:-$ROOT/.derived}"
@@ -19,7 +39,8 @@ if [[ "${SKIP_IOS_BUILD:-}" != "1" ]]; then
   xcodebuild -quiet -project "$PROJECT" -scheme BeetCodeRemoteIOS \
     -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
     -derivedDataPath "$DERIVED" CODE_SIGNING_ALLOWED=NO \
-    CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= build
+    CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= \
+    -skipMacroValidation build
 fi
 
 [[ -d "$APP" ]] || { echo "Missing built app: $APP" >&2; exit 1; }

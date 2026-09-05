@@ -363,56 +363,6 @@ struct SessionRow: View {
     }
 }
 
-struct RemoteReasoningSelector: View {
-    let modelName: String
-    let efforts: [String]
-    let defaultEffort: String?
-    @Binding var selection: String?
-    @Environment(\.remoteAppearance) private var appearance
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("Reasoning", systemImage: "brain.head.profile")
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                Text(selection ?? defaultEffort ?? "Auto")
-                    .font(.caption.monospaced().weight(.semibold))
-                    .foregroundStyle(BeetTheme.accentBright)
-            }
-            Text("Choose how much thinking \(modelName) should use.")
-                .font(.caption)
-                .foregroundStyle(BeetTheme.secondaryText(appearance))
-            ScrollView(.horizontal) {
-                HStack(spacing: 7) {
-                    reasoningButton("Auto", value: nil)
-                    ForEach(efforts, id: \.self) { effort in
-                        reasoningButton(effort.capitalized, value: effort)
-                    }
-                }
-            }
-            .scrollIndicators(.hidden)
-        }
-        .padding(13)
-        .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 16))
-        .overlay { RoundedRectangle(cornerRadius: 16).stroke(BeetTheme.line(appearance)) }
-    }
-
-    private func reasoningButton(_ title: String, value: String?) -> some View {
-        let selected = selection == value
-        return Button(title) { selection = value }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(selected ? Color.white : BeetTheme.secondaryText(appearance))
-            .padding(.horizontal, 12)
-            .frame(minHeight: 34)
-            .background(
-                selected ? BeetTheme.accent : BeetTheme.surfaceStrong(appearance),
-                in: Capsule())
-            .buttonStyle(.plain)
-            .accessibilityAddTraits(selected ? .isSelected : [])
-    }
-}
-
 struct RemotePressButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
