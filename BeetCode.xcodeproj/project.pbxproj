@@ -41,6 +41,7 @@
 		1201C0CACB3F3B864C722B4E /* RemoteSessionPorts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2003A10E610D1AB1FFD13D8B /* RemoteSessionPorts.swift */; };
 		12ABD4E440313E94BC8CF837 /* RemoteDraftAndNotificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCFB8BAA6AD83D84CD9C2F23 /* RemoteDraftAndNotificationTests.swift */; };
 		58E3406A84821DBD0B19EF12 /* RemoteStartPreferencesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D84F35B6F6161099E6475F0C /* RemoteStartPreferencesTests.swift */; };
+		618D146A1B5DD984A440F733 /* RemoteSessionGroupingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A03CF8C9924B73A3F4BEE02 /* RemoteSessionGroupingTests.swift */; };
 		12FE399FBCDB0D07FDE3C3D0 /* SymbolGraph.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3780978AF4DBD7ACEFB5EF0D /* SymbolGraph.swift */; };
 		13DF1E6E913B7127B2ADC854 /* SimctlRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77ABA973E0B1A3F49DDBAA95 /* SimctlRunner.swift */; };
 		1418FA7E8F0959CA350F56B6 /* SearchIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAB2D72FE420C93E8B5A3AC3 /* SearchIndex.swift */; };
@@ -785,6 +786,7 @@
 		BCB06B06FEEE6E4B9D1F70B4 /* FakeLLMEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FakeLLMEngine.swift; sourceTree = "<group>"; };
 		BCFB8BAA6AD83D84CD9C2F23 /* RemoteDraftAndNotificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteDraftAndNotificationTests.swift; sourceTree = "<group>"; };
 		D84F35B6F6161099E6475F0C /* RemoteStartPreferencesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteStartPreferencesTests.swift; sourceTree = "<group>"; };
+		6A03CF8C9924B73A3F4BEE02 /* RemoteSessionGroupingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSessionGroupingTests.swift; sourceTree = "<group>"; };
 		BD52BE1C1AEDD51F4F2049B0 /* IntelligenceInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntelligenceInspectorView.swift; sourceTree = "<group>"; };
 		BD98CA135FF49E70FE983F28 /* RemoteSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSettingsView.swift; sourceTree = "<group>"; };
 		BEA9EE5775BD9F322A982205 /* EntityStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntityStore.swift; sourceTree = "<group>"; };
@@ -1162,6 +1164,7 @@
 			children = (
 				BCFB8BAA6AD83D84CD9C2F23 /* RemoteDraftAndNotificationTests.swift */,
 				D84F35B6F6161099E6475F0C /* RemoteStartPreferencesTests.swift */,
+				6A03CF8C9924B73A3F4BEE02 /* RemoteSessionGroupingTests.swift */,
 				FF3B1C49804D8C9A7A2029A9 /* RemoteProtocolRegressionTests.swift */,
 				4910EB432AF1C29F0720D1AB /* RemoteStoreConcurrencyTests.swift */,
 			);
@@ -2247,6 +2250,7 @@
 			files = (
 				12ABD4E440313E94BC8CF837 /* RemoteDraftAndNotificationTests.swift in Sources */,
 				58E3406A84821DBD0B19EF12 /* RemoteStartPreferencesTests.swift in Sources */,
+				618D146A1B5DD984A440F733 /* RemoteSessionGroupingTests.swift in Sources */,
 				8ABFB3EAA5E365DA89062FDE /* RemoteProtocolRegressionTests.swift in Sources */,
 				DE78EA6684ECE27ACF3A7868 /* RemoteStoreConcurrencyTests.swift in Sources */,
 			);

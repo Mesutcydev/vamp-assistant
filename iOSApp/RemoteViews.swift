@@ -79,6 +79,26 @@ extension View {
     }
 }
 
+/// Grouped-list rows over the app's backdrop.
+///
+/// A stock `insetGrouped` list paints opaque cells, which would hide the
+/// engraving entirely. Thinning the system cell colour keeps the platform's
+/// own row geometry and semantics while letting the backdrop read — and it
+/// goes fully opaque for anyone who has asked for less transparency.
+struct RemoteListRowBackground: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    func body(content: Content) -> some View {
+        content.listRowBackground(
+            Color(uiColor: .secondarySystemGroupedBackground)
+                .opacity(reduceTransparency ? 1 : 0.88))
+    }
+}
+
+extension View {
+    func remoteListRow() -> some View { modifier(RemoteListRowBackground()) }
+}
+
 /// Surface roles for the companion glass. Each role owns how much of the
 /// backdrop it lets through: broad surfaces stay transparent enough for the
 /// engraving to read, compact controls keep a visible optical rim.
