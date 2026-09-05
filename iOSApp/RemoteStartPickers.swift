@@ -237,6 +237,9 @@ struct RemoteStartAdvancedSheet: View {
     }
 
     private func computerRow(_ computer: RemoteBotComputer) -> some View {
+        // Every button here is `.borderless`: a List row routes taps to the
+        // first Button in it unless each one opts out, which would have made
+        // Start, Stop and the console glyph all select the row instead.
         HStack(spacing: 10) {
             RemoteSelectionRow(
                 title: RemoteBotComputerNaming.displayName(computer),
@@ -245,18 +248,20 @@ struct RemoteStartAdvancedSheet: View {
                     guard RemoteBotComputerNaming.canAttach(computer) else { return }
                     selectedBotComputerID = selectedBotComputerID == computer.id ? nil : computer.id
                 }
+                .buttonStyle(.borderless)
             // A bot computer has no screen to stream; its console is the shell,
             // the workspace, and the output.
             Button { consoleComputer = computer } label: { Image(systemName: "terminal") }
-                .buttonStyle(.bordered)
+                .buttonStyle(.borderless)
                 .accessibilityLabel("Open \(RemoteBotComputerNaming.displayName(computer)) console")
             if computer.state == "running" {
                 Button(busyID == computer.id ? "Stopping…" : "Stop") { stop(computer) }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.borderless)
                     .disabled(busyID != nil)
             } else if computer.backend != "isolatedWorkspace" {
                 Button(busyID == computer.id ? "Starting…" : "Start") { start(computer) }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.borderless)
+                    .fontWeight(.semibold)
                     .disabled(busyID != nil)
             }
         }
