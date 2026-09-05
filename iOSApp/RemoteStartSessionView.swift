@@ -1,159 +1,123 @@
 import SwiftUI
 import UIKit
-import UniformTypeIdentifiers
 
+/// Starting a session, reduced to the one thing only the user can supply.
+///
+/// The old sheet asked nine questions in a single scroll — mode, folder, bot,
+/// starters, model source, bot computer, API key, model, reasoning — before the
+/// prompt field it all led to, and forgot every answer as soon as it closed.
+/// Now the prompt is first and focused, the three answers that vary are one
+/// tappable line each (pre-filled with what was used last time), and everything
+/// that is really setup lives behind "More options". A returning user types and
+/// taps Start.
 struct StartSessionSheet: View {
-    @Bindable var store: RemoteStore
+    let store: RemoteStore
     let initialBotID: String
     let onStarted: (UUID) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.remoteAppearance) private var appearance
-    @State private var source = "local"
-    @State private var selectedModelID = ""
-    @State private var selectedReasoningEffort: String?
-    @State private var showModelPicker = false
+    @FocusState private var promptFocused: Bool
+
+    private var preferences: RemoteStartPreferences { .shared }
+
     @State private var prompt = ""
+    @State private var selectedBotID = ""
+    @State private var selectedModelID = ""
+    @State private var selectedSource = "local"
+    @State private var selectedWorkspacePath = ""
+    @State private var selectedReasoningEffort: String?
     @State private var botComputers: [RemoteBotComputer] = []
     @State private var selectedBotComputerID: UUID?
-    @State private var botComputerBusyID: UUID?
-    @State private var consoleComputer: RemoteBotComputer?
-    @State private var keyProviderID = "openAI"
-    @State private var keyDraft = ""
-    @State private var isSavingKey = false
-    @State private var keyMessage: String?
-    @State private var selectedBotID = ""
     @State private var isStarting = false
-    @State private var selectedWorkspacePath = ""
-    @State private var newFolderName = ""
-    @State private var showNewFolder = false
-    @State private var folderPathDraft = ""
-    @State private var showPathEntry = false
+    @State private var isLoading = true
+    @State private var showModelPicker = false
+    @State private var showWorkspacePicker = false
+    @State private var showBotPicker = false
+    @State private var showAdvanced = false
 
-    private var codeFolderMissing: Bool {
-        store.sessionMode == .code
-            && selectedBotComputerID == nil
-            && (selectedWorkspacePath.isEmpty || !store.workspacesSupported)
-    }
-
-    private var canStart: Bool {
-        store.isConnected
-            && !selectedModelID.isEmpty
-            && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !isStarting
-            && !codeFolderMissing
-    }
+    // MARK: Derived state
 
     private var botProfile: RemoteBotProfile {
         RemoteBotProfile.profile(id: selectedBotID.isEmpty ? RemoteBotProfile.general.id : selectedBotID)
     }
-    private var models: [RemoteStartModelOption] { store.startModels.filter { $0.source == source } }
-    private var groupedAPIModels: [(detail: String, models: [RemoteStartModelOption])] {
-        let groups = Dictionary(grouping: models, by: \.detail)
-        return groups.keys.sorted { $0.localizedStandardCompare($1) == .orderedAscending }.map { key in
-            (key, groups[key]!.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending })
-        }
+
+    private var selectedModel: RemoteStartModelOption? {
+        store.startModels.first { $0.id == selectedModelID }
     }
-    private var sourceIcon: String {
-        switch source {
-        case "chatgpt": "person.crop.circle"
-        case "api": "cloud"
-        default: "cpu"
-        }
+
+    private var attachedComputer: RemoteBotComputer? {
+        botComputers.first { $0.id == selectedBotComputerID }
     }
-    private var emptyModelsTitle: String {
-        switch source {
-        case "chatgpt": "No ChatGPT models"
-        case "api": "No API models"
-        default: "No local models"
-        }
+
+    private var selectedWorkspace: RemoteWorkspace? {
+        store.workspaces.first { $0.path == selectedWorkspacePath }
     }
-    private var emptyModelsDescription: String {
-        switch source {
-        case "chatgpt": "Sign in with ChatGPT on your Mac, then refresh."
-        case "api": "Configure an API provider on your Mac first."
-        default: "Download a model on your Mac first."
-        }
+
+    /// No folder and no bot computer means a plain conversation. Mode is not a
+    /// separate switch any more — it is whatever this answers.
+    private var isChatOnly: Bool {
+        attachedComputer == nil && selectedWorkspacePath.isEmpty
     }
+
+    private var trimmedPrompt: String {
+        prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canStart: Bool {
+        store.isConnected && !selectedModelID.isEmpty && !trimmedPrompt.isEmpty && !isStarting
+    }
+
+    /// Why Start is unavailable, in the user's terms. A disabled button that
+    /// never says what is missing was the single most common way this screen
+    /// stalled people.
+    private var blockedReason: String? {
+        if isStarting { return nil }
+        if !store.isConnected { return "Reconnect to your Mac to start a session." }
+        if store.startModels.isEmpty {
+            return isLoading ? "Loading models from your Mac…" : "No models available. Add an API key under More options."
+        }
+        if selectedModelID.isEmpty { return "Choose a model first." }
+        if trimmedPrompt.isEmpty { return "Type what you want done." }
+        return nil
+    }
+
+    private var locationValue: String {
+        if let attachedComputer { return RemoteBotComputerNaming.displayName(attachedComputer) }
+        if selectedWorkspacePath.isEmpty { return "Chat only" }
+        return selectedWorkspace?.name ?? (selectedWorkspacePath as NSString).lastPathComponent
+    }
+
+    private var locationDetail: String? {
+        if attachedComputer != nil { return "Bot computer" }
+        if selectedWorkspacePath.isEmpty { return "No project folder" }
+        return selectedWorkspacePath
+    }
+
+    // MARK: Body
 
     var body: some View {
         NavigationStack {
             ZStack {
                 RemoteBackdrop()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        if !store.isConnected {
-                            RemoteReconnectBanner(store: store)
+                VStack(spacing: 0) {
+                    if !store.isConnected { RemoteReconnectBanner(store: store) }
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            promptCard
+                            RemoteBotStarters(
+                                starters: botProfile.starters,
+                                tint: botProfile.tint,
+                                appearance: appearance,
+                                prompt: $prompt)
+                            setupCard
+                            moreOptionsButton
                         }
-                        RemoteModeSwitcher(mode: $store.sessionMode)
-                        Text(store.sessionMode == .chat
-                             ? "Conversation only — no project folder on your Mac."
-                             : "The agent stays inside one Mac folder.")
-                            .font(.caption)
-                            .foregroundStyle(BeetTheme.secondaryText(appearance))
-                        if store.sessionMode == .code {
-                            workspaceSection
-                        }
-                        Text(botProfile.instruction == nil
-                             ? "Plain chat — no specialist instructions."
-                             : "\(botProfile.name) will \(botProfile.subtitle.lowercased()).")
-                            .font(.subheadline)
-                            .foregroundStyle(BeetTheme.secondaryText(appearance))
-                        RemoteBotChooser(selectedBotID: $selectedBotID)
-                        RemoteBotStarters(
-                            starters: botProfile.starters,
-                            tint: botProfile.tint,
-                            appearance: appearance,
-                            prompt: $prompt)
-                        Picker("Model source", selection: $source) {
-                            ForEach(RemoteModelPickerSheet.sources, id: \.self) { option in
-                                let count = store.startModels.filter { $0.source == option }.count
-                                Text(count > 0
-                                     ? "\(RemoteModelPickerSheet.sourceLabel(option)) \(count)"
-                                     : RemoteModelPickerSheet.sourceLabel(option))
-                                    .tag(option)
-                            }
-                        }.pickerStyle(.segmented)
-
-                        botComputerSection
-
-                        apiKeySection
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("MODEL").font(.caption2.bold()).tracking(0.8).foregroundStyle(BeetTheme.secondaryText(appearance))
-                            if models.isEmpty {
-                                ContentUnavailableView(emptyModelsTitle, systemImage: sourceIcon, description: Text(emptyModelsDescription))
-                                    .frame(maxWidth: .infinity).padding(.vertical, 18)
-                            } else {
-                                // A summary row into the searchable picker, not
-                                // the whole catalog inline: a few hundred API
-                                // models made this form scroll for minutes with
-                                // no way to find a known name.
-                                RemoteModelSummaryRow(
-                                    models: store.startModels,
-                                    selectedModelID: selectedModelID,
-                                    action: { showModelPicker = true })
-                            }
-                        }
-
-                        if let selected = models.first(where: { $0.id == selectedModelID }),
-                           let efforts = selected.reasoningEfforts, !efforts.isEmpty {
-                            RemoteReasoningSelector(
-                                modelName: selected.name,
-                                efforts: efforts,
-                                defaultEffort: selected.defaultReasoningEffort,
-                                selection: $selectedReasoningEffort)
-                        }
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("FIRST PROMPT").font(.caption2.bold()).tracking(0.8).foregroundStyle(BeetTheme.secondaryText(appearance))
-                            TextField("What should Vamp Assistant work on?", text: $prompt, axis: .vertical).lineLimit(3...8).padding(14)
-                                .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 16)).overlay { RoundedRectangle(cornerRadius: 16).stroke(BeetTheme.line(appearance)) }
-                        }
-                        Button { start() } label: {
-                            HStack { if isStarting { ProgressView().tint(.white) }; Label(isStarting ? "Starting…" : "Start session", systemImage: "arrow.up.circle.fill") }
-                                .font(.headline).frame(maxWidth: .infinity, minHeight: 52)
-                        }.buttonStyle(RemotePrimaryButtonStyle()).disabled(!canStart)
-                    }.padding(18)
+                        .padding(18)
+                        .frame(maxWidth: 720)
+                        .frame(maxWidth: .infinity)
+                    }
+                    .scrollDismissesKeyboard(.interactively)
+                    startBar
                 }
             }
             .navigationTitle("New session")
@@ -161,370 +125,227 @@ struct StartSessionSheet: View {
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
             .toolbarBackground(BeetTheme.background(appearance).opacity(0.94), for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .sheet(item: $consoleComputer) { computer in
-                RemoteBotConsoleView(store: store, computer: computer)
-            }
             .sheet(isPresented: $showModelPicker) {
                 RemoteModelPickerSheet(
                     models: store.startModels,
-                    source: $source,
+                    source: $selectedSource,
                     selectedModelID: $selectedModelID,
-                    onSelect: { selectedReasoningEffort = $0.defaultReasoningEffort },
+                    onSelect: { model in
+                        selectedReasoningEffort = model.defaultReasoningEffort
+                        preferences.remember(model: model)
+                    },
                     onRefresh: { await store.loadStartModels() })
                     .environment(\.remoteAppearance, appearance)
             }
-            .task {
-                selectedBotID = initialBotID
-                async let models: Void = store.loadStartModels()
-                async let computers: Void = loadBotComputers()
-                async let folders: Void = store.loadWorkspaces()
-                _ = await (models, computers, folders)
+            .sheet(isPresented: $showWorkspacePicker) {
+                RemoteWorkspacePickerSheet(
+                    store: store,
+                    selectedPath: $selectedWorkspacePath,
+                    attachedComputerName: attachedComputer.map(RemoteBotComputerNaming.displayName))
+                    .environment(\.remoteAppearance, appearance)
+            }
+            .sheet(isPresented: $showBotPicker) {
+                RemoteBotPickerSheet(selectedBotID: $selectedBotID)
+                    .environment(\.remoteAppearance, appearance)
+            }
+            .sheet(isPresented: $showAdvanced) {
+                RemoteStartAdvancedSheet(
+                    store: store,
+                    botComputers: $botComputers,
+                    selectedBotComputerID: $selectedBotComputerID,
+                    reasoningEffort: $selectedReasoningEffort,
+                    model: selectedModel,
+                    botProfile: botProfile,
+                    reload: loadBotComputers)
+                    .environment(\.remoteAppearance, appearance)
+            }
+            .task { await load() }
+            .onChange(of: selectedWorkspacePath) { _, path in
+                preferences.workspacePath = path
+                // Choosing a folder is a statement about where the work
+                // happens; a bot computer would silently override it.
+                if !path.isEmpty { selectedBotComputerID = nil }
+            }
+            .onChange(of: selectedBotID) { _, id in
+                preferences.botID = id
                 attachMatchingBotComputer()
-                selectFirstModel()
-                if selectedWorkspacePath.isEmpty {
-                    selectedWorkspacePath = store.workspaces.first(where: { $0.isCurrent == true })?.path
-                        ?? store.workspaces.first?.path
-                        ?? ""
-                }
-            }
-            .onChange(of: source) { _, _ in selectFirstModel() }
-            .onChange(of: store.sessionMode) { _, mode in
-                if mode == .chat { selectedBotComputerID = nil }
-            }
-            .onChange(of: selectedBotID) { _, _ in
-                attachMatchingBotComputer()
-            }
-            .alert("New folder on Mac", isPresented: $showNewFolder) {
-                TextField("Folder name", text: $newFolderName)
-                Button("Cancel", role: .cancel) { newFolderName = "" }
-                Button("Create") { createFolder() }
-            } message: {
-                Text(store.workspaceCreateParent.map { "Created inside \($0)." } ?? "Created in the app’s Documents folder on your Mac.")
-            }
-            .alert("Open a folder path", isPresented: $showPathEntry) {
-                TextField("~/Developer/my-app", text: $folderPathDraft)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                Button("Cancel", role: .cancel) { folderPathDraft = "" }
-                Button("Open") { openFolderPath() }
-            } message: {
-                Text("The folder must already exist inside your Mac home directory.")
             }
             .keyboardDismissToolbar()
         }
     }
 
-    private func selectFirstModel() {
-        let first = source == "api" ? groupedAPIModels.first?.models.first : models.first
-        selectedModelID = first?.id ?? ""
-        selectedReasoningEffort = first?.defaultReasoningEffort
-    }
+    // MARK: Sections
 
-    @ViewBuilder
-    private var workspaceSection: some View {
+    private var promptCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("PROJECT FOLDER").font(.caption2.bold()).tracking(0.8)
-                Spacer()
-                if selectedBotComputerID != nil {
-                    Text("Bot computer")
-                        .font(.caption)
-                }
-            }.foregroundStyle(BeetTheme.secondaryText(appearance))
-            if !store.workspacesSupported {
-                Text("Update Vamp Assistant on your Mac to open or create a project folder from here.")
-                    .font(.subheadline)
-                    .foregroundStyle(BeetTheme.secondaryText(appearance))
-            } else if selectedBotComputerID != nil {
-                Text("This session uses the selected bot computer’s workspace and private browser.")
-                    .font(.subheadline)
-                    .foregroundStyle(BeetTheme.secondaryText(appearance))
-            } else {
-                if store.workspaces.isEmpty {
-                    Text("No recent folders yet. Create one or open a path on your Mac.")
-                        .font(.subheadline)
-                        .foregroundStyle(BeetTheme.secondaryText(appearance))
-                } else {
-                    VStack(spacing: 0) {
-                        ForEach(store.workspaces) { folder in
-                            Button {
-                                selectedWorkspacePath = folder.path
-                            } label: {
-                                HStack(spacing: 12) {
-                                    Image(systemName: selectedWorkspacePath == folder.path ? "checkmark.circle.fill" : "folder.fill")
-                                        .foregroundStyle(selectedWorkspacePath == folder.path ? BeetTheme.accentBright : BeetTheme.secondaryText(appearance))
-                                        .frame(width: 24)
-                                        .accessibilityHidden(true)
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(folder.name).font(.body.weight(.semibold))
-                                        Text(folder.path).font(.caption).foregroundStyle(BeetTheme.secondaryText(appearance)).lineLimit(1)
-                                    }
-                                    Spacer()
-                                }.padding(13).contentShape(Rectangle())
-                                    .accessibilityAddTraits(selectedWorkspacePath == folder.path ? .isSelected : [])
-                            }.buttonStyle(.plain)
-                            if folder.path != store.workspaces.last?.path {
-                                Divider().overlay(BeetTheme.line(appearance))
-                            }
-                        }
-                    }
-                    .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 16))
-                    .overlay { RoundedRectangle(cornerRadius: 16).stroke(BeetTheme.line(appearance)) }
-                }
-                HStack(spacing: 10) {
-                    Button { showNewFolder = true } label: {
-                        Label("New folder", systemImage: "folder.badge.plus")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                    }
-                    .buttonStyle(RemoteSecondaryButtonStyle())
-                    Button { showPathEntry = true } label: {
-                        Label("Path", systemImage: "text.alignleft")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                    }
-                    .buttonStyle(RemoteSecondaryButtonStyle())
-                }
-            }
-        }
-    }
-
-    private func createFolder() {
-        let name = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
-        newFolderName = ""
-        guard !name.isEmpty else { return }
-        Task {
-            if let created = await store.createWorkspace(name: name) {
-                selectedWorkspacePath = created.path
-            }
-        }
-    }
-
-    private func openFolderPath() {
-        let path = folderPathDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        folderPathDraft = ""
-        guard !path.isEmpty else { return }
-        Task {
-            if let opened = await store.openWorkspace(path: path) {
-                selectedWorkspacePath = opened.path
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var botComputerSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("BOT COMPUTER").font(.caption2.bold()).tracking(0.8)
-                Spacer()
-                Text(botComputers.isEmpty
-                     ? "None prepared on Mac"
-                     : (selectedBotComputerID == nil ? "Optional — tap to attach" : "Attached"))
-                    .font(.caption)
-            }.foregroundStyle(BeetTheme.secondaryText(appearance))
-            if !botComputers.isEmpty {
-                VStack(spacing: 0) {
-                    ForEach(botComputers) { computer in
-                        HStack(spacing: 11) {
-                            Image(systemName: selectedBotComputerID == computer.id ? "checkmark.circle.fill" : "square.stack.3d.up.fill")
-                                .foregroundStyle(selectedBotComputerID == computer.id ? BeetTheme.accentBright : BeetTheme.secondaryText(appearance))
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(displayName(for: computer)).font(.body.weight(.semibold))
-                                Text(botComputerSubtitle(computer))
-                                    .font(.caption).foregroundStyle(BeetTheme.secondaryText(appearance))
-                            }
-                            Spacer()
-                            // A bot computer has no screen to stream; its console is the shell,
-                            // the workspace, and the output.
-                            Button {
-                                consoleComputer = computer
-                            } label: {
-                                Image(systemName: "terminal")
-                            }
-                            .buttonStyle(.bordered)
-                            .accessibilityLabel("Open \(displayName(for: computer)) console")
-                            if computer.state == "running" {
-                                Button(botComputerBusyID == computer.id ? "Stopping…" : "Stop") { stopBotComputer(computer) }
-                                    .buttonStyle(.bordered)
-                                    .disabled(botComputerBusyID != nil)
-                            } else if computer.backend != "isolatedWorkspace" {
-                                Button(botComputerBusyID == computer.id ? "Starting…" : "Start") { startBotComputer(computer) }
-                                    .buttonStyle(.borderedProminent).tint(BeetTheme.accentBright)
-                                    .disabled(botComputerBusyID != nil)
-                            }
-                        }
-                        .padding(13)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            guard canAttachBotComputer(computer) else { return }
-                            selectedBotComputerID = selectedBotComputerID == computer.id ? nil : computer.id
-                            if selectedBotComputerID != nil { store.sessionMode = .code }
-                        }
-                        if computer.id != botComputers.last?.id { Divider().overlay(BeetTheme.line(appearance)) }
-                    }
-                }
+            Text("What should Vamp Assistant do?")
+                .font(.subheadline.weight(.semibold))
+            TextField("Describe the task, or pick a suggestion below", text: $prompt, axis: .vertical)
+                .lineLimit(4...9)
+                .font(.body)
+                .focused($promptFocused)
+                .padding(14)
                 .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 16))
                 .overlay { RoundedRectangle(cornerRadius: 16).stroke(BeetTheme.line(appearance)) }
-            }
-            if let profileID = RemoteBotProfile.resolvedID(selectedBotID),
-               !botComputers.contains(where: { $0.profileID == profileID }) {
-                Button {
-                    prepareBotComputer(profileID: profileID)
-                } label: {
-                    Label("Create \(botProfile.name) computer on Mac", systemImage: "plus")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                .accessibilityLabel("First prompt")
+        }
+    }
+
+    private var setupCard: some View {
+        VStack(spacing: 0) {
+            RemoteStartSetupRow(
+                icon: isChatOnly ? "bubble.left.and.bubble.right.fill" : "folder.fill",
+                title: "Works in",
+                value: locationValue,
+                detail: locationDetail,
+                action: { showWorkspacePicker = true })
+            Divider().overlay(BeetTheme.line(appearance))
+            RemoteStartSetupRow(
+                icon: "person.crop.square.filled.and.at.rectangle",
+                title: "Bot",
+                value: botProfile.name,
+                detail: botProfile.instruction == nil ? "Plain chat" : botProfile.subtitle,
+                action: { showBotPicker = true })
+            Divider().overlay(BeetTheme.line(appearance))
+            RemoteStartSetupRow(
+                icon: RemoteModelPickerSheet.sourceIcon(selectedModel?.source ?? selectedSource),
+                title: "Model",
+                value: selectedModel?.name ?? (isLoading ? "Loading…" : "Choose a model"),
+                detail: selectedModel?.detail ?? "\(store.startModels.count) available",
+                isPlaceholder: selectedModel == nil,
+                action: { showModelPicker = true })
+        }
+        .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 18))
+        .overlay { RoundedRectangle(cornerRadius: 18).stroke(BeetTheme.line(appearance)) }
+    }
+
+    private var moreOptionsButton: some View {
+        Button { showAdvanced = true } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "slider.horizontal.3")
+                Text("More options")
+                if let effort = selectedReasoningEffort {
+                    Text("· \(effort.capitalized) reasoning")
+                        .foregroundStyle(BeetTheme.secondaryText(appearance))
                 }
-                .buttonStyle(RemoteSecondaryButtonStyle())
-                .disabled(botComputerBusyID != nil || !store.isConnected)
-            } else if botComputers.isEmpty {
-                Button {
-                    prepareBotComputer(profileID: nil)
-                } label: {
-                    Label("Prepare bot computers on Mac", systemImage: "plus")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+            }
+            .font(.subheadline.weight(.semibold))
+            .padding(.horizontal, 14)
+            .frame(minHeight: 46)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(BeetTheme.secondaryText(appearance))
+        .accessibilityHint("Reasoning effort, bot computers, and API keys")
+    }
+
+    private var startBar: some View {
+        VStack(spacing: 8) {
+            if let blockedReason {
+                Text(blockedReason)
+                    .font(.caption)
+                    .foregroundStyle(BeetTheme.secondaryText(appearance))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityHidden(true)
+            }
+            Button { start() } label: {
+                HStack(spacing: 8) {
+                    if isStarting { ProgressView().tint(.white) }
+                    Label(isStarting ? "Starting…" : "Start session", systemImage: "arrow.up.circle.fill")
                 }
-                .buttonStyle(RemoteSecondaryButtonStyle())
-                .disabled(botComputerBusyID != nil || !store.isConnected)
+                .font(.headline)
+                .frame(maxWidth: .infinity, minHeight: 52)
             }
+            .buttonStyle(RemotePrimaryButtonStyle())
+            .disabled(!canStart)
+            .opacity(canStart ? 1 : 0.55)
+            .accessibilityHint(blockedReason ?? "")
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 10)
+        .padding(.bottom, 12)
+        .frame(maxWidth: 720)
+        .frame(maxWidth: .infinity)
+        .background(BeetTheme.background(appearance).opacity(0.94))
+        .overlay(alignment: .top) {
+            Rectangle().fill(BeetTheme.line(appearance)).frame(height: 0.75)
         }
     }
 
-    private func displayName(for computer: RemoteBotComputer) -> String {
-        computer.name.trimmingCharacters(in: .whitespacesAndNewlines).localizedCaseInsensitiveCompare("Beet") == .orderedSame
-            ? "Assistant computer"
-            : computer.name
+    // MARK: Loading
+
+    private func load() async {
+        selectedBotID = initialBotID.isEmpty ? preferences.botID : initialBotID
+        selectedSource = preferences.modelSource
+        selectedWorkspacePath = preferences.workspacePath
+        async let models: Void = store.loadStartModels()
+        async let computers: Void = loadBotComputers()
+        async let folders: Void = store.loadWorkspaces()
+        _ = await (models, computers, folders)
+        applyRememberedModel()
+        selectedWorkspacePath = RemoteStartPreferences.resolveWorkspacePath(
+            in: store.workspaces, rememberedPath: preferences.workspacePath)
+        attachMatchingBotComputer()
+        isLoading = false
+        // Focus last: the field is the only thing left to fill in, and doing it
+        // before the sheet settles loses the keyboard on slower connections.
+        promptFocused = prompt.isEmpty
     }
 
-    private func canAttachBotComputer(_ computer: RemoteBotComputer) -> Bool {
-        computer.state == "running" || computer.backend == "isolatedWorkspace"
-    }
-
-    private func botComputerSubtitle(_ computer: RemoteBotComputer) -> String {
-        let backend: String
-        switch computer.backend {
-        case "appleContainer": backend = "Linux micro-VM"
-        case "isolatedWorkspace": backend = "Private workspace"
-        default: backend = computer.backend
-        }
-        return computer.state.capitalized + " · " + backend + " · private browser"
-    }
-
-    private func attachMatchingBotComputer() {
-        guard let profileID = RemoteBotProfile.resolvedID(selectedBotID) else { return }
-        if let match = botComputers.first(where: { $0.profileID == profileID && canAttachBotComputer($0) }) {
-            selectedBotComputerID = match.id
-            store.sessionMode = .code
-        }
-    }
-
-    private func prepareBotComputer(profileID: String?) {
-        botComputerBusyID = UUID()
-        Task {
-            let computers = await store.prepareBotComputers(profileID: profileID)
-            if !computers.isEmpty {
-                botComputers = computers
-                attachMatchingBotComputer()
-            } else {
-                await loadBotComputers()
-            }
-            botComputerBusyID = nil
-        }
+    private func applyRememberedModel() {
+        guard let model = RemoteStartPreferences.resolveModel(
+            in: store.startModels,
+            rememberedID: preferences.modelID,
+            rememberedSource: preferences.modelSource) else { return }
+        selectedModelID = model.id
+        selectedSource = model.source
+        selectedReasoningEffort = model.defaultReasoningEffort
     }
 
     private func loadBotComputers() async {
-        if let envelope = await store.botComputers() {
-            botComputers = envelope.computers
-            if let selected = selectedBotComputerID,
-               !envelope.computers.contains(where: {
-                   $0.id == selected && ($0.state == "running" || $0.backend == "isolatedWorkspace")
-               }) {
-                selectedBotComputerID = nil
-            }
+        guard let envelope = await store.botComputers() else { return }
+        botComputers = envelope.computers
+        if let selected = selectedBotComputerID,
+           !envelope.computers.contains(where: { $0.id == selected && RemoteBotComputerNaming.canAttach($0) }) {
+            selectedBotComputerID = nil
         }
     }
 
-    private var apiKeySection: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text("API KEY").font(.caption2.bold()).tracking(0.8).foregroundStyle(BeetTheme.secondaryText(appearance))
-            HStack(spacing: 8) {
-                Picker("Provider", selection: $keyProviderID) {
-                    Text("OpenAI").tag("openAI")
-                    Text("Gemini").tag("gemini")
-                    Text("OpenRouter").tag("openRouter")
-                    Text("Anthropic").tag("anthropic")
-                    Text("DeepSeek").tag("deepSeek")
-                    Text("OpenCode Zen").tag("openCode")
-                    Text("OpenCode Go").tag("openCodeGo")
-                }.pickerStyle(.menu)
-                SecureField("Paste key", text: $keyDraft)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                Button(isSavingKey ? "Saving…" : "Save") { saveAPIKey() }
-                    .disabled(keyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSavingKey)
-            }
-            if let keyMessage { Text(keyMessage).font(.caption).foregroundStyle(BeetTheme.secondaryText(appearance)) }
-            Text("Stored securely in the Mac Keychain; the key is never saved on this device or in chat.")
-                .font(.caption2).foregroundStyle(BeetTheme.secondaryText(appearance))
-        }
+    /// A specialist that already has its own computer prepared should use it —
+    /// but never at the cost of a folder the user picked on purpose.
+    private func attachMatchingBotComputer() {
+        guard selectedWorkspacePath.isEmpty,
+              let profileID = RemoteBotProfile.resolvedID(selectedBotID),
+              let match = botComputers.first(where: {
+                  $0.profileID == profileID && RemoteBotComputerNaming.canAttach($0)
+              }) else { return }
+        selectedBotComputerID = match.id
     }
 
-    private func saveAPIKey() {
-        isSavingKey = true
-        let key = keyDraft
-        Task {
-            let saved = await store.saveAPIKey(providerID: keyProviderID, key: key)
-            if saved {
-                keyDraft = ""
-                source = "api"
-                await store.loadStartModels()
-                selectFirstModel()
-                let count = store.startModels.filter { $0.source == "api" }.count
-                keyMessage = count == 0
-                    ? "Saved on Mac, but no models came back yet."
-                    : "Saved. Loaded \(count) API models."
-            } else {
-                keyMessage = "Could not save the key."
-            }
-            isSavingKey = false
-        }
-    }
+    // MARK: Start
 
-    private func startBotComputer(_ computer: RemoteBotComputer) {
-        botComputerBusyID = computer.id
-        Task {
-            if await store.startBotComputer(computer.id) {
-                await loadBotComputers()
-                selectedBotComputerID = computer.id
-                store.sessionMode = .code
-            }
-            botComputerBusyID = nil
-        }
-    }
-
-    private func stopBotComputer(_ computer: RemoteBotComputer) {
-        botComputerBusyID = computer.id
-        Task {
-            if await store.stopBotComputer(computer.id) {
-                await loadBotComputers()
-                if selectedBotComputerID == computer.id { selectedBotComputerID = nil }
-            }
-            botComputerBusyID = nil
-        }
-    }
     private func start() {
         isStarting = true
         store.reasoningEffort = selectedReasoningEffort
-        let firstMessage = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        store.sessionMode = isChatOnly ? .chat : .code
+        if let selectedModel { preferences.remember(model: selectedModel) }
+        preferences.botID = selectedBotID
+        preferences.workspacePath = selectedWorkspacePath
+        let firstMessage = trimmedPrompt
+        let computerID = attachedComputer?.id
         Task {
             if let id = await store.startSession(
                 modelID: selectedModelID,
                 message: firstMessage,
                 botProfileID: RemoteBotProfile.resolvedID(selectedBotID),
-                botComputerID: selectedBotComputerID,
-                workspacePath: store.sessionMode == .code && selectedBotComputerID == nil
+                botComputerID: computerID,
+                workspacePath: computerID == nil && !selectedWorkspacePath.isEmpty
                     ? selectedWorkspacePath : nil,
-                chatOnly: store.sessionMode == .chat && selectedBotComputerID == nil) { onStarted(id) }
+                chatOnly: computerID == nil && selectedWorkspacePath.isEmpty) {
+                onStarted(id)
+            }
             isStarting = false
         }
     }

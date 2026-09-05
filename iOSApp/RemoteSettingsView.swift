@@ -86,6 +86,7 @@ struct RemoteSettingsSheet: View {
     @Environment(\.remoteAppearance) private var appearance
     @AppStorage("remoteAppearanceSetting") private var appearanceSetting = RemoteAppearanceSetting.dark
     @AppStorage("remoteAccent") private var accent = AccentPalette.graphite
+    @AppStorage(RemoteBackdropSetting.key) private var showsBackdrop = true
     @State private var showForgetMac = false
 
     var body: some View {
@@ -159,6 +160,22 @@ struct RemoteSettingsSheet: View {
             Text(accent.label)
                 .font(.caption)
                 .foregroundStyle(BeetTheme.secondaryText(appearance))
+
+            Divider().padding(.top, 4)
+
+            Toggle(isOn: $showsBackdrop) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Background image")
+                        .font(.body)
+                    Text(showsBackdrop
+                         ? "The engraved atmosphere sits behind every screen."
+                         : "Screens draw on a plain surface instead.")
+                        .font(.caption)
+                        .foregroundStyle(BeetTheme.secondaryText(appearance))
+                }
+            }
+            .tint(BeetTheme.accentBright)
+            .accessibilityHint("Turns the app's background image off for a plain surface")
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)

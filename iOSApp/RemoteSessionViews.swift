@@ -232,21 +232,24 @@ struct SessionControlHeader: View {
                 }
                 .buttonStyle(RemoteChromeButtonStyle())
                 .accessibilityLabel("Refresh sessions")
-                Button(action: onStart) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 36, height: 36)
-                        .background(BeetTheme.accent, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .hitTarget(4)
-                }
-                .buttonStyle(RemotePressButtonStyle())
-                .disabled(!store.isConnected)
-                .opacity(store.isConnected ? 1 : 0.62)
-                .accessibilityLabel("Start a new session")
-                .accessibilityHint(store.isConnected ? "" : "Connect to your Mac first")
             }
             .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+            // The primary action of the whole screen, at the size of a primary
+            // action. It used to be a 36pt "+" competing with three other
+            // glyphs in the same row — the hardest thing on the screen to find
+            // was the thing people open the app to do.
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                onStart()
+            } label: {
+                Label("New session", systemImage: "plus.circle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 46)
+            }
+            .buttonStyle(RemotePrimaryButtonStyle())
+            .disabled(!store.isConnected)
+            .opacity(store.isConnected ? 1 : 0.62)
+            .accessibilityHint(store.isConnected ? "Type a prompt and start" : "Connect to your Mac first")
             SearchField(text: $search)
             // No Chat/Code switcher here: the mode belongs to a session, and every session is
             // created through the New session sheet, which asks for it there. On the home screen
@@ -402,38 +405,6 @@ struct ConnectionCard: View {
             Spacer()
             if store.isRefreshing { ProgressView().controlSize(.small).frame(width: 36, height: 36) } else { Button { Task { try? await store.refresh() } } label: { Image(systemName: "arrow.clockwise").font(.subheadline.weight(.semibold)).frame(width: 36, height: 36).background(BeetTheme.surfaceStrong(appearance), in: Circle()).hitTarget(4) }.buttonStyle(RemotePressButtonStyle()).accessibilityLabel("Refresh sessions") }
         }.padding(.horizontal, 12).frame(minHeight: 58).remoteGlass(appearance, radius: 17)
-    }
-}
-
-struct RemoteModeSwitcher: View {
-    @Binding var mode: RemoteSessionMode
-    @Environment(\.remoteAppearance) private var appearance
-
-    var body: some View {
-        HStack(spacing: 4) {
-            ForEach(RemoteSessionMode.allCases) { option in
-                Button {
-                    guard mode != option else { return }
-                    UISelectionFeedbackGenerator().selectionChanged()
-                    mode = option
-                } label: {
-                    Label(option.title, systemImage: option.symbol)
-                        .font(.subheadline.weight(mode == option ? .semibold : .medium))
-                        .frame(maxWidth: .infinity, minHeight: 40)
-                        .foregroundStyle(mode == option ? Color.white : BeetTheme.secondaryText(appearance))
-                        .background(
-                            mode == option ? BeetTheme.accent : BeetTheme.surfaceStrong(appearance),
-                            in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-                .buttonStyle(RemotePressButtonStyle())
-                .accessibilityAddTraits(mode == option ? .isSelected : [])
-            }
-        }
-        .padding(3)
-        .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(BeetTheme.line(appearance)) }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Session mode")
     }
 }
 

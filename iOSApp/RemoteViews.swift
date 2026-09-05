@@ -130,9 +130,19 @@ struct RemoteGlassBackdrop: ViewModifier {
     }
 }
 
+/// The engraved atmosphere behind every screen.
+///
+/// It can be turned off in Settings: on a small phone, over dense text, some
+/// people just want a flat surface — and a plain background is also the most
+/// reliable way to get maximum contrast without leaving the app's palette.
 struct RemoteBackdrop: View {
+    @AppStorage(RemoteBackdropSetting.key) private var showsAtmosphere = true
     @Environment(\.remoteAppearance) private var appearance
-    var body: some View {
+    @ViewBuilder var body: some View {
+        if showsAtmosphere { atmosphere } else { BeetTheme.background(appearance).ignoresSafeArea() }
+    }
+
+    private var atmosphere: some View {
         GeometryReader { proxy in
             Image("WindowAtmosphere")
                 .resizable()
@@ -182,4 +192,10 @@ struct AppearanceMenuButton: View {
         }
         .accessibilityLabel("Appearance, \(current.label)")
     }
+}
+
+/// Where the backdrop toggle lives, so the view and the settings screen cannot
+/// drift apart on the key or the default.
+enum RemoteBackdropSetting {
+    static let key = "remoteShowsBackdrop"
 }

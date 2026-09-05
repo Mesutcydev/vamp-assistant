@@ -553,60 +553,6 @@ private struct RemoteBotThumbnail: View {
     }
 }
 
-struct RemoteBotChooser: View {
-    @Binding var selectedBotID: String
-    @Environment(\.remoteAppearance) private var appearance
-
-    private var effectiveID: String {
-        selectedBotID.isEmpty ? RemoteBotProfile.general.id : selectedBotID
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("BOT").font(.caption2.bold()).tracking(0.8)
-                Spacer()
-                Text(effectiveID == RemoteBotProfile.general.id ? "None — plain chat" : RemoteBotProfile.profile(id: effectiveID).name)
-                    .font(.caption.weight(.semibold))
-            }
-            .foregroundStyle(BeetTheme.secondaryText(appearance))
-            ScrollView(.horizontal) {
-                HStack(spacing: 8) {
-                    ForEach(RemoteBotProfile.profiles) { profile in
-                        let isSelected = effectiveID == profile.id
-                        Button {
-                            selectedBotID = RemoteBotProfile.resolvedID(profile.id) ?? ""
-                        } label: {
-                            VStack(spacing: 6) {
-                                RemoteBotThumbnail(profile: profile, size: 48)
-                                Text(profile.name)
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(isSelected ? profile.tint : .primary)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                            }
-                            .frame(minWidth: 76)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 8)
-                            .background(
-                                BeetTheme.surface(appearance).opacity(isSelected ? 0.96 : 0.5),
-                                in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .stroke(isSelected ? profile.tint.opacity(0.7) : BeetTheme.line(appearance).opacity(0.5), lineWidth: isSelected ? 1.25 : 0.75)
-                            }
-                        }
-                        .buttonStyle(RemotePressButtonStyle())
-                        .accessibilityLabel(profile.name)
-                        .accessibilityAddTraits(isSelected ? .isSelected : [])
-                    }
-                }
-            }
-            .scrollIndicators(.hidden)
-        }
-    }
-}
-
 struct RemoteBotStarters: View {
     let starters: [String]
     let tint: Color
