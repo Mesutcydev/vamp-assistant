@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Lets a branch be built and packaged on demand, without opening a pull
+  # request first — the IPA job below only runs this way.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -70,3 +73,26 @@ jobs:
           name: ${{ matrix.platform }}-test-results
           path: ${{ runner.temp }}/Tests.xcresult
           retention-days: 7
+
+  ipa:
+    name: Sideloadable IPA
+    # Only on demand: packaging is not part of the per-PR gate.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      # DEVELOPER_DIR is deliberately unset: the packaging script resolves the
+      # toolchain itself and prints which one it used.
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Package unsigned IPA
+        run: ./scripts/package-beetcode-remote-ios.sh
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: vamp-assistant-ios-ipa
+          path: |
+            dist/*.ipa
+            dist/*.sha256
+          retention-days: 14
