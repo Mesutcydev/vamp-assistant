@@ -238,14 +238,13 @@ struct MessageBubble: View {
                     .accessibilityHidden(true)
                 Text(message.content)
                     .font(.caption)
-                    .foregroundStyle(BeetTheme.secondaryText(appearance))
+                    .foregroundStyle(.secondary)
                     .textSelection(.enabled)
                 Spacer(minLength: 4)
             }
             .padding(11)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.red.opacity(0.09), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.red.opacity(0.3), lineWidth: 0.75) }
+            .background(Color.red.opacity(0.09), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         else if message.role == "notice" {
             HStack(spacing: 8) {
@@ -254,7 +253,7 @@ struct MessageBubble: View {
                     .foregroundStyle(BeetTheme.accentBright)
                 Text(message.content)
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(BeetTheme.secondaryText(appearance))
+                    .foregroundStyle(.secondary)
                 Spacer(minLength: 4)
             }
         }
@@ -328,12 +327,11 @@ struct CheckpointMessageRow: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text("Checkpoint")
-                    .font(.caption2.weight(.bold))
-                    .tracking(0.5)
-                    .foregroundStyle(BeetTheme.secondaryText(appearance))
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
                 Text(message.content)
                     .font(.caption)
-                    .foregroundStyle(BeetTheme.secondaryText(appearance))
+                    .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
             Spacer(minLength: 6)
@@ -347,8 +345,9 @@ struct CheckpointMessageRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(BeetTheme.surfaceStrong(appearance).opacity(0.45),
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(
+            Color(uiColor: .secondarySystemGroupedBackground).opacity(0.86),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .confirmationDialog("Restore this checkpoint?",
                             isPresented: $confirming,
                             titleVisibility: .visible) {
@@ -370,7 +369,6 @@ struct RemoteChatErrorCard: View {
             HStack(alignment: .top) {
                 Label(error.title, systemImage: "exclamationmark.triangle.fill")
                     .font(.headline)
-                    .foregroundStyle(BeetTheme.accentBright)
                 Spacer(minLength: 8)
                 if let onDismiss {
                     Button("Dismiss", action: onDismiss)
@@ -383,15 +381,13 @@ struct RemoteChatErrorCard: View {
                 .textSelection(.enabled)
             Text("You can change the model or start a new chat. This failed chat will not be reopened automatically.")
                 .font(.caption)
-                .foregroundStyle(BeetTheme.secondaryText(appearance))
+                .foregroundStyle(.secondary)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(BeetTheme.surfaceStrong(appearance), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(BeetTheme.line(appearance), lineWidth: 0.75)
-        }
+        .background(
+            Color(uiColor: .secondarySystemGroupedBackground).opacity(0.86),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -520,11 +516,11 @@ struct QueuedFollowUpsView: View {
                         .foregroundStyle(BeetTheme.accentBright)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(item.label ?? "Queued")
-                            .font(.caption2.weight(.semibold))
+                            .font(.footnote.weight(.semibold))
                             .foregroundStyle(BeetTheme.accentBright)
                         Text(item.message)
                             .font(.caption)
-                            .foregroundStyle(BeetTheme.secondaryText(appearance))
+                            .foregroundStyle(.secondary)
                             .lineLimit(2)
                     }
                     Spacer(minLength: 4)
@@ -535,17 +531,15 @@ struct QueuedFollowUpsView: View {
                             .font(.caption.weight(.bold))
                             .frame(width: 28, height: 28)
                     }
-                    .foregroundStyle(BeetTheme.secondaryText(appearance))
-                    .buttonStyle(RemotePressButtonStyle())
+                    .foregroundStyle(.secondary)
+                    .buttonStyle(.borderless)
                     .accessibilityLabel("Remove queued follow-up")
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(BeetTheme.line(appearance).opacity(0.9), lineWidth: 0.75)
-                }
+                .background(
+                    Color(uiColor: .secondarySystemGroupedBackground).opacity(0.86),
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
         }
         .padding(.horizontal, 12)
