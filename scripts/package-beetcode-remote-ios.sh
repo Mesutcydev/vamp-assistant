@@ -40,7 +40,7 @@ if [[ "${SKIP_IOS_BUILD:-}" != "1" ]]; then
     -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
     -derivedDataPath "$DERIVED" CODE_SIGNING_ALLOWED=NO \
     CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= \
-    -skipMacroValidation build
+    -skipPackagePluginValidation -skipMacroValidation build
 fi
 
 [[ -d "$APP" ]] || { echo "Missing built app: $APP" >&2; exit 1; }

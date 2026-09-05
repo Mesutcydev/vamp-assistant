@@ -46,6 +46,7 @@ jobs:
           -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/Derived"
           -resultBundlePath "$RUNNER_TEMP/Tests.xcresult"
           CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO ONLY_ACTIVE_ARCH=YES
+          -skipPackagePluginValidation -skipMacroValidation
           -only-testing:BeetCodeTests test
       - name: iOS simulator tests
         if: matrix.platform == 'iOS'
@@ -53,19 +54,22 @@ jobs:
           xcodebuild -project BeetCode.xcodeproj -scheme BeetCodeRemoteIOS
           -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5'
           -derivedDataPath "$RUNNER_TEMP/Derived" -resultBundlePath "$RUNNER_TEMP/Tests.xcresult"
-          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+          -skipPackagePluginValidation -skipMacroValidation test
       - name: macOS Release build
         if: matrix.platform == 'macOS'
         run: >-
           xcodebuild -project BeetCode.xcodeproj -scheme BeetCode -configuration Release
           -destination 'generic/platform=macOS' ARCHS=arm64 EXCLUDED_ARCHS=x86_64 -derivedDataPath "$RUNNER_TEMP/Derived"
-          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+          -skipPackagePluginValidation -skipMacroValidation build
       - name: iOS device Release build
         if: matrix.platform == 'iOS'
         run: >-
           xcodebuild -project BeetCode.xcodeproj -scheme BeetCodeRemoteIOS -configuration Release
           -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/Derived"
-          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+          -skipPackagePluginValidation -skipMacroValidation build
       - name: Save test results
         if: always()
         uses: actions/upload-artifact@v4
