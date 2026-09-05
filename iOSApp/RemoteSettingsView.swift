@@ -48,9 +48,9 @@ struct RemoteSettingsSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                identitySection
                 appearanceSection
                 connectionSection
-                aboutSection
             }
             .scrollContentBackground(.hidden)
             .background { RemoteBackdrop() }
@@ -121,11 +121,11 @@ struct RemoteSettingsSheet: View {
                     Text(store.activeComputerName)
                 }
             }
-            RemoteDisclosureRow(title: "Switch computer") {
+            RemoteDisclosureRow(title: "Switch computer", icon: "desktopcomputer.and.macbook") {
                 dismiss()
                 onSwitchComputer()
             }
-            RemoteDisclosureRow(title: "Control diagnostics") {
+            RemoteDisclosureRow(title: "Control diagnostics", icon: "stethoscope") {
                 dismiss()
                 onDiagnostics()
             }
@@ -136,18 +136,34 @@ struct RemoteSettingsSheet: View {
         .remoteListRow()
     }
 
-    private var aboutSection: some View {
+    /// Settings opens on the app itself rather than on a segmented control.
+    /// The version lived in a third card at the bottom that existed only to
+    /// print two numbers.
+    private var identitySection: some View {
         Section {
-            LabeledContent("Version", value: RemoteAppVersion.current.version)
-                .monospacedDigit()
-            LabeledContent("Build", value: RemoteAppVersion.current.build)
-                .monospacedDigit()
-        } header: {
-            Text("About")
-        } footer: {
-            Text("Vamp Assistant for iPhone and iPad.")
+            HStack(spacing: 14) {
+                Image("BeetLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 52, height: 52)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Vamp Assistant")
+                        .font(.title3.weight(.semibold))
+                    Text("Version \(RemoteAppVersion.current.version) · Build \(RemoteAppVersion.current.build)")
+                        .font(.footnote)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 6)
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 8, trailing: 20))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Vamp Assistant, version \(RemoteAppVersion.current.version), build \(RemoteAppVersion.current.build)")
         }
-        .remoteListRow()
     }
 
 }

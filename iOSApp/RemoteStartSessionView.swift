@@ -98,6 +98,7 @@ struct StartSessionSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                heroSection
                 if !store.isConnected { reconnectSection }
                 promptSection
                 setupSection
@@ -173,6 +174,17 @@ struct StartSessionSheet: View {
         .remoteListRow()
     }
 
+    /// The page's own opening. Without it the sheet began with a grouped card
+    /// under a "Task" header, which is the same first impression as Settings.
+    private var heroSection: some View {
+        Section {
+            RemotePageHero(
+                icon: "text.cursor",
+                title: "What should it work on?",
+                subtitle: "Everything below is what you used last time — change it or just start.")
+        }
+    }
+
     private var promptSection: some View {
         Section {
             TextField("Describe the task", text: $prompt, axis: .vertical)
@@ -191,15 +203,14 @@ struct StartSessionSheet: View {
                             .buttonBorderShape(.capsule)
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 9)
                 }
                 .scrollIndicators(.hidden)
                 .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
                 .accessibilityLabel("Suggested tasks")
             }
-        } header: {
-            Text("Task")
         }
         .remoteListRow()
     }
@@ -208,15 +219,18 @@ struct StartSessionSheet: View {
         Section {
             RemoteDisclosureRow(
                 title: "Works in",
+                icon: isChatOnly ? "bubble.left.and.bubble.right" : "folder",
                 value: locationValue,
                 detail: locationDetail,
                 action: { showWorkspacePicker = true })
             RemoteDisclosureRow(
                 title: "Bot",
+                icon: "person.crop.square",
                 value: botProfile.name,
                 action: { showBotPicker = true })
             RemoteDisclosureRow(
                 title: "Model",
+                icon: "cpu",
                 value: selectedModel?.name ?? (isLoading ? "Loading…" : "Choose a model"),
                 detail: selectedModel?.detail,
                 action: { showModelPicker = true })
@@ -242,7 +256,8 @@ struct StartSessionSheet: View {
                 }
             }
             RemoteDisclosureRow(
-                title: "Bot computers & API keys",
+                title: "Sandboxes & keys",
+                icon: "shippingbox",
                 action: { showAdvanced = true })
         } header: {
             Text("More")
@@ -265,6 +280,7 @@ struct StartSessionSheet: View {
                 HStack(spacing: 8) {
                     if isStarting { ProgressView().tint(.white) }
                     Text(isStarting ? "Starting…" : "Start session")
+                        .fontWeight(.semibold)
                 }
                 .frame(maxWidth: .infinity)
             }
@@ -273,9 +289,13 @@ struct StartSessionSheet: View {
             .disabled(!canStart)
             .accessibilityHint(blockedReason ?? "")
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 20)
+        .padding(.top, 10)
+        .padding(.bottom, 12)
         .background(.bar)
+        // Over a pale backdrop the bar material alone is nearly invisible, so
+        // the button reads as floating loose at the bottom of the sheet.
+        .overlay(alignment: .top) { Divider() }
     }
 
     // MARK: Loading

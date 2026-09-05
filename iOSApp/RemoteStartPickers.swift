@@ -24,6 +24,12 @@ struct RemoteWorkspacePickerSheet: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    RemotePageHero(
+                        icon: "folder",
+                        title: "Where it works",
+                        subtitle: "A folder on your Mac the agent stays inside, or no folder at all.")
+                }
                 if let attachedComputerName {
                     Section {
                         Text("This session runs on \(attachedComputerName), which brings its own workspace and private browser.")
@@ -148,6 +154,12 @@ struct RemoteBotPickerSheet: View {
         NavigationStack {
             List {
                 Section {
+                    RemotePageHero(
+                        icon: "person.crop.square.on.square.angled",
+                        title: "Who takes it on",
+                        subtitle: "Each bot carries its own standing instructions for the session.")
+                }
+                Section {
                     ForEach(RemoteBotProfile.profiles) { profile in
                         RemoteSelectionRow(
                             title: profile.name,
@@ -199,6 +211,12 @@ struct RemoteStartAdvancedSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    RemotePageHero(
+                        icon: "shippingbox",
+                        title: "Sandboxes & keys",
+                        subtitle: "Machines your Mac can run a session inside, and the provider keys it signs in with.")
+                }
                 botComputerSection
                 apiKeySection
             }
@@ -231,7 +249,7 @@ struct RemoteStartAdvancedSheet: View {
         } header: {
             Text("Bot computer")
         } footer: {
-            Text("A sandboxed machine on your Mac with its own workspace and private browser. Attach one and the session runs there instead of in a project folder.")
+            Text("Attach one and the session runs there instead of in a project folder.")
         }
         .remoteListRow()
     }

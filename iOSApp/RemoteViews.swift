@@ -87,11 +87,55 @@ extension View {
 /// goes fully opaque for anyone who has asked for less transparency.
 struct RemoteListRowBackground: ViewModifier {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.remoteAppearance) private var appearance
+
+    /// Light mode needs a nearly opaque cell. The engraving is dark lines on
+    /// pale paper, so at the dark mode's alpha it reads straight through white
+    /// cells and text ends up sitting on texture. Dark mode has the opposite
+    /// problem — an opaque cell there kills the depth entirely — so the two
+    /// appearances get different alphas rather than a compromise that suits
+    /// neither.
+    private var alpha: Double {
+        if reduceTransparency { return 1 }
+        return appearance == .light ? 0.97 : 0.88
+    }
 
     func body(content: Content) -> some View {
         content.listRowBackground(
-            Color(uiColor: .secondarySystemGroupedBackground)
-                .opacity(reduceTransparency ? 1 : 0.88))
+            Color(uiColor: .secondarySystemGroupedBackground).opacity(alpha))
+    }
+}
+
+/// A page's own opening: a glyph, a name, and one line saying what the screen
+/// is for. Each screen picks its own, which is what keeps a stack of grouped
+/// lists from reading as the same page four times.
+struct RemotePageHero: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 30, weight: .regular))
+                .foregroundStyle(BeetTheme.accentBright)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.title2.weight(.semibold))
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 4)
+        .padding(.bottom, 10)
+        .listRowBackground(Color.clear)
+        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -106,6 +150,7 @@ extension View {
 /// accessory. Four screens were each drawing their own version.
 struct RemoteDisclosureRow: View {
     let title: String
+    var icon: String? = nil
     var value: String? = nil
     var detail: String? = nil
     let action: () -> Void
@@ -113,11 +158,24 @@ struct RemoteDisclosureRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
+                if let icon {
+                    Image(systemName: icon)
+                        .font(.body)
+                        .foregroundStyle(BeetTheme.accentBright)
+                        .frame(width: 26, alignment: .leading)
+                        .accessibilityHidden(true)
+                }
                 Text(title).foregroundStyle(.primary)
                 Spacer(minLength: 8)
                 if let value {
                     VStack(alignment: .trailing, spacing: 1) {
-                        Text(value).foregroundStyle(.secondary).lineLimit(1)
+                        // Middle truncation: model names carry their family at
+                        // the front and the quantisation at the back, and tail
+                        // truncation throws the useful half away.
+                        Text(value)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                         if let detail {
                             Text(detail)
                                 .font(.caption)
@@ -244,7 +302,7 @@ struct RemoteBackdrop: View {
                 .frame(width: proxy.size.width, height: proxy.size.height)
                 .clipped()
                 .overlay(appearance == .light
-                    ? Color.white.opacity(0.70)
+                    ? Color.white.opacity(0.66)
                     : Color.black.opacity(0.64))
                 .overlay {
                     LinearGradient(
