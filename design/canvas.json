@@ -1,0 +1,20 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html",           "x": 0,    "y": 0,    "w": 390, "h": 844, "title": "Sessions" },
+    { "file": "Conversation.dc.html",   "x": 490,  "y": 0,    "w": 390, "h": 844 },
+    { "file": "NewSession.dc.html",     "x": 980,  "y": 0,    "w": 390, "h": 844, "title": "New session" },
+    { "file": "Bots.dc.html",           "x": 1470, "y": 0,    "w": 390, "h": 844 },
+    { "file": "Settings.dc.html",       "x": 1960, "y": 0,    "w": 390, "h": 844 },
+    { "file": "SessionsLight.dc.html",  "x": 0,    "y": 1000, "w": 390, "h": 844, "title": "Sessions — light" },
+    { "file": "Overlays.dc.html",       "x": 490,  "y": 1000, "w": 390, "h": 1120, "title": "Menus, popovers, dialogs" },
+    { "file": "ChatStates.dc.html",     "x": 980,  "y": 1000, "w": 390, "h": 1180, "title": "Chat states" },
+    { "file": "Foundations.dc.html",    "x": 1470, "y": 1000, "w": 880, "h": 1180 }
+  ],
+  "annotations": [
+    { "id": "brief", "x": 0, "y": -190, "w": 470, "text": "Vamp Assistant — iOS\n\nOne system: the platform's structure and gestures, glass surfaces over the engraving, a monochrome graphite accent, and colour reserved for failure. Every token here is lifted from the shipping source, not invented." },
+    { "id": "home", "x": 0, "y": 880, "w": 390, "text": "Sessions: everything the app can do sits in the Mac card at the top — Stream, Bots, Share, Settings — and nothing hangs below the list. The compose glyph stays in the nav bar where a new-item action belongs." },
+    { "id": "chat", "x": 490, "y": 880, "w": 390, "text": "Transcript: the prompt is in a card and the answer is not — that contrast is the speaker cue, as in Cursor and Codex. Tool steps are a ledger against a rule, a call folded into its result. One Stop, in the run bar." },
+    { "id": "overlaynote", "x": 490, "y": 2160, "w": 390, "text": "Popovers are sized to their content and anchored to what opened them; sheets are for things with a task inside. Destructive actions stay red and stay behind a confirm." }
+  ],
+  "launch": { "view": "canvas" }
+}

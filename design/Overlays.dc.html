@@ -1,0 +1,153 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #888888; } a:hover { color: #F5F2EC; }
+    .screen { position: relative; width: 390px; height: 1120px; overflow: hidden;
+      background: #151310; color: #F5F2EC; }
+    .atmos { position: absolute; inset: 0; background-image: url("atmosphere.jpg");
+      background-size: cover; background-position: center; filter: grayscale(1);
+      opacity: 0.14; pointer-events: none; }
+    .layer { position: relative; height: 100%; display: flex; flex-direction: column; }
+    .glass { background: rgba(33,30,26,0.72); -webkit-backdrop-filter: blur(24px) saturate(1.4);
+      backdrop-filter: blur(24px) saturate(1.4); border: 0.75px solid rgba(255,248,235,0.14);
+      box-shadow: 0 8px 22px rgba(0,0,0,0.42), inset 0 0.75px 0 rgba(255,248,235,0.10); border-radius: 18px; }
+    .well { background: rgba(46,42,37,0.55); border-radius: 12px; }
+    .cap { font-size: 11px; font-weight: 600; letter-spacing: 0.9px; text-transform: uppercase;
+      color: rgba(245,242,236,0.62); }
+    .t1 { font-size: 34px; font-weight: 700; letter-spacing: -0.8px; line-height: 41px; }
+    .h  { font-size: 17px; font-weight: 600; letter-spacing: -0.4px; }
+    .b  { font-size: 17px; letter-spacing: -0.4px; line-height: 25px; }
+    .sub { font-size: 15px; color: rgba(245,242,236,0.62); letter-spacing: -0.2px; }
+    .fn { font-size: 13px; color: rgba(245,242,236,0.62); }
+    .c2 { font-size: 11px; color: rgba(245,242,236,0.38); }
+    .mono { font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace; font-size: 13px; }
+    .row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 14px; }
+    .div { height: 0.75px; background: rgba(255,248,235,0.10); }
+    .stack { display: flex; flex-direction: column; }
+    .navpill { width: 34px; height: 34px; border-radius: 17px; display: flex; align-items: center;
+      justify-content: center; background: rgba(46,42,37,0.55); border: 0.75px solid rgba(255,248,235,0.14); }
+    .chip { display: flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px;
+      background: rgba(46,42,37,0.55); border: 0.75px solid rgba(255,248,235,0.14); font-size: 13px; font-weight: 500; }
+  </style>
+</helmet>
+<div class="screen" style="height:1120px">
+  <div class="atmos"></div>
+  <div class="layer" style="padding:20px 18px;gap:26px">
+
+    <div>
+      <div class="cap" style="padding:0 0 8px">Commands popover — anchored to the + </div>
+      <div style="display:flex;justify-content:flex-start">
+        <div style="position:relative">
+          <div class="glass" style="width:292px;border-radius:16px;padding:4px 0 8px;overflow:hidden">
+            <div class="cap" style="padding:10px 14px 4px;font-size:10px">Workspace</div>
+            <div style="display:flex;align-items:center;gap:11px;padding:0 14px;min-height:46px">
+      <div style="width:26px;height:26px;border-radius:8px;background:rgba(46,42,37,0.55);display:flex;align-items:center;justify-content:center;flex:none"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(245,242,236,0.62)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v10M7 20v-2M17 20V10M17 4v2"/><circle cx="7" cy="17" r="2.4"/><circle cx="17" cy="7" r="2.4"/></svg></div>
+      <div style="min-width:0">
+        <div style="font-size:15px;font-weight:500">Git diff</div>
+        <div class="c2" style="margin-top:1px">Review uncommitted changes</div>
+      </div>
+    </div><div class="div" style="margin-left:48px"></div>
+            <div style="display:flex;align-items:center;gap:11px;padding:0 14px;min-height:46px">
+      <div style="width:26px;height:26px;border-radius:8px;background:rgba(46,42,37,0.55);display:flex;align-items:center;justify-content:center;flex:none"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(245,242,236,0.62)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8.5l-7.6 7.6a3 3 0 11-4.2-4.2l8-8a4.2 4.2 0 016 6l-8.2 8.2"/></svg></div>
+      <div style="min-width:0">
+        <div style="font-size:15px;font-weight:500">@context</div>
+        <div class="c2" style="margin-top:1px">Use the current workspace and chat</div>
+      </div>
+    </div>
+            <div class="cap" style="padding:12px 14px 4px;font-size:10px">Browser control</div>
+            <div style="display:flex;align-items:center;gap:11px;padding:0 14px;min-height:46px">
+      <div style="width:26px;height:26px;border-radius:8px;background:rgba(46,42,37,0.55);display:flex;align-items:center;justify-content:center;flex:none"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(245,242,236,0.62)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><path d="M15 9l-1.6 4.4L9 15l1.6-4.4z"/></svg></div>
+      <div style="min-width:0">
+        <div style="font-size:15px;font-weight:500">Open page</div>
+        <div class="c2" style="margin-top:1px">Navigate with browser control</div>
+      </div>
+    </div><div class="div" style="margin-left:48px"></div>
+            <div style="display:flex;align-items:center;gap:11px;padding:0 14px;min-height:46px">
+      <div style="width:26px;height:26px;border-radius:8px;background:rgba(46,42,37,0.55);display:flex;align-items:center;justify-content:center;flex:none"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(245,242,236,0.62)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h7l5 5v13H6z"/><path d="M13 3v5h5"/></svg></div>
+      <div style="min-width:0">
+        <div style="font-size:15px;font-weight:500">Read page</div>
+        <div class="c2" style="margin-top:1px">Inspect the current page</div>
+      </div>
+    </div><div class="div" style="margin-left:48px"></div>
+            <div style="display:flex;align-items:center;gap:11px;padding:0 14px;min-height:46px">
+      <div style="width:26px;height:26px;border-radius:8px;background:rgba(46,42,37,0.55);display:flex;align-items:center;justify-content:center;flex:none"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(245,242,236,0.62)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6.5" width="18" height="12" rx="2.4"/><circle cx="12" cy="12.5" r="3.2"/></svg></div>
+      <div style="min-width:0">
+        <div style="font-size:15px;font-weight:500">Screenshot</div>
+        <div class="c2" style="margin-top:1px">Capture and analyze the page</div>
+      </div>
+    </div>
+          </div>
+          <div style="width:14px;height:14px;background:rgba(33,30,26,0.72);border-left:0.75px solid rgba(255,248,235,0.14);border-bottom:0.75px solid rgba(255,248,235,0.14);transform:rotate(-45deg);margin:-7px 0 0 24px"></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:8px">
+        <div style="width:32px;height:32px;border-radius:16px;background:rgba(46,42,37,0.55);border:0.75px solid rgba(255,248,235,0.14);display:flex;align-items:center;justify-content:center"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="rgba(245,242,236,0.62)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></div>
+        <div style="flex:1;height:38px;border-radius:19px;background:rgba(46,42,37,0.55);border:0.75px solid rgba(255,248,235,0.14);display:flex;align-items:center;padding:0 14px" class="sub">Message your assistant…</div>
+      </div>
+    </div>
+
+    <div>
+      <div class="cap" style="padding:0 0 8px">Session menu — long press a row</div>
+      <div class="glass" style="width:250px;border-radius:14px;padding:4px 0">
+        <div style="display:flex;align-items:center;gap:12px;padding:0 14px;min-height:44px;color:#F5F2EC">
+      <div style="flex:1;font-size:16px">Rename</div><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#F5F2EC" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L20 8l-4-4L4 16z"/></svg>
+    </div><div style="height:0.75px;background:rgba(255,248,235,0.10)"></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:0 14px;min-height:44px;color:#F5F2EC">
+      <div style="flex:1;font-size:16px">Share transcript</div><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#F5F2EC" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4"/><path d="M8 8l4-4 4 4"/><path d="M5 14v4a2 2 0 002 2h10a2 2 0 002-2v-4"/></svg>
+    </div><div style="height:0.75px;background:rgba(255,248,235,0.10)"></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:0 14px;min-height:44px;color:#D4695F">
+      <div style="flex:1;font-size:16px">Delete</div><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#D4695F" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></svg>
+    </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="cap" style="padding:0 0 8px">Model picker — sheet</div>
+      <div class="glass" style="border-radius:20px;padding:10px 0 6px">
+        <div style="width:36px;height:5px;border-radius:3px;background:rgba(255,248,235,0.10);margin:0 auto 12px"></div>
+        <div style="display:flex;align-items:center;padding:0 16px 10px">
+          <div class="h" style="flex:1">Model</div>
+          <div class="chip" style="padding:5px 12px">On this Mac</div>
+        </div>
+        <div class="div"></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:0 16px;min-height:52px">
+          <div style="flex:1"><div style="font-size:15px;font-weight:500">Qwen3.5 9B MLX</div><div class="c2" style="margin-top:1px">9B · 4-bit · local</div></div>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#888888" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+        </div>
+        <div class="div" style="margin-left:16px"></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:0 16px;min-height:52px">
+          <div style="flex:1"><div style="font-size:15px;font-weight:500">GPT-5</div><div class="c2" style="margin-top:1px">API · reasoning</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="cap" style="padding:0 0 8px">Destructive confirm — alert</div>
+      <div style="display:flex;justify-content:center">
+        <div class="glass" style="width:270px;border-radius:14px;text-align:center;padding:18px 16px 0">
+          <div class="h">Delete this chat?</div>
+          <div class="fn" style="margin-top:6px;line-height:17px">“Port the diff viewer” is removed from your Mac. This cannot be undone.</div>
+          <div style="height:0.75px;background:rgba(255,248,235,0.10);margin:16px -16px 0"></div>
+          <div style="display:flex;min-height:44px;align-items:center">
+            <div style="flex:1;font-size:17px;color:#D4695F;font-weight:600">Delete</div>
+            <div style="width:0.75px;align-self:stretch;background:rgba(255,248,235,0.10)"></div>
+            <div style="flex:1;font-size:17px;color:#888888">Cancel</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

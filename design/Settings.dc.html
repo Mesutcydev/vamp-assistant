@@ -1,0 +1,94 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #888888; } a:hover { color: #F5F2EC; }
+    .screen { position: relative; width: 390px; height: 844px; overflow: hidden;
+      background: #151310; color: #F5F2EC; }
+    .atmos { position: absolute; inset: 0; background-image: url("atmosphere.jpg");
+      background-size: cover; background-position: center; filter: grayscale(1);
+      opacity: 0.14; pointer-events: none; }
+    .layer { position: relative; height: 100%; display: flex; flex-direction: column; }
+    .glass { background: rgba(33,30,26,0.72); -webkit-backdrop-filter: blur(24px) saturate(1.4);
+      backdrop-filter: blur(24px) saturate(1.4); border: 0.75px solid rgba(255,248,235,0.14);
+      box-shadow: 0 8px 22px rgba(0,0,0,0.42), inset 0 0.75px 0 rgba(255,248,235,0.10); border-radius: 18px; }
+    .well { background: rgba(46,42,37,0.55); border-radius: 12px; }
+    .cap { font-size: 11px; font-weight: 600; letter-spacing: 0.9px; text-transform: uppercase;
+      color: rgba(245,242,236,0.62); }
+    .t1 { font-size: 34px; font-weight: 700; letter-spacing: -0.8px; line-height: 41px; }
+    .h  { font-size: 17px; font-weight: 600; letter-spacing: -0.4px; }
+    .b  { font-size: 17px; letter-spacing: -0.4px; line-height: 25px; }
+    .sub { font-size: 15px; color: rgba(245,242,236,0.62); letter-spacing: -0.2px; }
+    .fn { font-size: 13px; color: rgba(245,242,236,0.62); }
+    .c2 { font-size: 11px; color: rgba(245,242,236,0.38); }
+    .mono { font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace; font-size: 13px; }
+    .row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 14px; }
+    .div { height: 0.75px; background: rgba(255,248,235,0.10); }
+    .stack { display: flex; flex-direction: column; }
+    .navpill { width: 34px; height: 34px; border-radius: 17px; display: flex; align-items: center;
+      justify-content: center; background: rgba(46,42,37,0.55); border: 0.75px solid rgba(255,248,235,0.14); }
+    .chip { display: flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px;
+      background: rgba(46,42,37,0.55); border: 0.75px solid rgba(255,248,235,0.14); font-size: 13px; font-weight: 500; }
+  </style>
+</helmet>
+<div class="screen">
+  <div class="atmos"></div>
+  <div class="layer" style="padding:0 18px">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0 16px">
+      <div class="t1">Settings</div>
+      <div class="chip">Done</div>
+    </div>
+
+    <div class="cap" style="padding-bottom:8px">Appearance</div>
+    <div class="glass" style="padding:10px 12px;margin-bottom:20px">
+      <div style="display:flex;gap:2px;padding:2px;border-radius:9px;background:rgba(46,42,37,0.55)">
+        <div style="flex:1;text-align:center;padding:7px 0;font-size:13px;font-weight:500;color:rgba(245,242,236,0.62)">System</div>
+        <div style="flex:1;text-align:center;padding:7px 0;font-size:13px;font-weight:500;color:rgba(245,242,236,0.62)">Light</div>
+        <div style="flex:1;text-align:center;padding:7px 0;font-size:13px;font-weight:600;border-radius:7px;background:#211E1A;box-shadow:0 1px 3px rgba(0,0,0,0.42)">Dark</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;padding:14px 2px 4px">
+        <div style="width:26px;height:26px;border-radius:13px;background:#686868;box-shadow:0 0 0 2px #151310,0 0 0 3.5px #888888;flex:none"></div><div style="width:26px;height:26px;border-radius:13px;background:#445677;flex:none"></div><div style="width:26px;height:26px;border-radius:13px;background:#B05E3C;flex:none"></div><div style="width:26px;height:26px;border-radius:13px;background:#487A5C;flex:none"></div><div style="width:26px;height:26px;border-radius:13px;background:#B03055;flex:none"></div><div style="width:26px;height:26px;border-radius:13px;background:#C13570;flex:none"></div><div style="width:26px;height:26px;border-radius:13px;background:#3F7BC4;flex:none"></div>
+      </div>
+    </div>
+
+    <div class="cap" style="padding-bottom:8px">Backdrop</div>
+    <div class="glass">
+      <div class="row">
+        <div style="flex:1;font-size:15px;font-weight:500">Show the engraving</div>
+        <div style="width:51px;height:31px;border-radius:16px;background:#888888;display:flex;align-items:center;justify-content:flex-end;padding:2px;flex:none">
+          <div style="width:27px;height:27px;border-radius:14px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3)"></div>
+        </div>
+      </div>
+    </div>
+    <div class="fn" style="margin:8px 2px 20px">Off replaces it with a plain warm ground on every screen.</div>
+
+    <div class="cap" style="padding-bottom:8px">Mac</div>
+    <div class="glass">
+      <div class="row">
+        <div style="width:26px;height:26px;border-radius:8px;background:rgba(46,42,37,0.55);display:flex;align-items:center;justify-content:center;flex:none"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#888888" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/></svg></div>
+        <div style="font-size:15px;font-weight:500">Computer</div>
+        <div style="flex:1"></div>
+        <div style="text-align:right"><div class="sub">vamp-mini</div></div>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(245,242,236,0.38)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+      </div><div class="div" style="margin-left:14px"></div>
+      <div class="row">
+        <div style="width:26px;height:26px;border-radius:8px;background:rgba(46,42,37,0.55);display:flex;align-items:center;justify-content:center;flex:none"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#888888" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5-6 4 12L16 12h5"/></svg></div>
+        <div style="font-size:15px;font-weight:500">Diagnostics</div>
+        <div style="flex:1"></div>
+        <div style="text-align:right"><div class="sub"></div></div>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(245,242,236,0.38)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
