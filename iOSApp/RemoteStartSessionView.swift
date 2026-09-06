@@ -105,6 +105,7 @@ struct StartSessionSheet: View {
                 moreSection
             }
             .scrollContentBackground(.hidden)
+            .contentMargins(.bottom, 24, for: .scrollContent)
             .scrollDismissesKeyboard(.interactively)
             .background { RemoteBackdrop() }
             .navigationTitle("New session")
@@ -286,17 +287,20 @@ struct StartSessionSheet: View {
                 HStack(spacing: 8) {
                     if isStarting { ProgressView().tint(.white) }
                     Text(isStarting ? "Starting…" : "Start session")
-                        .fontWeight(.semibold)
+                        .font(.headline)
                 }
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, minHeight: 50)
+                // Drawn rather than left to .borderedProminent: the system's
+                // disabled fill is white on a light sheet and near-black on a
+                // dark one, so the screen's primary action disappeared in both.
+                .background(
+                    canStart ? AnyShapeStyle(BeetTheme.accent)
+                             : AnyShapeStyle(Color(uiColor: .tertiarySystemFill)),
+                    in: Capsule())
+                .foregroundStyle(canStart ? AnyShapeStyle(Color.white)
+                                          : AnyShapeStyle(HierarchicalShapeStyle.secondary))
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .tint(BeetTheme.accent)
-            // The system's disabled fill is near-black over this backdrop and
-            // reads as a broken control. Keeping the accent and dimming it
-            // says "not yet" instead.
-            .opacity(canStart ? 1 : 0.45)
+            .buttonStyle(.plain)
             .disabled(!canStart)
             .accessibilityHint(blockedReason ?? "")
         }
