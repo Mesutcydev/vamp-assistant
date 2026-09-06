@@ -1,0 +1,19 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html",          "x": 0,    "y": 0,    "w": 390,  "h": 844,  "title": "Sessions" },
+    { "file": "Conversation.dc.html",  "x": 490,  "y": 0,    "w": 390,  "h": 844 },
+    { "file": "NewSession.dc.html",    "x": 980,  "y": 0,    "w": 390,  "h": 844, "title": "New session" },
+    { "file": "Bots.dc.html",          "x": 1470, "y": 0,    "w": 390,  "h": 844 },
+    { "file": "SessionsNight.dc.html", "x": 1960, "y": 0,    "w": 390,  "h": 844, "title": "Sessions — night" },
+    { "file": "Mac.dc.html",           "x": 0,    "y": 1000, "w": 1280, "h": 820, "title": "Mac" },
+    { "file": "Foundations.dc.html",   "x": 1400, "y": 1000, "w": 980,  "h": 1180 }
+  ],
+  "annotations": [
+    { "id": "brief", "x": 0, "y": -230, "w": 520, "text": "Vamp Assistant — paper, ink, one orange\n\nA second direction, drawn from scratch: an ivory ground instead of grey, a serif to name things and a sans to operate them, hairlines instead of boxes, and a single accent spent once per screen. Glass appears only where something genuinely floats — the bar, a sheet, a popover.\n\nEvery pair is contrast-checked: ink 16.4:1 on paper, the accent 4.5:1 and 4.9:1 under white; at night 16.2:1 and 8.0:1." },
+    { "id": "home", "x": 0, "y": 880, "w": 390, "text": "Sessions: the Mac's four actions between two rules, then the list. No cards, no fills, no chrome below." },
+    { "id": "chat", "x": 490, "y": 880, "w": 390, "text": "The prompt is the only thing in a container; the answer is on the page. Tool steps hang off a single rule. The one orange on screen is the send button and the caret." },
+    { "id": "newsession", "x": 980, "y": 880, "w": 390, "text": "The question is set in the serif, the four settings are cells between rules, and the first message is typed in the same composer as every message after it." },
+    { "id": "macnote", "x": 0, "y": 1850, "w": 520, "text": "The Mac is the same system at desk scale: a sidebar of hairline rows, one reading column, the plan as a list, the approval as an outline, and the composer with ⌘↩ where the phone shows a send button." }
+  ],
+  "launch": { "view": "canvas" }
+}

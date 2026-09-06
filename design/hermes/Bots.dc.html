@@ -1,0 +1,116 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #C24A16; } a:hover { color: #1A1714; }
+    .screen { position: relative; width: 390px; height: 844px; overflow: hidden;
+      background: #F8F5EF; color: #1A1714; }
+    .layer { position: relative; height: 100%; display: flex; flex-direction: column; }
+    .rule { height: 1px; background: rgba(26,23,20,0.14); }
+    .rule-strong { height: 1px; background: rgba(26,23,20,0.30); }
+    .t1 { font-family: 'Iowan Old Style', 'New York', Georgia, 'Times New Roman', serif; font-size: 34px; line-height: 40px; letter-spacing: -0.4px; }
+    .t2 { font-family: 'Iowan Old Style', 'New York', Georgia, 'Times New Roman', serif; font-size: 23px; line-height: 29px; letter-spacing: -0.2px; }
+    .label { font-size: 10px; font-weight: 600; letter-spacing: 1.4px;
+      text-transform: uppercase; color: rgba(26,23,20,0.45); }
+    .body { font-size: 16px; line-height: 24px; letter-spacing: -0.2px; }
+    .sub { font-size: 15px; color: rgba(26,23,20,0.62); letter-spacing: -0.1px; }
+    .fn { font-size: 13px; color: rgba(26,23,20,0.62); }
+    .c2 { font-size: 11px; color: rgba(26,23,20,0.45); }
+    .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12.5px; }
+    .num { font-family: 'Iowan Old Style', 'New York', Georgia, 'Times New Roman', serif; font-size: 13px; color: rgba(26,23,20,0.45);
+      font-variant-numeric: tabular-nums; }
+    .glass { background: rgba(255,255,255,0.66); -webkit-backdrop-filter: blur(20px) saturate(1.3);
+      backdrop-filter: blur(20px) saturate(1.3); }
+    .row { display: flex; align-items: center; gap: 14px; min-height: 60px; }
+    .dot { width: 5px; height: 5px; border-radius: 3px; background: #C24A16; }
+  </style>
+</helmet>
+<div class="screen">
+  <div class="layer" style="padding:0 24px">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;padding:18px 0 4px">
+      <div class="t1">Bots</div>
+      <div class="fn" style="color:#C24A16">Done</div>
+    </div>
+    <div class="fn" style="padding-bottom:22px">Five specialists, each with its own brief.</div>
+
+    <div class="label" style="padding-bottom:10px">Running</div>
+    <div class="rule-strong"></div>
+    <div class="row" style="min-height:64px">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#C24A16" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 6.5l4-4 4 4-4 4z"/><path d="M11.3 8.7L4 16v4h4l7.3-7.3"/></svg>
+      <div style="flex:1">
+        <div class="body">Builder</div>
+        <div class="fn" style="margin-top:2px;color:#C24A16">Editing · 2 files · 38s</div>
+      </div>
+      <div class="fn" style="color:#1A1714">Stop</div>
+    </div>
+    <div class="rule-strong"></div>
+
+    <div class="label" style="padding:26px 0 10px">Team</div>
+    <div class="rule"></div>
+    <div class="row" style="min-height:64px">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1A1714" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6a2 2 0 012-2h12a2 2 0 012 2v7a2 2 0 01-2 2H9l-5 4z"/></svg>
+            <div style="flex:1;min-width:0">
+              <div class="body">Assistant</div>
+              <div class="fn" style="margin-top:2px">Balanced, no brief</div>
+            </div>
+            <div class="c2" style="color:rgba(26,23,20,0.45)">Chat only</div>
+          </div>
+          <div class="rule" style="margin-left:34px"></div>
+    <div class="row" style="min-height:64px">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#C24A16" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 6.5l4-4 4 4-4 4z"/><path d="M11.3 8.7L4 16v4h4l7.3-7.3"/></svg>
+            <div style="flex:1;min-width:0">
+              <div class="body">Builder</div>
+              <div class="fn" style="margin-top:2px">Builds and fixes</div>
+            </div>
+            <div class="c2" style="color:#C24A16">Editing</div>
+          </div>
+          <div class="rule" style="margin-left:34px"></div>
+    <div class="row" style="min-height:64px">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1A1714" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="5.5"/><path d="M14.6 14.6L20 20"/></svg>
+            <div style="flex:1;min-width:0">
+              <div class="body">Reviewer</div>
+              <div class="fn" style="margin-top:2px">Diffs and risks</div>
+            </div>
+            <div class="c2" style="color:rgba(26,23,20,0.45)">Idle</div>
+          </div>
+          <div class="rule" style="margin-left:34px"></div>
+    <div class="row" style="min-height:64px">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1A1714" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M15.2 8.8l-1.9 4.5-4.5 1.9 1.9-4.5z"/></svg>
+            <div style="flex:1;min-width:0">
+              <div class="body">Navigator</div>
+              <div class="fn" style="margin-top:2px">Drives the browser</div>
+            </div>
+            <div class="c2" style="color:rgba(26,23,20,0.45)">Idle</div>
+          </div>
+          <div class="rule" style="margin-left:34px"></div>
+    <div class="row" style="min-height:64px">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1A1714" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A2.5 2.5 0 016.5 3H20v15H6.5A2.5 2.5 0 004 20.5z"/><path d="M4 5.5v15"/></svg>
+            <div style="flex:1;min-width:0">
+              <div class="body">Researcher</div>
+              <div class="fn" style="margin-top:2px">Sources and synthesis</div>
+            </div>
+            <div class="c2" style="color:rgba(26,23,20,0.45)">Idle</div>
+          </div>
+          <div class="rule" style="margin-left:34px"></div>
+
+    <div class="label" style="padding:26px 0 10px">Together</div>
+    <div class="rule"></div>
+    <div class="row" style="min-height:60px">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1A1714" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="3"/><path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><path d="M16 7.5a2.6 2.6 0 010 5"/><path d="M17.5 19c0-2-.7-3.6-1.8-4.6 2.7.2 4.8 2.1 4.8 4.6"/></svg>
+      <div style="flex:1"><div class="body">Delegate one outcome</div></div>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(26,23,20,0.45)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+    </div>
+    <div class="rule"></div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

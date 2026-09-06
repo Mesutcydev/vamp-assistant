@@ -1,0 +1,148 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #C24A16; } a:hover { color: #1A1714; }
+    .screen { position: relative; width: 980px; height: 1180px; overflow: hidden;
+      background: #F8F5EF; color: #1A1714; }
+    .layer { position: relative; height: 100%; display: flex; flex-direction: column; }
+    .rule { height: 1px; background: rgba(26,23,20,0.14); }
+    .rule-strong { height: 1px; background: rgba(26,23,20,0.30); }
+    .t1 { font-family: 'Iowan Old Style', 'New York', Georgia, 'Times New Roman', serif; font-size: 34px; line-height: 40px; letter-spacing: -0.4px; }
+    .t2 { font-family: 'Iowan Old Style', 'New York', Georgia, 'Times New Roman', serif; font-size: 23px; line-height: 29px; letter-spacing: -0.2px; }
+    .label { font-size: 10px; font-weight: 600; letter-spacing: 1.4px;
+      text-transform: uppercase; color: rgba(26,23,20,0.45); }
+    .body { font-size: 16px; line-height: 24px; letter-spacing: -0.2px; }
+    .sub { font-size: 15px; color: rgba(26,23,20,0.62); letter-spacing: -0.1px; }
+    .fn { font-size: 13px; color: rgba(26,23,20,0.62); }
+    .c2 { font-size: 11px; color: rgba(26,23,20,0.45); }
+    .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12.5px; }
+    .num { font-family: 'Iowan Old Style', 'New York', Georgia, 'Times New Roman', serif; font-size: 13px; color: rgba(26,23,20,0.45);
+      font-variant-numeric: tabular-nums; }
+    .glass { background: rgba(255,255,255,0.66); -webkit-backdrop-filter: blur(20px) saturate(1.3);
+      backdrop-filter: blur(20px) saturate(1.3); }
+    .row { display: flex; align-items: center; gap: 14px; min-height: 60px; }
+    .dot { width: 5px; height: 5px; border-radius: 3px; background: #C24A16; }
+  </style>
+</helmet>
+<div class="screen" style="width:980px;height:1180px">
+  <div class="layer" style="padding:34px 40px;gap:28px;overflow:hidden">
+    <div>
+      <div class="t1">Paper, ink, one orange</div>
+      <div class="sub" style="margin-top:8px;max-width:640px">Restraint is the system. Two grounds, three ink tiers, one rule weight, one accent — spent once per screen, never twice. Nothing is boxed that does not have to be.</div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(2, minmax(0,1fr));gap:30px">
+      <div>
+        <div class="label" style="padding-bottom:14px">Paper</div>
+        <div class="rule-strong"></div>
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;padding-top:16px">
+          <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:38px;height:38px;border-radius:6px;background:#F8F5EF;border:1px solid rgba(26,23,20,0.14)"></div>
+          <div><div style="font-size:13px;font-weight:600">ground</div>
+          <div class="mono" style="color:rgba(26,23,20,0.45);margin-top:2px">#F8F5EF</div></div>
+        </div>
+          <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:38px;height:38px;border-radius:6px;background:#FFFFFF;border:1px solid rgba(26,23,20,0.14)"></div>
+          <div><div style="font-size:13px;font-weight:600">raised</div>
+          <div class="mono" style="color:rgba(26,23,20,0.45);margin-top:2px">#FFFFFF · bubbles only</div></div>
+        </div>
+          <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:38px;height:38px;border-radius:6px;background:#1A1714;border:1px solid rgba(26,23,20,0.14)"></div>
+          <div><div style="font-size:13px;font-weight:600">ink</div>
+          <div class="mono" style="color:rgba(26,23,20,0.45);margin-top:2px">#1A1714 · 16.4:1</div></div>
+        </div>
+          <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:38px;height:38px;border-radius:6px;background:#C24A16;border:1px solid rgba(26,23,20,0.14)"></div>
+          <div><div style="font-size:13px;font-weight:600">accent</div>
+          <div class="mono" style="color:rgba(26,23,20,0.45);margin-top:2px">#C24A16 · 4.5:1</div></div>
+        </div>
+        </div>
+      </div>
+      <div>
+        <div class="label" style="padding-bottom:14px">Night</div>
+        <div class="rule-strong"></div>
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;padding-top:16px">
+          <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:38px;height:38px;border-radius:6px;background:#131211;border:1px solid rgba(26,23,20,0.14)"></div>
+          <div><div style="font-size:13px;font-weight:600">ground</div>
+          <div class="mono" style="color:rgba(26,23,20,0.45);margin-top:2px">#131211</div></div>
+        </div>
+          <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:38px;height:38px;border-radius:6px;background:#1B1917;border:1px solid rgba(26,23,20,0.14)"></div>
+          <div><div style="font-size:13px;font-weight:600">raised</div>
+          <div class="mono" style="color:rgba(26,23,20,0.45);margin-top:2px">#1B1917</div></div>
+        </div>
+          <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:38px;height:38px;border-radius:6px;background:#F2EEE7;border:1px solid rgba(26,23,20,0.14)"></div>
+          <div><div style="font-size:13px;font-weight:600">ink</div>
+          <div class="mono" style="color:rgba(26,23,20,0.45);margin-top:2px">#F2EEE7 · 16.2:1</div></div>
+        </div>
+          <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:38px;height:38px;border-radius:6px;background:#FF8A3D;border:1px solid rgba(26,23,20,0.14)"></div>
+          <div><div style="font-size:13px;font-weight:600">accent</div>
+          <div class="mono" style="color:rgba(26,23,20,0.45);margin-top:2px">#FF8A3D · 8.0:1</div></div>
+        </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="label" style="padding-bottom:10px">Type — a serif to name things, a sans to operate them</div>
+      <div class="rule-strong"></div>
+      <div style="display:flex;align-items:baseline;gap:16px;padding:9px 0;border-bottom:1px solid rgba(26,23,20,0.14)">
+          <div class="mono" style="width:150px;flex:none;color:rgba(26,23,20,0.45)">serif 34/40</div>
+          <div class="t1">Sessions</div>
+        </div>
+      <div style="display:flex;align-items:baseline;gap:16px;padding:9px 0;border-bottom:1px solid rgba(26,23,20,0.14)">
+          <div class="mono" style="width:150px;flex:none;color:rgba(26,23,20,0.45)">serif 23/29</div>
+          <div class="t2">How hair tests work</div>
+        </div>
+      <div style="display:flex;align-items:baseline;gap:16px;padding:9px 0;border-bottom:1px solid rgba(26,23,20,0.14)">
+          <div class="mono" style="width:150px;flex:none;color:rgba(26,23,20,0.45)">sans 16/24</div>
+          <div class="body">A hair test looks for metabolites in the shaft.</div>
+        </div>
+      <div style="display:flex;align-items:baseline;gap:16px;padding:9px 0;border-bottom:1px solid rgba(26,23,20,0.14)">
+          <div class="mono" style="width:150px;flex:none;color:rgba(26,23,20,0.45)">sans 15</div>
+          <div class="sub">Editing · vamp-assistant</div>
+        </div>
+      <div style="display:flex;align-items:baseline;gap:16px;padding:9px 0;border-bottom:1px solid rgba(26,23,20,0.14)">
+          <div class="mono" style="width:150px;flex:none;color:rgba(26,23,20,0.45)">sans 10 · 1.4 tracking</div>
+          <div class="label">Today</div>
+        </div>
+      <div style="display:flex;align-items:baseline;gap:16px;padding:9px 0;border-bottom:1px solid rgba(26,23,20,0.14)">
+          <div class="mono" style="width:150px;flex:none;color:rgba(26,23,20,0.45)">serif tabular</div>
+          <div class="num">6.39</div>
+        </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:30px">
+      <div>
+        <div class="label" style="padding-bottom:10px">Rules, not boxes</div>
+        <div class="rule-strong"></div>
+        <div class="sub" style="padding-top:12px;line-height:22px">One hairline at 14% divides rows; the same line at 30% opens and closes a section. A fill appears only where you touch — the send button, a bubble, a chip — and glass only where something floats: the bar, a sheet, a popover.</div>
+      </div>
+      <div>
+        <div class="label" style="padding-bottom:10px">The accent, spent once</div>
+        <div class="rule-strong"></div>
+        <div style="display:flex;align-items:center;gap:18px;padding-top:16px">
+          <div style="width:38px;height:38px;border-radius:20px;background:#C24A16;display:flex;align-items:center;justify-content:center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg></div>
+          <div style="display:flex;align-items:center;gap:8px"><div class="dot"></div><div class="fn">running</div></div>
+          <div class="fn" style="color:#C24A16">Cancel</div>
+        </div>
+        <div class="sub" style="padding-top:14px;line-height:22px">Send, the live dot, one text action. Everything else is ink.</div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
