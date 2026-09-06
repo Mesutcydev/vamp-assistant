@@ -18,6 +18,11 @@ enum RemoteControlSourceMode: Identifiable {
     }
 }
 
+private enum StreamSheet: String, Identifiable {
+    case share, terminal
+    var id: String { rawValue }
+}
+
 enum RemoteViewportStability {
     static func shouldAccept(
         _ size: CGSize,
@@ -592,11 +597,18 @@ struct RemoteControlView: View {
         .ignoresSafeArea()
         .statusBarHidden(hideChrome)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: showKeyboard)
-        .sheet(isPresented: $showShare) {
-            ActivityShareSheet(items: shareItems)
-        }
-        .sheet(isPresented: $showTerminal) {
-            RemoteTerminalView(store: store)
+        // One cover: two `sheet(isPresented:)` on the same view means SwiftUI
+        // presents whichever modifier came last, so Share did nothing here.
+        .sheet(item: Binding(
+            get: { showShare ? StreamSheet.share : (showTerminal ? StreamSheet.terminal : nil) },
+            set: { value in
+                showShare = value == .share
+                showTerminal = value == .terminal
+            })) { which in
+            switch which {
+            case .share: ActivityShareSheet(items: shareItems)
+            case .terminal: RemoteTerminalView(store: store)
+            }
         }
         .task {
             configureDecoder()

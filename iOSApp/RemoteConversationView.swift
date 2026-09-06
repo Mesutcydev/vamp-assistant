@@ -13,9 +13,15 @@ struct ConversationView: View {
     let sessionID: UUID
     @Environment(\.remoteAppearance) private var appearance
     private var draft: String { store[draftFor: sessionID] }
-    @State private var showSharing = false
-    @State private var showComputers = false
-    @State private var showModelPicker = false
+    /// One cover for the three sheets this screen presents: SwiftUI honours a
+    /// single `sheet(isPresented:)` per view, so stacking three meant only the
+    /// last modifier ever opened.
+    @State private var sheet: ConversationSheet?
+
+    enum ConversationSheet: String, Identifiable {
+        case model, sharing, computers
+        var id: String { rawValue }
+    }
     @State private var pickerSource = "local"
     @State private var selectedModelID = ""
     @State private var dismissedErrorMessage: String?
@@ -95,6 +101,17 @@ struct ConversationView: View {
                 .accessibilityAddTraits(.isHeader)
             }
             ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    pickerSource = store.startModels.first { $0.id == selectedModelID }?.source ?? "local"
+                    sheet = .model
+                } label: {
+                    Image(systemName: "cpu")
+                }
+                .disabled(detail?.isRunning == true || store.startModels.isEmpty)
+                .accessibilityLabel("Model, \(selectedModelName)")
+                .accessibilityHint("Choose the model for this chat")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Toggle("Auto mode", isOn: Binding(get: { store.autoMode }, set: { value in
                         Task { await store.setAccessMode(autoMode: value) }
@@ -105,12 +122,12 @@ struct ConversationView: View {
                     Divider()
                     Button("Model: \(selectedModelName)", systemImage: "cpu") {
                         pickerSource = store.startModels.first { $0.id == selectedModelID }?.source ?? "local"
-                        showModelPicker = true
+                        sheet = .model
                     }
                     .disabled(detail?.isRunning == true || store.startModels.isEmpty)
                     Divider()
-                    Button("Share clipboard or files", systemImage: "square.and.arrow.up") { showSharing = true }
-                    Button("Switch computer", systemImage: "desktopcomputer.and.macbook") { showComputers = true }
+                    Button("Share clipboard or files", systemImage: "square.and.arrow.up") { sheet = .sharing }
+                    Button("Switch computer", systemImage: "desktopcomputer.and.macbook") { sheet = .computers }
                 } label: {
                     Image(systemName: store.fullAccess ? "lock.open.fill" : "ellipsis.circle")
                 }
@@ -130,15 +147,20 @@ struct ConversationView: View {
             guard !old.isEmpty, old != new else { return }
             dismissedErrorMessage = store.selectedSession?.error?.message ?? dismissedErrorMessage
         }
-        .sheet(isPresented: $showSharing) { RemoteShareSheet(store: store) }
-        .sheet(isPresented: $showComputers) { ComputerSwitcherSheet(store: store) }
-        .sheet(isPresented: $showModelPicker) {
-            RemoteModelPickerSheet(
-                models: store.startModels,
-                source: $pickerSource,
-                selectedModelID: $selectedModelID,
-                onRefresh: { await store.loadStartModels() },
-                isConnected: store.isConnected)
+        .sheet(item: $sheet) { which in
+            switch which {
+            case .model:
+                RemoteModelPickerSheet(
+                    models: store.startModels,
+                    source: $pickerSource,
+                    selectedModelID: $selectedModelID,
+                    onRefresh: { await store.loadStartModels() },
+                    isConnected: store.isConnected)
+            case .sharing:
+                RemoteShareSheet(store: store)
+            case .computers:
+                ComputerSwitcherSheet(store: store)
+            }
         }
     }
 

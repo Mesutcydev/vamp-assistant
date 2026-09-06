@@ -30,10 +30,15 @@ struct StartSessionSheet: View {
     @State private var selectedBotComputerID: UUID?
     @State private var isStarting = false
     @State private var isLoading = true
-    @State private var showModelPicker = false
-    @State private var showWorkspacePicker = false
-    @State private var showBotPicker = false
-    @State private var showAdvanced = false
+    /// SwiftUI honours ONE `sheet(isPresented:)` per view: with four stacked
+    /// here, only the last modifier ever presented, so tapping Model, Works in
+    /// or Bot did nothing. One `sheet(item:)` over an enum instead.
+    @State private var sheet: StartSheet?
+
+    enum StartSheet: String, Identifiable {
+        case model, workspace, bot, advanced
+        var id: String { rawValue }
+    }
 
     // MARK: Derived state
 
@@ -114,38 +119,38 @@ struct StartSessionSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
             .safeAreaInset(edge: .bottom) { startBar }
-            .sheet(isPresented: $showModelPicker) {
-                RemoteModelPickerSheet(
-                    models: store.startModels,
-                    source: $selectedSource,
-                    selectedModelID: $selectedModelID,
-                    onSelect: { model in
-                        selectedReasoningEffort = model.defaultReasoningEffort
-                        preferences.remember(model: model)
-                    },
-                    onRefresh: { await store.loadStartModels() },
-                    isConnected: store.isConnected)
-                    .environment(\.remoteAppearance, appearance)
-            }
-            .sheet(isPresented: $showWorkspacePicker) {
-                RemoteWorkspacePickerSheet(
-                    store: store,
-                    selectedPath: $selectedWorkspacePath,
-                    attachedComputerName: attachedComputer.map(RemoteBotComputerNaming.displayName))
-                    .environment(\.remoteAppearance, appearance)
-            }
-            .sheet(isPresented: $showBotPicker) {
-                RemoteBotPickerSheet(selectedBotID: $selectedBotID)
-                    .environment(\.remoteAppearance, appearance)
-            }
-            .sheet(isPresented: $showAdvanced) {
-                RemoteStartAdvancedSheet(
-                    store: store,
-                    botComputers: $botComputers,
-                    selectedBotComputerID: $selectedBotComputerID,
-                    botProfile: botProfile,
-                    reload: loadBotComputers)
-                    .environment(\.remoteAppearance, appearance)
+            .sheet(item: $sheet) { which in
+                switch which {
+                case .model:
+                    RemoteModelPickerSheet(
+                        models: store.startModels,
+                        source: $selectedSource,
+                        selectedModelID: $selectedModelID,
+                        onSelect: { model in
+                            selectedReasoningEffort = model.defaultReasoningEffort
+                            preferences.remember(model: model)
+                        },
+                        onRefresh: { await store.loadStartModels() },
+                        isConnected: store.isConnected)
+                        .environment(\.remoteAppearance, appearance)
+                case .workspace:
+                    RemoteWorkspacePickerSheet(
+                        store: store,
+                        selectedPath: $selectedWorkspacePath,
+                        attachedComputerName: attachedComputer.map(RemoteBotComputerNaming.displayName))
+                        .environment(\.remoteAppearance, appearance)
+                case .bot:
+                    RemoteBotPickerSheet(selectedBotID: $selectedBotID)
+                        .environment(\.remoteAppearance, appearance)
+                case .advanced:
+                    RemoteStartAdvancedSheet(
+                        store: store,
+                        botComputers: $botComputers,
+                        selectedBotComputerID: $selectedBotComputerID,
+                        botProfile: botProfile,
+                        reload: loadBotComputers)
+                        .environment(\.remoteAppearance, appearance)
+                }
             }
             .task { await load() }
             .onChange(of: selectedWorkspacePath) { _, path in
@@ -218,15 +223,15 @@ struct StartSessionSheet: View {
                 RemoteSettingChip(
                     title: locationValue,
                     icon: isChatOnly ? "bubble.left.and.bubble.right" : "folder") {
-                        showWorkspacePicker = true
+                        sheet = .workspace
                     }
                 RemoteSettingChip(title: botProfile.name, icon: botProfile.symbol) {
-                    showBotPicker = true
+                    sheet = .bot
                 }
                 RemoteSettingChip(
                     title: selectedModel?.name ?? (isLoading ? "Loading…" : "Choose a model"),
                     icon: "cpu") {
-                        showModelPicker = true
+                        sheet = .model
                     }
                 if let model = selectedModel, let efforts = model.reasoningEfforts, !efforts.isEmpty {
                     Menu {
@@ -243,7 +248,7 @@ struct StartSessionSheet: View {
                     }
                 }
                 RemoteSettingChip(title: "Sandboxes & keys", icon: "shippingbox") {
-                    showAdvanced = true
+                    sheet = .advanced
                 }
             }
             .padding(.vertical, 2)

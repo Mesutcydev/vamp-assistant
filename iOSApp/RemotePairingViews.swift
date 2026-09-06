@@ -2,6 +2,11 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+private enum PairingSheet: String, Identifiable {
+    case scanner, computers, diagnostics, pairing
+    var id: String { rawValue }
+}
+
 struct PairingView: View {
     let store: RemoteStore
     @State private var address = ""
@@ -54,13 +59,24 @@ struct PairingView: View {
             .toolbarBackground(.hidden, for: .navigationBar)
             .alert(store.errorTitle, isPresented: errorBinding) { Button("OK") { store.errorMessage = nil } }
                 message: { Text(store.errorMessage ?? "Unknown error") }
-            .sheet(isPresented: $showScanner) {
-                QRScannerSheet(onScan: { value in
-                    address = value; showScanner = false
-                    Task { await store.connect(address: value, code: "") }
-                }, onCancel: { showScanner = false })
+            // Stacked covers present only the last one, so the scanner never
+            // opened once the switcher was added below it.
+            .sheet(item: Binding(
+                get: { showScanner ? PairingSheet.scanner : (showComputers ? PairingSheet.computers : nil) },
+                set: { value in
+                    showScanner = value == .scanner
+                    showComputers = value == .computers
+                })) { which in
+                switch which {
+                case .scanner:
+                    QRScannerSheet(onScan: { value in
+                        address = value; showScanner = false
+                        Task { await store.connect(address: value, code: "") }
+                    }, onCancel: { showScanner = false })
+                case .computers:
+                    ComputerSwitcherSheet(store: store)
+                }
             }
-            .sheet(isPresented: $showComputers) { ComputerSwitcherSheet(store: store) }
             .keyboardDismissToolbar()
             .scrollDismissesKeyboard(.interactively)
             .onAppear {
@@ -342,8 +358,18 @@ struct ComputerSwitcherSheet: View {
                 } message: { computer in
                     Text("“\(computer.name)” is unpaired from this device. You will need its pairing code to connect again.")
                 }
-            .sheet(isPresented: $showDiagnostics) { RemoteDiagnosticsView(store: store) }
-            .sheet(isPresented: $showPairing) { PairAnotherMacSheet(store: store) }
+            .sheet(item: Binding(
+                get: { showDiagnostics ? PairingSheet.diagnostics : (showPairing ? PairingSheet.pairing : nil) },
+                set: { value in
+                    showDiagnostics = value == .diagnostics
+                    showPairing = value == .pairing
+                })) { which in
+                switch which {
+                case .diagnostics: RemoteDiagnosticsView(store: store)
+                case .pairing: PairAnotherMacSheet(store: store)
+                default: EmptyView()
+                }
+            }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)

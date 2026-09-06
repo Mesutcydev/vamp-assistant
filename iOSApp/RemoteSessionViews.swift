@@ -41,16 +41,19 @@ struct SessionListView: View {
     let store: RemoteStore
     let onOpen: (UUID) -> Void
     @State private var search = ""
-    @State private var showStartSession = false
-    @State private var showSharing = false
-    @State private var showComputers = false
+    /// Six `sheet(isPresented:)` modifiers used to sit on this view, and
+    /// SwiftUI honours one — the same defect that made Control Mac and App
+    /// Stream open the same screen. One cover, one enum.
+    @State private var sheet: SessionSheet?
+
+    enum SessionSheet: String, Identifiable {
+        case start, sharing, settings, bots, computers, diagnostics
+        var id: String { rawValue }
+    }
     /// One binding, not two: SwiftUI honours a single fullScreenCover per
     /// view, so stacking one for the display and another for App Stream meant
     /// both menu items opened whichever modifier won — the display stream.
     @State private var stage: RemoteControlSourceMode?
-    @State private var showBotRuns = false
-    @State private var showDiagnostics = false
-    @State private var showSettings = false
     @State private var startBotID = ""
     @State private var deferredSessionID: UUID?
     @State private var pendingDelete: RemoteSessionSummary?
@@ -107,7 +110,7 @@ struct SessionListView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     startBotID = ""
-                    showStartSession = true
+                    sheet = .start
                 } label: {
                     Image(systemName: "square.and.pencil")
                 }
@@ -147,34 +150,36 @@ struct SessionListView: View {
         } message: {
             Text("Choose a short name that is easy to find in history.")
         }
-        .sheet(isPresented: $showStartSession, onDismiss: openDeferredSession) {
-            StartSessionSheet(store: store, initialBotID: startBotID) { sessionID in
-                deferredSessionID = sessionID
-                showStartSession = false
-            }
-        }
-        .sheet(isPresented: $showSharing) { RemoteShareSheet(store: store) }
-        .sheet(isPresented: $showSettings) {
-            RemoteSettingsSheet(
-                store: store,
-                onSwitchComputer: { showComputers = true },
-                onDiagnostics: { showDiagnostics = true })
-        }
-        .sheet(isPresented: $showBotRuns, onDismiss: openDeferredSession) {
-            RemoteBotsView(store: store) { sessionID in
-                deferredSessionID = sessionID
-                showBotRuns = false
-            }
-        }
-        .sheet(isPresented: $showComputers) { ComputerSwitcherSheet(store: store) }
-        .sheet(isPresented: $showDiagnostics) {
-            NavigationStack {
-                RemoteDiagnosticsSettingsView()
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Done") { showDiagnostics = false }
+        .sheet(item: $sheet, onDismiss: openDeferredSession) { which in
+            switch which {
+            case .start:
+                StartSessionSheet(store: store, initialBotID: startBotID) { sessionID in
+                    deferredSessionID = sessionID
+                    sheet = nil
+                }
+            case .sharing:
+                RemoteShareSheet(store: store)
+            case .settings:
+                RemoteSettingsSheet(
+                    store: store,
+                    onSwitchComputer: { sheet = .computers },
+                    onDiagnostics: { sheet = .diagnostics })
+            case .bots:
+                RemoteBotsView(store: store) { sessionID in
+                    deferredSessionID = sessionID
+                    sheet = nil
+                }
+            case .computers:
+                ComputerSwitcherSheet(store: store)
+            case .diagnostics:
+                NavigationStack {
+                    RemoteDiagnosticsSettingsView()
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Done") { sheet = nil }
+                            }
                         }
-                    }
+                }
             }
         }
         .fullScreenCover(item: $stage) { mode in
@@ -189,7 +194,7 @@ struct SessionListView: View {
     private var connectionSection: some View {
         Section {
             Button {
-                if store.isConnected { showComputers = true }
+                if store.isConnected { sheet = .computers }
                 else { Task { await store.connectSaved() } }
             } label: {
                 HStack(spacing: 12) {
@@ -229,17 +234,17 @@ struct SessionListView: View {
                 RemoteQuickAction(title: "Bots",
                                   symbol: "person.3.sequence",
                                   spokenLabel: "Specialist bots") {
-                    showBotRuns = true
+                    sheet = .bots
                 }
                 RemoteQuickAction(title: "Share",
                                   symbol: "square.and.arrow.up",
                                   spokenLabel: "Share clipboard or files") {
-                    showSharing = true
+                    sheet = .sharing
                 }
                 RemoteQuickAction(title: "Settings",
                                   symbol: "gearshape",
                                   spokenLabel: "Settings") {
-                    showSettings = true
+                    sheet = .settings
                 }
             }
             .remoteListRow()
@@ -270,7 +275,7 @@ struct SessionListView: View {
             } actions: {
                 Button("Start a chat") {
                     startBotID = ""
-                    showStartSession = true
+                    sheet = .start
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!store.isConnected)
