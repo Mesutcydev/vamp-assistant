@@ -14,7 +14,7 @@ enum Theme {
     nonisolated(unsafe) static var currentPalette: AccentPalette = .graphite
     nonisolated(unsafe) static var currentAppearance: AppAppearance = .system
     nonisolated(unsafe) static var currentTextSize: AppTextSize = .comfortable
-    nonisolated(unsafe) static var currentTypeface: AppTypeface = .serif
+    nonisolated(unsafe) static var currentTypeface: AppTypeface = .sans
 
     /// Palette-driven dynamic color: resolves the CURRENT palette's hex
     // pair for the active appearance on every draw.
@@ -151,8 +151,9 @@ enum ContentColumn {
 /// typography in their dedicated surfaces.
 enum AppFont {
     /// Prose and chrome. Every token asks for `.serif`, which `Font.app`
-    /// resolves against the user's Typeface setting (Serif is the default).
-    /// Code, diffs, and pairing tokens stay monospaced at the call site.
+    /// resolves against the user's Typeface setting (San Francisco is the
+    /// default now; Serif is one opt-in choice). Code, diffs, and pairing
+    /// tokens stay monospaced at the call site.
     static var chatBody: Font { .app(size: 16, design: .serif) }
     static var chatHeading: Font { .app(size: 18, weight: .semibold, design: .serif) }
     /// Folder / project group in the sidebar — parent of chat rows.
@@ -161,8 +162,10 @@ enum AppFont {
     static var navigationTitle: Font { .app(size: 12, weight: .medium, design: .serif) }
     static var navigationMeta: Font { .app(size: 11.5, design: .serif) }
     static var editor: Font { .app(size: 15.5, design: .serif) }
-    static var homeWordmark: Font { .app(size: 80, weight: .bold, design: .serif) }
+    static var homeWordmark: Font { .app(size: 34, weight: .semibold, design: .serif) }
     static var homeInvitation: Font { .app(size: 15, design: .serif) }
+    /// A quiet caption above the wordmark, in place of the old masthead scale.
+    static var homeEyebrow: Font { .app(size: 12, weight: .semibold, design: .serif) }
 }
 
 /// Spacing — 4pt grid. Use these instead of ad-hoc padding literals.

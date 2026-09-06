@@ -57,7 +57,7 @@ targets:
         CFBundleDisplayName: "Vamp Assistant"
         CFBundleIconName: AppIcon
         CFBundleShortVersionString: "0.10.29"
-        CFBundleVersion: "83"
+        CFBundleVersion: "84"
         LSApplicationCategoryType: public.app-category.developer-tools
         LSMinimumSystemVersion: "15.0"
         NSHumanReadableCopyright: "Copyright © 2026 Vamp Assistant contributors"
@@ -197,7 +197,7 @@ targets:
         PRODUCT_NAME: "Vamp Assistant"
         PRODUCT_MODULE_NAME: BeetCodeRemoteIOS
         MARKETING_VERSION: "0.1.37"
-        CURRENT_PROJECT_VERSION: "91"
+        CURRENT_PROJECT_VERSION: "92"
         CODE_SIGN_ENTITLEMENTS: iOSApp/BeetCodeRemote.entitlements
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: iOSApp/Info.plist

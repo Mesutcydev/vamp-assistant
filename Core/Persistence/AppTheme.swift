@@ -119,8 +119,8 @@ enum AppTypeface: String, CaseIterable, Codable, Identifiable, Sendable {
 
     var help: String {
         switch self {
-        case .serif: "New York — the editorial default."
-        case .sans: "San Francisco — the macOS system face."
+        case .serif: "New York — an editorial serif."
+        case .sans: "San Francisco — the system face, and the default."
         case .rounded: "SF Rounded — softer, friendlier chrome."
         case .mono: "SF Mono — everything in a fixed pitch."
         }

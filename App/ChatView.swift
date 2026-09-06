@@ -251,12 +251,19 @@ struct ChatView: View {
             Spacer(minLength: Spacing.xl)
 
             VStack(spacing: Spacing.lg) {
-                VStack(spacing: Spacing.md) {
-                    Text("VAMP ASSISTANT")
+                VStack(spacing: Spacing.sm) {
+                    Image(systemName: "building.columns")
+                        .font(.system(size: 30, weight: .regular))
+                        .foregroundStyle(Theme.textSecondary)
+                        .padding(.bottom, 2)
+                        .accessibilityHidden(true)
+                    // Sentence case, system weight, ordinary title scale — the
+                    // 80pt tracked all-caps masthead was the editorial look the
+                    // app dropped.
+                    Text("Vamp Assistant")
                         .font(AppFont.homeWordmark)
-                        .tracking(2.4)
                         .foregroundStyle(Theme.textPrimary)
-                        .minimumScaleFactor(0.55)
+                        .minimumScaleFactor(0.7)
                         .lineLimit(1)
                         .accessibilityAddTraits(.isHeader)
                 }

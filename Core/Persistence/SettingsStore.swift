@@ -168,7 +168,7 @@ final class SettingsStore: ObservableObject {
             DefaultsKeys.appearance: AppAppearance.dark.rawValue,
             DefaultsKeys.accentPalette: AccentPalette.graphite.rawValue,
             DefaultsKeys.textSize: AppTextSize.comfortable.rawValue,
-            DefaultsKeys.typeface: AppTypeface.serif.rawValue,
+            DefaultsKeys.typeface: AppTypeface.sans.rawValue,
             DefaultsKeys.composerBorderAnimation: true,
             DefaultsKeys.apiServerEnabled: false,
             DefaultsKeys.apiServerPort: 1234,
@@ -199,6 +199,17 @@ final class SettingsStore: ObservableObject {
         if defaults.object(forKey: DefaultsKeys.reasoningVisibilityMigration) == nil {
             defaults.set(true, forKey: DefaultsKeys.showReasoning)
             defaults.set(true, forKey: DefaultsKeys.reasoningVisibilityMigration)
+        }
+
+        // The editorial serif was the old launch default and the look
+        // people kept asking us to drop. Move installs that never explicitly
+        // chose a face onto San Francisco once; a later explicit Serif pick is
+        // preserved because this runs a single time, guarded by its own key.
+        if defaults.object(forKey: DefaultsKeys.typefaceDefaultMigration) == nil {
+            if defaults.string(forKey: DefaultsKeys.typeface) == AppTypeface.serif.rawValue {
+                defaults.set(AppTypeface.sans.rawValue, forKey: DefaultsKeys.typeface)
+            }
+            defaults.set(true, forKey: DefaultsKeys.typefaceDefaultMigration)
         }
 
         // A previous build could leave Beet as the saved launch appearance.
@@ -265,7 +276,7 @@ final class SettingsStore: ObservableObject {
     var typeface: AppTypeface {
         get {
             AppTypeface(rawValue: defaults.string(forKey: DefaultsKeys.typeface)
-                ?? AppTypeface.serif.rawValue) ?? .serif
+                ?? AppTypeface.sans.rawValue) ?? .sans
         }
         set {
             defaults.set(newValue.rawValue, forKey: DefaultsKeys.typeface)
@@ -730,6 +741,7 @@ final class SettingsStore: ObservableObject {
         static let accentPalette = "accentPalette"
         static let textSize = "textSize"
         static let typeface = "typeface"
+        static let typefaceDefaultMigration = "typefaceSerifToSans.v1"
         static let composerBorderAnimation = "composerBorderAnimation"
         static let apiServerEnabled = "apiServerEnabled"
         static let apiServerPort = "apiServerPort"
