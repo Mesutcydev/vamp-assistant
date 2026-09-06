@@ -83,7 +83,8 @@ struct StartSessionSheet: View {
             return isLoading ? "Loading models from your Mac…" : "No models available. Add an API key under More options."
         }
         if selectedModelID.isEmpty { return "Choose a model first." }
-        if trimmedPrompt.isEmpty { return "Type what you want done." }
+        // An empty field is not a blocker worth a sentence: the send button is
+        // already dim, and the placeholder already asks the question.
         return nil
     }
 
@@ -107,11 +108,13 @@ struct StartSessionSheet: View {
                 VStack(alignment: .leading, spacing: 0) {
                     if !store.isConnected { reconnectCard.padding(.bottom, 20) }
                     setupRow
+                    Spacer(minLength: 24)
                     startersList
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 4)
-                .padding(.bottom, 20)
+                .padding(.bottom, 12)
+                .frame(minHeight: 520, alignment: .top)
             }
             .scrollDismissesKeyboard(.interactively)
             .background { RemoteBackdrop() }
