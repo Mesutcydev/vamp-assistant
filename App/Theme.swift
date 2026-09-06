@@ -42,17 +42,21 @@ enum Theme {
     //
     // The legacy `beet` arguments are decode-only compatibility values and
     // intentionally resolve to the same neutral ramp as native dark mode.
-    static let bg           = Color.dynamic(light: 0xF5F5F5, dark: 0x000000, beet: 0x000000)
-    static let surface      = Color.dynamic(light: 0xFFFFFF, dark: 0x0A0A0A, beet: 0x0A0A0A)
-    static let surfaceInset = Color.dynamic(light: 0xECECEC, dark: 0x151515, beet: 0x151515)
-    // Card edges were 1.14–1.46:1 against the surfaces they sit on — present
-    // in the code, barely present on screen. Lifted to ~1.5–1.9:1: still a
-    // hairline, but one you can actually see the card end at.
-    static let hairline     = Color.dynamic(light: 0xC9C9C9, dark: 0x3A3A3A, beet: 0x3A3A3A)
+    // These are the iOS client's surfaces to the byte. The two apps had drifted
+    // to different greys — the Mac's dark page was pure black under near-black
+    // cards, the phone's was a warm brown — so a screenshot from one never
+    // looked like the other. One ramp now: ground, card, well, hairline.
+    static let bg           = Color.dynamic(light: 0xF1F1F3, dark: 0x0F0F10, beet: 0x0F0F10)
+    static let surface      = Color.dynamic(light: 0xFCFCFD, dark: 0x1A1A1C, beet: 0x1A1A1C)
+    static let surfaceInset = Color.dynamic(light: 0xE8E8EB, dark: 0x252528, beet: 0x252528)
+    // The hairline is the app's main divider now that surfaces stopped being
+    // boxes, so it is the phone's separator resolved against these greys:
+    // black at 10% on paper, white at 9% on ink.
+    static let hairline     = Color.dynamic(light: 0xD7D7DA, dark: 0x2C2C2F, beet: 0x2C2C2F)
 
     // Text tiers. Dark secondary/tertiary sit a touch brighter than the
     // neutrals around them so captions stay legible on the lifted surfaces.
-    static let textPrimary   = Color.dynamic(light: 0x181818, dark: 0xF2F2F2, beet: 0xF2F2F2)
+    static let textPrimary   = Color.dynamic(light: 0x141416, dark: 0xF2F2F4, beet: 0xF2F2F4)
     static let textSecondary = Color.dynamic(light: 0x585858, dark: 0xB0B0B0, beet: 0xB0B0B0)
     // Tertiary text still carries actionable metadata and must remain readable
     // at caption sizes, so it must clear AA on the WORST surface it lands on —

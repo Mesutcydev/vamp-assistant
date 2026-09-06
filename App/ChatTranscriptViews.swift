@@ -183,38 +183,25 @@ struct UserBubble: View {
 
     var body: some View {
         if case .user(let text) = item.kind {
-            if Self.isLongForm(text) {
-                HStack {
-                    Text(text)
-                        .font(AppFont.chatBody)
-                        .lineSpacing(3)
-                        .foregroundStyle(Theme.textPrimary)
-                        .multilineTextAlignment(.leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                            .strokeBorder(Theme.washBorder(Theme.accent), lineWidth: 1))
-                        .frame(maxWidth: 760, alignment: .leading)
-                        .textSelection(.enabled)
-                    Spacer(minLength: 0)
-                }
-            } else {
-                HStack {
-                    Spacer()
-                    Text(text)
-                        .font(AppFont.chatBody)
-                        .lineSpacing(3)
-                        .foregroundStyle(Theme.textPrimary)
-                        .multilineTextAlignment(.leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                            .strokeBorder(Theme.washBorder(Theme.accent), lineWidth: 1))
-                        .frame(maxWidth: 520, alignment: .trailing)
-                        .textSelection(.enabled)
-                }
+            // The phone's shape, for the same reason: a prompt is yours and it
+            // is short, so it sits in a well-filled bubble on the right, sized
+            // to its words. The accent-tinted outline is gone — an outline on a
+            // filled bubble was two ways of saying the same thing.
+            HStack {
+                if !Self.isLongForm(text) { Spacer(minLength: 44) }
+                Text(text)
+                    .font(AppFont.chatBody)
+                    .lineSpacing(3)
+                    .foregroundStyle(Theme.textPrimary)
+                    .multilineTextAlignment(.leading)
+                    .padding(.horizontal, 15)
+                    .padding(.vertical, 11)
+                    .background(Theme.surfaceInset,
+                                in: RoundedRectangle(cornerRadius: 21, style: .continuous))
+                    .frame(maxWidth: Self.isLongForm(text) ? 760 : 520,
+                           alignment: Self.isLongForm(text) ? .leading : .trailing)
+                    .textSelection(.enabled)
+                if Self.isLongForm(text) { Spacer(minLength: 0) }
             }
         }
     }
@@ -770,14 +757,13 @@ struct AgentActivityCard: View {
                 }
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: hasFailure ? "exclamationmark.circle.fill" : "sparkles")
+                    // A badge in a filled disc made every step look like a
+                    // notification. Only a failure earns colour here.
+                    Image(systemName: hasFailure ? "xmark" : "checkmark")
                         .accessibilityHidden(true)
-                        .font(.app(size: 11, weight: .semibold, design: .serif))
-                        .foregroundStyle(hasFailure ? Theme.danger : Theme.accentText)
-                        .frame(width: 22, height: 22)
-                        .background(
-                            Theme.washStrong(hasFailure ? Theme.danger : Theme.accent),
-                            in: Circle())
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(hasFailure ? Theme.danger : Theme.textTertiary)
+                        .frame(width: 14)
                     Text(title)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Theme.textPrimary)
@@ -795,26 +781,30 @@ struct AgentActivityCard: View {
                         .foregroundStyle(Theme.textTertiary)
                         .rotationEffect(.degrees(expanded ? 90 : 0))
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .frame(minHeight: 30)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help(expanded ? "Hide agent activity" : "Show reasoning and tool activity")
 
             if expanded {
-                Divider().padding(.horizontal, 12)
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(items) { item in
                         ActivityRow(item: item)
                     }
                 }
-                .padding(12)
+                .padding(.top, 4)
+                .padding(.bottom, 8)
             }
         }
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-            .strokeBorder(Theme.hairline, lineWidth: 1))
+        // A ledger against a rule, not a card. These are the run's margin
+        // notes; boxing them gave them the same weight as the answer.
+        .padding(.leading, 12)
+        .overlay(alignment: .leading) {
+            Capsule()
+                .fill(Theme.hairline)
+                .frame(width: 1.5)
+        }
     }
 }
 
@@ -827,17 +817,18 @@ struct ActivityRow: View {
     var body: some View {
         switch item.kind {
         case .toolCall(let invocation):
-            HStack(spacing: 6) {
-                Image(systemName: "arrow.turn.down.right")
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark")
                     .accessibilityHidden(true)
-                    .font(.caption2)
+                    .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(Theme.textTertiary)
+                    .frame(width: 12)
                 Text(invocation.name)
-                    .font(.caption.monospaced().bold())
+                    .font(.caption.monospaced())
                     .foregroundStyle(Theme.textPrimary)
                 Text(invocation.summary)
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(Theme.textSecondary)
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textTertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
@@ -1092,20 +1083,16 @@ private extension View {
     /// Raised surface + hairline + a 3-pt leading bar in the card's semantic
     /// tint. Quieter and more native than a full tint wash, and every
     /// interactive card shares the exact same silhouette.
-    func lfTranscriptCard(_ tint: Color, radius: CGFloat = Radius.md) -> some View {
+    /// A panel in the transcript: an outline on the page, nothing more.
+    ///
+    /// It used to be a filled card with a coloured stripe down its left edge
+    /// and a shadow — a container with three separate ways of saying "this is
+    /// a container", stacked on a transcript whose other surfaces are all
+    /// open. The tint argument is kept so call sites read unchanged; only the
+    /// drawing is quieter.
+    func lfTranscriptCard(_ tint: Color, radius: CGFloat = 18) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
-        return self
-            .background(Theme.surface, in: shape)
-            .overlay(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(tint)
-                    .frame(width: 3)
-                    .padding(.vertical, 10)
-                    .padding(.leading, 6)
-                    .allowsHitTesting(false)
-            }
-            .overlay(shape.strokeBorder(Theme.hairline, lineWidth: 1))
-            .shadow(color: Theme.cardShadow, radius: 4, y: 1)
+        return self.overlay(shape.strokeBorder(Theme.hairline, lineWidth: 1))
     }
 }
 
@@ -1116,13 +1103,10 @@ struct TranscriptCardHeader: View {
     var detail: String? = nil
 
     var body: some View {
-        HStack(spacing: Spacing.sm) {
+        HStack(spacing: 8) {
             Image(systemName: systemImage)
-                .font(.app(size: 13, weight: .semibold, design: .serif))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(tint)
-                .frame(width: 30, height: 30)
-                .background(Theme.washStrong(tint),
-                            in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
             Text(title)
                 .font(.callout.weight(.semibold))
                 .foregroundStyle(Theme.textPrimary)
@@ -1214,10 +1198,12 @@ struct ApprovalCard: View {
             }
         }
         .padding(Spacing.lg)
-        .background(
-            Theme.surface.opacity(0.96),
-            in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
-        .shadow(color: Theme.cardShadow, radius: 18, y: 7)
+        // Outlined, never filled: every other surface in the transcript lets
+        // the page through now, and a shadowed card here read as a
+        // notification dropped on the conversation rather than a turn in it.
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Theme.hairline, lineWidth: 1))
     }
 
     private var approvalButtonRow: some View {
@@ -1377,10 +1363,29 @@ struct QuestionCard: View {
                 .foregroundStyle(Theme.textPrimary)
                 .textSelection(.enabled)
             if !choices.isEmpty {
-                VStack(alignment: .leading, spacing: Spacing.xs) {
+                VStack(alignment: .leading, spacing: 8) {
                     ForEach(choices, id: \.self) { choice in
-                        Button(choice) { onAnswer(choice) }
-                            .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
+                        Button {
+                            onAnswer(choice)
+                        } label: {
+                            HStack(spacing: 10) {
+                                Text(choice)
+                                    .font(.callout.weight(.medium))
+                                    .foregroundStyle(Theme.textPrimary)
+                                    .multilineTextAlignment(.leading)
+                                Spacer(minLength: 8)
+                                Image(systemName: "arrow.up.left")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(Theme.textTertiary)
+                            }
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 40)
+                            .frame(maxWidth: .infinity)
+                            .background(Theme.surfaceInset,
+                                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -1402,7 +1407,6 @@ struct QuestionCard: View {
             }
         }
         .padding(Spacing.lg)
-        .padding(.leading, Spacing.sm)
         .lfTranscriptCard(Theme.info)
     }
 }
