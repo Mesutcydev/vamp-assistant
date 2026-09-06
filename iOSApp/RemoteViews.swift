@@ -284,7 +284,9 @@ struct RemoteSectionHeading: View {
         Text(text.uppercased())
             .font(.caption.weight(.semibold))
             .tracking(0.9)
-            .foregroundStyle(.secondary)
+            // Headings sit outside the cards, on the ground: .secondary was
+            // too pale there to read at a glance.
+            .foregroundStyle(.primary.opacity(0.55))
             .padding(.top, 4)
             .padding(.bottom, 2)
     }
@@ -494,10 +496,11 @@ struct RemoteBackdrop: View {
                 .saturation(0)
                 .frame(width: proxy.size.width, height: proxy.size.height)
                 .clipped()
-                // Pushed much further back than before. The engraving is a
-                // room the content sits in, not a pattern printed behind it —
-                // at the old strength it competed with every card edge.
-                .opacity(appearance == .light ? 0.32 : 0.28)
+                // Quiet enough to read prose over. The transcript deliberately
+                // puts the assistant's answer straight on this ground with no
+                // card, so the ground has to be near-silent or the engraving
+                // sits inside the words.
+                .opacity(appearance == .light ? 0.16 : 0.14)
                 .accessibilityHidden(true)
         }
         .background(RemoteSurface.ground(appearance))
