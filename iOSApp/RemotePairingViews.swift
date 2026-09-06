@@ -75,6 +75,8 @@ struct PairingView: View {
                     }, onCancel: { showScanner = false })
                 case .computers:
                     ComputerSwitcherSheet(store: store)
+                default:
+                    EmptyView()
                 }
             }
             .keyboardDismissToolbar()
