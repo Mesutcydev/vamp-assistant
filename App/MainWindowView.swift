@@ -59,6 +59,9 @@ struct MainWindowView: View {
     /// inset, rounded concentric-glass panel, which gave the drawer its own
     /// bottom-trailing corner instead of letting the window own the corners.
     @State private var sidebarVisible = true
+    /// The active conversation's title, shown in the window bar so the chat
+    /// needs no second header strip of its own.
+    @State private var chatTitle = "New chat"
     @State private var sidebarWidth: CGFloat = SidebarMetrics.width
 
     private var dockedPanelOpen: Bool {
@@ -103,6 +106,17 @@ struct MainWindowView: View {
         notificationView
     }
 
+    private var windowTitle: String {
+        if showSettings { return "Settings" }
+        if showBotsDashboard { return "Bots" }
+        // An active, non-empty conversation names the window; otherwise the
+        // workspace does.
+        if sessions.activeSessionID != nil, !sessions.transcript.isEmpty {
+            return chatTitle
+        }
+        return sessions.workspaceURL?.lastPathComponent ?? "Vamp Assistant"
+    }
+
     private var configuredLayout: some View {
         Group {
             if showSettings {
@@ -112,7 +126,22 @@ struct MainWindowView: View {
                 responsiveLayout
             }
         }
-            .navigationTitle(showSettings ? "Settings" : (showBotsDashboard ? "Bots" : (sessions.workspaceURL?.lastPathComponent ?? "Vamp Assistant")))
+            .navigationTitle(windowTitle)
+            .task(id: sessions.activeSessionID) {
+                let id = sessions.activeSessionID
+                let title = await Task.detached(priority: .utility) {
+                    guard let id, let record = SessionStore.shared.load(id: id) else { return "New chat" }
+                    return SessionTitle.display(for: record)
+                }.value
+                guard !Task.isCancelled else { return }
+                chatTitle = title
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .sessionTitleChanged)) { note in
+                guard let id = note.object as? UUID,
+                      id == sessions.activeSessionID,
+                      let title = note.userInfo?["title"] as? String else { return }
+                chatTitle = title
+            }
             .toolbar {
                 if !showSettings {
                     ToolbarItem(placement: .navigation) {
@@ -225,12 +254,17 @@ struct MainWindowView: View {
             Button("Remote sessions…") { requestRemoteAccess() }
             Button("Models…") { openModelsSettings() }
             Divider()
+            Button("Review changed files…") { NotificationCenter.default.post(name: .gitDiff, object: nil) }
+            Button("Git status") { NotificationCenter.default.post(name: .gitStatus, object: nil) }
+            Button("Undo last checkpoint") { NotificationCenter.default.post(name: .undoCheckpoint, object: nil) }
+            Divider()
             Button("Export current chat as Markdown…") {
                 exportCurrentChat(format: .markdown)
             }
             Button("Export current chat as JSON…") {
                 exportCurrentChat(format: .json)
             }
+            Button("Export task bundle…") { NotificationCenter.default.post(name: .exportTaskBundle, object: nil) }
         } label: {
             Image(systemName: "ellipsis")
                 .font(.app(size: 13, weight: .semibold, design: .serif))

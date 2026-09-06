@@ -1140,13 +1140,34 @@ struct ApprovalCard: View {
         request.invocation.name.hasPrefix("computer_")
     }
 
+    /// The card is titled by what it will do, so the header reads like a turn
+    /// in the conversation rather than a system alert.
+    private var approvalTitle: String {
+        switch request.preview {
+        case .diff(_, let path):
+            return "Edit \((path as NSString).lastPathComponent)"
+        case .command(let command):
+            return command.split(separator: " ").first.map { "Run \($0)" } ?? "Run command"
+        case .none:
+            return request.invocation.summary
+        }
+    }
+
+    private var approvalIcon: String {
+        switch request.preview {
+        case .diff: return "pencil"
+        case .command: return "terminal"
+        case .none: return isComputer ? "desktopcomputer" : "hand.raised"
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             TranscriptCardHeader(
-                title: "Approval required",
-                systemImage: "hand.raised.fill",
-                tint: Theme.warning,
-                detail: request.invocation.name)
+                title: approvalTitle,
+                systemImage: approvalIcon,
+                tint: Theme.textSecondary,
+                detail: nil)
 
             switch request.preview {
             case .command(let command):
@@ -1166,13 +1187,8 @@ struct ApprovalCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
-            case .diff(let diff, let path):
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    Text("Edit \(path)")
-                        .font(.caption)
-                        .foregroundStyle(Theme.textSecondary)
-                    DiffPreview(diff: diff)
-                }
+            case .diff(let diff, _):
+                DiffPreview(diff: diff)
             case .none:
                 Text(request.invocation.summary)
                     .font(.caption.monospaced())

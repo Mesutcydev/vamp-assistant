@@ -34,13 +34,6 @@ struct ChatView: View {
             if isEmptyConversation {
                 emptyState
             } else {
-                ChatHeaderView(
-                    title: sessionTitle,
-                    phaseLabel: phaseLabel,
-                    phaseTint: phaseTint,
-                    canReview: controller.workspaceURL != nil,
-                    onHome: controller.newSession,
-                    onNewChat: controller.newSession)
                 if controller.workspaceTrustNeeded {
                     workspaceTrustBanner
                 }
