@@ -262,10 +262,8 @@ struct StartSessionSheet: View {
     private var startersList: some View {
         if prompt.isEmpty, !botProfile.starters.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Or start from")
-                    .font(.caption.weight(.semibold))
-                    .tracking(0.9)
-                    .foregroundStyle(.primary.opacity(0.55))
+                Text("Or start from".uppercased())
+                    .remoteSectionHeadingStyle()
                     .padding(.bottom, 6)
                 ForEach(botProfile.starters, id: \.self) { starter in
                     Button {
@@ -281,7 +279,7 @@ struct StartSessionSheet: View {
                             Spacer(minLength: 8)
                             Image(systemName: "arrow.up.left")
                                 .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.primary.opacity(0.45))
+                                .foregroundStyle(RemoteInk.quiet)
                         }
                         .frame(minHeight: 48)
                         .contentShape(Rectangle())

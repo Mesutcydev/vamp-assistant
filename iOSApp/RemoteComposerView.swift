@@ -253,7 +253,7 @@ struct PendingInteractionView: View {
                     if let toolName = pending.toolName, !toolName.isEmpty {
                         Text(toolName)
                             .font(.caption.monospaced())
-                            .foregroundStyle(.primary.opacity(0.45))
+                            .foregroundStyle(RemoteInk.quiet)
                             .lineLimit(1)
                     }
                 }
@@ -335,7 +335,7 @@ struct PendingInteractionView: View {
                                 Spacer(minLength: 8)
                                 Image(systemName: "arrow.up.left")
                                     .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.primary.opacity(0.45))
+                                    .foregroundStyle(RemoteInk.quiet)
                             }
                             .padding(.horizontal, 14)
                             .frame(minHeight: 44)

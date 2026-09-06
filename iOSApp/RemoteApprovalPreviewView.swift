@@ -48,9 +48,9 @@ struct RemoteApprovalPreviewView: View {
             }
             .padding(11)
             .background(BeetTheme.surfaceStrong(appearance),
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(BeetTheme.line(appearance).opacity(0.7), lineWidth: 0.75)
             }
         }

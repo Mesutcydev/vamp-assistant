@@ -93,9 +93,7 @@ struct RemoteBotsView: View {
 
     private func heading(_ text: String) -> some View {
         Text(text.uppercased())
-            .font(.caption.weight(.semibold))
-            .tracking(0.9)
-            .foregroundStyle(.primary.opacity(0.78))
+            .remoteSectionHeadingStyle()
             .padding(.top, 26)
             .padding(.bottom, 6)
     }
@@ -239,7 +237,7 @@ private struct RemoteBotRow: View {
                     .lineLimit(1)
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.primary.opacity(0.45))
+                    .foregroundStyle(RemoteInk.quiet)
             }
             .frame(minHeight: 58)
             .contentShape(Rectangle())
@@ -280,7 +278,7 @@ private struct RemoteBotPlainRow: View {
                 if showsChevron {
                     Image(systemName: "chevron.right")
                         .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.primary.opacity(0.45))
+                        .foregroundStyle(RemoteInk.quiet)
                 }
             }
             .frame(minHeight: 58)

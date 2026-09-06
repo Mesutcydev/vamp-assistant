@@ -262,7 +262,7 @@ struct MessageBubble: View {
             }
             .padding(11)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.red.opacity(0.09), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(Color.red.opacity(0.09), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         else if message.role == "notice" {
             HStack(spacing: 8) {
@@ -369,9 +369,10 @@ struct CheckpointMessageRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RemoteSurface.card(appearance),
-            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        // Outlined, at the panel radius: the last three 10pt cards in here
+        // were left over from before the transcript's surfaces opened up.
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .strokeBorder(RemoteSurface.separator(appearance), lineWidth: 0.75))
         .confirmationDialog("Restore this checkpoint?",
                             isPresented: $confirming,
                             titleVisibility: .visible) {
@@ -409,9 +410,8 @@ struct RemoteChatErrorCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RemoteSurface.card(appearance),
-            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .strokeBorder(RemoteSurface.separator(appearance), lineWidth: 0.75))
     }
 }
 
@@ -468,7 +468,7 @@ struct ToolLedger: View {
                     if !entry.summary.isEmpty, !isExpanded {
                         Text(entry.summary)
                             .font(.footnote)
-                            .foregroundStyle(.primary.opacity(0.45))
+                            .foregroundStyle(RemoteInk.quiet)
                             .lineLimit(1)
                             .truncationMode(.tail)
                     }
@@ -476,7 +476,7 @@ struct ToolLedger: View {
                     if !entry.output.isEmpty {
                         Image(systemName: "chevron.down")
                             .font(.caption2.weight(.bold))
-                            .foregroundStyle(.primary.opacity(0.45))
+                            .foregroundStyle(RemoteInk.quiet)
                             .rotationEffect(.degrees(isExpanded ? 180 : 0))
                             .accessibilityHidden(true)
                     }
@@ -514,7 +514,7 @@ struct ToolLedger: View {
             // Done is the quiet state; only a failure earns colour.
             Image(systemName: "checkmark")
                 .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(.primary.opacity(0.45))
+                .foregroundStyle(RemoteInk.quiet)
                 .frame(width: 12, height: 12)
                 .accessibilityHidden(true)
         case .failed:
@@ -652,8 +652,8 @@ struct QueuedFollowUpsView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(
-                    RemoteSurface.card(appearance),
-                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    RemoteSurface.well(appearance),
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
         }
         .padding(.horizontal, 12)

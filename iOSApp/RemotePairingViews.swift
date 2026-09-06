@@ -261,8 +261,8 @@ struct RemoteField: View {
                     }
                 }
                 .padding(.horizontal, 14).frame(minHeight: 50)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-                .overlay { RoundedRectangle(cornerRadius: 13).stroke(BeetTheme.line(appearance)) }
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay { RoundedRectangle(cornerRadius: 14).stroke(BeetTheme.line(appearance)) }
         }
     }
 }

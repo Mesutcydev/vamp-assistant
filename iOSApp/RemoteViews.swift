@@ -164,6 +164,23 @@ enum RemoteSurface {
     }
 }
 
+/// The quiet ink tier.
+///
+/// `.primary.opacity(0.45)` measured 4.5:1 on the dark ground and **2.9:1** on
+/// the light one — the rows stopped being cards, so every quiet label now sits
+/// on the engraving and the same alpha no longer means the same contrast. A
+/// dynamic colour resolves per appearance instead: 45% white on ink, 58% black
+/// on paper, which clears 4.5:1 in both.
+enum RemoteInk {
+    static var quiet: Color {
+        Color(uiColor: UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(white: 1, alpha: 0.45)
+                : UIColor(white: 0, alpha: 0.58)
+        })
+    }
+}
+
 /// Grouped-list rows over the app's backdrop.
 ///
 /// A stock `insetGrouped` list paints opaque cells, which would hide the
@@ -300,13 +317,24 @@ struct RemoteSectionHeading: View {
 
     var body: some View {
         Text(text.uppercased())
-            .font(.caption.weight(.semibold))
+            .remoteSectionHeadingStyle()
+            .padding(.top, 4)
+            .padding(.bottom, 2)
+    }
+}
+
+extension View {
+    /// The section-heading register, as one definition.
+    ///
+    /// Four screens had drawn their own — same font, same tracking, same
+    /// alpha, typed out four times. They agreed today and would not have next
+    /// month, and the alpha in particular has already had to move once.
+    func remoteSectionHeadingStyle() -> some View {
+        font(.caption.weight(.semibold))
             .tracking(0.9)
             // Headings sit on the ground, not on a card, so they compete with
             // the engraving: 0.55 vanished into it in dark mode.
             .foregroundStyle(.primary.opacity(0.78))
-            .padding(.top, 4)
-            .padding(.bottom, 2)
     }
 }
 
@@ -387,14 +415,14 @@ struct RemoteDisclosureRow: View {
                         if let detail {
                             Text(detail)
                                 .font(.caption)
-                                .foregroundStyle(.primary.opacity(0.45))
+                                .foregroundStyle(RemoteInk.quiet)
                                 .lineLimit(1)
                         }
                     }
                 }
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.primary.opacity(0.45))
+                    .foregroundStyle(RemoteInk.quiet)
                     .accessibilityHidden(true)
             }
             .contentShape(Rectangle())
@@ -676,7 +704,7 @@ struct RemoteSettingChipLabel: View {
                 .lineLimit(1)
             Image(systemName: "chevron.down")
                 .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(.primary.opacity(0.45))
+                .foregroundStyle(RemoteInk.quiet)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

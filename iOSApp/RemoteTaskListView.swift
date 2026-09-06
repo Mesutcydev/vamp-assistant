@@ -18,14 +18,12 @@ struct RemoteTaskListView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Text(title.uppercased())
-                    .font(.caption.weight(.semibold))
-                    .tracking(0.9)
-                    .foregroundStyle(.primary.opacity(0.55))
+                    .remoteSectionHeadingStyle()
                 Spacer(minLength: 8)
                 Text("\(done) of \(items.count)")
                     .font(.caption)
                     .monospacedDigit()
-                    .foregroundStyle(.primary.opacity(0.45))
+                    .foregroundStyle(RemoteInk.quiet)
             }
             .padding(.bottom, 8)
 
