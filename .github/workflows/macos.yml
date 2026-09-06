@@ -123,3 +123,40 @@ jobs:
           name: simulator-screens
           path: ${{ runner.temp }}/screens
           retention-days: 14
+
+  mac_app:
+    name: Mac app
+    # On demand only, like the IPA: this is the build you install over the one
+    # already on your Mac, so it exists when you ask for it rather than on
+    # every push.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Build Release
+        run: |
+          xcodegen generate
+          xcodebuild -project BeetCode.xcodeproj -scheme BeetCode \
+            -configuration Release -derivedDataPath .derived \
+            -skipPackagePluginValidation -skipMacroValidation build
+      - name: Package DMG
+        run: ./scripts/package-beetcode-dmg.sh
+      # The .app as well as the disk image: update-local-install.sh takes the
+      # bundle directly, and re-signs it with your own identity so the
+      # permissions macOS has already granted survive the swap.
+      - name: Zip the app bundle
+        run: |
+          cd .derived/Build/Products/Release
+          ditto -c -k --keepParent "Vamp Assistant.app" "$RUNNER_TEMP/Vamp-Assistant-app.zip"
+      - name: Upload Mac build
+        uses: actions/upload-artifact@v4
+        with:
+          name: vamp-assistant-mac
+          path: |
+            dist/*.dmg
+            dist/*.sha256
+            ${{ runner.temp }}/Vamp-Assistant-app.zip
+          retention-days: 14
