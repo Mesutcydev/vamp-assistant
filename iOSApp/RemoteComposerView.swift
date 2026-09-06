@@ -262,12 +262,16 @@ struct PendingInteractionView: View {
                     }
                 }
 
-                Text(pending.summary ?? pending.content ?? "Vamp Assistant needs your input.")
-                    .font(.subheadline)
-                    .foregroundStyle(.primary.opacity(0.78))
-                    .lineSpacing(3)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+                if let items = planItems {
+                    RemoteTaskListView(title: "Plan", items: items)
+                } else {
+                    Text(bodyText)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary.opacity(0.78))
+                        .lineSpacing(3)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 if let preview = pending.preview {
                     RemoteApprovalPreviewView(preview: preview)
@@ -282,8 +286,10 @@ struct PendingInteractionView: View {
             answerArea
                 .padding(12)
         }
-        .background(RemoteSurface.card(appearance),
-                    in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        // Outlined, not filled. Every other surface on the page lets the
+        // ground through now, and a filled panel here was the one card left
+        // in the transcript — it read as a notification dropped on top of the
+        // conversation rather than a turn inside it.
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .strokeBorder(RemoteSurface.separator(appearance), lineWidth: 0.75)
@@ -291,6 +297,21 @@ struct PendingInteractionView: View {
         .padding(.horizontal, 12)
         .padding(.bottom, 8)
         .animation(nil, value: isResolving)
+    }
+
+    private var canAnswer: Bool {
+        !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var bodyText: String {
+        pending.summary ?? pending.content ?? "Vamp Assistant needs your input."
+    }
+
+    /// A plan is a list of steps; drawn as a paragraph you approve a wall of
+    /// text. Only claims the text is a plan when it really parses as one.
+    private var planItems: [RemoteTaskItem]? {
+        guard pending.kind == "plan" else { return nil }
+        return RemoteTaskListParser.parse(pending.content ?? pending.summary ?? "")
     }
 
     @ViewBuilder private var answerArea: some View {
@@ -308,21 +329,51 @@ struct PendingInteractionView: View {
             VStack(spacing: 8) {
                 if let options = pending.options, !options.isEmpty {
                     ForEach(options, id: \.self) { option in
-                        Button(option) { onResolve(option) }
-                            .buttonStyle(RemoteAnswerButtonStyle(kind: .secondary, appearance: appearance))
+                        Button {
+                            onResolve(option)
+                        } label: {
+                            HStack(spacing: 10) {
+                                Text(option)
+                                    .font(.subheadline.weight(.medium))
+                                    .multilineTextAlignment(.leading)
+                                Spacer(minLength: 8)
+                                Image(systemName: "arrow.up.left")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 44)
+                            .frame(maxWidth: .infinity)
+                            .background(RemoteSurface.well(appearance),
+                                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 HStack(spacing: 8) {
-                    TextField("Your answer", text: $answer)
+                    TextField(pending.options?.isEmpty == false ? "Something else…" : "Your answer",
+                              text: $answer)
                         .font(.subheadline)
-                        .padding(.horizontal, 12)
-                        .frame(minHeight: 40)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 44)
                         .background(RemoteSurface.well(appearance),
-                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    Button("Send") { onResolve(answer) }
-                        .buttonStyle(RemoteAnswerButtonStyle(kind: .primary, appearance: appearance))
-                        .fixedSize()
-                        .disabled(answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    Button {
+                        onResolve(answer)
+                    } label: {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(width: 44, height: 44)
+                            .background(canAnswer ? AnyShapeStyle(BeetTheme.accent)
+                                                  : AnyShapeStyle(RemoteSurface.well(appearance)),
+                                        in: Circle())
+                            .foregroundStyle(canAnswer ? AnyShapeStyle(Color.white)
+                                                       : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canAnswer)
+                    .accessibilityLabel("Send answer")
                 }
             }
         } else {

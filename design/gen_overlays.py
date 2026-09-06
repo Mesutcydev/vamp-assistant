@@ -119,7 +119,7 @@ composer_running = f'''<div style="display:flex;gap:10px;align-items:center">
   </div>
 </div>'''
 
-chat_states = head(t, 390, 1180) + f'''<div class="screen" style="height:1180px">
+chat_states = head(t, 390, 1620) + f'''<div class="screen" style="height:1620px">
   <div class="atmos"></div>
   <div class="layer" style="padding:20px 18px;gap:24px">
 
@@ -135,28 +135,74 @@ chat_states = head(t, 390, 1180) + f'''<div class="screen" style="height:1180px"
         <div class="chip" style="padding:5px 14px">{ico('stop', t['text'], 13, 2)} Stop</div>
       </div>""")}
 
-    {state('Approval — the model asks before it acts', f"""
-      <div class="glass" style="padding:14px">
-        <div style="display:flex;gap:10px;align-items:flex-start">
-          {ico('box', br, 18)}
-          <div style="flex:1">
-            <div style="font-size:15px;font-weight:600">Run a shell command?</div>
-            <div class="mono" style="margin-top:8px;background:{t['glass']};border-radius:10px;padding:9px 11px;font-size:12px;color:{t['text2']}">swift test --filter TranscriptItemTests</div>
+    {state('Approval — outlined, never filled', f"""
+      <div style="border:0.75px solid {t['sep']};border-radius:18px">
+        <div style="padding:14px">
+          <div style="display:flex;align-items:center;gap:8px">
+            {ico('box', t['text2'], 15)}
+            <div style="font-size:15px;font-weight:600">Approval needed</div>
+            <div style="flex:1"></div>
+            <div class="mono" style="font-size:11px;color:{t['text3']}">shell</div>
           </div>
+          <div class="sub" style="margin-top:8px;color:{t['text']};opacity:.78;line-height:20px">Run the iOS test target and report the failures.</div>
+          <div class="mono" style="margin-top:10px;background:{t['well']};border-radius:10px;padding:9px 11px;font-size:12px;color:{t['text2']}">swift test --filter TranscriptItemTests</div>
         </div>
-        <div style="display:flex;gap:8px;margin-top:12px">
-          <div style="flex:1;height:36px;border-radius:18px;background:{a};color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:600">Allow</div>
-          <div style="flex:1;height:36px;border-radius:18px;background:{t['glass']};border:0.75px solid {t['rim']};display:flex;align-items:center;justify-content:center;font-size:15px">Not now</div>
+        <div style="height:0.75px;background:{t['sep']}"></div>
+        <div style="padding:12px;display:flex;flex-direction:column;gap:8px">
+          <div style="height:44px;border-radius:14px;background:{a};color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:600">Allow once</div>
+          <div style="height:44px;border-radius:14px;background:{t['well']};display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:600">Not now</div>
         </div>
       </div>""")}
 
-    {state('Question — the model needs one answer', f"""
-      <div class="glass" style="padding:14px">
-        <div style="font-size:15px;font-weight:600">Which target should I build?</div>
-        <div style="display:flex;gap:8px;margin-top:11px;flex-wrap:wrap">
-          <div class="chip">BeetCodeRemoteIOS</div>
-          <div class="chip">BeetCode</div>
-          <div class="chip">Both</div>
+    {state('Question — the options are the answer', f"""
+      <div style="border:0.75px solid {t['sep']};border-radius:18px">
+        <div style="padding:14px">
+          <div style="display:flex;align-items:center;gap:8px">
+            {ico('bubble', t['text2'], 15)}
+            <div style="font-size:15px;font-weight:600">Question</div>
+          </div>
+          <div class="sub" style="margin-top:8px;color:{t['text']};opacity:.78">Which target should I build?</div>
+        </div>
+        <div style="height:0.75px;background:{t['sep']}"></div>
+        <div style="padding:12px;display:flex;flex-direction:column;gap:8px">
+          <div style="height:44px;border-radius:14px;background:{t['well']};display:flex;align-items:center;padding:0 14px;font-size:15px;font-weight:500">BeetCodeRemoteIOS<div style="flex:1"></div>{ico('arrowup', t['text3'], 13, 2)}</div>
+          <div style="height:44px;border-radius:14px;background:{t['well']};display:flex;align-items:center;padding:0 14px;font-size:15px;font-weight:500">Both targets<div style="flex:1"></div>{ico('arrowup', t['text3'], 13, 2)}</div>
+          <div style="display:flex;gap:8px">
+            <div style="flex:1;height:44px;border-radius:14px;background:{t['well']};display:flex;align-items:center;padding:0 14px" class="sub">Something else…</div>
+            <div style="width:44px;height:44px;border-radius:22px;background:{t['well']};display:flex;align-items:center;justify-content:center">{ico('arrowup', t['text3'], 16, 2.2)}</div>
+          </div>
+        </div>
+      </div>""")}
+
+    {state('Plan — a list of steps, not a paragraph', f"""
+      <div>
+        <div style="display:flex;align-items:center;gap:8px;padding-bottom:8px">
+          <div class="cap">Plan</div><div style="flex:1"></div>
+          <div class="c2" style="font-variant-numeric:tabular-nums">2 of 5</div>
+        </div>
+        <div style="display:flex;gap:10px;padding:9px 0;align-items:flex-start">
+          <div style="width:18px;flex:none">{ico('check', t['text2'], 13, 2.6)}</div>
+          <div class="sub" style="text-decoration:line-through">Read the composer and its two callers</div>
+        </div>
+        <div style="height:0.75px;background:{t['sep']};margin-left:28px"></div>
+        <div style="display:flex;gap:10px;padding:9px 0;align-items:flex-start">
+          <div style="width:18px;flex:none">{ico('check', t['text2'], 13, 2.6)}</div>
+          <div class="sub" style="text-decoration:line-through">Reproduce the layout shift with a draft</div>
+        </div>
+        <div style="height:0.75px;background:{t['sep']};margin-left:28px"></div>
+        <div style="display:flex;gap:10px;padding:9px 0;align-items:flex-start">
+          <div style="width:18px;flex:none;padding-left:2px"><div style="width:7px;height:7px;border-radius:4px;background:{br};margin-top:6px"></div></div>
+          <div class="b" style="font-size:15px">Pin the trailing group so Steer joins it</div>
+        </div>
+        <div style="height:0.75px;background:{t['sep']};margin-left:28px"></div>
+        <div style="display:flex;gap:10px;padding:9px 0;align-items:flex-start">
+          <div style="width:18px;flex:none;padding-left:2px"><div style="width:7px;height:7px;border-radius:4px;border:1.2px solid {t['text3']};margin-top:6px"></div></div>
+          <div class="sub" style="color:{t['text']};opacity:.78">Run the iOS tests</div>
+        </div>
+        <div style="height:0.75px;background:{t['sep']};margin-left:28px"></div>
+        <div style="display:flex;gap:10px;padding:9px 0;align-items:flex-start">
+          <div style="width:18px;flex:none;padding-left:2px"><div style="width:7px;height:7px;border-radius:4px;border:1.2px solid {t['text3']};margin-top:6px"></div></div>
+          <div class="sub" style="color:{t['text']};opacity:.78">Push and report the diff stat</div>
         </div>
       </div>""")}
 

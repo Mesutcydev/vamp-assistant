@@ -11,7 +11,7 @@
     * { box-sizing: border-box; }
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
     a { color: #9A9A9E; } a:hover { color: #F2F2F4; }
-    .screen { position: relative; width: 390px; height: 1180px; overflow: hidden;
+    .screen { position: relative; width: 390px; height: 1620px; overflow: hidden;
       background: #0F0F10; color: #F2F2F4; }
     .atmos { position: absolute; inset: 0; background-image: url("atmosphere.jpg");
       background-size: cover; background-position: center; filter: grayscale(1);
@@ -39,7 +39,7 @@
       background: rgba(37,37,40,0.58); border: 0.75px solid rgba(255,255,255,0.13); font-size: 13px; font-weight: 500; }
   </style>
 </helmet>
-<div class="screen" style="height:1180px">
+<div class="screen" style="height:1620px">
   <div class="atmos"></div>
   <div class="layer" style="padding:20px 18px;gap:24px">
 
@@ -78,32 +78,81 @@
     </div>
 
     <div>
-      <div class="cap" style="padding:0 0 8px">Approval — the model asks before it acts</div>
+      <div class="cap" style="padding:0 0 8px">Approval — outlined, never filled</div>
       
-      <div class="glass" style="padding:14px">
-        <div style="display:flex;gap:10px;align-items:flex-start">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9A9A9E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg>
-          <div style="flex:1">
-            <div style="font-size:15px;font-weight:600">Run a shell command?</div>
-            <div class="mono" style="margin-top:8px;background:rgba(37,37,40,0.58);border-radius:10px;padding:9px 11px;font-size:12px;color:rgba(242,242,244,0.62)">swift test --filter TranscriptItemTests</div>
+      <div style="border:0.75px solid rgba(255,255,255,0.09);border-radius:18px">
+        <div style="padding:14px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.62)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg>
+            <div style="font-size:15px;font-weight:600">Approval needed</div>
+            <div style="flex:1"></div>
+            <div class="mono" style="font-size:11px;color:rgba(242,242,244,0.38)">shell</div>
           </div>
+          <div class="sub" style="margin-top:8px;color:#F2F2F4;opacity:.78;line-height:20px">Run the iOS test target and report the failures.</div>
+          <div class="mono" style="margin-top:10px;background:#252528;border-radius:10px;padding:9px 11px;font-size:12px;color:rgba(242,242,244,0.62)">swift test --filter TranscriptItemTests</div>
         </div>
-        <div style="display:flex;gap:8px;margin-top:12px">
-          <div style="flex:1;height:36px;border-radius:18px;background:#686868;color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:600">Allow</div>
-          <div style="flex:1;height:36px;border-radius:18px;background:rgba(37,37,40,0.58);border:0.75px solid rgba(255,255,255,0.13);display:flex;align-items:center;justify-content:center;font-size:15px">Not now</div>
+        <div style="height:0.75px;background:rgba(255,255,255,0.09)"></div>
+        <div style="padding:12px;display:flex;flex-direction:column;gap:8px">
+          <div style="height:44px;border-radius:14px;background:#686868;color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:600">Allow once</div>
+          <div style="height:44px;border-radius:14px;background:#252528;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:600">Not now</div>
         </div>
       </div>
     </div>
 
     <div>
-      <div class="cap" style="padding:0 0 8px">Question — the model needs one answer</div>
+      <div class="cap" style="padding:0 0 8px">Question — the options are the answer</div>
       
-      <div class="glass" style="padding:14px">
-        <div style="font-size:15px;font-weight:600">Which target should I build?</div>
-        <div style="display:flex;gap:8px;margin-top:11px;flex-wrap:wrap">
-          <div class="chip">BeetCodeRemoteIOS</div>
-          <div class="chip">BeetCode</div>
-          <div class="chip">Both</div>
+      <div style="border:0.75px solid rgba(255,255,255,0.09);border-radius:18px">
+        <div style="padding:14px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.62)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6a2 2 0 012-2h12a2 2 0 012 2v7a2 2 0 01-2 2H9l-5 4z"/></svg>
+            <div style="font-size:15px;font-weight:600">Question</div>
+          </div>
+          <div class="sub" style="margin-top:8px;color:#F2F2F4;opacity:.78">Which target should I build?</div>
+        </div>
+        <div style="height:0.75px;background:rgba(255,255,255,0.09)"></div>
+        <div style="padding:12px;display:flex;flex-direction:column;gap:8px">
+          <div style="height:44px;border-radius:14px;background:#252528;display:flex;align-items:center;padding:0 14px;font-size:15px;font-weight:500">BeetCodeRemoteIOS<div style="flex:1"></div><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.38)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg></div>
+          <div style="height:44px;border-radius:14px;background:#252528;display:flex;align-items:center;padding:0 14px;font-size:15px;font-weight:500">Both targets<div style="flex:1"></div><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.38)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg></div>
+          <div style="display:flex;gap:8px">
+            <div style="flex:1;height:44px;border-radius:14px;background:#252528;display:flex;align-items:center;padding:0 14px" class="sub">Something else…</div>
+            <div style="width:44px;height:44px;border-radius:22px;background:#252528;display:flex;align-items:center;justify-content:center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.38)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="cap" style="padding:0 0 8px">Plan — a list of steps, not a paragraph</div>
+      
+      <div>
+        <div style="display:flex;align-items:center;gap:8px;padding-bottom:8px">
+          <div class="cap">Plan</div><div style="flex:1"></div>
+          <div class="c2" style="font-variant-numeric:tabular-nums">2 of 5</div>
+        </div>
+        <div style="display:flex;gap:10px;padding:9px 0;align-items:flex-start">
+          <div style="width:18px;flex:none"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.62)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
+          <div class="sub" style="text-decoration:line-through">Read the composer and its two callers</div>
+        </div>
+        <div style="height:0.75px;background:rgba(255,255,255,0.09);margin-left:28px"></div>
+        <div style="display:flex;gap:10px;padding:9px 0;align-items:flex-start">
+          <div style="width:18px;flex:none"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.62)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
+          <div class="sub" style="text-decoration:line-through">Reproduce the layout shift with a draft</div>
+        </div>
+        <div style="height:0.75px;background:rgba(255,255,255,0.09);margin-left:28px"></div>
+        <div style="display:flex;gap:10px;padding:9px 0;align-items:flex-start">
+          <div style="width:18px;flex:none;padding-left:2px"><div style="width:7px;height:7px;border-radius:4px;background:#9A9A9E;margin-top:6px"></div></div>
+          <div class="b" style="font-size:15px">Pin the trailing group so Steer joins it</div>
+        </div>
+        <div style="height:0.75px;background:rgba(255,255,255,0.09);margin-left:28px"></div>
+        <div style="display:flex;gap:10px;padding:9px 0;align-items:flex-start">
+          <div style="width:18px;flex:none;padding-left:2px"><div style="width:7px;height:7px;border-radius:4px;border:1.2px solid rgba(242,242,244,0.38);margin-top:6px"></div></div>
+          <div class="sub" style="color:#F2F2F4;opacity:.78">Run the iOS tests</div>
+        </div>
+        <div style="height:0.75px;background:rgba(255,255,255,0.09);margin-left:28px"></div>
+        <div style="display:flex;gap:10px;padding:9px 0;align-items:flex-start">
+          <div style="width:18px;flex:none;padding-left:2px"><div style="width:7px;height:7px;border-radius:4px;border:1.2px solid rgba(242,242,244,0.38);margin-top:6px"></div></div>
+          <div class="sub" style="color:#F2F2F4;opacity:.78">Push and report the diff stat</div>
         </div>
       </div>
     </div>

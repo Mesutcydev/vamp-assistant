@@ -275,6 +275,12 @@ struct MessageBubble: View {
                 Spacer(minLength: 4)
             }
         }
+        // A written checklist is a list of tasks, not a paragraph with square
+        // brackets in it.
+        else if let items = RemoteTaskListParser.checklist(message.content) {
+            RemoteTaskListView(title: "Tasks", items: items)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
         else {
             MarkdownText(message.content)
                 .frame(maxWidth: .infinity, alignment: .leading)
