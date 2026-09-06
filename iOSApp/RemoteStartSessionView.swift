@@ -120,7 +120,8 @@ struct StartSessionSheet: View {
                         selectedReasoningEffort = model.defaultReasoningEffort
                         preferences.remember(model: model)
                     },
-                    onRefresh: { await store.loadStartModels() })
+                    onRefresh: { await store.loadStartModels() },
+                    isConnected: store.isConnected)
                     .environment(\.remoteAppearance, appearance)
             }
             .sheet(isPresented: $showWorkspacePicker) {

@@ -106,6 +106,36 @@ struct RemoteListRowBackground: ViewModifier {
     }
 }
 
+/// One way of saying the Mac is not there.
+///
+/// Sharing, the model picker and the folder picker had no notion of the
+/// connection at all: their buttons stayed lit and their loads returned
+/// nothing, so an unreachable Mac looked like an empty account.
+struct RemoteOfflineRow: View {
+    let store: RemoteStore
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "wifi.exclamationmark")
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(store.isConnecting ? "Reconnecting to your Mac" : "Mac unreachable")
+                    .font(.subheadline.weight(.semibold))
+                Text(store.connectionSubtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            if !store.isConnecting {
+                Button("Retry") { Task { await store.connectSaved() } }
+                    .buttonStyle(.borderless)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
 /// A page's own opening: a glyph, a name, and one line saying what the screen
 /// is for. Each screen picks its own, which is what keeps a stack of grouped
 /// lists from reading as the same page four times.

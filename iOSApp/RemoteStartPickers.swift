@@ -30,6 +30,10 @@ struct RemoteWorkspacePickerSheet: View {
                         title: "Where it works",
                         subtitle: "A folder on your Mac the agent stays inside, or no folder at all.")
                 }
+                if !store.isConnected {
+                    Section { RemoteOfflineRow(store: store) }
+                        .remoteListRow()
+                }
                 if let attachedComputerName {
                     Section {
                         Text("This session runs on \(attachedComputerName), which brings its own workspace and private browser.")
@@ -211,6 +215,10 @@ struct RemoteStartAdvancedSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                if !store.isConnected {
+                    Section { RemoteOfflineRow(store: store) }
+                        .remoteListRow()
+                }
                 Section {
                     RemotePageHero(
                         icon: "shippingbox",

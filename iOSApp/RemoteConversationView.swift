@@ -136,7 +136,8 @@ struct ConversationView: View {
                 models: store.startModels,
                 source: $pickerSource,
                 selectedModelID: $selectedModelID,
-                onRefresh: { await store.loadStartModels() })
+                onRefresh: { await store.loadStartModels() },
+                isConnected: store.isConnected)
         }
     }
 

@@ -18,6 +18,9 @@ struct RemoteModelPickerSheet: View {
     /// Pull-to-refresh, so a model configured on the Mac while this sheet is
     /// open can be picked up without closing and reopening it.
     var onRefresh: (() async -> Void)? = nil
+    /// An empty catalogue means something different when the Mac is not
+    /// reachable, and this sheet used to blame the user's model library for it.
+    var isConnected: Bool = true
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.remoteAppearance) private var appearance
@@ -93,7 +96,13 @@ struct RemoteModelPickerSheet: View {
                     .padding(.horizontal, 18)
                     .padding(.bottom, 12)
 
-                    if inSource.isEmpty {
+                    if !isConnected, models.isEmpty {
+                        ContentUnavailableView(
+                            "Mac unreachable",
+                            systemImage: "wifi.exclamationmark",
+                            description: Text("Reconnect to load the models on your Mac."))
+                        .frame(maxHeight: .infinity)
+                    } else if inSource.isEmpty {
                         ContentUnavailableView(
                             "No \(Self.sourceLabel(source)) models",
                             systemImage: Self.sourceIcon(source),

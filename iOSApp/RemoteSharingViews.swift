@@ -17,6 +17,14 @@ struct RemoteShareSheet: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
                         ShareSheetHeader()
+                        if !store.isConnected {
+                            RemoteOfflineRow(store: store)
+                                .padding(14)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(
+                                    Color(uiColor: .secondarySystemGroupedBackground).opacity(0.9),
+                                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
                         ClipboardSharingSection(store: store, confirmation: $confirmation)
                         FileSharingSection(
                             store: store,

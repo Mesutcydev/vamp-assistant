@@ -394,7 +394,7 @@
 		BF4566880D587C84CBC2ADF2 /* RemoteLLMEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88374DF483EA72584B134787 /* RemoteLLMEngine.swift */; };
 		C11DFF4A65B319B0667B2663 /* BrowserController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9896E30516A78DA5A38C94A5 /* BrowserController.swift */; };
 		C146084CC23D9C02DAA91242 /* ApprovalOverrides.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6343AED4D4FC92C87B07B8F /* ApprovalOverrides.swift */; };
-		C15EF15F85473E2FFAA39C57 /* RemoteTrackpadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E8F40955DA0DE0D20C78B7E /* RemoteTrackpadView.swift */; };
+		C15EF15F85473E2FFAA39C57 /* RemoteScreenGestureSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E8F40955DA0DE0D20C78B7E /* RemoteScreenGestureSurface.swift */; };
 		C1BD66D1A1D01FE10C3CDCC0 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6305F43E05FB978F49F4100 /* SettingsStore.swift */; };
 		C237747C4F231D8435CD41AA /* MLXModelInspectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB1ED06111F8C915FDB50D3D /* MLXModelInspectorTests.swift */; };
 		C2ED3EBC2DD6AE992B681EE3 /* RemotePointerCurve.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC18B0939BD40422FAE3E424 /* RemotePointerCurve.swift */; };
@@ -643,7 +643,7 @@
 		4BA67E7E38411054DAB0C91B /* SettingsProviderCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsProviderCard.swift; sourceTree = "<group>"; };
 		4D71199ED79E9A94A0CD37D1 /* ComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerView.swift; sourceTree = "<group>"; };
 		4DFB2625E9C931135DED08FB /* PublicSDKTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PublicSDKTests.swift; sourceTree = "<group>"; };
-		4E8F40955DA0DE0D20C78B7E /* RemoteTrackpadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteTrackpadView.swift; sourceTree = "<group>"; };
+		4E8F40955DA0DE0D20C78B7E /* RemoteScreenGestureSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteScreenGestureSurface.swift; sourceTree = "<group>"; };
 		4FF1E8ED8C4103B929BE7C77 /* OpenCodeCompatibilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeCompatibilityTests.swift; sourceTree = "<group>"; };
 		50AB3F819AEC6B8A6902389B /* RemoteSessionPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSessionPage.swift; sourceTree = "<group>"; };
 		516F1FBB8168024529BA7438 /* BotRunCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotRunCoordinator.swift; sourceTree = "<group>"; };
@@ -996,7 +996,7 @@
 				0CF62FEEEC83316537562E5B /* RemoteStore.swift */,
 				5FAE78D01C16415D6AA47D39 /* RemoteTerminalSession.swift */,
 				2286B1722DF39C9914F550FA /* RemoteTerminalView.swift */,
-				4E8F40955DA0DE0D20C78B7E /* RemoteTrackpadView.swift */,
+				4E8F40955DA0DE0D20C78B7E /* RemoteScreenGestureSurface.swift */,
 				08BEE196596B0B717A3C27F0 /* RemoteTranscriptViews.swift */,
 				19DC34A2B1370A2F575A3E3F /* RemoteVideoSurface.swift */,
 				EC7D081F0DC222588A0643D6 /* RemoteViews.swift */,
@@ -2295,7 +2295,7 @@
 				488F9E3D621F05CD7C309147 /* RemoteStreamProfile.swift in Sources */,
 				FFE28AB2111612AFD55854A2 /* RemoteTerminalSession.swift in Sources */,
 				EE98B39B9A5E301BA1D1D194 /* RemoteTerminalView.swift in Sources */,
-				C15EF15F85473E2FFAA39C57 /* RemoteTrackpadView.swift in Sources */,
+				C15EF15F85473E2FFAA39C57 /* RemoteScreenGestureSurface.swift in Sources */,
 				B6C34AC689348C32E1BE2073 /* RemoteTranscriptViews.swift in Sources */,
 				F2999652A3E56CA79045D4D4 /* RemoteVideoSurface.swift in Sources */,
 				6BAFE0A89DBF2548BA961C35 /* RemoteViews.swift in Sources */,
