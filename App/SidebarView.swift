@@ -46,16 +46,6 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SidebarPrimaryDestinations(
-                onAssistant: {
-                    NotificationCenter.default.post(name: .openAssistantHome, object: nil)
-                    if showsCloseButton { dismiss() }
-                },
-                onBots: {
-                    NotificationCenter.default.post(name: .openBotsDashboard, object: nil)
-                    if showsCloseButton { dismiss() }
-                })
-            SidebarDivider()
             SidebarHeaderView(
                 workspaceURL: sessions.workspaceURL,
                 sidebarTab: sidebarTab,
@@ -1270,25 +1260,22 @@ struct SidebarHeaderView: View {
                 PanelCloseButton(action: onClose)
             }
         }
-        .padding(.horizontal, Spacing.md)
-        .padding(.vertical, Spacing.sm)
-        .background(Theme.surface.opacity(0.72),
-                    in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-            .strokeBorder(Theme.hairline.opacity(0.62), lineWidth: 1))
+        .padding(.horizontal, Spacing.sm)
+        .padding(.vertical, Spacing.xs)
     }
 
     private var primaryActions: some View {
         Button(action: onNewSession) {
             Label("New chat", systemImage: "square.and.pencil")
-                .font(.app(size: 13.5, weight: .semibold, design: .serif))
-                .foregroundStyle(Theme.bg)
-                .frame(maxWidth: .infinity, minHeight: 36)
-                .background(Theme.textPrimary,
+                .font(.app(size: 13.5, weight: .medium, design: .serif))
+                .foregroundStyle(Theme.textPrimary)
+                .frame(maxWidth: .infinity, minHeight: 34)
+                .background(Theme.surfaceInset.opacity(0.6),
                             in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                    .strokeBorder(Theme.hairline, lineWidth: 1))
         }
         .buttonStyle(LFPlainPressButtonStyle())
-        .shadow(color: Theme.cardShadow.opacity(0.5), radius: 6, y: 2)
         .help("Start a new chat")
     }
 

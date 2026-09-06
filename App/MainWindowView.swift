@@ -130,18 +130,21 @@ struct MainWindowView: View {
                 if #available(macOS 26.0, *) {
                     ToolbarItemGroup(placement: .primaryAction) {
                         topToolCluster
+                        botsToolButton
                         moreActionsMenu
                     }
                     .sharedBackgroundVisibility(.hidden)
                 } else {
                     ToolbarItemGroup(placement: .primaryAction) {
                         topToolCluster
+                        botsToolButton
                         moreActionsMenu
                     }
                 }
 #else
                 ToolbarItemGroup(placement: .primaryAction) {
                     topToolCluster
+                    botsToolButton
                     moreActionsMenu
                 }
 #endif
@@ -195,6 +198,26 @@ struct MainWindowView: View {
                     in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
             .strokeBorder(Theme.hairline.opacity(0.42), lineWidth: 0.75))
+    }
+
+    private var botsToolButton: some View {
+        Button {
+            NotificationCenter.default.post(name: .openBotsDashboard, object: nil)
+        } label: {
+            Label("Bots", systemImage: "person.2")
+                .font(.app(size: 13, weight: .medium, design: .serif))
+                .foregroundStyle(showBotsDashboard ? Theme.rose : Theme.textSecondary)
+                .padding(.horizontal, 11)
+                .frame(height: 32)
+                .background(showBotsDashboard ? Theme.surfaceInset : Color.clear,
+                            in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                    .strokeBorder(Theme.hairline.opacity(0.42), lineWidth: 0.75))
+        }
+        .buttonStyle(.plain)
+        .lfHoverLift()
+        .help("Bots")
+        .accessibilityLabel("Bots")
     }
 
     private var moreActionsMenu: some View {

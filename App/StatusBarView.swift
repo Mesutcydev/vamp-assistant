@@ -16,7 +16,10 @@ struct StatusBarView: View {
         .font(.caption)
         .foregroundStyle(Theme.textSecondary)
         .lineLimit(1)
-        .background(.ultraThinMaterial)
+        // Flat bar, not a material slab: matches the window's other chrome and
+        // stops the bar sampling the transcript scrolling behind it.
+        .background(Theme.surface)
+        .overlay(alignment: .top) { Rectangle().fill(Theme.hairline).frame(height: 1) }
     }
 
     @ViewBuilder
