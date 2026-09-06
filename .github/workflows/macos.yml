@@ -136,11 +136,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
         run: brew install xcodegen
+      # No certificate on a runner, so signing is off and the app comes out
+      # ad-hoc — which is exactly why update-local-install.sh re-signs it with
+      # your own identity before it replaces the installed copy.
       - name: Build Release
         run: |
           xcodegen generate
           xcodebuild -project BeetCode.xcodeproj -scheme BeetCode \
-            -configuration Release -derivedDataPath .derived \
+            -configuration Release -destination 'generic/platform=macOS' \
+            ARCHS=arm64 EXCLUDED_ARCHS=x86_64 -derivedDataPath .derived \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             -skipPackagePluginValidation -skipMacroValidation build
       - name: Package DMG
         run: ./scripts/package-beetcode-dmg.sh
