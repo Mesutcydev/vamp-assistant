@@ -222,8 +222,7 @@ struct SessionListView: View {
                 RemoteQuickAction(title: "Stream",
                                   symbol: "display",
                                   spokenLabel: "Stream this Mac",
-                                  hint: store.isConnected ? "" : "Connect to your Mac first",
-                                  showsDivider: false) {
+                                  hint: store.isConnected ? "" : "Connect to your Mac first") {
                     stage = .display
                 }
                 .disabled(!store.isConnected)
@@ -244,8 +243,7 @@ struct SessionListView: View {
                 }
             }
             .remoteListRow()
-            .listRowInsets(EdgeInsets(top: 10, leading: 20, bottom: 12, trailing: 20))
-            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 2, leading: 20, bottom: 2, trailing: 20))
         } footer: {
             if !store.isConnected {
                 Text(store.connectionSubtitle)

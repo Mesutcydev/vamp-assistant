@@ -565,52 +565,42 @@ enum RemoteBackdropSetting {
 /// anywhere to come back from. They live at the top instead, in the same card
 /// as the Mac they mostly act on, and they scroll away with it.
 struct RemoteQuickActionRow<Content: View>: View {
-    @Environment(\.remoteAppearance) private var appearance
     @ViewBuilder var content: Content
 
     var body: some View {
-        // One strip, not four tiles. Four separately filled wells floating on
-        // the ground read as four unrelated buttons and put three gaps of
-        // nothing between them; a single well divided by the app's own
-        // hairlines is one control that happens to have four cells — and it
-        // matches the rows above and below it, which are also hairline-divided.
+        // No box at all. Once every list on the screen became rows on the
+        // ground, any filled container here was the one thing still drawing a
+        // shape — first four tiles, then one strip, both of them a patch laid
+        // over the page. The actions are a row like the others now: the
+        // hairline above and below comes from the list, and the ground runs
+        // straight through them.
         HStack(spacing: 0) { content }
-            .frame(height: 62)
-            .background(RemoteSurface.well(appearance),
-                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(RemoteSurface.separator(appearance), lineWidth: 0.75)
-            }
+            .frame(height: 60)
     }
 }
 
-/// One cell of `RemoteQuickActionRow`: a glyph over a short name.
+/// One action in `RemoteQuickActionRow`: a glyph over a short name, on the
+/// ground.
 struct RemoteQuickAction: View {
-    @Environment(\.remoteAppearance) private var appearance
     @Environment(\.isEnabled) private var isEnabled
     let title: String
     let symbol: String
     let spokenLabel: String
     var hint: String = ""
-    /// Every cell but the first carries the hairline that separates it from
-    /// the one before, so the strip needs no divider views of its own.
-    var showsDivider = true
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 6) {
                 Image(systemName: symbol)
-                    .font(.system(size: 19, weight: .regular))
+                    .font(.system(size: 20, weight: .regular))
                     .symbolRenderingMode(.monochrome)
                     .foregroundStyle(isEnabled ? AnyShapeStyle(HierarchicalShapeStyle.primary)
                                                : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
-                    .frame(height: 21)
+                    .frame(height: 22)
                 Text(title)
                     .font(.system(size: 11, weight: .medium))
-                    .tracking(0.1)
-                    .foregroundStyle(.primary.opacity(isEnabled ? 0.62 : 0.28))
+                    .foregroundStyle(.primary.opacity(isEnabled ? 0.6 : 0.28))
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
             }
@@ -618,14 +608,6 @@ struct RemoteQuickAction: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(RemoteQuickActionStyle())
-        .overlay(alignment: .leading) {
-            if showsDivider {
-                Rectangle()
-                    .fill(RemoteSurface.separator(appearance))
-                    .frame(width: 0.75)
-                    .padding(.vertical, 12)
-            }
-        }
         .accessibilityLabel(spokenLabel)
         .accessibilityHint(hint)
     }
@@ -635,10 +617,10 @@ private struct RemoteQuickActionStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
+        // The only thing a press paints is the glyph and its label going
+        // quiet — nothing appears behind them that was not there before.
         configuration.label
-            // The press tints the cell rather than scaling it: a cell inside a
-            // strip cannot shrink without tearing the strip's edge.
-            .background(Color.primary.opacity(configuration.isPressed ? 0.07 : 0))
+            .opacity(configuration.isPressed ? 0.45 : 1)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
