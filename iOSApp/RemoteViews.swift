@@ -447,6 +447,57 @@ struct RemoteSelectionRow: View {
 /// Surface roles for the companion glass. Each role owns how much of the
 /// backdrop it lets through: broad surfaces stay transparent enough for the
 /// engraving to read, compact controls keep a visible optical rim.
+/// The sheet a screen's content sits on: colourless Apple glass, never a tint.
+///
+/// The register is rows on the ground — but a ground with nothing on it makes
+/// a monochrome app read flat, and the only depth available was the engraving,
+/// which kept being turned down to keep text legible. So content gets one
+/// lifted sheet: real Liquid Glass on iOS 26, colourless and clear, sized by
+/// the geometry around it so it never enters layout. The engraving stays
+/// behind it, in the margins, where it can be stronger again.
+///
+/// Reduce Transparency gets the opaque card colour instead. The whole point of
+/// that setting is no backdrop.
+struct RemoteContentSheet: View {
+    var radius: CGFloat = 28
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.remoteAppearance) private var appearance
+
+    @ViewBuilder
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        if reduceTransparency {
+            shape.fill(RemoteSurface.card(appearance))
+        } else if #available(iOS 26.0, *) {
+            GeometryReader { geometry in
+                Color.clear
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .glassEffect(Glass.clear, in: .rect(cornerRadius: radius))
+                    .opacity(0.42)
+                    .allowsHitTesting(false)
+            }
+            .overlay(shape.strokeBorder(RemoteSurface.separator(appearance), lineWidth: 0.75))
+        } else {
+            shape.fill(.ultraThinMaterial)
+                .overlay(shape.fill(RemoteSurface.card(appearance).opacity(0.28)))
+                .overlay(shape.strokeBorder(RemoteSurface.separator(appearance), lineWidth: 0.75))
+        }
+    }
+}
+
+extension View {
+    /// Puts the content sheet behind a screen's list or transcript, inset from
+    /// the edges so the engraving shows around it.
+    func remoteContentSheet(inset: CGFloat = 8, top: CGFloat = 0) -> some View {
+        background {
+            RemoteContentSheet()
+                .padding(.horizontal, inset)
+                .padding(.top, top)
+                .ignoresSafeArea(edges: .bottom)
+        }
+    }
+}
+
 /// The engraved atmosphere behind every screen.
 ///
 /// It can be turned off in Settings: on a small phone, over dense text, some
@@ -471,7 +522,7 @@ struct RemoteBackdrop: View {
                 // puts the assistant's answer straight on this ground with no
                 // card, so the ground has to be near-silent or the engraving
                 // sits inside the words.
-                .opacity(appearance == .light ? 0.11 : 0.085)
+                .opacity(appearance == .light ? 0.20 : 0.17)
                 .accessibilityHidden(true)
         }
         .background(RemoteSurface.ground(appearance))

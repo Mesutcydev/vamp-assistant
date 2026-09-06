@@ -53,6 +53,7 @@ struct RemoteSettingsSheet: View {
                 connectionSection
             }
             .remotePlainList()
+            .remoteContentSheet()
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }

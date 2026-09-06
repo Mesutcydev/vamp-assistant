@@ -61,6 +61,8 @@ struct ConversationView: View {
             if let detail {
                 VStack(spacing: 0) {
                     if !store.isConnected { RemoteReconnectBanner(store: store) }
+                    // The words sit on the sheet; the engraving keeps the
+                    // margins around it.
                     MessageTranscript(
                         detail: detail,
                         dismissedErrorMessage: dismissedErrorMessage,
@@ -68,6 +70,7 @@ struct ConversationView: View {
                         onRevertCheckpoint: detail.isRunning
                             ? nil
                             : { Task { await store.undoCheckpoint() } })
+                        .remoteContentSheet()
                     if let pending = detail.pending {
                         PendingInteractionView(
                             pending: pending,

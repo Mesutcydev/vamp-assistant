@@ -117,6 +117,7 @@ struct StartSessionSheet: View {
                 .frame(minHeight: 520, alignment: .top)
             }
             .scrollDismissesKeyboard(.interactively)
+            .remoteContentSheet()
             .background { RemoteBackdrop() }
             .navigationTitle("New session")
             .navigationBarTitleDisplayMode(.inline)

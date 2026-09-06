@@ -61,6 +61,7 @@ struct RemoteBotsView: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 28)
             }
+            .remoteContentSheet()
             .background { RemoteBackdrop() }
             .refreshable { try? await store.refresh() }
             .navigationTitle("Bots")

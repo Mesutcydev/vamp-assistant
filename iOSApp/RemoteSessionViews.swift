@@ -97,6 +97,7 @@ struct SessionListView: View {
             }
         }
         .remotePlainList()
+        .remoteContentSheet()
         .refreshable { try? await store.refresh() }
         // Under the title rather than floating at the bottom: the floating
         // field sat on top of the last section, so Imported was invisible at
