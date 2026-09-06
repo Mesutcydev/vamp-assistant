@@ -205,7 +205,7 @@ struct SessionListView: View {
                         .lineLimit(1)
                     Image(systemName: "chevron.right")
                         .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.primary.opacity(0.45))
                         .accessibilityHidden(true)
                 }
             }

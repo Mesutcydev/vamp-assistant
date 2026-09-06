@@ -148,7 +148,9 @@ struct RemoteSettingsSheet: View {
                     Text("Version \(RemoteAppVersion.current.version) · Build \(RemoteAppVersion.current.build)")
                         .font(.footnote)
                         .monospacedDigit()
-                        .foregroundStyle(.secondary)
+                        // Rows are transparent now, so system secondary sat on
+                        // the engraving at about 2.5:1 in dark mode.
+                        .foregroundStyle(.primary.opacity(0.62))
                 }
                 Spacer(minLength: 0)
             }

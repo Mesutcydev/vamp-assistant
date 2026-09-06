@@ -95,7 +95,7 @@ struct RemoteBotsView: View {
         Text(text.uppercased())
             .font(.caption.weight(.semibold))
             .tracking(0.9)
-            .foregroundStyle(.primary.opacity(0.55))
+            .foregroundStyle(.primary.opacity(0.78))
             .padding(.top, 26)
             .padding(.bottom, 6)
     }
@@ -239,7 +239,7 @@ private struct RemoteBotRow: View {
                     .lineLimit(1)
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.primary.opacity(0.45))
             }
             .frame(minHeight: 58)
             .contentShape(Rectangle())
@@ -280,7 +280,7 @@ private struct RemoteBotPlainRow: View {
                 if showsChevron {
                     Image(systemName: "chevron.right")
                         .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.primary.opacity(0.45))
                 }
             }
             .frame(minHeight: 58)

@@ -468,7 +468,7 @@ struct ToolLedger: View {
                     if !entry.summary.isEmpty, !isExpanded {
                         Text(entry.summary)
                             .font(.footnote)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.primary.opacity(0.45))
                             .lineLimit(1)
                             .truncationMode(.tail)
                     }
@@ -476,7 +476,7 @@ struct ToolLedger: View {
                     if !entry.output.isEmpty {
                         Image(systemName: "chevron.down")
                             .font(.caption2.weight(.bold))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.primary.opacity(0.45))
                             .rotationEffect(.degrees(isExpanded ? 180 : 0))
                             .accessibilityHidden(true)
                     }
@@ -514,7 +514,7 @@ struct ToolLedger: View {
             // Done is the quiet state; only a failure earns colour.
             Image(systemName: "checkmark")
                 .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.primary.opacity(0.45))
                 .frame(width: 12, height: 12)
                 .accessibilityHidden(true)
         case .failed:

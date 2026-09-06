@@ -302,9 +302,9 @@ struct RemoteSectionHeading: View {
         Text(text.uppercased())
             .font(.caption.weight(.semibold))
             .tracking(0.9)
-            // Headings sit outside the cards, on the ground: .secondary was
-            // too pale there to read at a glance.
-            .foregroundStyle(.primary.opacity(0.55))
+            // Headings sit on the ground, not on a card, so they compete with
+            // the engraving: 0.55 vanished into it in dark mode.
+            .foregroundStyle(.primary.opacity(0.78))
             .padding(.top, 4)
             .padding(.bottom, 2)
     }
@@ -387,14 +387,14 @@ struct RemoteDisclosureRow: View {
                         if let detail {
                             Text(detail)
                                 .font(.caption)
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(.primary.opacity(0.45))
                                 .lineLimit(1)
                         }
                     }
                 }
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.primary.opacity(0.45))
                     .accessibilityHidden(true)
             }
             .contentShape(Rectangle())
@@ -518,7 +518,7 @@ struct RemoteBackdrop: View {
                 // puts the assistant's answer straight on this ground with no
                 // card, so the ground has to be near-silent or the engraving
                 // sits inside the words.
-                .opacity(appearance == .light ? 0.15 : 0.13)
+                .opacity(appearance == .light ? 0.11 : 0.085)
                 .accessibilityHidden(true)
         }
         .background(RemoteSurface.ground(appearance))
@@ -676,7 +676,7 @@ struct RemoteSettingChipLabel: View {
                 .lineLimit(1)
             Image(systemName: "chevron.down")
                 .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.primary.opacity(0.45))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

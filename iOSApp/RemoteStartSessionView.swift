@@ -114,7 +114,6 @@ struct StartSessionSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
             .safeAreaInset(edge: .bottom) { startBar }
-            .keyboardDismissToolbar()
             .sheet(isPresented: $showModelPicker) {
                 RemoteModelPickerSheet(
                     models: store.startModels,
@@ -277,7 +276,7 @@ struct StartSessionSheet: View {
                             Spacer(minLength: 8)
                             Image(systemName: "arrow.up.left")
                                 .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(.primary.opacity(0.45))
                         }
                         .frame(minHeight: 48)
                         .contentShape(Rectangle())
@@ -293,46 +292,50 @@ struct StartSessionSheet: View {
     }
 
     private var startBar: some View {
-        HStack(alignment: .center, spacing: 12) {
-            if let blockedReason {
-                Text(blockedReason)
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(RemoteSurface.separator(appearance))
+                .frame(height: 0.75)
+            HStack(alignment: .center, spacing: 12) {
+                Text(blockedReason ?? "Return sends. This is where it begins.")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.primary.opacity(blockedReason == nil ? 0.45 : 0.7))
+                    .lineLimit(2)
                     .accessibilityHidden(true)
-            } else {
-                Text("Return sends. This is where it begins.")
-                    .font(.footnote)
-                    .foregroundStyle(.tertiary)
-                    .accessibilityHidden(true)
-            }
-            Spacer(minLength: 0)
-            Button(action: start) {
-                Group {
-                    if isStarting {
-                        ProgressView().tint(.white)
-                    } else {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 19, weight: .semibold))
+                Spacer(minLength: 8)
+                Button(action: start) {
+                    HStack(spacing: 7) {
+                        if isStarting {
+                            ProgressView().controlSize(.small).tint(.white)
+                        }
+                        Text(isStarting ? "Starting" : "Start")
+                            .font(.subheadline.weight(.semibold))
+                        if !isStarting {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 13, weight: .bold))
+                        }
                     }
+                    .padding(.horizontal, 18)
+                    .frame(height: 44)
+                    // Drawn rather than .borderedProminent, whose disabled fill
+                    // is white on a light sheet and near-black on a dark one.
+                    .background(canStart ? AnyShapeStyle(BeetTheme.accent)
+                                         : AnyShapeStyle(RemoteSurface.well(appearance)),
+                                in: Capsule())
+                    .foregroundStyle(canStart ? AnyShapeStyle(Color.white)
+                                              : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
                 }
-                .frame(width: 46, height: 46)
-                // Drawn rather than .borderedProminent, whose disabled fill is
-                // white on a light sheet and near-black on a dark one — the
-                // screen's primary action disappeared in both.
-                .background(canStart ? AnyShapeStyle(BeetTheme.accent)
-                                     : AnyShapeStyle(RemoteSurface.well(appearance)),
-                            in: Circle())
-                .foregroundStyle(canStart ? AnyShapeStyle(Color.white)
-                                          : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
+                .buttonStyle(.plain)
+                .disabled(!canStart)
+                .accessibilityLabel(isStarting ? "Starting" : "Start session")
+                .accessibilityHint(blockedReason ?? "")
             }
-            .buttonStyle(.plain)
-            .disabled(!canStart)
-            .accessibilityLabel(isStarting ? "Starting" : "Start session")
-            .accessibilityHint(blockedReason ?? "")
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            // Opaque, in the app's own grey. `.bar` painted a white slab across
+            // the bottom of a dark sheet and let the list show through it.
+            .background(RemoteSurface.card(appearance))
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-        .background(.bar)
     }
 
     // MARK: Loading

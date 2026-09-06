@@ -25,7 +25,7 @@ struct RemoteTaskListView: View {
                 Text("\(done) of \(items.count)")
                     .font(.caption)
                     .monospacedDigit()
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.primary.opacity(0.45))
             }
             .padding(.bottom, 8)
 

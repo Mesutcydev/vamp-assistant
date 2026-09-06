@@ -38,19 +38,6 @@ struct RemoteComposer: View {
             .foregroundStyle(.secondary)
             .padding(.bottom, 3)
             .accessibilityLabel("Commands and context")
-            // A popover anchored to the button, not a sheet: six shortcuts do
-            // not need half the screen, and the sheet's first section was
-            // clipped by the detent it opened at.
-            .popover(isPresented: $showCommands,
-                     attachmentAnchor: .point(.top),
-                     arrowEdge: .top) {
-                RemoteCommandPopover(draft: $draft) {
-                    showCommands = false
-                    isComposerFocused = true
-                }
-                .presentationCompactAdaptation(.popover)
-                .presentationBackground(RemoteSurface.card(appearance))
-            }
 
             HStack(alignment: .bottom, spacing: 8) {
                 TextField(placeholder, text: $draft, axis: .vertical)
@@ -91,6 +78,15 @@ struct RemoteComposer: View {
                 Capsule()
                     .fill(RemoteSurface.well(appearance)))
             .overlay(Capsule().stroke(RemoteSurface.separator(appearance), lineWidth: 0.5))
+        }
+        .sheet(isPresented: $showCommands) {
+            RemoteCommandPopover(draft: $draft) {
+                showCommands = false
+                isComposerFocused = true
+            }
+            .presentationDetents([.height(392)])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(RemoteSurface.card(appearance))
         }
         .animation(.easeOut(duration: 0.16), value: isRunning && hasDraft)
         .frame(maxWidth: 720)
@@ -257,7 +253,7 @@ struct PendingInteractionView: View {
                     if let toolName = pending.toolName, !toolName.isEmpty {
                         Text(toolName)
                             .font(.caption.monospaced())
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.primary.opacity(0.45))
                             .lineLimit(1)
                     }
                 }
@@ -339,7 +335,7 @@ struct PendingInteractionView: View {
                                 Spacer(minLength: 8)
                                 Image(systemName: "arrow.up.left")
                                     .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.tertiary)
+                                    .foregroundStyle(.primary.opacity(0.45))
                             }
                             .padding(.horizontal, 14)
                             .frame(minHeight: 44)
