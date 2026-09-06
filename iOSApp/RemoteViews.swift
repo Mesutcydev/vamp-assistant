@@ -182,7 +182,6 @@ extension View {
         self
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .background { RemoteBackdrop() }
     }
 }
 
@@ -469,17 +468,23 @@ struct RemoteContentSheet: View {
         if reduceTransparency {
             shape.fill(RemoteSurface.card(appearance))
         } else if #available(iOS 26.0, *) {
-            GeometryReader { geometry in
-                Color.clear
-                    .frame(width: geometry.size.width, height: geometry.size.height)
-                    .glassEffect(Glass.clear, in: .rect(cornerRadius: radius))
-                    .opacity(0.42)
-                    .allowsHitTesting(false)
-            }
-            .overlay(shape.strokeBorder(RemoteSurface.separator(appearance), lineWidth: 0.75))
+            // Tint over glass, not glass alone: clear glass refracts the
+            // engraving rather than covering it, so at full bleed the
+            // atmosphere landed inside the paragraphs. Light needs more of the
+            // card than dark — a pale ground shows the mottle far sooner.
+            shape.fill(RemoteSurface.card(appearance).opacity(appearance == .light ? 0.46 : 0.40))
+                .background {
+                    GeometryReader { geometry in
+                        Color.clear
+                            .frame(width: geometry.size.width, height: geometry.size.height)
+                            .glassEffect(Glass.clear, in: .rect(cornerRadius: radius))
+                            .allowsHitTesting(false)
+                    }
+                }
+                .overlay(shape.strokeBorder(RemoteSurface.separator(appearance), lineWidth: 0.75))
         } else {
             shape.fill(.ultraThinMaterial)
-                .overlay(shape.fill(RemoteSurface.card(appearance).opacity(0.28)))
+                .overlay(shape.fill(RemoteSurface.card(appearance).opacity(appearance == .light ? 0.40 : 0.32)))
                 .overlay(shape.strokeBorder(RemoteSurface.separator(appearance), lineWidth: 0.75))
         }
     }
@@ -488,12 +493,15 @@ struct RemoteContentSheet: View {
 extension View {
     /// Puts the content sheet behind a screen's list or transcript, inset from
     /// the edges so the engraving shows around it.
-    func remoteContentSheet(inset: CGFloat = 8, top: CGFloat = 0) -> some View {
+    func remoteContentSheet(inset: CGFloat = 12, top: CGFloat = 0) -> some View {
         background {
-            RemoteContentSheet()
-                .padding(.horizontal, inset)
-                .padding(.top, top)
-                .ignoresSafeArea(edges: .bottom)
+            ZStack {
+                RemoteBackdrop()
+                RemoteContentSheet()
+                    .padding(.horizontal, inset)
+                    .padding(.top, top)
+                    .ignoresSafeArea(edges: .bottom)
+            }
         }
     }
 }
@@ -522,7 +530,7 @@ struct RemoteBackdrop: View {
                 // puts the assistant's answer straight on this ground with no
                 // card, so the ground has to be near-silent or the engraving
                 // sits inside the words.
-                .opacity(appearance == .light ? 0.20 : 0.17)
+                .opacity(appearance == .light ? 0.13 : 0.17)
                 .accessibilityHidden(true)
         }
         .background(RemoteSurface.ground(appearance))
@@ -546,7 +554,6 @@ struct AppearanceMenuButton: View {
                 .foregroundStyle(BeetTheme.secondaryText(current))
                 .frame(width: 40, height: 40)
                 .hitTarget(2)
-                .background(.thinMaterial, in: Circle())
                 .background(RemoteSurface.well(current), in: Circle())
                 .overlay { Circle().stroke(RemoteSurface.separator(current), lineWidth: 0.75) }
                 .shadow(color: .black.opacity(current == .light ? 0.08 : 0.18), radius: 9, y: 4)

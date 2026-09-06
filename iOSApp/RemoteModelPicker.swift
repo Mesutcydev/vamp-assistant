@@ -82,8 +82,9 @@ struct RemoteModelPickerSheet: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                RemoteBackdrop()
+            // One register with the rest of the app: content on the sheet, the
+            // engraving only in the margin around it.
+            Group {
                 VStack(spacing: 0) {
                     Picker("Model source", selection: $source) {
                         ForEach(Self.sources, id: \.self) { option in
@@ -131,6 +132,8 @@ struct RemoteModelPickerSheet: View {
                 }
                 .padding(.top, 10)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .remoteContentSheet()
             .navigationTitle("Model")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),

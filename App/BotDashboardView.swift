@@ -517,8 +517,8 @@ private struct BotRailRow: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(isSelected ? AnyShapeStyle(.selection) : AnyShapeStyle(.clear)))
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(isSelected ? AnyShapeStyle(Theme.surfaceInset) : AnyShapeStyle(.clear)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

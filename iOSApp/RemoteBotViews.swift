@@ -56,6 +56,7 @@ struct RemoteBotDetailView: View {
             if let run, run.isTerminal { lastRunSection(run) }
         }
         .remotePlainList()
+        .remoteContentSheet()
         .refreshable { try? await store.refresh() }
         .navigationTitle(profile.name)
         .navigationBarTitleDisplayMode(.inline)

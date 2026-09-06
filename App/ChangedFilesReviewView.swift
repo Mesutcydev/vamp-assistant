@@ -157,7 +157,11 @@ struct ChangedFilesReviewView: View {
             if model.isLoading, model.files.isEmpty {
                 ProgressView("Loading changes…")
                     .padding(Spacing.xl)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Radius.lg))
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                            .stroke(Theme.hairline, lineWidth: 1)
+                    }
             }
         }
         .safeAreaInset(edge: .bottom) {

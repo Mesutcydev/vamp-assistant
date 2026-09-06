@@ -62,7 +62,6 @@ struct RemoteBotsView: View {
                 .padding(.bottom, 28)
             }
             .remoteContentSheet()
-            .background { RemoteBackdrop() }
             .refreshable { try? await store.refresh() }
             .navigationTitle("Bots")
             .navigationBarTitleDisplayMode(.large)
@@ -359,7 +358,8 @@ private struct RemoteDelegateSheet: View {
                 Spacer(minLength: 0)
             }
             .padding(20)
-            .background { RemoteBackdrop() }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .remoteContentSheet()
             .navigationTitle("Delegate")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }

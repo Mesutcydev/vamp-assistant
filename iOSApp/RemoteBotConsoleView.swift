@@ -16,6 +16,7 @@ struct RemoteBotConsoleView: View {
     let computer: RemoteBotComputer
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.remoteAppearance) private var appearance
     @State private var tab: Tab = .shell
     @State private var command = ""
     @State private var transcript: [String] = []
@@ -95,7 +96,11 @@ struct RemoteBotConsoleView: View {
                 }
             }
             .padding(10)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(RemoteSurface.card(appearance), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(RemoteSurface.separator(appearance), lineWidth: 0.75)
+            }
             .padding(.horizontal)
             .padding(.bottom, 8)
         }

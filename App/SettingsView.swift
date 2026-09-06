@@ -28,6 +28,22 @@ struct SettingsView: View {
             case .plugins: "puzzlepiece"
             }
         }
+
+        /// Six flat rows read as one undifferentiated list. Grouped, the rail
+        /// says what kind of thing each tab is before you read its label.
+        var group: String {
+            switch self {
+            case .general: "This app"
+            case .models, .agent, .bots: "Intelligence"
+            case .network, .plugins: "System"
+            }
+        }
+
+        /// ⌘1…⌘6, in the order the rail shows them.
+        var shortcut: KeyEquivalent? {
+            guard let index = Tab.allCases.firstIndex(of: self), index < 9 else { return nil }
+            return KeyEquivalent(Character("\(index + 1)"))
+        }
     }
 
     @State private var tab: Tab
@@ -65,16 +81,30 @@ struct SettingsView: View {
                 // No ScrollView: six fixed rows always fit, and a scroll view
                 // adds its own horizontal content inset.
                 VStack(spacing: 2) {
-                    ForEach(Tab.allCases) { option in
-                        SidebarNavRow(title: option.rawValue,
+                    ForEach(Array(Tab.allCases.enumerated()), id: \.element) { index, option in
+                        if index == 0 || option.group != Tab.allCases[index - 1].group {
+                            SidebarRailCaption(text: option.group)
+                        }
+                        SidebarTabRow(title: option.rawValue,
                                       icon: option.icon,
-                                      selected: option == tab) {
+                                      selected: option == tab,
+                                      shortcut: option.shortcut) {
                             tab = option
                         }
                     }
                 }
 
                 Spacer(minLength: 0)
+
+                // The rail's foot answers the question the About row used to:
+                // which build am I looking at.
+                SidebarDivider(inset: 0)
+                Text(Self.versionLine)
+                    .font(.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .padding(.horizontal, SidebarMetrics.rowPadding)
+                    .padding(.vertical, Spacing.md)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, SidebarMetrics.inset)
             .navigationTitle("Settings")
@@ -87,20 +117,16 @@ struct SettingsView: View {
             SidebarSplitDivider()
 
             VStack(spacing: 0) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(tab.rawValue).font(.title2.weight(.semibold))
-                        Text(detailSubtitle).font(.callout).foregroundStyle(Theme.textSecondary)
-                    }
-                    Spacer()
-                    Button(action: onClose) {
-                        Label("Back to Assistant", systemImage: "chevron.backward")
-                    }
-                    .buttonStyle(LFCapsuleButtonStyle())
+                // One back affordance, in the rail. The capsule that used to
+                // sit here said the same thing twice, three inches apart.
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(tab.rawValue).font(.title2.weight(.semibold))
+                    Text(detailSubtitle).font(.callout).foregroundStyle(Theme.textSecondary)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 24)
                 .padding(.vertical, 18)
-                .background(.thinMaterial)
+                .background(Theme.surface)
                 .overlay(alignment: .bottom) { Rectangle().fill(Theme.hairline).frame(height: 1) }
 
                 Group {
@@ -134,6 +160,14 @@ struct SettingsView: View {
             modelsSection = .library
         }
     }
+
+    /// Marketing version and build, read once from the bundle.
+    private static let versionLine: String = {
+        let bundle = Bundle.main
+        let version = bundle.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = bundle.infoDictionary?["CFBundleVersion"] as? String ?? "—"
+        return "Vamp Assistant \(version) (\(build))"
+    }()
 
     private var detailSubtitle: String {
         switch tab {

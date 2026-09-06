@@ -89,6 +89,7 @@ struct RemoteWorkspacePickerSheet: View {
                 }
             }
             .remotePlainList()
+            .remoteContentSheet()
             .navigationTitle("Where it works")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
@@ -179,6 +180,7 @@ struct RemoteBotPickerSheet: View {
                 .remoteListRow()
             }
             .remotePlainList()
+            .remoteContentSheet()
             .navigationTitle("Bot")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
@@ -228,7 +230,7 @@ struct RemoteStartAdvancedSheet: View {
             }
             .scrollContentBackground(.hidden)
             .scrollDismissesKeyboard(.interactively)
-            .background { RemoteBackdrop() }
+            .remoteContentSheet()
             .navigationTitle("Bot computers & keys")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }

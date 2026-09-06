@@ -108,17 +108,14 @@ struct StartSessionSheet: View {
                 VStack(alignment: .leading, spacing: 0) {
                     if !store.isConnected { reconnectCard.padding(.bottom, 20) }
                     setupRow
-                    Spacer(minLength: 24)
                     startersList
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 4)
                 .padding(.bottom, 12)
-                .frame(minHeight: 520, alignment: .top)
             }
             .scrollDismissesKeyboard(.interactively)
             .remoteContentSheet()
-            .background { RemoteBackdrop() }
             .navigationTitle("New session")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }

@@ -321,7 +321,6 @@ struct RemoteSecondaryButtonStyle: ButtonStyle {
     @Environment(\.remoteAppearance) private var appearance
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.foregroundStyle(BeetTheme.secondaryText(appearance))
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .background(RemoteSurface.well(appearance), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay { RoundedRectangle(cornerRadius: 14).stroke(RemoteSurface.separator(appearance)) }
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.975 : 1).animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
@@ -348,6 +347,7 @@ struct ComputerSwitcherSheet: View {
                 actionsSection
             }
             .remotePlainList()
+            .remoteContentSheet()
             .navigationTitle("Computers")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -523,7 +523,6 @@ struct RemoteReconnectBanner: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(.thinMaterial)
             .background(RemoteSurface.card(appearance))
         }
         .buttonStyle(.plain)

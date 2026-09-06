@@ -196,7 +196,7 @@ struct MessageTranscript: View {
                 .foregroundStyle(BeetTheme.secondaryText(appearance))
                 .padding(.horizontal, 14)
                 .frame(minHeight: 44)
-                .background(.regularMaterial, in: Capsule())
+                .background(RemoteSurface.card(appearance), in: Capsule())
                 .overlay { Capsule().stroke(RemoteSurface.separator(appearance), lineWidth: 0.75) }
                 .contentShape(Capsule())
         }
