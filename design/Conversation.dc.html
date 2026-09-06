@@ -10,45 +10,45 @@
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
-    a { color: #888888; } a:hover { color: #F5F2EC; }
+    a { color: #9A9A9E; } a:hover { color: #F2F2F4; }
     .screen { position: relative; width: 390px; height: 844px; overflow: hidden;
-      background: #151310; color: #F5F2EC; }
+      background: #0F0F10; color: #F2F2F4; }
     .atmos { position: absolute; inset: 0; background-image: url("atmosphere.jpg");
       background-size: cover; background-position: center; filter: grayscale(1);
-      opacity: 0.14; pointer-events: none; }
+      opacity: 0.13; pointer-events: none; }
     .layer { position: relative; height: 100%; display: flex; flex-direction: column; }
-    .glass { background: rgba(33,30,26,0.72); -webkit-backdrop-filter: blur(24px) saturate(1.4);
-      backdrop-filter: blur(24px) saturate(1.4); border: 0.75px solid rgba(255,248,235,0.14);
-      box-shadow: 0 8px 22px rgba(0,0,0,0.42), inset 0 0.75px 0 rgba(255,248,235,0.10); border-radius: 18px; }
-    .well { background: rgba(46,42,37,0.55); border-radius: 12px; }
+    .glass { background: rgba(26,26,28,0.72); -webkit-backdrop-filter: blur(24px) saturate(1.4);
+      backdrop-filter: blur(24px) saturate(1.4); border: 0.75px solid rgba(255,255,255,0.13);
+      box-shadow: 0 8px 22px rgba(0,0,0,0.46), inset 0 0.75px 0 rgba(255,255,255,0.10); border-radius: 18px; }
+    .well { background: rgba(37,37,40,0.58); border-radius: 12px; }
     .cap { font-size: 11px; font-weight: 600; letter-spacing: 0.9px; text-transform: uppercase;
-      color: rgba(245,242,236,0.62); }
+      color: rgba(242,242,244,0.62); }
     .t1 { font-size: 34px; font-weight: 700; letter-spacing: -0.8px; line-height: 41px; }
     .h  { font-size: 17px; font-weight: 600; letter-spacing: -0.4px; }
     .b  { font-size: 17px; letter-spacing: -0.4px; line-height: 25px; }
-    .sub { font-size: 15px; color: rgba(245,242,236,0.62); letter-spacing: -0.2px; }
-    .fn { font-size: 13px; color: rgba(245,242,236,0.62); }
-    .c2 { font-size: 11px; color: rgba(245,242,236,0.38); }
+    .sub { font-size: 15px; color: rgba(242,242,244,0.62); letter-spacing: -0.2px; }
+    .fn { font-size: 13px; color: rgba(242,242,244,0.62); }
+    .c2 { font-size: 11px; color: rgba(242,242,244,0.38); }
     .mono { font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace; font-size: 13px; }
     .row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 14px; }
-    .div { height: 0.75px; background: rgba(255,248,235,0.10); }
+    .div { height: 0.75px; background: rgba(255,255,255,0.09); }
     .stack { display: flex; flex-direction: column; }
     .navpill { width: 34px; height: 34px; border-radius: 17px; display: flex; align-items: center;
-      justify-content: center; background: rgba(46,42,37,0.55); border: 0.75px solid rgba(255,248,235,0.14); }
+      justify-content: center; background: rgba(37,37,40,0.58); border: 0.75px solid rgba(255,255,255,0.13); }
     .chip { display: flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px;
-      background: rgba(46,42,37,0.55); border: 0.75px solid rgba(255,248,235,0.14); font-size: 13px; font-weight: 500; }
+      background: rgba(37,37,40,0.58); border: 0.75px solid rgba(255,255,255,0.13); font-size: 13px; font-weight: 500; }
   </style>
 </helmet>
 <div class="screen">
   <div class="atmos"></div>
   <div class="layer">
-    <div style="display:flex;align-items:center;gap:10px;padding:10px 14px 12px;border-bottom:0.75px solid rgba(255,248,235,0.10);background:rgba(33,30,26,0.72);-webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px)">
-      <div class="navpill" style="width:32px;height:32px"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#888888" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 14px 12px;border-bottom:0.75px solid rgba(255,255,255,0.09);background:rgba(26,26,28,0.72);-webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px)">
+      <div class="navpill" style="width:32px;height:32px"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#9A9A9E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></div>
       <div style="flex:1;text-align:center">
         <div class="h">How do hair tests work</div>
         <div class="c2" style="margin-top:1px">Ready · Chat · GPT-5</div>
       </div>
-      <div class="navpill" style="width:32px;height:32px"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#888888" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="18" cy="12" r="1.5"/></svg></div>
+      <div class="navpill" style="width:32px;height:32px"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#9A9A9E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="18" cy="12" r="1.5"/></svg></div>
     </div>
 
     <div style="flex:1;overflow:hidden;padding:18px 18px 0;display:flex;flex-direction:column;gap:18px">
@@ -57,47 +57,47 @@
       </div>
 
       <div style="display:flex;align-items:center;gap:6px">
-        <div class="fn" style="color:rgba(245,242,236,0.38)">Thought for 4s</div>
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(245,242,236,0.38)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l7 7 7-7"/></svg>
+        <div class="fn" style="color:rgba(242,242,244,0.38)">Thought for 4s</div>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.38)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l7 7 7-7"/></svg>
       </div>
 
       <div class="b">A hair test looks for drugs and their metabolites locked into the growing shaft, not for anything circulating now.</div>
 
-      <div style="border-left:1.5px solid rgba(255,248,235,0.10);padding-left:12px;display:flex;flex-direction:column">
+      <div style="border-left:1.5px solid rgba(255,255,255,0.09);padding-left:12px;display:flex;flex-direction:column">
         <div>
           <div style="display:flex;align-items:center;gap:8px;min-height:30px">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(245,242,236,0.38)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
-            <div class="mono" style="color:#F5F2EC;opacity:.82">web search</div>
-            <div class="fn" style="color:rgba(245,242,236,0.38);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">5 results · SAMHSA, PubMed</div>
-            <div style="transform:rotate(0deg)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(245,242,236,0.38)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l7 7 7-7"/></svg></div>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.38)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+            <div class="mono" style="color:#F2F2F4;opacity:.82">web search</div>
+            <div class="fn" style="color:rgba(242,242,244,0.38);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">5 results · SAMHSA, PubMed</div>
+            <div style="transform:rotate(0deg)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.38)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l7 7 7-7"/></svg></div>
           </div>
         </div>
         <div>
           <div style="display:flex;align-items:center;gap:8px;min-height:30px">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(245,242,236,0.38)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
-            <div class="mono" style="color:#F5F2EC;opacity:.82">read file</div>
-            <div class="fn" style="color:rgba(245,242,236,0.38);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">hair-testing.md — 166 lines</div>
-            <div style="transform:rotate(180deg)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(245,242,236,0.38)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l7 7 7-7"/></svg></div>
-          </div><div class="mono" style="color:rgba(245,242,236,0.62);background:rgba(46,42,37,0.55);border-radius:10px;padding:9px 11px;margin:2px 0 8px;line-height:18px;font-size:12px">RemoteComposerView.swift<br>@@ -118,7 +118,25 @@<br>+ .popover(isPresented: $showCommands,<br>+          attachmentAnchor: .point(.top))</div>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.38)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+            <div class="mono" style="color:#F2F2F4;opacity:.82">read file</div>
+            <div class="fn" style="color:rgba(242,242,244,0.38);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">hair-testing.md — 166 lines</div>
+            <div style="transform:rotate(180deg)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.38)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l7 7 7-7"/></svg></div>
+          </div><div class="mono" style="color:rgba(242,242,244,0.62);background:rgba(37,37,40,0.58);border-radius:10px;padding:9px 11px;margin:2px 0 8px;line-height:18px;font-size:12px">RemoteComposerView.swift<br>@@ -118,7 +118,25 @@<br>+ .popover(isPresented: $showCommands,<br>+          attachmentAnchor: .point(.top))</div>
         </div>
       </div>
 
-      <div class="b">About 4&nbsp;cm from the scalp covers roughly three months, so it is a record of repeated use rather than of last night<span style="display:inline-block;width:2px;height:17px;background:#888888;margin-left:2px;vertical-align:-3px"></span></div>
+      <div class="b">About 4&nbsp;cm from the scalp covers roughly three months, so it is a record of repeated use rather than of last night<span style="display:inline-block;width:2px;height:17px;background:#9A9A9E;margin-left:2px;vertical-align:-3px"></span></div>
     </div>
 
     <div style="padding:0 18px">
       <div style="display:flex;align-items:center;gap:9px;padding:8px 4px">
-        <div style="width:13px;height:13px;border-radius:7px;border:1.6px solid rgba(245,242,236,0.38);border-top-color:#888888"></div>
+        <div style="width:13px;height:13px;border-radius:7px;border:1.6px solid rgba(242,242,244,0.38);border-top-color:#9A9A9E"></div>
         <div class="fn">Writing</div>
         <div style="flex:1"></div>
-        <div class="chip" style="padding:5px 14px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#F5F2EC" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="2"/></svg> Stop</div>
+        <div class="chip" style="padding:5px 14px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#F2F2F4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="2"/></svg> Stop</div>
       </div>
     </div>
 
-    <div style="padding:6px 12px 14px;display:flex;align-items:flex-end;gap:10px;border-top:0.75px solid rgba(255,248,235,0.10);background:rgba(33,30,26,0.72);-webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px)">
-      <div style="width:32px;height:32px;border-radius:16px;background:rgba(46,42,37,0.55);border:0.75px solid rgba(255,248,235,0.14);display:flex;align-items:center;justify-content:center"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="rgba(245,242,236,0.62)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></div>
-      <div style="flex:1;display:flex;align-items:center;gap:8px;padding:0 6px 0 14px;height:38px;border-radius:19px;background:rgba(46,42,37,0.55);border:0.75px solid rgba(255,248,235,0.14)">
-        <div class="b" style="flex:1;color:rgba(245,242,236,0.38);font-size:16px">Queue a follow-up or steer…</div>
+    <div style="padding:6px 12px 14px;display:flex;align-items:flex-end;gap:10px;border-top:0.75px solid rgba(255,255,255,0.09);background:rgba(26,26,28,0.72);-webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px)">
+      <div style="width:32px;height:32px;border-radius:16px;background:rgba(37,37,40,0.58);border:0.75px solid rgba(255,255,255,0.13);display:flex;align-items:center;justify-content:center"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.62)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></div>
+      <div style="flex:1;display:flex;align-items:center;gap:8px;padding:0 6px 0 14px;height:38px;border-radius:19px;background:rgba(37,37,40,0.58);border:0.75px solid rgba(255,255,255,0.13)">
+        <div class="b" style="flex:1;color:rgba(242,242,244,0.38);font-size:16px">Queue a follow-up or steer…</div>
         <div style="width:30px;height:30px;border-radius:15px;background:#686868;display:flex;align-items:center;justify-content:center"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg></div>
       </div>
     </div>

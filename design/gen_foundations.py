@@ -30,23 +30,23 @@ foundations = head(t, 880, 1180) + f'''<div class="screen" style="width:880px;he
       <div class="glass" style="padding:16px">
         <div class="cap" style="padding-bottom:12px">Dark — the default</div>
         <div style="display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:12px">
-          {sw(t['ground'],'ground','#151310 · behind everything')}
-          {sw(t['card'],'card','#211E1A · rows, sheets')}
-          {sw(t['well'],'well','#2E2A25 · fields, chips')}
+          {sw(t['ground'],'ground','#0F0F10 · behind everything')}
+          {sw(t['card'],'card','#1A1A1C · rows, sheets')}
+          {sw(t['well'],'well','#252528 · fields, chips')}
           {sw('#686868','accent','graphite accentDark')}
-          {sw('#888888','bright','brightDark · glyphs, dots')}
-          {sw('#FFF8EB','separator','10% · hairlines, rims')}
+          {sw('#9A9A9E','bright','bright · glyphs, dots')}
+          {sw('#FFFFFF','separator','9% hairline · 13% rim')}
         </div>
       </div>
       <div class="glass" style="padding:16px">
         <div class="cap" style="padding-bottom:12px">Light</div>
         <div style="display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:12px">
-          {sw(l['ground'],'ground','#F2EFE9')}
-          {sw(l['card'],'card','#FDFCFA')}
-          {sw(l['well'],'well','#EEEBE5')}
+          {sw(l['ground'],'ground','#F1F1F3')}
+          {sw(l['card'],'card','#FCFCFD')}
+          {sw(l['well'],'well','#E8E8EB')}
           {sw('#303030','accent','graphite accentLight')}
-          {sw('#505050','bright','brightLight')}
-          {sw('#3C372D','separator','14%')}
+          {sw('#4A4A4E','bright','bright')}
+          {sw('#000000','separator','10%')}
         </div>
       </div>
     </div>
@@ -68,9 +68,9 @@ foundations = head(t, 880, 1180) + f'''<div class="screen" style="width:880px;he
         <div class="mono" style="font-size:11px;color:{t['text2']};line-height:19px">
           fill&nbsp;&nbsp;&nbsp;&nbsp;card @ 72%<br>
           blur&nbsp;&nbsp;&nbsp;&nbsp;24 · saturate 1.4<br>
-          rim&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;0.75px #FFF8EB @ 14%<br>
+          rim&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;0.75px white @ 13%<br>
           inner&nbsp;&nbsp;&nbsp;top highlight @ 10%<br>
-          shadow&nbsp;&nbsp;0 8 22 black @ 42%<br>
+          shadow&nbsp;&nbsp;0 8 22 black @ 46%<br>
           radius&nbsp;&nbsp;18 card · 12 well · 999 pill
         </div>
         <div class="fn" style="margin-top:12px;line-height:17px">Reduce Transparency drops the blur and paints card/well opaque; nothing else changes.</div>
@@ -107,7 +107,7 @@ foundations = head(t, 880, 1180) + f'''<div class="screen" style="width:880px;he
       </div>
     </div>
 
-    <div class="fn" style="line-height:18px">Rules that hold everywhere: the platform owns structure and gestures; the accent is monochrome and only failure is coloured; the engraving sits at 14% dark / 16% light behind every screen and can be switched off in Settings; the assistant's prose never sits in a bubble.</div>
+    <div class="fn" style="line-height:18px">Rules that hold everywhere: the platform owns structure and gestures; the accent is monochrome and only failure is coloured; the engraving sits at 13% dark / 15% light behind every screen and can be switched off in Settings; the assistant's prose never sits in a bubble.</div>
   </div>
 </div>
 ''' + TAIL

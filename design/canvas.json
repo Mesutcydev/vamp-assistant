@@ -1,20 +1,36 @@
 {
+  "pages": [
+    { "id": "page-1", "name": "Screens" },
+    { "id": "page-2", "name": "First pass" }
+  ],
   "artboards": [
-    { "file": "Main.dc.html",           "x": 0,    "y": 0,    "w": 390, "h": 844, "title": "Sessions" },
-    { "file": "Conversation.dc.html",   "x": 490,  "y": 0,    "w": 390, "h": 844 },
-    { "file": "NewSession.dc.html",     "x": 980,  "y": 0,    "w": 390, "h": 844, "title": "New session" },
-    { "file": "Bots.dc.html",           "x": 1470, "y": 0,    "w": 390, "h": 844 },
-    { "file": "Settings.dc.html",       "x": 1960, "y": 0,    "w": 390, "h": 844 },
-    { "file": "SessionsLight.dc.html",  "x": 0,    "y": 1000, "w": 390, "h": 844, "title": "Sessions — light" },
-    { "file": "Overlays.dc.html",       "x": 490,  "y": 1000, "w": 390, "h": 1120, "title": "Menus, popovers, dialogs" },
-    { "file": "ChatStates.dc.html",     "x": 980,  "y": 1000, "w": 390, "h": 1180, "title": "Chat states" },
-    { "file": "Foundations.dc.html",    "x": 1470, "y": 1000, "w": 880, "h": 1180 }
+    { "file": "Main.dc.html",              "page": "page-1", "x": 0,    "y": 0,    "w": 390, "h": 844,  "title": "Sessions" },
+    { "file": "Conversation.dc.html",      "page": "page-1", "x": 490,  "y": 0,    "w": 390, "h": 844 },
+    { "file": "Settings.dc.html",          "page": "page-1", "x": 980,  "y": 0,    "w": 390, "h": 844 },
+    { "file": "SessionsLight.dc.html",     "page": "page-1", "x": 1470, "y": 0,    "w": 390, "h": 844,  "title": "Sessions — light" },
+
+    { "file": "BotsDispatch.dc.html",      "page": "page-1", "x": 0,    "y": 1060, "w": 390, "h": 844,  "title": "Bots A — Dispatch" },
+    { "file": "BotsDirectory.dc.html",     "page": "page-1", "x": 490,  "y": 1060, "w": 390, "h": 844,  "title": "Bots B — Directory" },
+    { "file": "NewSessionComposer.dc.html","page": "page-1", "x": 980,  "y": 1060, "w": 390, "h": 844,  "title": "New session A — Composer" },
+    { "file": "NewSessionModes.dc.html",   "page": "page-1", "x": 1470, "y": 1060, "w": 390, "h": 844,  "title": "New session B — Modes" },
+
+    { "file": "Overlays.dc.html",          "page": "page-1", "x": 0,    "y": 2120, "w": 390, "h": 1120, "title": "Menus, popovers, dialogs" },
+    { "file": "ChatStates.dc.html",        "page": "page-1", "x": 490,  "y": 2120, "w": 390, "h": 1180, "title": "Chat states" },
+    { "file": "Foundations.dc.html",       "page": "page-1", "x": 980,  "y": 2120, "w": 880, "h": 1180 },
+
+    { "file": "Bots.dc.html",              "page": "page-2", "x": 0,    "y": 0,    "w": 390, "h": 844,  "title": "Bots — first pass" },
+    { "file": "NewSession.dc.html",        "page": "page-2", "x": 490,  "y": 0,    "w": 390, "h": 844,  "title": "New session — first pass" }
   ],
   "annotations": [
-    { "id": "brief", "x": 0, "y": -190, "w": 470, "text": "Vamp Assistant — iOS\n\nOne system: the platform's structure and gestures, glass surfaces over the engraving, a monochrome graphite accent, and colour reserved for failure. Every token here is lifted from the shipping source, not invented." },
-    { "id": "home", "x": 0, "y": 880, "w": 390, "text": "Sessions: everything the app can do sits in the Mac card at the top — Stream, Bots, Share, Settings — and nothing hangs below the list. The compose glyph stays in the nav bar where a new-item action belongs." },
-    { "id": "chat", "x": 490, "y": 880, "w": 390, "text": "Transcript: the prompt is in a card and the answer is not — that contrast is the speaker cue, as in Cursor and Codex. Tool steps are a ledger against a rule, a call folded into its result. One Stop, in the run bar." },
-    { "id": "overlaynote", "x": 490, "y": 2160, "w": 390, "text": "Popovers are sized to their content and anchored to what opened them; sheets are for things with a task inside. Destructive actions stay red and stay behind a confirm." }
+    { "id": "brief", "page": "page-1", "x": 0, "y": -190, "w": 470, "text": "Vamp Assistant — iOS\n\nOne system: the platform's structure and gestures, glass over the engraving, a monochrome graphite accent, colour only for failure. Every token is lifted from the shipping source." },
+    { "id": "home", "page": "page-1", "x": 0, "y": 880, "w": 390, "text": "Sessions: the app's controls sit in the Mac card at the top, nothing hangs below the list." },
+    { "id": "chat", "page": "page-1", "x": 490, "y": 880, "w": 390, "text": "Transcript: the prompt is in a card, the answer is not. Tool steps are a ledger; one Stop, in the run bar." },
+    { "id": "botsA", "page": "page-1", "x": 0, "y": 1940, "w": 390, "text": "Bots A — Dispatch. The job comes first: one field, Auto or a named bot, and Send. Runs are live rows with progress; the five faces are a strip you tap to read a brief.\n\nTradeoff: the bots are less browsable — this suits someone who already knows what they want done." },
+    { "id": "botsB", "page": "page-1", "x": 490, "y": 1940, "w": 390, "text": "Bots B — Directory. Contacts, not cards: full-width rows with a portrait, role and live status, running work pulled out above, and delegation as one quiet row at the bottom.\n\nTradeoff: delegation is demoted to a tap — reading the team is what the screen is for." },
+    { "id": "newA", "page": "page-1", "x": 980, "y": 1940, "w": 390, "text": "New session A — Composer. The screen is the question. Setup collapses into three chips under it, starters are a plain list, and the field itself carries Start.\n\nTradeoff: the setup is legible only if you know what the chips mean — fastest for a returning user." },
+    { "id": "newB", "page": "page-1", "x": 1470, "y": 1940, "w": 390, "text": "New session B — Modes. A half-height sheet that asks the one thing that changes everything first: Chat, a folder, or a bot computer. Then the prompt, then two rows.\n\nTradeoff: one more decision up front, in exchange for never wondering why a session came out chat-only." },
+    { "id": "overlaynote", "page": "page-1", "x": 0, "y": 3280, "w": 390, "text": "Popovers are sized to their content and anchored to what opened them; sheets are for things with a task inside." },
+    { "id": "firstpass", "page": "page-2", "x": 0, "y": -150, "w": 880, "text": "The first pass at these two screens, kept for comparison. Both are card-and-section pages: correct, but the same shape as every other screen in the app — which is what made them feel generic rather than designed for what they do." }
   ],
-  "launch": { "view": "canvas" }
+  "launch": { "view": "canvas", "page": "page-1" }
 }

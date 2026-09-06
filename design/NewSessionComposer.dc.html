@@ -1,0 +1,82 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #9A9A9E; } a:hover { color: #F2F2F4; }
+    .screen { position: relative; width: 390px; height: 844px; overflow: hidden;
+      background: #0F0F10; color: #F2F2F4; }
+    .atmos { position: absolute; inset: 0; background-image: url("atmosphere.jpg");
+      background-size: cover; background-position: center; filter: grayscale(1);
+      opacity: 0.13; pointer-events: none; }
+    .layer { position: relative; height: 100%; display: flex; flex-direction: column; }
+    .glass { background: rgba(26,26,28,0.72); -webkit-backdrop-filter: blur(24px) saturate(1.4);
+      backdrop-filter: blur(24px) saturate(1.4); border: 0.75px solid rgba(255,255,255,0.13);
+      box-shadow: 0 8px 22px rgba(0,0,0,0.46), inset 0 0.75px 0 rgba(255,255,255,0.10); border-radius: 18px; }
+    .well { background: rgba(37,37,40,0.58); border-radius: 12px; }
+    .cap { font-size: 11px; font-weight: 600; letter-spacing: 0.9px; text-transform: uppercase;
+      color: rgba(242,242,244,0.62); }
+    .t1 { font-size: 34px; font-weight: 700; letter-spacing: -0.8px; line-height: 41px; }
+    .h  { font-size: 17px; font-weight: 600; letter-spacing: -0.4px; }
+    .b  { font-size: 17px; letter-spacing: -0.4px; line-height: 25px; }
+    .sub { font-size: 15px; color: rgba(242,242,244,0.62); letter-spacing: -0.2px; }
+    .fn { font-size: 13px; color: rgba(242,242,244,0.62); }
+    .c2 { font-size: 11px; color: rgba(242,242,244,0.38); }
+    .mono { font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace; font-size: 13px; }
+    .row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 14px; }
+    .div { height: 0.75px; background: rgba(255,255,255,0.09); }
+    .stack { display: flex; flex-direction: column; }
+    .navpill { width: 34px; height: 34px; border-radius: 17px; display: flex; align-items: center;
+      justify-content: center; background: rgba(37,37,40,0.58); border: 0.75px solid rgba(255,255,255,0.13); }
+    .chip { display: flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px;
+      background: rgba(37,37,40,0.58); border: 0.75px solid rgba(255,255,255,0.13); font-size: 13px; font-weight: 500; }
+  </style>
+</helmet>
+<div class="screen">
+  <div class="atmos"></div>
+  <div class="layer" style="padding:0 18px">
+    <div style="display:flex;align-items:center;padding:14px 0 22px">
+      <div class="b" style="color:#9A9A9E;font-size:16px">Cancel</div>
+    </div>
+
+    <div class="t1" style="font-size:30px;line-height:36px;color:rgba(242,242,244,0.38);padding-right:30px">What should it<br>work on?</div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:8px;padding:26px 0 0">
+      <div class="chip" style="padding:7px 12px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.62)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6a2 2 0 012-2h12a2 2 0 012 2v7a2 2 0 01-2 2H9l-5 4z"/></svg> Chat only <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.38)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l7 7 7-7"/></svg></div><div class="chip" style="padding:7px 12px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.62)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="3.2"/><path d="M5.5 20c0-3.4 2.9-6 6.5-6s6.5 2.6 6.5 6"/></svg> Assistant <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.38)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l7 7 7-7"/></svg></div><div class="chip" style="padding:7px 12px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.62)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M10 3v3M14 3v3M10 18v3M14 18v3M3 10h3M3 14h3M18 10h3M18 14h3"/></svg> Qwen3.5 9B <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.38)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l7 7 7-7"/></svg></div>
+    </div>
+
+    <div style="padding:30px 0 0">
+      <div class="cap" style="padding-bottom:4px">Or start from</div>
+      <div style="display:flex;align-items:center;gap:10px;padding:12px 2px;border-bottom:0.75px solid rgba(255,255,255,0.09)">
+          <div class="b" style="flex:1;color:rgba(242,242,244,0.62);font-size:16px">Plan this task</div>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.38)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg>
+        </div>
+      <div style="display:flex;align-items:center;gap:10px;padding:12px 2px;border-bottom:0.75px solid rgba(255,255,255,0.09)">
+          <div class="b" style="flex:1;color:rgba(242,242,244,0.62);font-size:16px">Explain this project</div>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.38)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg>
+        </div>
+      <div style="display:flex;align-items:center;gap:10px;padding:12px 2px;border-bottom:0.75px solid rgba(255,255,255,0.09)">
+          <div class="b" style="flex:1;color:rgba(242,242,244,0.62);font-size:16px">Review my changes</div>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.38)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg>
+        </div>
+    </div>
+
+    <div style="flex:1"></div>
+    <div style="padding:0 0 20px;display:flex;align-items:center;gap:10px">
+      <div style="flex:1;height:46px;border-radius:23px;background:rgba(37,37,40,0.58);border:0.75px solid rgba(255,255,255,0.13);display:flex;align-items:center;padding:0 6px 0 16px">
+        <div class="b" style="flex:1;color:rgba(242,242,244,0.38);font-size:16px">Type to start…</div>
+        <div style="width:36px;height:36px;border-radius:18px;background:#252528;display:flex;align-items:center;justify-content:center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.38)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg></div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

@@ -1,0 +1,129 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #9A9A9E; } a:hover { color: #F2F2F4; }
+    .screen { position: relative; width: 390px; height: 844px; overflow: hidden;
+      background: #0F0F10; color: #F2F2F4; }
+    .atmos { position: absolute; inset: 0; background-image: url("atmosphere.jpg");
+      background-size: cover; background-position: center; filter: grayscale(1);
+      opacity: 0.13; pointer-events: none; }
+    .layer { position: relative; height: 100%; display: flex; flex-direction: column; }
+    .glass { background: rgba(26,26,28,0.72); -webkit-backdrop-filter: blur(24px) saturate(1.4);
+      backdrop-filter: blur(24px) saturate(1.4); border: 0.75px solid rgba(255,255,255,0.13);
+      box-shadow: 0 8px 22px rgba(0,0,0,0.46), inset 0 0.75px 0 rgba(255,255,255,0.10); border-radius: 18px; }
+    .well { background: rgba(37,37,40,0.58); border-radius: 12px; }
+    .cap { font-size: 11px; font-weight: 600; letter-spacing: 0.9px; text-transform: uppercase;
+      color: rgba(242,242,244,0.62); }
+    .t1 { font-size: 34px; font-weight: 700; letter-spacing: -0.8px; line-height: 41px; }
+    .h  { font-size: 17px; font-weight: 600; letter-spacing: -0.4px; }
+    .b  { font-size: 17px; letter-spacing: -0.4px; line-height: 25px; }
+    .sub { font-size: 15px; color: rgba(242,242,244,0.62); letter-spacing: -0.2px; }
+    .fn { font-size: 13px; color: rgba(242,242,244,0.62); }
+    .c2 { font-size: 11px; color: rgba(242,242,244,0.38); }
+    .mono { font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace; font-size: 13px; }
+    .row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 14px; }
+    .div { height: 0.75px; background: rgba(255,255,255,0.09); }
+    .stack { display: flex; flex-direction: column; }
+    .navpill { width: 34px; height: 34px; border-radius: 17px; display: flex; align-items: center;
+      justify-content: center; background: rgba(37,37,40,0.58); border: 0.75px solid rgba(255,255,255,0.13); }
+    .chip { display: flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px;
+      background: rgba(37,37,40,0.58); border: 0.75px solid rgba(255,255,255,0.13); font-size: 13px; font-weight: 500; }
+  </style>
+</helmet>
+<div class="screen">
+  <div class="atmos"></div>
+  <div class="layer" style="padding:0 18px">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0 6px">
+      <div class="t1">Bots</div><div class="chip">Done</div>
+    </div>
+    <div class="sub" style="padding-bottom:18px">Five specialists on your Mac, each with its own brief.</div>
+
+    <div class="cap" style="padding-bottom:8px">Running</div>
+    <div class="glass" style="padding:2px 0;margin-bottom:20px">
+      <div style="display:flex;align-items:center;gap:13px;padding:11px 14px">
+        <div style="width:46px;height:46px;border-radius:23px;overflow:hidden;flex:none;border:0.75px solid rgba(255,255,255,0.13)">
+      <img src="atmosphere.jpg" alt="" style="width:100%;height:100%;object-fit:cover;filter:grayscale(1) contrast(1.1)"></div>
+        <div style="flex:1;min-width:0">
+          <div class="h">Builder</div>
+          <div class="fn" style="margin-top:2px;color:#9A9A9E">Editing · 2 files · 38s</div>
+        </div>
+        <div style="width:14px;height:14px;border-radius:7px;border:1.8px solid rgba(242,242,244,0.38);border-top-color:#9A9A9E"></div>
+      </div>
+    </div>
+
+    <div class="cap" style="padding-bottom:8px">The team</div>
+    <div class="glass" style="padding:2px 0">
+      <div style="display:flex;align-items:center;gap:13px;padding:11px 14px">
+          <div style="width:46px;height:46px;border-radius:23px;overflow:hidden;flex:none;border:0.75px solid rgba(255,255,255,0.13)">
+      <img src="atmosphere.jpg" alt="" style="width:100%;height:100%;object-fit:cover;filter:grayscale(1) contrast(1.1)"></div>
+          <div style="flex:1;min-width:0">
+            <div class="h">Assistant</div>
+            <div class="sub" style="margin-top:2px">Balanced assistant</div>
+          </div>
+          <div class="fn" style="color:rgba(242,242,244,0.38)">Chat only</div>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.38)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+        </div><div class="div" style="margin-left:73px"></div>
+      <div style="display:flex;align-items:center;gap:13px;padding:11px 14px">
+          <div style="width:46px;height:46px;border-radius:23px;overflow:hidden;flex:none;border:0.75px solid rgba(255,255,255,0.13)">
+      <img src="atmosphere.jpg" alt="" style="width:100%;height:100%;object-fit:cover;filter:grayscale(1) contrast(1.1)"></div>
+          <div style="flex:1;min-width:0">
+            <div class="h">Builder</div>
+            <div class="sub" style="margin-top:2px">Build and fix</div>
+          </div>
+          <div class="fn" style="color:#9A9A9E">Editing</div>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.38)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+        </div><div class="div" style="margin-left:73px"></div>
+      <div style="display:flex;align-items:center;gap:13px;padding:11px 14px">
+          <div style="width:46px;height:46px;border-radius:23px;overflow:hidden;flex:none;border:0.75px solid rgba(255,255,255,0.13)">
+      <img src="atmosphere.jpg" alt="" style="width:100%;height:100%;object-fit:cover;filter:grayscale(1) contrast(1.1)"></div>
+          <div style="flex:1;min-width:0">
+            <div class="h">Reviewer</div>
+            <div class="sub" style="margin-top:2px">Diff and risks</div>
+          </div>
+          <div class="fn" style="color:rgba(242,242,244,0.38)">Idle</div>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.38)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+        </div><div class="div" style="margin-left:73px"></div>
+      <div style="display:flex;align-items:center;gap:13px;padding:11px 14px">
+          <div style="width:46px;height:46px;border-radius:23px;overflow:hidden;flex:none;border:0.75px solid rgba(255,255,255,0.13)">
+      <img src="atmosphere.jpg" alt="" style="width:100%;height:100%;object-fit:cover;filter:grayscale(1) contrast(1.1)"></div>
+          <div style="flex:1;min-width:0">
+            <div class="h">Navigator</div>
+            <div class="sub" style="margin-top:2px">Browser control</div>
+          </div>
+          <div class="fn" style="color:rgba(242,242,244,0.38)">Idle</div>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.38)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+        </div><div class="div" style="margin-left:73px"></div>
+      <div style="display:flex;align-items:center;gap:13px;padding:11px 14px">
+          <div style="width:46px;height:46px;border-radius:23px;overflow:hidden;flex:none;border:0.75px solid rgba(255,255,255,0.13)">
+      <img src="atmosphere.jpg" alt="" style="width:100%;height:100%;object-fit:cover;filter:grayscale(1) contrast(1.1)"></div>
+          <div style="flex:1;min-width:0">
+            <div class="h">Researcher</div>
+            <div class="sub" style="margin-top:2px">Sources and synthesis</div>
+          </div>
+          <div class="fn" style="color:rgba(242,242,244,0.38)">Idle</div>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.38)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+        </div>
+    </div>
+
+    <div class="glass" style="margin-top:20px">
+      <div class="row">
+        <div style="width:26px;height:26px;border-radius:8px;background:rgba(37,37,40,0.58);display:flex;align-items:center;justify-content:center;flex:none"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9A9A9E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="3"/><path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><path d="M16 7.5a2.6 2.6 0 010 5"/><path d="M17.5 19c0-2-.7-3.6-1.8-4.6 2.7.2 4.8 2.1 4.8 4.6"/></svg></div>
+        <div style="flex:1"><div style="font-size:15px;font-weight:500">Delegate to the team</div>
+        <div class="c2" style="margin-top:1px">They divide one outcome between them</div></div>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.38)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

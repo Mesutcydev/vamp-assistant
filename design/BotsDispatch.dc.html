@@ -1,0 +1,118 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #9A9A9E; } a:hover { color: #F2F2F4; }
+    .screen { position: relative; width: 390px; height: 844px; overflow: hidden;
+      background: #0F0F10; color: #F2F2F4; }
+    .atmos { position: absolute; inset: 0; background-image: url("atmosphere.jpg");
+      background-size: cover; background-position: center; filter: grayscale(1);
+      opacity: 0.13; pointer-events: none; }
+    .layer { position: relative; height: 100%; display: flex; flex-direction: column; }
+    .glass { background: rgba(26,26,28,0.72); -webkit-backdrop-filter: blur(24px) saturate(1.4);
+      backdrop-filter: blur(24px) saturate(1.4); border: 0.75px solid rgba(255,255,255,0.13);
+      box-shadow: 0 8px 22px rgba(0,0,0,0.46), inset 0 0.75px 0 rgba(255,255,255,0.10); border-radius: 18px; }
+    .well { background: rgba(37,37,40,0.58); border-radius: 12px; }
+    .cap { font-size: 11px; font-weight: 600; letter-spacing: 0.9px; text-transform: uppercase;
+      color: rgba(242,242,244,0.62); }
+    .t1 { font-size: 34px; font-weight: 700; letter-spacing: -0.8px; line-height: 41px; }
+    .h  { font-size: 17px; font-weight: 600; letter-spacing: -0.4px; }
+    .b  { font-size: 17px; letter-spacing: -0.4px; line-height: 25px; }
+    .sub { font-size: 15px; color: rgba(242,242,244,0.62); letter-spacing: -0.2px; }
+    .fn { font-size: 13px; color: rgba(242,242,244,0.62); }
+    .c2 { font-size: 11px; color: rgba(242,242,244,0.38); }
+    .mono { font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace; font-size: 13px; }
+    .row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 14px; }
+    .div { height: 0.75px; background: rgba(255,255,255,0.09); }
+    .stack { display: flex; flex-direction: column; }
+    .navpill { width: 34px; height: 34px; border-radius: 17px; display: flex; align-items: center;
+      justify-content: center; background: rgba(37,37,40,0.58); border: 0.75px solid rgba(255,255,255,0.13); }
+    .chip { display: flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px;
+      background: rgba(37,37,40,0.58); border: 0.75px solid rgba(255,255,255,0.13); font-size: 13px; font-weight: 500; }
+  </style>
+</helmet>
+<div class="screen">
+  <div class="atmos"></div>
+  <div class="layer" style="padding:0 18px">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0 14px">
+      <div class="t1">Bots</div><div class="chip">Done</div>
+    </div>
+
+    <div class="glass" style="padding:16px 14px 10px">
+      <div class="cap" style="padding-bottom:10px">Give the team a job</div>
+      <div class="b" style="color:rgba(242,242,244,0.38);font-size:19px;line-height:26px;min-height:78px">Describe the outcome you want…</div>
+      <div class="div" style="margin:0 -14px"></div>
+      <div style="display:flex;align-items:center;gap:8px;padding-top:10px">
+        <div style="display:flex;gap:2px;padding:2px;border-radius:9px;background:rgba(37,37,40,0.58)">
+          <div style="padding:5px 12px;font-size:12px;font-weight:600;border-radius:7px;background:#1A1A1C">Auto</div>
+          <div style="padding:5px 12px;font-size:12px;font-weight:500;color:rgba(242,242,244,0.62)">Pick</div>
+        </div>
+        <div class="chip" style="padding:5px 11px;font-size:12px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(242,242,244,0.62)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M10 3v3M14 3v3M10 18v3M14 18v3M3 10h3M3 14h3M18 10h3M18 14h3"/></svg> GPT-5</div>
+        <div style="flex:1"></div>
+        <div style="width:34px;height:34px;border-radius:17px;background:#686868;display:flex;align-items:center;justify-content:center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg></div>
+      </div>
+    </div>
+
+    <div class="cap" style="padding:22px 2px 8px">In flight</div>
+    <div class="glass" style="padding:2px 0">
+      <div style="display:flex;align-items:center;gap:11px;padding:11px 14px">
+          <div style="width:30px;height:30px;border-radius:15px;overflow:hidden;flex:none;border:0.75px solid rgba(255,255,255,0.13)">
+      <img src="atmosphere.jpg" alt="" style="width:100%;height:100%;object-fit:cover;filter:grayscale(1) contrast(1.1)"></div>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:baseline;gap:7px">
+              <div style="font-size:15px;font-weight:600">Builder</div>
+              <div class="c2" style="color:#9A9A9E">Editing</div>
+              <div style="flex:1"></div>
+              <div class="c2" style="font-variant-numeric:tabular-nums">38s</div>
+            </div>
+            <div style="height:2px;border-radius:1px;background:rgba(255,255,255,0.09);margin-top:7px">
+              <div style="height:2px;border-radius:1px;background:#9A9A9E;width:62%"></div>
+            </div>
+          </div>
+        </div>
+      <div class="div" style="margin-left:55px"></div>
+      <div style="display:flex;align-items:center;gap:11px;padding:11px 14px">
+          <div style="width:30px;height:30px;border-radius:15px;overflow:hidden;flex:none;border:0.75px solid rgba(255,255,255,0.13)">
+      <img src="atmosphere.jpg" alt="" style="width:100%;height:100%;object-fit:cover;filter:grayscale(1) contrast(1.1)"></div>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:baseline;gap:7px">
+              <div style="font-size:15px;font-weight:600">Reviewer</div>
+              <div class="c2" style="color:#9A9A9E">Reading diff</div>
+              <div style="flex:1"></div>
+              <div class="c2" style="font-variant-numeric:tabular-nums">1m 12s</div>
+            </div>
+            <div style="height:2px;border-radius:1px;background:rgba(255,255,255,0.09);margin-top:7px">
+              <div style="height:2px;border-radius:1px;background:#9A9A9E;width:24%"></div>
+            </div>
+          </div>
+        </div>
+    </div>
+
+    <div class="cap" style="padding:22px 2px 10px">The team</div>
+    <div style="display:flex;gap:10px;overflow:hidden">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:6px;width:62px;flex:none">
+          <div style="width:48px;height:48px;border-radius:24px;overflow:hidden;flex:none;border:0.75px solid rgba(255,255,255,0.13)">
+      <img src="atmosphere.jpg" alt="" style="width:100%;height:100%;object-fit:cover;filter:grayscale(1) contrast(1.1)"></div><div class="c2" style="color:rgba(242,242,244,0.62)">Assistant</div></div><div style="display:flex;flex-direction:column;align-items:center;gap:6px;width:62px;flex:none">
+          <div style="width:48px;height:48px;border-radius:24px;overflow:hidden;flex:none;border:0.75px solid rgba(255,255,255,0.13)">
+      <img src="atmosphere.jpg" alt="" style="width:100%;height:100%;object-fit:cover;filter:grayscale(1) contrast(1.1)"></div><div class="c2" style="color:rgba(242,242,244,0.62)">Builder</div></div><div style="display:flex;flex-direction:column;align-items:center;gap:6px;width:62px;flex:none">
+          <div style="width:48px;height:48px;border-radius:24px;overflow:hidden;flex:none;border:0.75px solid rgba(255,255,255,0.13)">
+      <img src="atmosphere.jpg" alt="" style="width:100%;height:100%;object-fit:cover;filter:grayscale(1) contrast(1.1)"></div><div class="c2" style="color:rgba(242,242,244,0.62)">Reviewer</div></div><div style="display:flex;flex-direction:column;align-items:center;gap:6px;width:62px;flex:none">
+          <div style="width:48px;height:48px;border-radius:24px;overflow:hidden;flex:none;border:0.75px solid rgba(255,255,255,0.13)">
+      <img src="atmosphere.jpg" alt="" style="width:100%;height:100%;object-fit:cover;filter:grayscale(1) contrast(1.1)"></div><div class="c2" style="color:rgba(242,242,244,0.62)">Navigator</div></div><div style="display:flex;flex-direction:column;align-items:center;gap:6px;width:62px;flex:none">
+          <div style="width:48px;height:48px;border-radius:24px;overflow:hidden;flex:none;border:0.75px solid rgba(255,255,255,0.13)">
+      <img src="atmosphere.jpg" alt="" style="width:100%;height:100%;object-fit:cover;filter:grayscale(1) contrast(1.1)"></div><div class="c2" style="color:rgba(242,242,244,0.62)">Research</div></div>
+    </div>
+    <div class="fn" style="padding-top:12px;line-height:17px">Tap a face to read its brief, chat with it, or start a run yourself.</div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
