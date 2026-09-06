@@ -92,10 +92,19 @@ pkill -f "Vamp Assistant.app/Contents/MacOS" 2>/dev/null || true
 
 step "Installing to $INSTALLED"
 # In place, same path: a moved app is a new app to Launch Services, and its
-# grants go with the old location.
-rm -rf "$INSTALLED"
-ditto "$SOURCE" "$INSTALLED"
-xattr -dr com.apple.quarantine "$INSTALLED" 2>/dev/null || true
+# grants go with the old location. Staged beside the target and swapped, so a
+# copy that fails half way cannot leave you with no app at all.
+STAGED="${INSTALLED%.app}.new.app"
+rm -rf "$STAGED"
+ditto "$SOURCE" "$STAGED"
+xattr -dr com.apple.quarantine "$STAGED" 2>/dev/null || true
+if [[ -d "$INSTALLED" ]]; then
+  BACKUP="${INSTALLED%.app}.previous.app"
+  rm -rf "$BACKUP"
+  mv "$INSTALLED" "$BACKUP"
+fi
+mv "$STAGED" "$INSTALLED"
+rm -rf "${INSTALLED%.app}.previous.app"
 
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INSTALLED/Contents/Info.plist")"
 BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INSTALLED/Contents/Info.plist")"
