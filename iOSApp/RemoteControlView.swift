@@ -2,9 +2,20 @@ import Observation
 import SwiftUI
 import UIKit
 
-enum RemoteControlSourceMode {
+enum RemoteControlSourceMode: Identifiable {
     case display
     case application
+
+    /// Identifiable so one `fullScreenCover(item:)` can present either mode.
+    /// Two `isPresented` covers on the same view do not both work: SwiftUI
+    /// honours one, which is why Control Mac and App Stream opened the same
+    /// screen.
+    var id: String {
+        switch self {
+        case .display: "display"
+        case .application: "application"
+        }
+    }
 }
 
 enum RemoteViewportStability {

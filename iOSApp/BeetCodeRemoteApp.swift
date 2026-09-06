@@ -26,7 +26,29 @@ private struct RemoteRootShell: View {
     @Environment(\.colorScheme) private var systemScheme
     @Environment(\.scenePhase) private var scenePhase
 
-    private var appearance: RemoteAppearance { setting.resolved(systemScheme) }
+    private var appearance: RemoteAppearance {
+#if DEBUG
+        // The screenshot harness sets this: the app's own Light/Dark preference
+        // otherwise wins over the simulator's, so a "light" pass rendered dark.
+        switch ProcessInfo.processInfo.environment["VAMP_REMOTE_TEST_APPEARANCE"] {
+        case "light": return .light
+        case "dark": return .dark
+        default: break
+        }
+#endif
+        return setting.resolved(systemScheme)
+    }
+
+    private var forcedColorScheme: ColorScheme? {
+#if DEBUG
+        switch ProcessInfo.processInfo.environment["VAMP_REMOTE_TEST_APPEARANCE"] {
+        case "light": return .light
+        case "dark": return .dark
+        default: break
+        }
+#endif
+        return setting.colorScheme
+    }
 
     var body: some View {
         RemoteRootView(store: store)
@@ -34,7 +56,7 @@ private struct RemoteRootShell: View {
             // controls dim. accentBright tracks the foreground instead.
             .tint(BeetTheme.accentBright)
             .environment(\.remoteAppearance, appearance)
-            .preferredColorScheme(setting.colorScheme)
+            .preferredColorScheme(forcedColorScheme)
             .onChange(of: accent, initial: true) { _, palette in
                 BeetTheme.currentPalette = palette
             }

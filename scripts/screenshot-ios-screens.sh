@@ -75,11 +75,15 @@ for appearance in light dark; do
   xcrun simctl ui "$DEVICE" appearance "$appearance"
   for screen in "${SCREENS[@]}"; do
     xcrun simctl terminate "$DEVICE" "$BUNDLE" >/dev/null 2>&1 || true
-    xcrun simctl launch --terminate-running-process "$DEVICE" "$BUNDLE" \
-      --setenv VAMP_REMOTE_TEST_SCREEN="$screen" >/dev/null
+    # SIMCTL_CHILD_ is how simctl passes an environment variable into the app;
+    # --setenv is accepted on the command line and never reaches the process,
+    # which is why the first run photographed the pairing screen fourteen times.
+    SIMCTL_CHILD_VAMP_REMOTE_TEST_SCREEN="$screen" \
+    SIMCTL_CHILD_VAMP_REMOTE_TEST_APPEARANCE="$appearance" \
+      xcrun simctl launch --terminate-running-process "$DEVICE" "$BUNDLE" >/dev/null
     # The first frame is an empty window; give SwiftUI time to lay out and the
     # backdrop image time to decode.
-    sleep "${SCREENSHOT_SETTLE_SECONDS:-4}"
+    sleep "${SCREENSHOT_SETTLE_SECONDS:-6}"
     xcrun simctl io "$DEVICE" screenshot "$OUT/$appearance-$screen.png"
   done
 done

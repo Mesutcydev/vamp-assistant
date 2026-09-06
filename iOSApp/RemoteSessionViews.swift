@@ -44,8 +44,10 @@ struct SessionListView: View {
     @State private var showStartSession = false
     @State private var showSharing = false
     @State private var showComputers = false
-    @State private var showControl = false
-    @State private var showAppStream = false
+    /// One binding, not two: SwiftUI honours a single fullScreenCover per
+    /// view, so stacking one for the display and another for App Stream meant
+    /// both menu items opened whichever modifier won — the display stream.
+    @State private var stage: RemoteControlSourceMode?
     @State private var showBotRuns = false
     @State private var showDiagnostics = false
     @State private var showSettings = false
@@ -99,7 +101,7 @@ struct SessionListView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    showControl = true
+                    stage = .display
                 } label: {
                     Image(systemName: "display.and.arrow.down")
                 }
@@ -121,7 +123,7 @@ struct SessionListView: View {
                 // One labelled menu, not four unlabelled glyphs. Every entry
                 // now says what it does at any Dynamic Type size.
                 Menu {
-                    Button("App Stream", systemImage: "macwindow.on.rectangle") { showAppStream = true }
+                    Button("App Stream", systemImage: "macwindow.on.rectangle") { stage = .application }
                         .disabled(!store.isConnected)
                     Divider()
                     Button("Specialist bots", systemImage: "person.3.sequence.fill") { showBotRuns = true }
@@ -195,9 +197,8 @@ struct SessionListView: View {
                     }
             }
         }
-        .fullScreenCover(isPresented: $showControl) { RemoteControlView(store: store) }
-        .fullScreenCover(isPresented: $showAppStream) {
-            RemoteControlView(store: store, sourceMode: .application)
+        .fullScreenCover(item: $stage) { mode in
+            RemoteControlView(store: store, sourceMode: mode)
         }
     }
 
