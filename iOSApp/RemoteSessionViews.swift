@@ -108,15 +108,6 @@ struct SessionListView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    stage = .display
-                } label: {
-                    Image(systemName: "display.and.arrow.down")
-                }
-                .disabled(!store.isConnected)
-                .accessibilityLabel("Control Mac")
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
                     startBotID = ""
                     showStartSession = true
                 } label: {
@@ -126,21 +117,43 @@ struct SessionListView: View {
                 .accessibilityLabel("New session")
                 .accessibilityHint(store.isConnected ? "" : "Connect to your Mac first")
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                // One labelled menu, not four unlabelled glyphs. Every entry
-                // now says what it does at any Dynamic Type size.
-                Menu {
-                    Button("App Stream", systemImage: "macwindow.on.rectangle") { stage = .application }
-                        .disabled(!store.isConnected)
-                    Divider()
-                    Button("Specialist bots", systemImage: "person.3.sequence.fill") { showBotRuns = true }
-                    Button("Share clipboard or files", systemImage: "square.and.arrow.up") { showSharing = true }
-                    Divider()
-                    Button("Settings", systemImage: "gearshape") { showSettings = true }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
+        }
+        // The screen's standing actions, on one strip. A bottom bar is
+        // where iOS puts them, but the stock one paints tinted text on the
+        // navigation material — five loose labels over this app's warm
+        // ground. Drawn as a card instead, it belongs to the same surface
+        // family as the rows above it.
+        .safeAreaInset(edge: .bottom) {
+            RemoteActionBar {
+                RemoteActionBarButton(title: "Mac",
+                                      symbol: "display.and.arrow.down",
+                                      spokenLabel: "Control Mac",
+                                      hint: store.isConnected ? "" : "Connect to your Mac first") {
+                    stage = .display
                 }
-                .accessibilityLabel("More")
+                .disabled(!store.isConnected)
+                RemoteActionBarButton(title: "Apps",
+                                      symbol: "macwindow.on.rectangle",
+                                      spokenLabel: "App Stream",
+                                      hint: store.isConnected ? "" : "Connect to your Mac first") {
+                    stage = .application
+                }
+                .disabled(!store.isConnected)
+                RemoteActionBarButton(title: "Bots",
+                                      symbol: "person.3.sequence.fill",
+                                      spokenLabel: "Specialist bots") {
+                    showBotRuns = true
+                }
+                RemoteActionBarButton(title: "Share",
+                                      symbol: "square.and.arrow.up",
+                                      spokenLabel: "Share clipboard or files") {
+                    showSharing = true
+                }
+                RemoteActionBarButton(title: "Settings",
+                                      symbol: "gearshape",
+                                      spokenLabel: "Settings") {
+                    showSettings = true
+                }
             }
         }
         .confirmationDialog(

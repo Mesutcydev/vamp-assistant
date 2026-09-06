@@ -539,3 +539,89 @@ struct AppearanceMenuButton: View {
 enum RemoteBackdropSetting {
     static let key = "remoteShowsBackdrop"
 }
+
+/// The standing actions of a screen, drawn as one strip rather than five
+/// system buttons.
+///
+/// A stock `.bottomBar` renders tinted text on the navigation bar's material,
+/// which reads as a debug toolbar over this app's warm ground — the labels
+/// float with nothing holding them together, and their tint fights the
+/// accent used for content. So the bar is a single card: the same surface,
+/// hairline and shadow the rows above it use, floated clear of the ground so
+/// the engraving still runs behind it, with the actions laid out on a shared
+/// baseline inside.
+struct RemoteActionBar<Content: View>: View {
+    @Environment(\.remoteAppearance) private var appearance
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        HStack(spacing: 0) { content }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 6)
+            .background {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(RemoteSurface.card(appearance))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 26, style: .continuous)
+                            .strokeBorder(RemoteSurface.separator(appearance), lineWidth: 0.75)
+                    }
+                    .shadow(color: .black.opacity(appearance == .light ? 0.10 : 0.38),
+                            radius: 18, y: 8)
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 6)
+    }
+}
+
+/// One action inside `RemoteActionBar`: a glyph over a short name.
+///
+/// The name is short because five of them share a phone's width; the long
+/// form is what VoiceOver reads.
+struct RemoteActionBarButton: View {
+    @Environment(\.remoteAppearance) private var appearance
+    @Environment(\.isEnabled) private var isEnabled
+    let title: String
+    let symbol: String
+    let spokenLabel: String
+    var hint: String = ""
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: symbol)
+                    .font(.system(size: 17, weight: .medium))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(isEnabled ? AnyShapeStyle(BeetTheme.accent)
+                                               : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
+                Text(title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.primary.opacity(isEnabled ? 0.66 : 0.3))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .padding(.vertical, 4)
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(RemoteActionBarButtonStyle(appearance: appearance))
+        .accessibilityLabel(spokenLabel)
+        .accessibilityHint(hint)
+    }
+}
+
+private struct RemoteActionBarButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let appearance: RemoteAppearance
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(RemoteSurface.well(appearance))
+                    .opacity(configuration.isPressed ? 1 : 0)
+            }
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}

@@ -197,7 +197,7 @@ targets:
         PRODUCT_NAME: "Vamp Assistant"
         PRODUCT_MODULE_NAME: BeetCodeRemoteIOS
         MARKETING_VERSION: "0.1.37"
-        CURRENT_PROJECT_VERSION: "67"
+        CURRENT_PROJECT_VERSION: "68"
         CODE_SIGN_ENTITLEMENTS: iOSApp/BeetCodeRemote.entitlements
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: iOSApp/Info.plist
