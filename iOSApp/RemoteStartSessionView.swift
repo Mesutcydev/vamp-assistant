@@ -111,6 +111,7 @@ struct StartSessionSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
             .safeAreaInset(edge: .bottom) { startBar }
+            .keyboardDismissToolbar()
             .sheet(isPresented: $showModelPicker) {
                 RemoteModelPickerSheet(
                     models: store.startModels,
@@ -180,7 +181,7 @@ struct StartSessionSheet: View {
     private var heroSection: some View {
         Section {
             RemotePageHero(
-                icon: "text.cursor",
+                icon: "square.and.pencil",
                 title: "What should it work on?",
                 subtitle: "Everything below is what you used last time — change it or just start.")
         }
@@ -202,6 +203,10 @@ struct StartSessionSheet: View {
                             }
                             .buttonStyle(.bordered)
                             .buttonBorderShape(.capsule)
+                            // Suggestions, not actions: a clay fill made them
+                            // shout louder than Start.
+                            .tint(Color.secondary)
+                            .foregroundStyle(.primary)
                         }
                     }
                     .padding(.horizontal, 20)
@@ -287,6 +292,10 @@ struct StartSessionSheet: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
+            // A disabled prominent button fills with a near-black grey over
+            // this backdrop and reads as broken. Tinting the disabled state
+            // keeps the shape legible as "not yet".
+            .tint(canStart ? BeetTheme.accent : Color.secondary)
             .disabled(!canStart)
             .accessibilityHint(blockedReason ?? "")
         }

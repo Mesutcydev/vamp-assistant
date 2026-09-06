@@ -56,6 +56,7 @@ struct RemoteBotConsoleView: View {
                     Button("Done") { dismiss() }
                 }
             }
+            .keyboardDismissToolbar()
             .task { await loadFiles() }
         }
     }

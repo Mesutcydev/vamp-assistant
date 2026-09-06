@@ -147,12 +147,50 @@ struct RemoteListRowBackground: ViewModifier {
     /// neither.
     private var alpha: Double {
         if reduceTransparency { return 1 }
-        return appearance == .light ? 0.97 : 0.88
+        return appearance == .light ? 0.97 : 0.94
     }
 
     func body(content: Content) -> some View {
         content.listRowBackground(
             Color(uiColor: .secondarySystemGroupedBackground).opacity(alpha))
+    }
+}
+
+/// The app's own icon, read from the bundle rather than an image asset.
+///
+/// Settings used to draw `BeetLogo`, which is the retired mark — the icon on
+/// the Home Screen and the one in Settings disagreed. This reads whatever the
+/// bundle actually ships, so they cannot drift again.
+struct RemoteAppIcon: View {
+    var size: CGFloat = 52
+
+    private var icon: UIImage? {
+        guard let icons = Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any],
+              let primary = icons["CFBundlePrimaryIcon"] as? [String: Any],
+              let files = primary["CFBundleIconFiles"] as? [String],
+              let name = files.last
+        else { return UIImage(named: "AppIcon") }
+        return UIImage(named: name) ?? UIImage(named: "AppIcon")
+    }
+
+    var body: some View {
+        Group {
+            if let icon {
+                Image(uiImage: icon).resizable()
+            } else {
+                // Never the old mark: a neutral glyph is better than the wrong
+                // logo.
+                Image(systemName: "app.dashed")
+                    .resizable()
+                    .scaledToFit()
+                    .padding(size * 0.18)
+                    .foregroundStyle(BeetTheme.accentBright)
+            }
+        }
+        .scaledToFit()
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: size * 0.225, style: .continuous))
+        .accessibilityHidden(true)
     }
 }
 
@@ -223,8 +261,9 @@ struct RemotePageHero: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 30, weight: .regular))
+                .font(.system(size: 28, weight: .medium))
                 .foregroundStyle(BeetTheme.accentBright)
+                .frame(height: 32)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
@@ -297,6 +336,10 @@ struct RemoteDisclosureRow: View {
             }
             .contentShape(Rectangle())
         }
+        // Without this a List tints the entire label with the accent, so the
+        // row's title, its value and its glyph all render in one colour and
+        // every explicit foregroundStyle below is ignored.
+        .buttonStyle(.plain)
         .accessibilityLabel(value.map { "\(title), \($0)" } ?? title)
     }
 }
@@ -332,6 +375,7 @@ struct RemoteSelectionRow: View {
             }
             .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }

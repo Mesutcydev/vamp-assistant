@@ -1398,7 +1398,15 @@ extension RemoteStore {
            "messageCount":112,"updatedAt":\(now - 30 * 3600),"isRunning":false,"phase":"idle"},
           {"id":"3F2504E0-4F89-11D3-9A0C-0305E82C3305","title":"Draft the Tailscale doc",
            "workspace":"Chat","workspacePath":null,"mode":"chat",
-           "messageCount":5,"updatedAt":\(now - 4 * 24 * 3600),"isRunning":false,"phase":"idle"}
+           "messageCount":5,"updatedAt":\(now - 4 * 24 * 3600),"isRunning":false,"phase":"idle"},
+          {"id":"3F2504E0-4F89-11D3-9A0C-0305E82C3306","title":"Refactor the export pipeline",
+           "workspace":"forgesign","workspacePath":"/Users/me/forgesign","mode":"code",
+           "messageCount":46,"updatedAt":\(now - 2 * 24 * 3600),"isRunning":false,"phase":"idle",
+           "source":"claude"},
+          {"id":"3F2504E0-4F89-11D3-9A0C-0305E82C3307","title":"Bisect the flaky test",
+           "workspace":"vamp-assistant","workspacePath":"/Users/me/vamp-assistant","mode":"code",
+           "messageCount":19,"updatedAt":\(now - 6 * 24 * 3600),"isRunning":false,"phase":"idle",
+           "source":"codex"}
         ]
         """
         store.sessions = (try? decoder.decode([RemoteSessionSummary].self,

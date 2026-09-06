@@ -142,12 +142,7 @@ struct RemoteSettingsSheet: View {
     private var identitySection: some View {
         Section {
             HStack(spacing: 14) {
-                Image("BeetLogo")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 52, height: 52)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .accessibilityHidden(true)
+                RemoteAppIcon(size: 54)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Vamp Assistant")
                         .font(.title3.weight(.semibold))

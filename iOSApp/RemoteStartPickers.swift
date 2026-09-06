@@ -234,6 +234,7 @@ struct RemoteStartAdvancedSheet: View {
             .navigationTitle("Bot computers & keys")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .keyboardDismissToolbar()
             .sheet(item: $consoleComputer) { computer in
                 RemoteBotConsoleView(store: store, computer: computer)
             }

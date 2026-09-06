@@ -1667,9 +1667,14 @@ final class RemoteSessionHost {
 
     private func sessionSummaries() -> [LFJSONValue] {
         let activeID = sessions.activeSessionID
-        return SessionStore.shared.cachedAll(maxAge: 2)
-            .filter { $0.source == .app }
-            .prefix(100)
+        // Imported histories used to be filtered out entirely, so the phone
+        // could not see a Claude, Codex or Cursor chat at all. They come across
+        // now, tagged with their origin and capped separately so a large import
+        // cannot crowd out this app's own sessions.
+        let all = SessionStore.shared.cachedAll(maxAge: 2)
+        let own = all.filter { $0.source == .app }.prefix(100)
+        let imported = all.filter { $0.source != .app }.prefix(50)
+        return (Array(own) + Array(imported))
             .map { record in
                 .object([
                     "id": .string(record.id.uuidString),
@@ -1683,6 +1688,7 @@ final class RemoteSessionHost {
                     "isRunning": .bool(activeID == record.id && sessions.isRunning),
                     "phase": .string(activeID == record.id ? sessions.currentPhase.rawValue : AgentPhase.idle.rawValue),
                     "queueState": taskLookupHandler?(record.id).map { .string($0.state.rawValue) } ?? .null,
+                    "source": .string(record.source.rawValue),
                 ])
             }
     }

@@ -10,7 +10,7 @@ final class RemoteSessionGroupingTests: XCTestCase {
         return calendar
     }
 
-    private func session(_ title: String, at date: Date) -> RemoteSessionSummary {
+    private func session(_ title: String, at date: Date, source: String? = "app") -> RemoteSessionSummary {
         RemoteSessionSummary(
             id: UUID(),
             title: title,
@@ -21,7 +21,8 @@ final class RemoteSessionGroupingTests: XCTestCase {
             updatedAt: date.timeIntervalSince1970,
             isRunning: false,
             phase: "idle",
-            queueState: nil)
+            queueState: nil,
+            source: source)
     }
 
     /// Noon, so "yesterday" and "earlier" cannot drift across a day boundary
@@ -51,6 +52,32 @@ final class RemoteSessionGroupingTests: XCTestCase {
             calendar: calendar,
             now: now)
         XCTAssertEqual(sections.map(\.id), ["earlier"])
+    }
+
+    /// Imported histories are their own section, whatever day they carry —
+    /// mixing them into Today buries whichever set you were not looking for.
+    func testImportedChatsGetTheirOwnSection() {
+        let sections = SessionDaySection.group(
+            [
+                session("ours", at: now.addingTimeInterval(-60)),
+                session("from Claude", at: now.addingTimeInterval(-120), source: "claude"),
+                session("from Codex", at: now.addingTimeInterval(-40 * 24 * 3600), source: "codex"),
+            ],
+            calendar: calendar,
+            now: now)
+        XCTAssertEqual(sections.map(\.id), ["today", "imported"])
+        XCTAssertEqual(sections[0].sessions.map(\.title), ["ours"])
+        XCTAssertEqual(sections[1].sessions.map(\.title), ["from Claude", "from Codex"])
+    }
+
+    /// A Mac that predates the field sends no source, and those sessions are
+    /// ours, not imports.
+    func testMissingSourceCountsAsOurOwn() {
+        let sections = SessionDaySection.group(
+            [session("legacy", at: now.addingTimeInterval(-60), source: nil)],
+            calendar: calendar,
+            now: now)
+        XCTAssertEqual(sections.map(\.id), ["today"])
     }
 
     func testNoSessionsProducesNoSections() {

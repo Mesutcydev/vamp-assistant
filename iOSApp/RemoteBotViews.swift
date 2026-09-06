@@ -20,8 +20,8 @@ struct RemoteBotsView: View {
                 Section {
                     RemotePageHero(
                         icon: "person.3.sequence",
-                        title: "Bots",
-                        subtitle: "Five specialists that run on your Mac. Open one to start or steer its work.")
+                        title: "Five specialists",
+                        subtitle: "Each runs on your Mac with its own brief. Open one to start or steer its work.")
                 }
                 if !store.isConnected {
                     Section { RemoteOfflineRow(store: store) }
@@ -62,6 +62,7 @@ struct RemoteBotsView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
+            .keyboardDismissToolbar()
             .task {
                 if store.startModels.isEmpty { await store.loadStartModels() }
                 if selectedModelID.isEmpty { selectedModelID = store.startModels.first?.id ?? "" }
@@ -462,7 +463,9 @@ private struct RemoteBotThumbnail: View {
                 Circle()
                     .stroke(Color.white.opacity(0.14), lineWidth: 0.75)
             }
-            .shadow(color: profile.tint.opacity(0.22), radius: 8, y: 4)
+            // No tinted halo: it glowed orange the moment the accent turned
+            // warm. The portrait carries itself.
+            .shadow(color: .black.opacity(0.25), radius: 6, y: 3)
             .accessibilityHidden(true)
     }
 }

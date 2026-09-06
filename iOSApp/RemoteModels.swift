@@ -322,6 +322,32 @@ struct RemoteSessionSummary: Decodable, Identifiable, Hashable {
     let isRunning: Bool
     let phase: String
     let queueState: String?
+    /// Where the chat came from: "app" for this assistant's own sessions, or
+    /// "claude" / "codex" / "cursor" / "bundle" for an imported history. Older
+    /// Macs omit it, and an absent value means the session is ours.
+    let source: String?
+
+    var isImported: Bool { source != nil && source != "app" }
+
+    var originLabel: String {
+        switch source {
+        case "claude": "Claude"
+        case "codex": "Codex"
+        case "cursor": "Cursor"
+        case "bundle": "Bundle"
+        default: "Vamp Assistant"
+        }
+    }
+
+    var originSymbol: String {
+        switch source {
+        case "claude": "sparkle"
+        case "codex": "terminal"
+        case "cursor": "cursorarrow.rays"
+        case "bundle": "shippingbox"
+        default: "bubble.left.and.bubble.right"
+        }
+    }
 }
 
 struct RemoteSessionDetail: Decodable, Identifiable {

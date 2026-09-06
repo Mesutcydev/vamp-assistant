@@ -99,6 +99,15 @@ struct SessionListView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
+                    showControl = true
+                } label: {
+                    Image(systemName: "display.and.arrow.down")
+                }
+                .disabled(!store.isConnected)
+                .accessibilityLabel("Control Mac")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
                     startBotID = ""
                     showStartSession = true
                 } label: {
@@ -112,8 +121,6 @@ struct SessionListView: View {
                 // One labelled menu, not four unlabelled glyphs. Every entry
                 // now says what it does at any Dynamic Type size.
                 Menu {
-                    Button("Control Mac", systemImage: "display.and.arrow.down") { showControl = true }
-                        .disabled(!store.isConnected)
                     Button("App Stream", systemImage: "macwindow.on.rectangle") { showAppStream = true }
                         .disabled(!store.isConnected)
                     Divider()
@@ -221,6 +228,7 @@ struct SessionListView: View {
                         .accessibilityHidden(true)
                 }
             }
+            .buttonStyle(.plain)
             .remoteListRow()
             .accessibilityLabel("\(store.activeComputerName), \(store.isConnected ? "connected" : store.connectionLabel)")
             .accessibilityHint(store.isConnected ? "Switch computer" : "Reconnect")
@@ -288,7 +296,12 @@ struct SessionDaySection: Identifiable {
         var today: [RemoteSessionSummary] = []
         var yesterday: [RemoteSessionSummary] = []
         var earlier: [RemoteSessionSummary] = []
+        // Chats imported from another agent are their own history, not part of
+        // this assistant's day: mixing them into Today buries whichever set you
+        // were not looking for.
+        var imported: [RemoteSessionSummary] = []
         for session in sessions {
+            if session.isImported { imported.append(session); continue }
             let date = Date(timeIntervalSince1970: session.updatedAt)
             if calendar.isDate(date, inSameDayAs: now) { today.append(session) }
             else if calendar.isDate(date, inSameDayAs: calendar.date(byAdding: .day, value: -1, to: now) ?? now) {
@@ -300,6 +313,7 @@ struct SessionDaySection: Identifiable {
         if !today.isEmpty { sections.append(SessionDaySection(id: "today", title: "Today", sessions: today)) }
         if !yesterday.isEmpty { sections.append(SessionDaySection(id: "yesterday", title: "Yesterday", sessions: yesterday)) }
         if !earlier.isEmpty { sections.append(SessionDaySection(id: "earlier", title: "Earlier", sessions: earlier)) }
+        if !imported.isEmpty { sections.append(SessionDaySection(id: "imported", title: "Imported", sessions: imported)) }
         return sections
     }
 }
@@ -317,20 +331,23 @@ struct SessionRow: View {
     private var place: String { isCode ? session.workspace : "Chat" }
 
     private var subtitle: String {
-        session.isRunning
-            ? "\(session.phase.capitalized) · \(place)"
-            : "\(place) · \(session.messageCount) messages"
+        if session.isRunning { return "\(session.phase.capitalized) · \(place)" }
+        if session.isImported { return "\(session.originLabel) · \(session.messageCount) messages" }
+        return "\(place) · \(session.messageCount) messages"
     }
 
+    /// The section header already says the day, so a row inside Today or
+    /// Yesterday shows the time instead of repeating it.
     private var timestamp: String {
         let date = Date(timeIntervalSince1970: session.updatedAt)
         let calendar = Calendar.current
-        if calendar.isDateInToday(date) { return date.formatted(date: .omitted, time: .shortened) }
-        if calendar.isDateInYesterday(date) { return "Yesterday" }
-        if let days = calendar.dateComponents([.day], from: date, to: Date()).day, days < 7 {
-            return date.formatted(.dateTime.weekday(.wide))
+        if calendar.isDateInToday(date) || calendar.isDateInYesterday(date) {
+            return date.formatted(date: .omitted, time: .shortened)
         }
-        return date.formatted(date: .numeric, time: .omitted)
+        if let days = calendar.dateComponents([.day], from: date, to: Date()).day, days < 7 {
+            return date.formatted(.dateTime.weekday(.abbreviated))
+        }
+        return date.formatted(.dateTime.day().month(.abbreviated))
     }
 
     var body: some View {
@@ -346,16 +363,24 @@ struct SessionRow: View {
                 Text(session.title)
                     .font(.headline)
                     .lineLimit(1)
-                Text(subtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(session.isRunning ? BeetTheme.accentBright : Color.secondary)
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    if session.isImported {
+                        Image(systemName: session.originSymbol)
+                            .font(.caption2)
+                            .accessibilityHidden(true)
+                    }
+                    Text(subtitle)
+                        .lineLimit(1)
+                }
+                .font(.subheadline)
+                .foregroundStyle(session.isRunning ? BeetTheme.accentBright : Color.secondary)
             }
             Spacer(minLength: 8)
             Text(timestamp)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .monospacedDigit()
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
