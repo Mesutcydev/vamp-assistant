@@ -118,7 +118,7 @@ struct RemoteBotsView: View {
                 .foregroundStyle(BeetTheme.accent)
         }
         .padding(14)
-        .remoteBotCardSurface()
+        .remoteCardSurface()
     }
 
     private var delegateCard: some View {
@@ -186,7 +186,7 @@ struct RemoteBotsView: View {
             }
         }
         .padding(14)
-        .remoteBotCardSurface()
+        .remoteCardSurface()
     }
 
     private var modelName: String {
@@ -305,36 +305,12 @@ private struct RemoteBotRunCard: View {
     }
 }
 
-/// The one card surface these three share, so the page reads as one material.
-private struct RemoteBotCardSurface: ViewModifier {
-    @Environment(\.remoteAppearance) private var appearance
-    var pressed = false
-
-    func body(content: Content) -> some View {
-        content
-            .background {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(pressed ? RemoteSurface.well(appearance) : RemoteSurface.card(appearance))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .strokeBorder(RemoteSurface.separator(appearance), lineWidth: 0.75)
-                    }
-            }
-    }
-}
-
-private extension View {
-    func remoteBotCardSurface(pressed: Bool = false) -> some View {
-        modifier(RemoteBotCardSurface(pressed: pressed))
-    }
-}
-
 private struct RemoteBotCardStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .remoteBotCardSurface(pressed: configuration.isPressed)
+            .remoteCardSurface(pressed: configuration.isPressed)
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }

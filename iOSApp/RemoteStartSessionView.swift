@@ -97,15 +97,17 @@ struct StartSessionSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                heroSection
-                if !store.isConnected { reconnectSection }
-                promptSection
-                setupSection
-                moreSection
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    if !store.isConnected { reconnectCard }
+                    promptCard
+                    setupCard
+                    moreCard
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 6)
+                .padding(.bottom, 28)
             }
-            .scrollContentBackground(.hidden)
-            .contentMargins(.bottom, 24, for: .scrollContent)
             .scrollDismissesKeyboard(.interactively)
             .background { RemoteBackdrop() }
             .navigationTitle("New session")
@@ -162,114 +164,144 @@ struct StartSessionSheet: View {
 
     // MARK: Sections
 
-    private var reconnectSection: some View {
-        Section {
-            Button {
-                Task { await store.connectSaved() }
-            } label: {
-                Label(store.isConnecting ? "Reconnecting…" : "Reconnect",
-                      systemImage: "wifi.exclamationmark")
+    private var reconnectCard: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(BeetTheme.accent)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Not connected").font(.subheadline.weight(.semibold))
+                Text(store.connectionSubtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            Spacer(minLength: 8)
+            Button(store.isConnecting ? "Connecting…" : "Reconnect") {
+                Task { await store.connectSaved() }
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(BeetTheme.accent)
             .disabled(store.isConnecting)
-        } footer: {
-            Text(store.connectionSubtitle)
         }
-        .remoteListRow()
+        .padding(14)
+        .remoteCardSurface()
     }
 
-    /// The page's own opening. Without it the sheet began with a grouped card
-    /// under a "Task" header, which is the same first impression as Settings.
-    private var heroSection: some View {
-        Section {
-            RemotePageHero(
-                icon: "square.and.pencil",
-                title: "What should it work on?",
-                subtitle: "Everything below is what you used last time — change it or just start.")
-        }
-    }
+    /// The prompt and its suggestions in one card.
+    ///
+    /// They used to be two rows of a grouped section, so the starter chips
+    /// escaped the card and read as a separate, floating control — and the
+    /// page opened with a full-height hero above them, which pushed the one
+    /// field the screen exists for below the fold.
+    private var promptCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .topLeading) {
+                if prompt.isEmpty {
+                    Text("What should it work on?")
+                        .font(.body)
+                        .foregroundStyle(.primary.opacity(0.34))
+                        .padding(.top, 2)
+                        .allowsHitTesting(false)
+                }
+                TextField("", text: $prompt, axis: .vertical)
+                    .font(.body)
+                    .lineLimit(4...10)
+                    .focused($promptFocused)
+                    .accessibilityLabel("First prompt")
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 14)
+            .padding(.bottom, 12)
+            .frame(minHeight: 108, alignment: .topLeading)
 
-    private var promptSection: some View {
-        Section {
-            TextField("Describe the task", text: $prompt, axis: .vertical)
-                .lineLimit(3...8)
-                .focused($promptFocused)
-                .accessibilityLabel("First prompt")
             if !botProfile.starters.isEmpty {
+                RemoteCardDivider(inset: 0)
                 ScrollView(.horizontal) {
                     HStack(spacing: 8) {
                         ForEach(botProfile.starters, id: \.self) { starter in
-                            Button(starter) {
+                            Button {
                                 prompt = starter
+                                promptFocused = true
                                 UISelectionFeedbackGenerator().selectionChanged()
+                            } label: {
+                                Text(starter)
+                                    .font(.footnote.weight(.medium))
+                                    .foregroundStyle(.primary.opacity(0.78))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 7)
+                                    .background(RemoteSurface.well(appearance), in: Capsule())
                             }
-                            .buttonStyle(.bordered)
-                            .buttonBorderShape(.capsule)
-                            // Suggestions, not actions: a clay fill made them
-                            // shout louder than Start.
-                            .tint(Color.secondary)
-                            .foregroundStyle(.primary)
+                            .buttonStyle(.plain)
                         }
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 9)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
                 }
                 .scrollIndicators(.hidden)
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
                 .accessibilityLabel("Suggested tasks")
             }
         }
-        .remoteListRow()
+        .remoteCardSurface()
     }
 
-    private var setupSection: some View {
-        Section {
-            RemoteDisclosureRow(
+    private var setupCard: some View {
+        RemoteCardGroup("Setup", footnote: "Starts with the folder, bot and model you used last.") {
+            RemoteCardRow(
                 title: "Works in",
                 icon: isChatOnly ? "bubble.left.and.bubble.right" : "folder",
                 value: locationValue,
                 detail: locationDetail,
                 action: { showWorkspacePicker = true })
-            RemoteDisclosureRow(
+            RemoteCardDivider()
+            RemoteCardRow(
                 title: "Bot",
                 icon: "person.crop.square",
                 value: botProfile.name,
                 action: { showBotPicker = true })
-            RemoteDisclosureRow(
+            RemoteCardDivider()
+            RemoteCardRow(
                 title: "Model",
                 icon: "cpu",
                 value: selectedModel?.name ?? (isLoading ? "Loading…" : "Choose a model"),
                 detail: selectedModel?.detail,
                 action: { showModelPicker = true })
-        } header: {
-            RemoteSectionHeading("Setup")
-        } footer: {
-            Text("Starts with the folder, bot and model you used last.")
         }
-        .remoteListRow()
     }
 
     @ViewBuilder
-    private var moreSection: some View {
-        Section {
-            // Inline rather than behind another sheet: it is a short list of
-            // named values, which is exactly what a menu picker is for.
+    private var moreCard: some View {
+        RemoteCardGroup("More") {
             if let model = selectedModel, let efforts = model.reasoningEfforts, !efforts.isEmpty {
-                Picker("Reasoning", selection: $selectedReasoningEffort) {
-                    Text("Auto").tag(String?.none)
-                    ForEach(efforts, id: \.self) { effort in
-                        Text(effort.capitalized).tag(String?.some(effort))
+                HStack(spacing: 12) {
+                    Image(systemName: "brain")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(BeetTheme.accent)
+                        .frame(width: 26, height: 26)
+                        .background(RemoteSurface.well(appearance),
+                                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    Text("Reasoning")
+                        .font(.subheadline.weight(.medium))
+                    Spacer(minLength: 10)
+                    Picker("Reasoning", selection: $selectedReasoningEffort) {
+                        Text("Auto").tag(String?.none)
+                        ForEach(efforts, id: \.self) { effort in
+                            Text(effort.capitalized).tag(String?.some(effort))
+                        }
                     }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .tint(.secondary)
                 }
+                .padding(.horizontal, 14)
+                .frame(minHeight: 52)
+                RemoteCardDivider()
             }
-            RemoteDisclosureRow(
+            RemoteCardRow(
                 title: "Sandboxes & keys",
                 icon: "shippingbox",
                 action: { showAdvanced = true })
-        } header: {
-            RemoteSectionHeading("More")
         }
-        .remoteListRow()
     }
 
     private var startBar: some View {

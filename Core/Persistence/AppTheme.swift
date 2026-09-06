@@ -26,7 +26,7 @@ enum AccentPalette: String, CaseIterable, Codable, Identifiable, Sendable {
 
     /// Explicit order — this is the swatch order in Settings, not source order.
     static let allCases: [AccentPalette] = [
-        .clay, .sage, .ink, .graphite, .beetRed, .rose, .amber, .forest, .ocean, .indigo, .violet,
+        .graphite, .ink, .clay, .sage, .beetRed, .rose, .amber, .forest, .ocean, .indigo, .violet,
     ]
 
     var id: String { rawValue }

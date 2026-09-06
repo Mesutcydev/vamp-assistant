@@ -33,10 +33,15 @@ struct MessageTranscript: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 24) {
-                    ForEach(detail.messages) { message in
-                        MessageBubble(
-                            message: message,
-                            onRevert: message.checkpointID == nil ? nil : onRevertCheckpoint)
+                    ForEach(TranscriptItem.build(from: detail.messages)) { item in
+                        switch item.kind {
+                        case .message(let message):
+                            MessageBubble(
+                                message: message,
+                                onRevert: message.checkpointID == nil ? nil : onRevertCheckpoint)
+                        case .tools(let entries):
+                            ToolLedger(entries: entries)
+                        }
                     }
                     if detail.isRunning { StreamingBubble(text: detail.streamingText, phase: detail.phase) }
                     if let error = detail.error, error.message != dismissedErrorMessage {
@@ -222,7 +227,12 @@ struct MessageBubble: View {
                     in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .accessibilityLabel("You: \(message.content)")
         }
-        else if message.role == "toolCall" || message.role == "toolResult" { ToolMessageCard(message: message) }
+        // Tool steps never reach here: the transcript groups them into a
+        // ledger before drawing. Kept out of the bubble switch so there is one
+        // place that decides how a step looks.
+        else if message.role == "toolCall" || message.role == "toolResult" {
+            ToolLedger(entries: ToolLedgerBuilder.entries(from: [message]))
+        }
         // Reasoning is the model's working, not its answer. It used to fall
         // through to the assistant bubble below, which presented thinking as
         // conclusions.
@@ -397,45 +407,75 @@ struct MarkdownText: View {
     var body: some View { if let value = try? AttributedString(markdown: content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) { Text(value).font(.body).lineSpacing(5).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) } else { Text(content).font(.body).lineSpacing(5).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) } }
 }
 
-/// One step of a run, as a ledger row: status, the tool in mono, and its
-/// output behind a disclosure. It used to be a card that printed up to twelve
-/// lines of JSON whether anyone wanted them or not.
-struct ToolMessageCard: View {
-    let message: RemoteMessage
+/// The steps of a run, as one ledger.
+///
+/// Each tool used to be its own filled, rounded card — and a call and its
+/// result were two of them, so a single web search printed two identical
+/// boxes stacked on top of each other. Boxes are also the wrong weight: these
+/// are the run's margin notes, not its content. Consecutive steps now merge
+/// into one block against a left rule, a call folding into its own result,
+/// with the output behind a disclosure.
+struct ToolLedger: View {
+    let entries: [ToolLedgerEntry]
     @Environment(\.remoteAppearance) private var appearance
-    @State private var expanded = false
+    @State private var expandedIDs: Set<String> = []
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(entries) { entry in
+                row(entry)
+            }
+        }
+        .padding(.leading, 12)
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(RemoteSurface.separator(appearance))
+                .frame(width: 1.5)
+                .clipShape(Capsule())
+        }
+    }
+
+    @ViewBuilder
+    private func row(_ entry: ToolLedgerEntry) -> some View {
+        let isExpanded = expandedIDs.contains(entry.id)
+        VStack(alignment: .leading, spacing: 0) {
             Button {
-                guard !displayContent.isEmpty else { return }
-                withAnimation(.easeOut(duration: 0.16)) { expanded.toggle() }
+                guard !entry.output.isEmpty else { return }
+                withAnimation(.easeOut(duration: 0.16)) {
+                    if isExpanded { expandedIDs.remove(entry.id) } else { expandedIDs.insert(entry.id) }
+                }
             } label: {
-                HStack(spacing: 9) {
-                    Image(systemName: symbol)
-                        .font(.footnote.weight(.bold))
-                        .foregroundStyle(statusTint)
-                        .accessibilityHidden(true)
-                    Text(displayName)
+                HStack(spacing: 8) {
+                    status(entry)
+                    Text(entry.name)
                         .font(.footnote.monospaced())
+                        .foregroundStyle(.primary.opacity(0.78))
                         .lineLimit(1)
-                    Spacer(minLength: 6)
-                    if !displayContent.isEmpty {
-                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                    if !entry.summary.isEmpty, !isExpanded {
+                        Text(entry.summary)
+                            .font(.footnote)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    Spacer(minLength: 4)
+                    if !entry.output.isEmpty {
+                        Image(systemName: "chevron.down")
                             .font(.caption2.weight(.bold))
                             .foregroundStyle(.tertiary)
+                            .rotationEffect(.degrees(isExpanded ? 180 : 0))
                             .accessibilityHidden(true)
                     }
                 }
-                .frame(minHeight: 34)
+                .frame(minHeight: 30)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("\(statusWord) \(displayName)")
-            .accessibilityHint(displayContent.isEmpty ? "" : (expanded ? "Hide output" : "Show output"))
+            .accessibilityLabel("\(entry.state.spokenWord) \(entry.name)")
+            .accessibilityHint(entry.output.isEmpty ? "" : (isExpanded ? "Hide output" : "Show output"))
 
-            if expanded, !displayContent.isEmpty {
-                Text(displayContent)
+            if isExpanded, !entry.output.isEmpty {
+                Text(entry.output)
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
                     .lineSpacing(3)
@@ -445,39 +485,98 @@ struct ToolMessageCard: View {
                     .padding(.bottom, 8)
             }
         }
-        .padding(.horizontal, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RemoteSurface.card(appearance),
-            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
-    /// A failed tool used to render with the same checkmark as a successful
-    /// one — the Mac tracked the failure but it never crossed the wire.
-    private var symbol: String {
-        if message.role == "toolCall" { return "circle.dashed" }
-        return message.didFail ? "xmark.circle.fill" : "checkmark.circle.fill"
+    @ViewBuilder
+    private func status(_ entry: ToolLedgerEntry) -> some View {
+        switch entry.state {
+        case .running:
+            ProgressView()
+                .controlSize(.mini)
+                .frame(width: 12, height: 12)
+                .accessibilityHidden(true)
+        case .done:
+            // A green filled disc turned every step into a notification badge.
+            // Done is the quiet state; only a failure earns colour.
+            Image(systemName: "checkmark")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.tertiary)
+                .frame(width: 12, height: 12)
+                .accessibilityHidden(true)
+        case .failed:
+            Image(systemName: "xmark")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.red)
+                .frame(width: 12, height: 12)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
+struct ToolLedgerEntry: Identifiable, Equatable {
+    enum State: Equatable {
+        case running, done, failed
+
+        var spokenWord: String {
+            switch self {
+            case .running: "Running"
+            case .done: "Finished"
+            case .failed: "Failed"
+            }
+        }
     }
 
-    private var statusTint: Color {
-        if message.role == "toolCall" { return .secondary }
-        return message.didFail ? .red : .green
+    let id: String
+    let name: String
+    var state: State
+    var output: String
+
+    /// The first line of the output, shown beside the name while collapsed —
+    /// the difference between "web search" and "web search · 5 results".
+    var summary: String {
+        guard state != .running else { return "" }
+        let line = output.split(separator: "\n").first.map(String.init) ?? ""
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.count > 60 ? String(trimmed.prefix(60)) + "…" : trimmed
+    }
+}
+
+/// Turns a transcript into what the ledger draws: consecutive tool messages
+/// grouped, and a call folded into the result that answers it.
+enum ToolLedgerBuilder {
+    static func entries(from messages: [RemoteMessage]) -> [ToolLedgerEntry] {
+        var out: [ToolLedgerEntry] = []
+        for message in messages {
+            let name = displayName(message)
+            let output = displayOutput(message)
+            if message.role == "toolCall" {
+                out.append(ToolLedgerEntry(id: message.id, name: name,
+                                           state: .running, output: output))
+                continue
+            }
+            let state: ToolLedgerEntry.State = message.didFail ? .failed : .done
+            // The result answers the most recent unfinished call of the same
+            // name; without that, one search rendered as two rows.
+            if let index = out.lastIndex(where: { $0.name == name && $0.state == .running }) {
+                out[index].state = state
+                if !output.isEmpty { out[index].output = output }
+            } else {
+                out.append(ToolLedgerEntry(id: message.id, name: name,
+                                           state: state, output: output))
+            }
+        }
+        return out
     }
 
-    private var statusWord: String {
-        if message.role == "toolCall" { return "Running" }
-        return message.didFail ? "Failed" : "Finished"
-    }
-
-    private var displayName: String {
+    static func displayName(_ message: RemoteMessage) -> String {
         let raw = message.toolName ?? "Tool activity"
         return raw.replacingOccurrences(of: "dynamic:", with: "")
             .replacingOccurrences(of: "_", with: " ")
     }
 
-    private var displayContent: String {
+    static func displayOutput(_ message: RemoteMessage) -> String {
         let trimmed = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed == "{}" { return "" }
+        if trimmed == "{}" || trimmed.isEmpty { return "" }
         guard let data = trimmed.data(using: .utf8),
               let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
               !array.isEmpty else { return message.content }
@@ -546,5 +645,44 @@ struct QueuedFollowUpsView: View {
         .padding(.horizontal, 12)
         .frame(maxWidth: 720)
         .frame(maxWidth: .infinity)
+    }
+}
+
+
+/// A transcript as it is drawn: ordinary messages, and runs of tool steps
+/// collapsed into a single ledger so a search does not occupy two cards and
+/// 48 points of air.
+struct TranscriptItem: Identifiable {
+    enum Kind {
+        case message(RemoteMessage)
+        case tools([ToolLedgerEntry])
+    }
+
+    let id: String
+    let kind: Kind
+
+    static func build(from messages: [RemoteMessage]) -> [TranscriptItem] {
+        var out: [TranscriptItem] = []
+        var pending: [RemoteMessage] = []
+
+        func flush() {
+            guard !pending.isEmpty else { return }
+            let entries = ToolLedgerBuilder.entries(from: pending)
+            if let first = pending.first {
+                out.append(TranscriptItem(id: "tools-\(first.id)", kind: .tools(entries)))
+            }
+            pending = []
+        }
+
+        for message in messages {
+            if message.role == "toolCall" || message.role == "toolResult" {
+                pending.append(message)
+            } else {
+                flush()
+                out.append(TranscriptItem(id: message.id, kind: .message(message)))
+            }
+        }
+        flush()
+        return out
     }
 }
