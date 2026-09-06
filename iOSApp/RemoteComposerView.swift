@@ -17,6 +17,7 @@ struct RemoteComposer: View {
     var onQueue: (() -> Void)? = nil
     var onSteer: (() -> Void)? = nil
     @Environment(\.remoteAppearance) private var appearance
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var isComposerFocused: Bool
     @State private var showCommands = false
 
@@ -88,7 +89,7 @@ struct RemoteComposer: View {
             .presentationDragIndicator(.visible)
             .presentationBackground(RemoteSurface.card(appearance))
         }
-        .animation(.easeOut(duration: 0.16), value: isRunning && hasDraft)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: isRunning && hasDraft)
         .frame(maxWidth: 720)
         .padding(.horizontal, 12)
         .padding(.top, 6)
