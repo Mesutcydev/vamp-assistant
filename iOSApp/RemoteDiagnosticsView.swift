@@ -6,7 +6,7 @@ struct RemoteDiagnosticsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Connection") {
+                Section {
                     LabeledContent("Status", value: store.isConnected ? "Connected" : "Disconnected")
                     LabeledContent("Mac version", value: store.hostStatus?.appVersion ?? "Not reported")
                     LabeledContent("Mac build", value: store.hostStatus?.appBuild ?? "Not reported")
@@ -16,7 +16,10 @@ struct RemoteDiagnosticsView: View {
                     }
                     Button("Check connection") { Task { await store.connectSaved() } }
                         .disabled(store.isConnecting || !store.hasSavedConnection)
+                } header: {
+                    Text("Connection")
                 }
+                .remoteListRow()
                 Section {
                     ShareLink(item: store.connectionDiagnostics) {
                         Label("Share diagnostics", systemImage: "square.and.arrow.up")
@@ -24,7 +27,10 @@ struct RemoteDiagnosticsView: View {
                 } footer: {
                     Text("The report excludes addresses, access tokens, computer names, files, and conversation text.")
                 }
+                .remoteListRow()
             }
+            .scrollContentBackground(.hidden)
+            .background { RemoteBackdrop() }
             .navigationTitle("Connection details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }

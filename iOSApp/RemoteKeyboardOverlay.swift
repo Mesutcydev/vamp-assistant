@@ -14,9 +14,6 @@ struct RemoteKeyboardOverlay: View {
     @StateObject private var dictation = RemoteDictation()
     @FocusState private var focused: Bool
 
-    private static let accent = Color(white: 0.72)
-    private static let panel = Color(white: 0.10)
-    private static let chip = Color(white: 0.17)
 
     var body: some View {
         VStack(spacing: 10) {
@@ -34,7 +31,7 @@ struct RemoteKeyboardOverlay: View {
         .padding(.horizontal, 10)
         .padding(.top, 8)
         .padding(.bottom, 10)
-        .background(Self.panel.opacity(0.96), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(RemoteStageTheme.panel.opacity(0.96), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
@@ -61,7 +58,7 @@ struct RemoteKeyboardOverlay: View {
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 28, height: 28)
-                    .background(Self.chip, in: Circle())
+                    .background(RemoteStageTheme.chip, in: Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Close the keyboard overlay")
@@ -79,13 +76,13 @@ struct RemoteKeyboardOverlay: View {
                 .onSubmit { sendComposer() }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
-                .background(Self.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(RemoteStageTheme.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             Button(action: sendComposer) {
                 Image(systemName: "paperplane.fill")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(textInput.isEmpty ? .white.opacity(0.35) : .white)
                     .frame(width: 40, height: 40)
-                    .background(textInput.isEmpty ? Self.chip : Self.accent, in: Circle())
+                    .background(textInput.isEmpty ? RemoteStageTheme.chip : RemoteStageTheme.accent, in: Circle())
             }
             .buttonStyle(.plain)
             .disabled(textInput.isEmpty)
@@ -110,7 +107,7 @@ struct RemoteKeyboardOverlay: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 40, height: 36)
-                    .background(dictation.isRecording ? Color(white: 0.34) : Self.accent, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(dictation.isRecording ? RemoteStageTheme.raised : RemoteStageTheme.accent, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
             .buttonStyle(.plain)
         }
@@ -180,7 +177,7 @@ struct RemoteKeyboardOverlay: View {
                 .foregroundStyle(.white.opacity(0.78))
                 .padding(.horizontal, 9)
                 .padding(.vertical, 6)
-                .background(Self.chip, in: Capsule())
+                .background(RemoteStageTheme.chip, in: Capsule())
         }
         .buttonStyle(.plain)
     }
@@ -192,7 +189,7 @@ struct RemoteKeyboardOverlay: View {
                 .foregroundStyle(.white.opacity(0.82))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
-                .background(Self.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(RemoteStageTheme.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -204,7 +201,7 @@ struct RemoteKeyboardOverlay: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 9)
-                .background(Self.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(RemoteStageTheme.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -220,7 +217,7 @@ struct RemoteKeyboardOverlay: View {
                 .foregroundStyle(active ? .white : .white.opacity(0.82))
                 .frame(minWidth: 52)
                 .padding(.vertical, 9)
-                .background(active ? Self.accent : Self.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(active ? RemoteStageTheme.accent : RemoteStageTheme.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -232,7 +229,7 @@ struct RemoteKeyboardOverlay: View {
                 .foregroundStyle(.white)
                 .frame(minWidth: 46)
                 .padding(.vertical, 9)
-                .background(Self.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(RemoteStageTheme.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
     }

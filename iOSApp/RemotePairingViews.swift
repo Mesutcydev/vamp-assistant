@@ -307,117 +307,75 @@ struct RemoteSecondaryButtonStyle: ButtonStyle {
 struct ComputerSwitcherSheet: View {
     let store: RemoteStore
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.remoteAppearance) private var appearance
     @State private var showPairing = false
     @State private var showDiagnostics = false
+    @State private var pendingRemoval: PairedBeetCodeComputer?
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                RemoteBackdrop()
-                ScrollView {
-                    LazyVStack(spacing: 12) {
-                        ComputerSwitcherIntro()
-                        Button { showDiagnostics = true } label: {
-                            Label("Connection details", systemImage: "network")
-                                .frame(maxWidth: .infinity, minHeight: 44)
-                        }
-                        ForEach(store.pairedComputers) { computer in
-                            ComputerChoiceCard(
-                                computer: computer,
-                                isActive: computer.id == store.activeComputerID,
-                                isConnected: computer.id == store.activeComputerID && store.isConnected,
-                                onSelect: {
-                                    Task {
-                                        await store.switchComputer(to: computer.id)
-                                        if store.isConnected { dismiss() }
-                                    }
-                                },
-                                onRemove: { store.removeComputer(computer.id) })
-                        }
-                        Button { showPairing = true } label: {
-                            Label("Pair another computer", systemImage: "plus")
-                                .font(.headline)
-                                .frame(maxWidth: .infinity, minHeight: 52)
-                        }
-                        .buttonStyle(RemotePrimaryButtonStyle())
-                    }
-                    .padding(18)
+            List {
+                Section {
+                    RemotePageHero(
+                        icon: "macmini",
+                        title: "Your computers",
+                        subtitle: "Every Mac this device is paired with. Pick one to work on.")
                 }
+                Section {
+                    ForEach(store.pairedComputers) { computer in
+                        RemoteSelectionRow(
+                            title: computer.name,
+                            subtitle: computer.baseURL.host ?? computer.baseURL.absoluteString,
+                            isSelected: computer.id == store.activeComputerID) {
+                                Task {
+                                    await store.switchComputer(to: computer.id)
+                                    if store.isConnected { dismiss() }
+                                }
+                            }
+                            .swipeActions(edge: .trailing) {
+                                Button("Remove", systemImage: "trash", role: .destructive) {
+                                    pendingRemoval = computer
+                                }
+                            }
+                    }
+                } footer: {
+                    if let active = store.pairedComputers.first(where: { $0.id == store.activeComputerID }) {
+                        Text(store.isConnected
+                             ? "Connected to \(active.name)."
+                             : "\(active.name) is selected but not reachable.")
+                    }
+                }
+                .remoteListRow()
+
+                Section {
+                    Button("Pair another computer", systemImage: "plus") { showPairing = true }
+                    RemoteDisclosureRow(title: "Connection details", icon: "network") {
+                        showDiagnostics = true
+                    }
+                }
+                .remoteListRow()
             }
-            .navigationTitle("Your computers")
+            .scrollContentBackground(.hidden)
+            .background { RemoteBackdrop() }
+            .navigationTitle("Computers")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
             }
+            .confirmationDialog(
+                "Remove this computer?",
+                isPresented: Binding(get: { pendingRemoval != nil },
+                                     set: { if !$0 { pendingRemoval = nil } }),
+                titleVisibility: .visible,
+                presenting: pendingRemoval) { computer in
+                    Button("Remove", role: .destructive) { store.removeComputer(computer.id) }
+                    Button("Cancel", role: .cancel) {}
+                } message: { computer in
+                    Text("“\(computer.name)” is unpaired from this device. You will need its pairing code to connect again.")
+                }
             .sheet(isPresented: $showDiagnostics) { RemoteDiagnosticsView(store: store) }
             .sheet(isPresented: $showPairing) { PairAnotherMacSheet(store: store) }
-        }
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
-    }
-}
-
-struct PairAnotherMacSheet: View {
-    let store: RemoteStore
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.remoteAppearance) private var appearance
-    @State private var address = ""
-    @State private var code = ""
-    @State private var showScanner = false
-    @State private var showManual = true
-    @FocusState private var focusedField: PairingField?
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                RemoteBackdrop()
-                ScrollView {
-                    VStack(spacing: 16) {
-                        Text("Scan the QR on your Mac, or enter its LAN or Tailscale address and pairing code.")
-                            .font(.subheadline)
-                            .foregroundStyle(BeetTheme.secondaryText(appearance))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        PairingActions(
-                            address: $address,
-                            code: $code,
-                            showManual: $showManual,
-                            focusedField: $focusedField,
-                            savedAddress: nil,
-                            requiresPairing: false,
-                            isConnecting: store.isConnecting,
-                            onScan: { showScanner = true },
-                            onReconnect: {},
-                            onForget: {},
-                            onConnect: {
-                                Task {
-                                    if await store.connect(address: address, code: code) { dismiss() }
-                                }
-                            })
-                    }
-                    .padding(18)
-                }
-            }
-            .navigationTitle("Pair another Mac")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
-            .sheet(isPresented: $showScanner) {
-                QRScannerSheet(onScan: { value in
-                    address = value
-                    showScanner = false
-                    Task {
-                        if await store.connect(address: value, code: "") { dismiss() }
-                    }
-                }, onCancel: { showScanner = false })
-            }
-            .keyboardDismissToolbar()
-            .scrollDismissesKeyboard(.interactively)
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
@@ -463,97 +421,3 @@ struct RemoteReconnectBanner: View {
     }
 }
 
-struct ComputerSwitcherIntro: View {
-    @Environment(\.remoteAppearance) private var appearance
-
-    var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "desktopcomputer.and.macbook")
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(BeetTheme.accentBright)
-                .frame(width: 48, height: 48)
-                .background(BeetTheme.surfaceStrong(appearance), in: RoundedRectangle(cornerRadius: 15))
-            VStack(alignment: .leading, spacing: 3) {
-                Text("One remote, every Mac")
-                    .font(.headline)
-                Text("Switch computers without pairing again.")
-                    .font(.subheadline)
-                    .foregroundStyle(BeetTheme.secondaryText(appearance))
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.bottom, 4)
-    }
-}
-
-struct ComputerChoiceCard: View {
-    let computer: PairedBeetCodeComputer
-    let isActive: Bool
-    let isConnected: Bool
-    let onSelect: () -> Void
-    let onRemove: () -> Void
-    @Environment(\.remoteAppearance) private var appearance
-    @State private var showRemove = false
-
-    var body: some View {
-        HStack(spacing: 0) {
-            Button(action: onSelect) {
-                HStack(spacing: 13) {
-                    Image(systemName: "macmini")
-                        .accessibilityHidden(true)
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(isActive ? Color.white : BeetTheme.accentBright)
-                        .frame(width: 44, height: 44)
-                        .background(isActive ? BeetTheme.accent : BeetTheme.surfaceStrong(appearance),
-                                    in: RoundedRectangle(cornerRadius: 13))
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(computer.name)
-                            .font(.headline)
-                            .lineLimit(1)
-                        Text(computer.baseURL.host ?? computer.baseURL.absoluteString)
-                            .font(.caption)
-                            .foregroundStyle(BeetTheme.secondaryText(appearance))
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 8)
-                    if isConnected {
-                        Label("Connected", systemImage: "checkmark.circle.fill")
-                            .labelStyle(.iconOnly)
-                            .foregroundStyle(BeetTheme.accentBright)
-                    } else {
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(BeetTheme.secondaryText(appearance))
-                            .accessibilityHidden(true)
-                    }
-                }
-            }
-            .buttonStyle(RemotePressButtonStyle())
-            Menu {
-                Button("Remove computer", systemImage: "trash", role: .destructive) { showRemove = true }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .frame(width: 44, height: 44)
-            }
-            .foregroundStyle(BeetTheme.secondaryText(appearance))
-            .accessibilityLabel("Options for \(computer.name)")
-        }
-        .padding(14)
-        .remoteGlass(appearance, radius: 19)
-        .overlay {
-            if isActive {
-                RoundedRectangle(cornerRadius: 19)
-                    .stroke(BeetTheme.accentBright.opacity(0.75), lineWidth: 1.25)
-            }
-        }
-        .confirmationDialog(
-            "Remove \(computer.name)?",
-            isPresented: $showRemove,
-            titleVisibility: .visible) {
-                Button("Remove computer", role: .destructive, action: onRemove)
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Its saved access token is deleted. You will need the pairing code from that Mac to add it again.")
-            }
-    }
-}

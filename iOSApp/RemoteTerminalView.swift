@@ -309,7 +309,7 @@ struct RemoteTerminalView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(Color(white: 0.055))
+        .background(RemoteStageTheme.terminalBackground)
     }
 
     private var presentationBar: some View {
@@ -339,7 +339,7 @@ struct RemoteTerminalView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 5)
-        .background(Color(white: 0.08))
+        .background(RemoteStageTheme.terminalChrome)
     }
 
     private var commandComposer: some View {
@@ -389,7 +389,7 @@ struct RemoteTerminalView: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(Color(white: 0.10))
+        .background(RemoteStageTheme.panel)
         .overlay(alignment: .top) { Rectangle().fill(Color.white.opacity(0.10)).frame(height: 0.5) }
     }
 
@@ -411,7 +411,7 @@ struct RemoteTerminalView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
         }
-        .background(Color(white: 0.075))
+        .background(RemoteStageTheme.terminalWell)
     }
 
     private func specialKey(

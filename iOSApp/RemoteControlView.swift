@@ -132,7 +132,7 @@ private struct RemoteControlUnavailableState: View {
                                     .frame(maxWidth: .infinity, minHeight: 48)
                             }
                             .buttonStyle(.borderedProminent)
-                            .tint(Color(white: 0.28))
+                            .tint(RemoteStageTheme.control)
                             .disabled(isWorking)
                         }
                         Button("Back to Vamp Assistant", action: dismiss)
@@ -256,7 +256,7 @@ private struct RemoteMacUnlockState: View {
                             .frame(maxWidth: .infinity, minHeight: 48)
                         }
                         .buttonStyle(.borderedProminent)
-                        .tint(Color(white: 0.28))
+                        .tint(RemoteStageTheme.control)
                         .disabled(password.isEmpty || password.count > 256 || isSubmitting)
 
                         if let feedback {
@@ -398,8 +398,6 @@ struct RemoteControlView: View {
         guard let selectedWindowID else { return nil }
         return applications.first { $0.windowID == selectedWindowID }
     }
-    private static let accent = Color(white: 0.72)
-    private static let panel = Color(white: 0.10)
 
     init(store: RemoteStore, sourceMode: RemoteControlSourceMode = .display) {
         self.store = store
@@ -528,7 +526,7 @@ struct RemoteControlView: View {
                             .foregroundStyle(.black)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
-                            .background(Self.accent, in: Capsule())
+                            .background(RemoteStageTheme.accent, in: Capsule())
                             .padding(.top, max(proxy.safeAreaInsets.top, 12) + (reconnectBanner == nil ? 8 : 44))
                         Spacer()
                     }
@@ -830,7 +828,7 @@ struct RemoteControlView: View {
     private func statLine(_ key: String, _ value: String) -> some View {
         HStack(spacing: 6) {
             Text(key).foregroundStyle(.white.opacity(0.48))
-            Text(value).foregroundStyle(Self.accent).monospacedDigit()
+            Text(value).foregroundStyle(RemoteStageTheme.accent).monospacedDigit()
         }
         .font(.system(size: 9, weight: .semibold, design: .monospaced))
     }
@@ -966,7 +964,7 @@ struct RemoteControlView: View {
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 4)
-        .background(Self.panel.opacity(0.94), in: Capsule())
+        .background(RemoteStageTheme.panel.opacity(0.94), in: Capsule())
         .overlay(Capsule().strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
         .shadow(color: .black.opacity(0.42), radius: 14, y: 7)
         .padding(.horizontal, 10)
@@ -997,12 +995,12 @@ struct RemoteControlView: View {
     ) -> some View {
         ZStack {
             if destructive {
-                Circle().fill(Color(white: 0.34).opacity(0.95)).frame(width: 30, height: 30)
+                Circle().fill(RemoteStageTheme.raised.opacity(0.95)).frame(width: 30, height: 30)
             }
             Image(systemName: systemName)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(
-                    destructive ? .white : active ? Self.accent : dimmed ? .white.opacity(0.38) : .white.opacity(0.82)
+                    destructive ? .white : active ? RemoteStageTheme.accent : dimmed ? .white.opacity(0.38) : .white.opacity(0.82)
                 )
         }
         .frame(width: 38, height: 38)
@@ -1483,7 +1481,7 @@ private struct RemoteMarkupOverlay: View {
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.white)
                             .padding(10)
-                            .background(store.tool == tool ? Color(white: 0.46) : Color.black.opacity(0.55), in: Circle())
+                            .background(store.tool == tool ? RemoteStageTheme.active : Color.black.opacity(0.55), in: Circle())
                     }
                     .accessibilityLabel(tool == .draw ? "Draw" : tool == .highlight ? "Highlight" : "Erase")
                     .accessibilityAddTraits(store.tool == tool ? .isSelected : [])

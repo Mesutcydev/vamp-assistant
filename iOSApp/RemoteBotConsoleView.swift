@@ -48,6 +48,7 @@ struct RemoteBotConsoleView: View {
                 case .files: files
                 }
             }
+            .background { RemoteBackdrop() }
             .navigationTitle(computer.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

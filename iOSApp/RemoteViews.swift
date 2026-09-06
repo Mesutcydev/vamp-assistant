@@ -106,6 +106,32 @@ struct RemoteListRowBackground: ViewModifier {
     }
 }
 
+/// The dark-only surfaces: the Mac stream, the terminal, the keyboard overlay.
+///
+/// These stay dark in every appearance on purpose — they frame a video feed and
+/// a terminal, and light chrome around either is glare. That is a deliberate
+/// exception to the app's theming, so it gets named values instead of the
+/// scatter of `Color(white:)` literals in three files that agreed only by
+/// coincidence and drifted where they did not.
+enum RemoteStageTheme {
+    /// Glyphs and text on the stage chrome.
+    static let accent = Color(white: 0.72)
+    /// The chrome itself.
+    static let panel = Color(white: 0.10)
+    /// A key cap or chip sitting on the panel.
+    static let chip = Color(white: 0.17)
+    /// A chip that is pressed, recording, or otherwise live.
+    static let raised = Color(white: 0.34)
+    /// The selected tool in the markup bar.
+    static let active = Color(white: 0.46)
+    /// Sliders and steppers on the stage.
+    static let control = Color(white: 0.28)
+    /// Terminal ground, its chrome bar, and the composer well.
+    static let terminalBackground = Color(white: 0.055)
+    static let terminalChrome = Color(white: 0.08)
+    static let terminalWell = Color(white: 0.075)
+}
+
 /// One way of saying the Mac is not there.
 ///
 /// Sharing, the model picker and the folder picker had no notion of the
