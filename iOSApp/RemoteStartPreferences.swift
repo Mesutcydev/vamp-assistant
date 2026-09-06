@@ -23,6 +23,12 @@ final class RemoteStartPreferences {
         static let modelID = "remoteStartModelID"
         static let modelSource = "remoteStartModelSource"
         static let workspacePath = "remoteStartWorkspacePath"
+        /// Per-bot default, keyed by profile id. A reviewer wants a model that
+        /// reads carefully and a builder wants one that writes code well;
+        /// remembering one model for everything meant re-picking on every
+        /// switch.
+        static func botModel(_ profileID: String) -> String { "remoteBotModel.\(profileID)" }
+        static func botModelSource(_ profileID: String) -> String { "remoteBotModelSource.\(profileID)" }
     }
 
     private let defaults: UserDefaults
@@ -45,6 +51,27 @@ final class RemoteStartPreferences {
     func remember(model: RemoteStartModelOption) {
         modelID = model.id
         modelSource = model.source
+    }
+
+    /// The model this bot should start on, if one was chosen for it.
+    func defaultModelID(forBot profileID: String) -> String? {
+        let value = defaults.string(forKey: Key.botModel(profileID)) ?? ""
+        return value.isEmpty ? nil : value
+    }
+
+    func defaultModelSource(forBot profileID: String) -> String? {
+        let value = defaults.string(forKey: Key.botModelSource(profileID)) ?? ""
+        return value.isEmpty ? nil : value
+    }
+
+    func setDefaultModel(_ model: RemoteStartModelOption?, forBot profileID: String) {
+        guard let model else {
+            defaults.removeObject(forKey: Key.botModel(profileID))
+            defaults.removeObject(forKey: Key.botModelSource(profileID))
+            return
+        }
+        defaults.set(model.id, forKey: Key.botModel(profileID))
+        defaults.set(model.source, forKey: Key.botModelSource(profileID))
     }
 
     /// The model the sheet should open on: the last used one if the Mac still

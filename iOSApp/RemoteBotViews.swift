@@ -12,7 +12,25 @@ struct RemoteBotDetailView: View {
     @State private var prompt = ""
     @State private var steerDraft = ""
     @State private var answerDraft = ""
-    @State private var showStartChat = false
+    @Environment(\.remoteAppearance) private var appearance
+    /// One cover: chat and the model picker are both sheets from this screen.
+    @State private var sheet: BotSheet?
+    @State private var starterPrompt = ""
+    @State private var defaultModelSource = "local"
+
+    enum BotSheet: String, Identifiable {
+        case chat, model
+        var id: String { rawValue }
+    }
+
+    private var preferences: RemoteStartPreferences { .shared }
+
+    /// The model this bot starts on. Nil means it follows whatever was used
+    /// last, which is what every bot did before.
+    private var defaultModel: RemoteStartModelOption? {
+        guard let id = preferences.defaultModelID(forBot: profile.id) else { return nil }
+        return store.startModels.first { $0.id == id }
+    }
 
     private var run: RemoteBotRun? {
         store.botRuns.first { $0.profileID == profile.id && !$0.isTerminal }
@@ -32,6 +50,7 @@ struct RemoteBotDetailView: View {
                     .remoteListRow()
             }
             chatSection
+            modelSection
             if let run, !run.isTerminal { activeRunSection(run) }
             if profile.isSpecialist { newRunSection }
             if let run, run.isTerminal { lastRunSection(run) }
@@ -40,10 +59,38 @@ struct RemoteBotDetailView: View {
         .refreshable { try? await store.refresh() }
         .navigationTitle(profile.name)
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showStartChat) {
-            StartSessionSheet(store: store, initialBotID: RemoteBotProfile.resolvedID(profile.id) ?? "") { sessionID in
-                showStartChat = false
-                onOpen(sessionID)
+        .sheet(item: $sheet) { which in
+            switch which {
+            case .chat:
+                StartSessionSheet(
+                    store: store,
+                    initialBotID: RemoteBotProfile.resolvedID(profile.id) ?? "",
+                    initialPrompt: starterPrompt) { sessionID in
+                        sheet = nil
+                        onOpen(sessionID)
+                    }
+            case .model:
+                RemoteModelPickerSheet(
+                    models: store.startModels,
+                    source: $defaultModelSource,
+                    selectedModelID: Binding(
+                        get: { preferences.defaultModelID(forBot: profile.id) ?? "" },
+                        set: { id in
+                            preferences.setDefaultModel(
+                                store.startModels.first { $0.id == id }, forBot: profile.id)
+                        }),
+                    onRefresh: { await store.loadStartModels() },
+                    isConnected: store.isConnected)
+                    .environment(\.remoteAppearance, appearance)
+            }
+        }
+        .task {
+            if store.startModels.isEmpty { await store.loadStartModels() }
+            defaultModelSource = defaultModel?.source ?? "local"
+            // A run started from this page follows the bot's model unless the
+            // row above it is changed for this one run.
+            if selectedModelID.isEmpty, let id = preferences.defaultModelID(forBot: profile.id) {
+                selectedModelID = id
             }
         }
     }
@@ -51,7 +98,13 @@ struct RemoteBotDetailView: View {
     private var hero: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 14) {
-                RemoteBotThumbnail(profile: profile, size: 68)
+                // The roster dropped the portraits because five grey discs
+                // carried no information; the detail page kept one out of
+                // habit. The bot's own glyph says which bot this is.
+                Image(systemName: profile.symbol)
+                    .font(.system(size: 26, weight: .regular))
+                    .foregroundStyle(.primary.opacity(0.85))
+                    .frame(width: 46, height: 46)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(profile.name).font(.title2.weight(.semibold))
                     Text(profile.subtitle)
@@ -76,21 +129,64 @@ struct RemoteBotDetailView: View {
         Section {
             Button {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                showStartChat = true
+                starterPrompt = ""
+                sheet = .chat
             } label: {
                 Label("Start a chat", systemImage: "plus.bubble")
             }
             .disabled(!store.isConnected)
             .accessibilityHint(store.isConnected ? "" : "Connect to your Mac first")
+            // The starters were grey text you could not tap — they read as
+            // disabled rows, which is exactly what they looked like. They open
+            // a chat with the line already typed.
             ForEach(profile.starters, id: \.self) { starter in
-                Text(starter)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                Button {
+                    starterPrompt = starter
+                    sheet = .chat
+                } label: {
+                    HStack(spacing: 10) {
+                        Text(starter)
+                            .font(.body)
+                            .foregroundStyle(.primary.opacity(0.82))
+                            .multilineTextAlignment(.leading)
+                        Spacer(minLength: 8)
+                        Image(systemName: "arrow.up.left")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(RemoteInk.quiet)
+                    }
+                    .frame(minHeight: 40)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!store.isConnected)
             }
         } header: {
             RemoteSectionHeading("Chat")
         } footer: {
             Text("A normal conversation, with this bot's brief applied.")
+        }
+        .remoteListRow()
+    }
+
+    /// This bot's own model, in the same row shape the rest of the app uses.
+    private var modelSection: some View {
+        Section {
+            RemoteDisclosureRow(
+                title: "Default model",
+                icon: "cpu",
+                value: defaultModel?.name ?? "Follows last used",
+                detail: defaultModel?.detail,
+                action: { sheet = .model })
+            if defaultModel != nil {
+                Button("Clear", systemImage: "arrow.uturn.backward") {
+                    preferences.setDefaultModel(nil, forBot: profile.id)
+                }
+                .foregroundStyle(.primary.opacity(0.82))
+            }
+        } header: {
+            RemoteSectionHeading("Model")
+        } footer: {
+            Text("Chats and runs you start from here open on this model.")
         }
         .remoteListRow()
     }
@@ -205,8 +301,11 @@ struct RemoteBotDetailView: View {
             Button("Start run") {
                 let text = prompt
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                let modelID = selectedModelID.isEmpty
+                    ? (preferences.defaultModelID(forBot: profile.id) ?? "")
+                    : selectedModelID
                 Task {
-                    if await store.startBotRun(profileID: profile.id, modelID: selectedModelID, prompt: text) {
+                    if await store.startBotRun(profileID: profile.id, modelID: modelID, prompt: text) {
                         prompt = ""
                         UINotificationFeedbackGenerator().notificationOccurred(.success)
                     }
@@ -307,26 +406,4 @@ struct RemoteBotProfile: Identifiable, Hashable {
     /// Only the specialists have an autonomous-run backend; the general
     /// assistant is chat-only.
     var isSpecialist: Bool { id != RemoteBotProfile.general.id }
-}
-
-struct RemoteBotThumbnail: View {
-    let profile: RemoteBotProfile
-    var size: CGFloat = 56
-
-    var body: some View {
-        Image(profile.imageName)
-            .resizable()
-            .scaledToFit()
-            .saturation(0)
-            .frame(width: size, height: size)
-            .clipShape(Circle())
-            .overlay {
-                Circle()
-                    .stroke(Color.white.opacity(0.14), lineWidth: 0.75)
-            }
-            // No tinted halo: it glowed orange the moment the accent turned
-            // warm. The portrait carries itself.
-            .shadow(color: .black.opacity(0.25), radius: 6, y: 3)
-            .accessibilityHidden(true)
-    }
 }

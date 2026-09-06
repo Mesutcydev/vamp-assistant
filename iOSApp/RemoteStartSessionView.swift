@@ -13,6 +13,8 @@ import UIKit
 struct StartSessionSheet: View {
     let store: RemoteStore
     let initialBotID: String
+    /// A starter tapped on a bot's page arrives here already typed.
+    var initialPrompt: String = ""
     let onStarted: (UUID) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.remoteAppearance) private var appearance
@@ -162,6 +164,12 @@ struct StartSessionSheet: View {
             .onChange(of: selectedBotID) { _, id in
                 preferences.botID = id
                 attachMatchingBotComputer()
+                if let modelID = preferences.defaultModelID(forBot: botProfile.id),
+                   let model = store.startModels.first(where: { $0.id == modelID }) {
+                    selectedModelID = model.id
+                    selectedSource = model.source
+                    selectedReasoningEffort = model.defaultReasoningEffort
+                }
             }
         }
     }
@@ -390,6 +398,7 @@ struct StartSessionSheet: View {
 
     private func load() async {
         selectedBotID = initialBotID.isEmpty ? preferences.botID : initialBotID
+        if prompt.isEmpty { prompt = initialPrompt }
         selectedSource = preferences.modelSource
         selectedWorkspacePath = preferences.workspacePath
         async let models: Void = store.loadStartModels()
@@ -407,10 +416,15 @@ struct StartSessionSheet: View {
     }
 
     private func applyRememberedModel() {
+        // A bot's own default wins over the last-used model: a reviewer and a
+        // builder want different models, and re-picking on every switch was
+        // the whole reason the default exists.
+        let botDefault = preferences.defaultModelID(forBot: botProfile.id)
         guard let model = RemoteStartPreferences.resolveModel(
             in: store.startModels,
-            rememberedID: preferences.modelID,
-            rememberedSource: preferences.modelSource) else { return }
+            rememberedID: botDefault ?? preferences.modelID,
+            rememberedSource: preferences.defaultModelSource(forBot: botProfile.id)
+                ?? preferences.modelSource) else { return }
         selectedModelID = model.id
         selectedSource = model.source
         selectedReasoningEffort = model.defaultReasoningEffort
