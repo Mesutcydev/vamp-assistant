@@ -125,13 +125,21 @@ STAGED="${INSTALLED%.app}.new.app"
 rm -rf "$STAGED"
 ditto "$SOURCE" "$STAGED"
 xattr -dr com.apple.quarantine "$STAGED" 2>/dev/null || true
+BACKUP="${INSTALLED%.app}.previous.app"
 if [[ -d "$INSTALLED" ]]; then
-  BACKUP="${INSTALLED%.app}.previous.app"
   rm -rf "$BACKUP"
   mv "$INSTALLED" "$BACKUP"
 fi
 mv "$STAGED" "$INSTALLED"
-rm -rf "${INSTALLED%.app}.previous.app"
+
+# The previous copy stays. An ad-hoc signed build can be refused by XProtect
+# on first launch and moved to the Trash, and deleting the working app before
+# that is known would leave you with nothing installed at all.
+if [[ -d "$BACKUP" ]]; then
+  echo "Previous app kept at: $BACKUP"
+  echo "If the new one is refused, restore it with:"
+  echo "  rm -rf \"$INSTALLED\" && mv \"$BACKUP\" \"$INSTALLED\""
+fi
 
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INSTALLED/Contents/Info.plist")"
 BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INSTALLED/Contents/Info.plist")"
