@@ -11,7 +11,7 @@
     * { box-sizing: border-box; }
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
     a { color: #9A9A9E; } a:hover { color: #F2F2F4; }
-    .screen { position: relative; width: 900px; height: 1080px; overflow: hidden;
+    .screen { position: relative; width: 1180px; height: 1000px; overflow: hidden;
       background: #0F0F10; color: #F2F2F4; }
     .atmos { position: absolute; inset: 0; background-image: url("atmosphere.jpg");
       background-size: cover; background-position: center; filter: grayscale(1);
@@ -39,14 +39,49 @@
       background: rgba(37,37,40,0.58); border: 0.75px solid rgba(255,255,255,0.13); font-size: 13px; font-weight: 500; }
   </style>
 </helmet>
-<div class="screen" style="width:900px;height:1080px">
+<div class="screen" style="width:1180px;height:1000px">
   <div class="atmos"></div>
   <div class="layer" style="padding:26px 30px;gap:20px;overflow:hidden">
     <div>
       <div class="t1" style="font-size:26px">Icon studies</div>
-      <div class="sub" style="margin-top:6px">Twelve cuts of one engraving in one serif. The first row follows the drawn border, which is the device that still reads at 40pt.</div>
+      <div class="sub" style="margin-top:6px">Two families. The marks are constructed — geometry and type, nothing photographic — which is what lets them survive being 40pt on a Home Screen. The framings below are all one plate, so they can only differ by a shade.</div>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:20px 20px">
+    <div class="cap">Drawn marks — geometry and type, no engraving</div>
+    <div style="display:grid;grid-template-columns:repeat(5, minmax(0, 1fr));gap:18px">
+      <div style="display:flex;flex-direction:column;gap:9px">
+  <img src="mark-portal.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
+  <div>
+    <div style="font-size:13px;font-weight:600">Portal</div>
+    <div class="c2" style="margin-top:3px;line-height:15px">A temple cut out of a solid tile. All silhouette, no picture — the one that still reads at 20pt.</div>
+  </div>
+</div><div style="display:flex;flex-direction:column;gap:9px">
+  <img src="mark-flutedv.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
+  <div>
+    <div style="font-size:13px;font-weight:600">Fluted V</div>
+    <div class="c2" style="margin-top:3px;line-height:15px">The letter built as two shafts of the order, fluted, with a capital across the top.</div>
+  </div>
+</div><div style="display:flex;flex-direction:column;gap:9px">
+  <img src="mark-seal.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
+  <div>
+    <div style="font-size:13px;font-weight:600">Seal</div>
+    <div class="c2" style="margin-top:3px;line-height:15px">A stamp rather than a scene: a ring of ticks around one letter, name beneath.</div>
+  </div>
+</div><div style="display:flex;flex-direction:column;gap:9px">
+  <img src="mark-letterpress.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
+  <div>
+    <div style="font-size:13px;font-weight:600">Letterpress</div>
+    <div class="c2" style="margin-top:3px;line-height:15px">Type alone, set between rules on paper. No mark at all — the name is the mark.</div>
+  </div>
+</div><div style="display:flex;flex-direction:column;gap:9px">
+  <img src="mark-pediment.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
+  <div>
+    <div style="font-size:13px;font-weight:600">Pediment</div>
+    <div class="c2" style="margin-top:3px;line-height:15px">The building reduced to its front, drawn in ink on paper.</div>
+  </div>
+</div>
+    </div>
+    <div class="cap" style="padding-top:6px">Framings of the plate</div>
+    <div style="display:grid;grid-template-columns:repeat(6, minmax(0, 1fr));gap:16px">
       <div style="display:flex;flex-direction:column;gap:9px">
   <img src="icon-frame.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
   <div>

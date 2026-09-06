@@ -73,8 +73,8 @@
       "file": "IconStudies.dc.html",
       "x": 1960,
       "y": 1060,
-      "w": 900,
-      "h": 1080,
+      "w": 1180,
+      "h": 1000,
       "title": "Icon studies"
     }
   ],
@@ -124,9 +124,9 @@
     {
       "id": "icons",
       "x": 1960,
-      "y": 1860,
+      "y": 2100,
       "w": 460,
-      "text": "Eight framings of the plate the app already ships: the whole scene, the colonnade, a monogram, the statue, a medallion with no type, the light-mode plate, a formal rule lockup, and a drawn frame. Same engraving, same serif, no new marks."
+      "text": "Two families of icon. The drawn marks \u2014 portal, fluted V, seal, letterpress, pediment \u2014 are geometry and type with no engraving in them, which is why they hold at icon size. The framings below are twelve arrangements of the one plate, and they can only ever differ by a shade."
     }
   ],
   "launch": {
