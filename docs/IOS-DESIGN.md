@@ -85,6 +85,23 @@ glyphs do not reflow. Everywhere else, use the type ramp.
 5. Standard rows and buttons. If you are reaching for a `RoundedRectangle`,
    stop and ask what row you actually want.
 
+## Looking at it
+
+`./scripts/screenshot-ios-screens.sh` builds the app, boots a simulator, and
+photographs every core screen in light and dark against fixtures — no paired
+Mac required. On macOS 27 the simulators live in **DeviceHub**; the script
+drives `xcrun simctl`, which is the scripting surface either way, so it works
+under both. `DEVELOPER_DIR` pins the toolchain (it prefers `Xcode-beta` when
+both are installed) and `SCREENSHOT_DEVICE` picks the simulator.
+
+The same script runs in CI as the workflow's `screens` job, on demand, and
+uploads the images as an artifact. GitHub's runners are macOS 26 today, so CI
+screenshots come from that toolchain; run the script locally when you need the
+macOS 27 rendering specifically.
+
+Fixtures come from `RemoteStore.fixtures()` and the `VAMP_REMOTE_TEST_SCREEN`
+environment variable, both `#if DEBUG`.
+
 ## Verification
 
 `xcodegen generate` after adding or removing a file, then the iOS scheme's
