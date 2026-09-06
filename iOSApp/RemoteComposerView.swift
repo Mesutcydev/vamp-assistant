@@ -229,96 +229,158 @@ private struct RemoteCommandPopover: View {
     }
 }
 
+/// What the model asks for before it acts, drawn the way ChatGPT draws it:
+/// one panel with a title, the request itself, and the answer as full-width
+/// buttons at the bottom — the primary filled, the refusal plain.
+///
+/// It used to be a grey card with a coloured glyph and a row of bordered
+/// buttons that wrapped to two lines on a small phone; the buttons were the
+/// same size as the tool chips above them, so the one moment the run is
+/// waiting on you looked like every other row.
 struct PendingInteractionView: View {
     let pending: RemotePendingInteraction
     var isResolving = false
     let onResolve: (String) -> Void
     @Environment(\.remoteAppearance) private var appearance
     @State private var answer = ""
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 13) {
-            HStack(spacing: 10) {
-                Image(systemName: symbol)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(BeetTheme.accentBright)
-                    .frame(width: 26)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.subheadline.weight(.semibold))
-                    if let toolName = pending.toolName, !toolName.isEmpty {
-                        Text(toolName).font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-
-            Text(pending.summary ?? pending.content ?? "Vamp Assistant needs your input.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .lineSpacing(3)
-                .textSelection(.enabled)
-
-            // The change itself, not a description of it.
-            if let preview = pending.preview {
-                RemoteApprovalPreviewView(preview: preview)
-            }
-
-            if isResolving {
-                HStack(spacing: 10) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Continuing…")
-                        .font(.subheadline.weight(.semibold))
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: symbol)
+                        .font(.footnote.weight(.semibold))
                         .foregroundStyle(.secondary)
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
                     Spacer(minLength: 0)
-                }
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                .accessibilityLabel("Continuing")
-            } else if pending.kind == "question" {
-                if let options = pending.options, !options.isEmpty {
-                    VStack(spacing: 8) {
-                        ForEach(options, id: \.self) { option in
-                            Button(option) { onResolve(option) }
-                                .buttonStyle(.borderedProminent)
-                                .frame(maxWidth: .infinity)
-                        }
+                    if let toolName = pending.toolName, !toolName.isEmpty {
+                        Text(toolName)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
                     }
                 }
-                TextField("Your answer", text: $answer)
-                    .textFieldStyle(.roundedBorder)
-                Button("Send answer") { onResolve(answer) }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            } else {
-                ViewThatFits {
-                    HStack(spacing: 9) { actionButtons }
-                    VStack(spacing: 9) { actionButtons }
+
+                Text(pending.summary ?? pending.content ?? "Vamp Assistant needs your input.")
+                    .font(.subheadline)
+                    .foregroundStyle(.primary.opacity(0.78))
+                    .lineSpacing(3)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let preview = pending.preview {
+                    RemoteApprovalPreviewView(preview: preview)
                 }
             }
+            .padding(14)
+
+            Rectangle()
+                .fill(RemoteSurface.separator(appearance))
+                .frame(height: 0.75)
+
+            answerArea
+                .padding(12)
         }
-        .padding(14)
-        .background(
-            RemoteSurface.card(appearance),
-            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(RemoteSurface.card(appearance),
+                    in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(RemoteSurface.separator(appearance), lineWidth: 0.75)
+        }
         .padding(.horizontal, 12)
         .padding(.bottom, 8)
         .animation(nil, value: isResolving)
+    }
+
+    @ViewBuilder private var answerArea: some View {
+        if isResolving {
+            HStack(spacing: 10) {
+                ProgressView().controlSize(.small)
+                Text("Continuing…")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            .frame(minHeight: 44)
+            .accessibilityLabel("Continuing")
+        } else if pending.kind == "question" {
+            VStack(spacing: 8) {
+                if let options = pending.options, !options.isEmpty {
+                    ForEach(options, id: \.self) { option in
+                        Button(option) { onResolve(option) }
+                            .buttonStyle(RemoteAnswerButtonStyle(kind: .secondary, appearance: appearance))
+                    }
+                }
+                HStack(spacing: 8) {
+                    TextField("Your answer", text: $answer)
+                        .font(.subheadline)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 40)
+                        .background(RemoteSurface.well(appearance),
+                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    Button("Send") { onResolve(answer) }
+                        .buttonStyle(RemoteAnswerButtonStyle(kind: .primary, appearance: appearance))
+                        .fixedSize()
+                        .disabled(answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        } else {
+            VStack(spacing: 8) { actionButtons }
+        }
     }
 
     @ViewBuilder private var actionButtons: some View {
         Button(pending.kind == "plan" ? "Approve plan" : "Allow once") {
             onResolve("approve")
         }
-        .buttonStyle(.borderedProminent)
-        .tint(BeetTheme.accent)
-        .frame(maxWidth: .infinity)
+        .buttonStyle(RemoteAnswerButtonStyle(kind: .primary, appearance: appearance))
         if pending.kind == "approval" {
-            Button("Decline", role: .destructive) { onResolve("decline") }
-                .buttonStyle(.bordered)
-                .frame(maxWidth: .infinity)
+            Button("Not now") { onResolve("decline") }
+                .buttonStyle(RemoteAnswerButtonStyle(kind: .secondary, appearance: appearance))
         }
     }
 
     private var title: String { switch pending.kind { case "question": "Question"; case "plan": "Plan ready"; default: "Approval needed" } }
     private var symbol: String { switch pending.kind { case "question": "questionmark.bubble"; case "plan": "list.bullet.clipboard"; default: "hand.raised.fill" } }
+}
+
+
+/// The two answers to a pending request: filled and plain, both full width and
+/// both 44pt, so which one is the default is never in doubt.
+struct RemoteAnswerButtonStyle: ButtonStyle {
+    enum Kind { case primary, secondary }
+    @Environment(\.isEnabled) private var isEnabled
+    let kind: Kind
+    let appearance: RemoteAppearance
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .padding(.horizontal, 16)
+            .background(background(configuration.isPressed),
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .foregroundStyle(foreground)
+            .opacity(isEnabled ? 1 : 0.5)
+    }
+
+    private func background(_ pressed: Bool) -> AnyShapeStyle {
+        switch kind {
+        case .primary:
+            isEnabled ? AnyShapeStyle(BeetTheme.accent.opacity(pressed ? 0.82 : 1))
+                      : AnyShapeStyle(RemoteSurface.well(appearance))
+        case .secondary:
+            AnyShapeStyle(RemoteSurface.well(appearance).opacity(pressed ? 0.6 : 1))
+        }
+    }
+
+    private var foreground: AnyShapeStyle {
+        switch kind {
+        case .primary:
+            isEnabled ? AnyShapeStyle(Color.white) : AnyShapeStyle(HierarchicalShapeStyle.tertiary)
+        case .secondary:
+            AnyShapeStyle(HierarchicalShapeStyle.primary)
+        }
+    }
 }

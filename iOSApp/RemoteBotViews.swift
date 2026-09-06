@@ -288,6 +288,18 @@ struct RemoteBotProfile: Identifiable, Hashable {
         return id
     }
 
+    /// One line glyph per bot. The portraits read as five identical grey discs
+    /// at row size; a distinct symbol is what actually tells them apart.
+    var symbol: String {
+        switch id {
+        case "builder": "hammer"
+        case "reviewer": "text.magnifyingglass"
+        case "navigator": "safari"
+        case "researcher": "books.vertical"
+        default: "bubble.left.and.bubble.right"
+        }
+    }
+
     @MainActor var tint: Color {
         BeetTheme.accentBright
     }

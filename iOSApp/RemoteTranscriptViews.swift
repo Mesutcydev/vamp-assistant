@@ -219,13 +219,21 @@ struct MessageBubble: View {
         // right-aligned bubble reads as a text message, which an agent run
         // is not.
         if message.role == "user" {
-            MarkdownText(message.content)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .background(
-                    RemoteSurface.card(appearance),
-                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .accessibilityLabel("You: \(message.content)")
+            // A prompt is short and it is yours: it gets a bubble on the right,
+            // sized to the words, the way ChatGPT does it. A full-width card
+            // with a 10pt radius read as another section of the page, and left
+            // alignment put it in the same column as the answer.
+            HStack {
+                Spacer(minLength: 44)
+                MarkdownText(message.content)
+                    .multilineTextAlignment(.leading)
+                    .padding(.horizontal, 15)
+                    .padding(.vertical, 11)
+                    .background(
+                        RemoteSurface.well(appearance),
+                        in: RoundedRectangle(cornerRadius: 21, style: .continuous))
+            }
+            .accessibilityLabel("You: \(message.content)")
         }
         // Tool steps never reach here: the transcript groups them into a
         // ledger before drawing. Kept out of the bubble switch so there is one

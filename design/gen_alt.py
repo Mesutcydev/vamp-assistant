@@ -212,8 +212,5 @@ def new_modes():
 ''' + TAIL
 
 if __name__ == "__main__":
-    open("BotsDispatch.dc.html","w").write(bots_dispatch())
-    open("BotsDirectory.dc.html","w").write(bots_directory())
     open("NewSessionComposer.dc.html","w").write(new_composer())
-    open("NewSessionModes.dc.html","w").write(new_modes())
     print("ok")

@@ -86,6 +86,9 @@ def ico(name, c, s=20, sw=1.6):
       "dots": '<circle cx="6" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="18" cy="12" r="1.5"/>',
       "trash": '<path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/>',
       "pencil": '<path d="M4 20h4L20 8l-4-4L4 16z"/>',
+      "hammer": '<path d="M13.5 6.5l4-4 4 4-4 4z"/><path d="M13.5 6.5l-2.2 2.2"/><path d="M11.3 8.7L4 16v4h4l7.3-7.3"/><path d="M9 14l1.5 1.5"/>',
+      "compass": '<circle cx="12" cy="12" r="8.2"/><path d="M15.2 8.8l-1.9 4.5-4.5 1.9 1.9-4.5z"/>',
+      "loupe": '<circle cx="10.5" cy="10.5" r="5.5"/><path d="M14.6 14.6L20 20"/><path d="M8 10.5h5"/>',
       "window": '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18"/>',
     }[name]
     return (f'<svg width="{s}" height="{s}" viewBox="0 0 24 24" fill="none" stroke="{c}" '

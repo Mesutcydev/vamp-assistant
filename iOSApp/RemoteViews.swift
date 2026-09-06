@@ -131,33 +131,36 @@ extension View {
 
 /// The app's own surface palette.
 ///
-/// The system's grouped greys are cool, and they were translucent over a warm
-/// sepia engraving — so every card picked up texture through it and the whole
-/// app read muddy rather than calm. These are warm to match the engraving and
-/// the clay accent, and they are opaque: the atmosphere belongs in the margins
-/// around content, not behind the words.
+/// The system's grouped greys are translucent, so every card picked up texture
+/// through the engraving and the app read muddy rather than calm. These are
+/// opaque — the atmosphere belongs in the margins around content, not behind
+/// the words.
 enum RemoteSurface {
+    /// Neutral greys, not warm ones: the warmth came from the clay accent and
+    /// had no reason to survive it — against a graphite accent the brown cast
+    /// read as a tint nobody had chosen.
+
     /// Behind everything, when the backdrop image is off.
     static func ground(_ appearance: RemoteAppearance) -> Color {
-        appearance == .light ? Color(red: 0.949, green: 0.937, blue: 0.914)
-                             : Color(red: 0.082, green: 0.075, blue: 0.063)
+        appearance == .light ? Color(red: 0.945, green: 0.945, blue: 0.953)
+                             : Color(red: 0.059, green: 0.059, blue: 0.063)
     }
 
     /// Cards, rows, sheets.
     static func card(_ appearance: RemoteAppearance) -> Color {
-        appearance == .light ? Color(red: 0.992, green: 0.988, blue: 0.980)
-                             : Color(red: 0.129, green: 0.118, blue: 0.102)
+        appearance == .light ? Color(red: 0.988, green: 0.988, blue: 0.992)
+                             : Color(red: 0.102, green: 0.102, blue: 0.110)
     }
 
     /// A well inside a card: fields, chips, the composer.
     static func well(_ appearance: RemoteAppearance) -> Color {
-        appearance == .light ? Color(red: 0.933, green: 0.921, blue: 0.898)
-                             : Color(red: 0.180, green: 0.165, blue: 0.145)
+        appearance == .light ? Color(red: 0.910, green: 0.910, blue: 0.922)
+                             : Color(red: 0.145, green: 0.145, blue: 0.157)
     }
 
     static func separator(_ appearance: RemoteAppearance) -> Color {
-        appearance == .light ? Color(red: 0.235, green: 0.216, blue: 0.176).opacity(0.14)
-                             : Color(red: 1.0, green: 0.973, blue: 0.922).opacity(0.10)
+        appearance == .light ? Color.black.opacity(0.10)
+                             : Color.white.opacity(0.09)
     }
 }
 
@@ -500,7 +503,7 @@ struct RemoteBackdrop: View {
                 // puts the assistant's answer straight on this ground with no
                 // card, so the ground has to be near-silent or the engraving
                 // sits inside the words.
-                .opacity(appearance == .light ? 0.16 : 0.14)
+                .opacity(appearance == .light ? 0.15 : 0.13)
                 .accessibilityHidden(true)
         }
         .background(RemoteSurface.ground(appearance))
@@ -739,5 +742,47 @@ struct RemoteCardDivider: View {
             .fill(RemoteSurface.separator(appearance))
             .frame(height: 0.75)
             .padding(.leading, inset)
+    }
+}
+
+/// A setting expressed as a chip: what it is set to, with the glyph that says
+/// which setting it is. Used where a row would be too much furniture for a
+/// value you change occasionally.
+struct RemoteSettingChipLabel: View {
+    @Environment(\.remoteAppearance) private var appearance
+    let title: String
+    let icon: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.primary.opacity(0.8))
+                .lineLimit(1)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(RemoteSurface.well(appearance), in: Capsule())
+        .overlay(Capsule().strokeBorder(RemoteSurface.separator(appearance), lineWidth: 0.75))
+    }
+}
+
+struct RemoteSettingChip: View {
+    let title: String
+    let icon: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            RemoteSettingChipLabel(title: title, icon: icon)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
     }
 }
