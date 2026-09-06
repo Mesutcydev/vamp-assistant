@@ -6,7 +6,7 @@ system masks it), macOS gets the inset rounded rect the Dock expects. Below
 simplified master rather than downsampled from the large one.
 """
 import json, sys
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 sys.argv = [sys.argv[0]]
 import importlib.util
 spec = importlib.util.spec_from_file_location("ped", "gen_pediment.py")
@@ -31,15 +31,29 @@ big = master().convert("RGB")
 small = master(simple=True).convert("RGB")
 
 def mac_tile(size):
-    """macOS: the art inset in a rounded rect with a transparent margin."""
+    """macOS: the art inset in a rounded rect, with the soft drop shadow the
+    Dock draws under every other icon. Skipped below 64px, where a blur that
+    small only greys the edge."""
     art = (small if size <= 32 else big).resize((size, size), Image.LANCZOS)
     inset = round(size * 0.098)
     side = size - inset * 2
     tile = art.resize((side, side), Image.LANCZOS)
+    radius = round(side * 0.2237)
     mask = Image.new("L", (side, side), 0)
-    ImageDraw.Draw(mask).rounded_rectangle([0, 0, side, side],
-                                           radius=round(side * 0.2237), fill=255)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, side, side], radius=radius, fill=255)
+
     out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    if size >= 64:
+        # Apple's proportions: a soft shadow about a fifth of the inset,
+        # dropped by about a third of it, at a third opacity.
+        blur = max(1.0, size * 0.020)
+        offset = round(size * 0.030)
+        shadow_mask = Image.new("L", (size, size), 0)
+        ImageDraw.Draw(shadow_mask).rounded_rectangle(
+            [inset, inset + offset, inset + side, inset + side + offset],
+            radius=radius, fill=int(255 * 0.34))
+        shadow_mask = shadow_mask.filter(ImageFilter.GaussianBlur(blur))
+        out.paste(Image.new("RGBA", (size, size), (0, 0, 0, 255)), (0, 0), shadow_mask)
     out.paste(tile, (inset, inset), mask)
     return out
 
