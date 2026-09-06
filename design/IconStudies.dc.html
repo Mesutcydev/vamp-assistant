@@ -1,0 +1,105 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #9A9A9E; } a:hover { color: #F2F2F4; }
+    .screen { position: relative; width: 900px; height: 760px; overflow: hidden;
+      background: #0F0F10; color: #F2F2F4; }
+    .atmos { position: absolute; inset: 0; background-image: url("atmosphere.jpg");
+      background-size: cover; background-position: center; filter: grayscale(1);
+      opacity: 0.13; pointer-events: none; }
+    .layer { position: relative; height: 100%; display: flex; flex-direction: column; }
+    .glass { background: rgba(26,26,28,0.72); -webkit-backdrop-filter: blur(24px) saturate(1.4);
+      backdrop-filter: blur(24px) saturate(1.4); border: 0.75px solid rgba(255,255,255,0.13);
+      box-shadow: 0 8px 22px rgba(0,0,0,0.46), inset 0 0.75px 0 rgba(255,255,255,0.10); border-radius: 18px; }
+    .well { background: rgba(37,37,40,0.58); border-radius: 12px; }
+    .cap { font-size: 11px; font-weight: 600; letter-spacing: 0.9px; text-transform: uppercase;
+      color: rgba(242,242,244,0.62); }
+    .t1 { font-size: 34px; font-weight: 700; letter-spacing: -0.8px; line-height: 41px; }
+    .h  { font-size: 17px; font-weight: 600; letter-spacing: -0.4px; }
+    .b  { font-size: 17px; letter-spacing: -0.4px; line-height: 25px; }
+    .sub { font-size: 15px; color: rgba(242,242,244,0.62); letter-spacing: -0.2px; }
+    .fn { font-size: 13px; color: rgba(242,242,244,0.62); }
+    .c2 { font-size: 11px; color: rgba(242,242,244,0.38); }
+    .mono { font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace; font-size: 13px; }
+    .row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 14px; }
+    .div { height: 0.75px; background: rgba(255,255,255,0.09); }
+    .stack { display: flex; flex-direction: column; }
+    .navpill { width: 34px; height: 34px; border-radius: 17px; display: flex; align-items: center;
+      justify-content: center; background: rgba(37,37,40,0.58); border: 0.75px solid rgba(255,255,255,0.13); }
+    .chip { display: flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px;
+      background: rgba(37,37,40,0.58); border: 0.75px solid rgba(255,255,255,0.13); font-size: 13px; font-weight: 500; }
+  </style>
+</helmet>
+<div class="screen" style="width:900px;height:760px">
+  <div class="atmos"></div>
+  <div class="layer" style="padding:26px 30px;gap:20px;overflow:hidden">
+    <div>
+      <div class="t1" style="font-size:26px">Icon studies</div>
+      <div class="sub" style="margin-top:6px">Eight cuts of the same engraving, one serif, no new marks — the plate the app already carries, framed eight ways.</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:20px">
+      <div style="display:flex;flex-direction:column;gap:9px">
+  <img src="icon-portico.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
+  <div>
+    <div style="font-size:13px;font-weight:600">Portico</div>
+    <div class="c2" style="margin-top:3px;line-height:15px">The plate as it is, wordmark on a gradient foot. Closest to what ships.</div>
+  </div>
+</div><div style="display:flex;flex-direction:column;gap:9px">
+  <img src="icon-columns.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
+  <div>
+    <div style="font-size:13px;font-weight:600">Columns</div>
+    <div class="c2" style="margin-top:3px;line-height:15px">Cropped to the order itself — reads at 40pt where the wide scene turns to mush.</div>
+  </div>
+</div><div style="display:flex;flex-direction:column;gap:9px">
+  <img src="icon-monogram.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
+  <div>
+    <div style="font-size:13px;font-weight:600">Monogram</div>
+    <div class="c2" style="margin-top:3px;line-height:15px">One letter, cut out of the plate by a vignette. The only one that works with no name at all.</div>
+  </div>
+</div><div style="display:flex;flex-direction:column;gap:9px">
+  <img src="icon-statue.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
+  <div>
+    <div style="font-size:13px;font-weight:600">Statue</div>
+    <div class="c2" style="margin-top:3px;line-height:15px">The figure instead of the architecture: a face on the Home Screen.</div>
+  </div>
+</div><div style="display:flex;flex-direction:column;gap:9px">
+  <img src="icon-medallion.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
+  <div>
+    <div style="font-size:13px;font-weight:600">Medallion</div>
+    <div class="c2" style="margin-top:3px;line-height:15px">The plate held in a ring on flat ink. No type, so it never competes with the label beneath it.</div>
+  </div>
+</div><div style="display:flex;flex-direction:column;gap:9px">
+  <img src="icon-plate.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
+  <div>
+    <div style="font-size:13px;font-weight:600">Plate</div>
+    <div class="c2" style="margin-top:3px;line-height:15px">Cream ground, ink engraving — the same icon in light.</div>
+  </div>
+</div><div style="display:flex;flex-direction:column;gap:9px">
+  <img src="icon-rule.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
+  <div>
+    <div style="font-size:13px;font-weight:600">Rule</div>
+    <div class="c2" style="margin-top:3px;line-height:15px">Wordmark over a hairline with the second word tracked beneath. The most formal.</div>
+  </div>
+</div><div style="display:flex;flex-direction:column;gap:9px">
+  <img src="icon-frame.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
+  <div>
+    <div style="font-size:13px;font-weight:600">Frame</div>
+    <div class="c2" style="margin-top:3px;line-height:15px">Drawn border, name in a solid foot. Reads as a plate in a book.</div>
+  </div>
+</div>
+    </div>
+    <div class="fn" style="line-height:18px">Each is a real 1024px PNG, generated from WindowAtmosphere — the clean plate. VampBackdrop carries the wordmark baked in, which is why type drawn over it printed VAMP twice.</div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
