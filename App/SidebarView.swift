@@ -142,17 +142,43 @@ struct SidebarView: View {
     /// belong to navigation. Browser, Simulator and Diagnostics live in the
     /// window toolbar.
     private var sidebarFooter: some View {
-        HStack(spacing: 4) {
-            footerTool("Models", icon: "cpu", isActive: false) {
-                NotificationCenter.default.post(name: .openModelManager, object: nil)
-            }
-            footerTool("Settings", icon: "gearshape", isActive: false) {
+        // The mockup's foot is a status line, not a pair of nav buttons: the
+        // active engine on the left, a settings gear on the right. Models moved
+        // into the window\'s More menu.
+        HStack(spacing: Spacing.sm) {
+            Circle()
+                .fill(appState.activeModelID == nil ? Theme.textTertiary : Theme.success)
+                .frame(width: 7, height: 7)
+            Text(footerStatus)
+                .font(.app(size: 12, weight: .medium, design: .serif))
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 4)
+            Button {
                 NotificationCenter.default.post(name: .openAppSettings, object: nil)
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.app(size: 13, weight: .medium, design: .serif))
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
             }
+            .buttonStyle(.plain)
+            .lfHoverLift()
+            .help("Settings")
+            .accessibilityLabel("Settings")
         }
-        .padding(SidebarMetrics.inset)
-        .background(Color.clear)
+        .padding(.horizontal, SidebarMetrics.rowPadding)
+        .padding(.vertical, Spacing.sm)
         .overlay(alignment: .top) { SidebarDivider() }
+    }
+
+    private var footerStatus: String {
+        if let name = appState.activeModel?.displayName {
+            return "\(name) · ready"
+        }
+        return "No model loaded"
     }
 
     private func footerTool(_ title: String, icon: String, isActive: Bool,
@@ -1212,13 +1238,9 @@ struct SidebarHeaderView: View {
     @State private var searchPresented = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.md) {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
             identityRow
-            primaryActions
-            quietNavigation
-            if searchPresented || !historySearch.isEmpty {
-                searchField
-            }
+            searchField
             if !queuedTasks.isEmpty {
                 queueSummary
             }
@@ -1247,14 +1269,29 @@ struct SidebarHeaderView: View {
                     .truncationMode(.middle)
             }
             Spacer(minLength: 4)
-            Button(action: onChooseWorkspace) {
+            Menu {
+                Button { onNewSession() } label: { Label("New chat", systemImage: "square.and.pencil") }
+                    .keyboardShortcut("n", modifiers: .command)
+                Button(action: onChooseWorkspace) { Label("Switch workspace…", systemImage: "folder") }
+                Divider()
+                Button {
+                    onSelectTab(sidebarTab == .imported ? .sessions : .imported)
+                } label: {
+                    Label(sidebarTab == .imported ? "Show my chats" : "Imported chats",
+                          systemImage: sidebarTab == .imported ? "bubble.left.and.bubble.right" : "tray.and.arrow.down")
+                }
+            } label: {
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.caption2.weight(.bold))
+                    .foregroundStyle(Theme.textTertiary)
+                    .frame(width: 26, height: 26)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(LFIconButtonStyle(size: 26))
-            .lfHoverLift()
-            .help("Switch workspace")
-            .accessibilityLabel("Switch workspace")
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Workspace and chat actions")
+            .accessibilityLabel("Workspace and chat actions")
 
             if showsCloseButton {
                 PanelCloseButton(action: onClose)
@@ -1334,15 +1371,15 @@ struct SidebarHeaderView: View {
                     .resizable()
                     .interpolation(.high)
                     .aspectRatio(contentMode: .fit)
+                    .frame(width: 20, height: 20)
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.sm - 2, style: .continuous))
             } else {
-                Image(systemName: workspaceURL == nil ? "bubble.left.and.bubble.right.fill" : "folder.fill")
-                    .font(.app(size: 13, weight: .medium, design: .serif))
-                    .foregroundStyle(Theme.textSecondary)
+                Image(systemName: "folder")
+                    .font(.app(size: 14, weight: .regular, design: .serif))
+                    .foregroundStyle(Theme.textTertiary)
+                    .frame(width: 20, height: 20)
             }
         }
-        .frame(width: 28, height: 28)
-        .background(Theme.rose.opacity(0.14), in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-        .foregroundStyle(Theme.rose)
         .accessibilityHidden(true)
     }
 
@@ -1400,7 +1437,7 @@ struct SidebarHeaderView: View {
                 .font(.app(size: 12, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.textTertiary)
                 .accessibilityHidden(true)
-            TextField("Search all history", text: $historySearch)
+            TextField("Search chats", text: $historySearch)
                 .textFieldStyle(.plain)
                 .font(.app(size: 13, design: .serif))
                 .focused($searchFocused)
