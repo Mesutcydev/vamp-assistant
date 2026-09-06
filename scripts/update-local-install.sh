@@ -38,7 +38,34 @@ if [[ -z "$SOURCE" ]]; then
   SOURCE="$ROOT/.derived/Build/Products/Release/Vamp Assistant.app"
 fi
 
+# Accept a .zip or a .dmg as well as an .app: a CI build arrives as one of
+# those, and unpacking it by hand is where the quarantine flag survives.
+case "$SOURCE" in
+  *.zip)
+    step "Unpacking $SOURCE"
+    UNPACK="$(mktemp -d "${TMPDIR:-/tmp}/vamp-app.XXXXXX")"
+    ditto -x -k "$SOURCE" "$UNPACK"
+    SOURCE="$(find "$UNPACK" -maxdepth 2 -name "*.app" -print -quit)"
+    ;;
+  *.dmg)
+    step "Mounting $SOURCE"
+    xattr -dr com.apple.quarantine "$SOURCE" 2>/dev/null || true
+    MOUNT="$(mktemp -d "${TMPDIR:-/tmp}/vamp-dmg.XXXXXX")"
+    hdiutil attach -nobrowse -quiet -mountpoint "$MOUNT" "$SOURCE"
+    UNPACK="$(mktemp -d "${TMPDIR:-/tmp}/vamp-app.XXXXXX")"
+    ditto "$(find "$MOUNT" -maxdepth 1 -name "*.app" -print -quit)" "$UNPACK/Vamp Assistant.app"
+    hdiutil detach -quiet "$MOUNT" || true
+    SOURCE="$UNPACK/Vamp Assistant.app"
+    ;;
+esac
+
 [[ -d "$SOURCE" ]] || { echo "no app at: $SOURCE" >&2; exit 1; }
+
+# Gatekeeper reports an ad-hoc signed app downloaded from the internet as
+# "damaged". It is not damaged: it carries com.apple.quarantine and a
+# signature no notarisation covers. Clearing the flag here, before signing,
+# is what makes the re-signed copy launch.
+xattr -dr com.apple.quarantine "$SOURCE" 2>/dev/null || true
 
 # The identity to sign with: what you asked for, else what the installed copy
 # already carries, else the first Apple Development certificate in the keychain.
