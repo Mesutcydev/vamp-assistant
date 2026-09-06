@@ -38,6 +38,19 @@ struct RemoteComposer: View {
             .foregroundStyle(.secondary)
             .padding(.bottom, 3)
             .accessibilityLabel("Commands and context")
+            // A popover anchored to the button, not a sheet: six shortcuts do
+            // not need half the screen, and the sheet's first section was
+            // clipped by the detent it opened at.
+            .popover(isPresented: $showCommands,
+                     attachmentAnchor: .point(.top),
+                     arrowEdge: .top) {
+                RemoteCommandPopover(draft: $draft) {
+                    showCommands = false
+                    isComposerFocused = true
+                }
+                .presentationCompactAdaptation(.popover)
+                .presentationBackground(RemoteSurface.card(appearance))
+            }
 
             HStack(alignment: .bottom, spacing: 8) {
                 TextField(placeholder, text: $draft, axis: .vertical)
@@ -86,14 +99,6 @@ struct RemoteComposer: View {
         .padding(.bottom, 8)
         .frame(maxWidth: .infinity)
         .background(RemoteSurface.card(appearance))
-        .sheet(isPresented: $showCommands) {
-            RemoteCommandPalette(draft: $draft) {
-                showCommands = false
-                isComposerFocused = true
-            }
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
-        }
         .onChange(of: draft) { _, value in
             if value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "/commands" {
                 draft = ""
@@ -149,52 +154,78 @@ private struct RemoteComposerCommand: Identifiable {
     ]
 }
 
-private struct RemoteCommandPalette: View {
+/// The composer's shortcuts, as a panel hung off the `+`.
+///
+/// This was a half-height sheet with a navigation bar and a grouped list — a
+/// whole screen borrowed for six one-line shortcuts, whose first section the
+/// detent cut off. A popover is the right size for the content and keeps the
+/// conversation visible behind it.
+private struct RemoteCommandPopover: View {
     @Binding var draft: String
     let onChoose: () -> Void
+    @Environment(\.remoteAppearance) private var appearance
 
-    var body: some View {
-        NavigationStack {
-            List {
-                Section("Workspace") {
-                    commandRows(Array(RemoteComposerCommand.commands.prefix(2)))
-                }
-                Section("Browser control") {
-                    commandRows(Array(RemoteComposerCommand.commands.dropFirst(2).prefix(3)))
-                }
-                Section("Device") {
-                    commandRows(Array(RemoteComposerCommand.commands.suffix(1)))
-                }
-            }
-            .scrollContentBackground(.hidden)
-            .background { RemoteBackdrop() }
-            .navigationTitle("Commands")
-            .navigationBarTitleDisplayMode(.inline)
-        }
+    private var groups: [(String, [RemoteComposerCommand])] {
+        [("Workspace", Array(RemoteComposerCommand.commands.prefix(2))),
+         ("Browser control", Array(RemoteComposerCommand.commands.dropFirst(2).prefix(3))),
+         ("Device", Array(RemoteComposerCommand.commands.suffix(1)))]
     }
 
-    @ViewBuilder private func commandRows(_ commands: [RemoteComposerCommand]) -> some View {
-        ForEach(commands) { command in
-            Button {
-                draft = command.prompt
-                onChoose()
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: command.symbol)
-                        .font(.body)
-                        .foregroundStyle(BeetTheme.accentBright)
-                        .frame(width: 26)
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(command.title).foregroundStyle(.primary)
-                        Text(command.detail).font(.caption).foregroundStyle(.secondary)
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
+                Text(group.0.uppercased())
+                    .font(.caption2.weight(.semibold))
+                    .tracking(0.8)
+                    .foregroundStyle(.primary.opacity(0.5))
+                    .padding(.horizontal, 14)
+                    .padding(.top, index == 0 ? 12 : 14)
+                    .padding(.bottom, 4)
+                ForEach(group.1) { command in
+                    row(command)
+                    if command.id != group.1.last?.id {
+                        Rectangle()
+                            .fill(RemoteSurface.separator(appearance))
+                            .frame(height: 0.75)
+                            .padding(.leading, 48)
                     }
                 }
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .remoteListRow()
         }
+        .padding(.bottom, 10)
+        .frame(width: 292)
+    }
+
+    private func row(_ command: RemoteComposerCommand) -> some View {
+        Button {
+            draft = command.prompt
+            onChoose()
+        } label: {
+            HStack(spacing: 11) {
+                Image(systemName: command.symbol)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.primary.opacity(0.7))
+                    .frame(width: 26, height: 26)
+                    .background(RemoteSurface.well(appearance),
+                                in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(command.title)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Text(command.detail)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .frame(minHeight: 46)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(command.title), \(command.detail)")
     }
 }
 
