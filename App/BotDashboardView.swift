@@ -55,8 +55,8 @@ struct BotDashboardView: View {
                 header
                 workflowComposer
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Specialists")
-                        .font(.caption.weight(.semibold))
+                    Text("Specialists".uppercased())
+                        .lfSectionHeadingStyle()
                         .foregroundStyle(.secondary)
                     ForEach(BotSpecialist.all) { specialist in
                         BotRailRow(

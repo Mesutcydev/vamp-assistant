@@ -140,8 +140,8 @@ struct RemoteAccessView: View {
                         .font(.headline)
                         .foregroundStyle(Theme.textPrimary)
                     networkHint
-                    Text("Pairing code")
-                        .font(.caption.weight(.semibold))
+                    Text("Pairing code".uppercased())
+                        .lfSectionHeadingStyle()
                         .foregroundStyle(Theme.textTertiary)
                     Text(appState.remotePairingCode)
                         .font(.app(size: 28, weight: .bold, design: .monospaced))
@@ -164,8 +164,8 @@ struct RemoteAccessView: View {
 
             Divider().overlay(Theme.hairline)
             VStack(alignment: .leading, spacing: 10) {
-                Text("Sharing permissions")
-                    .font(.caption.weight(.semibold))
+                Text("Sharing permissions".uppercased())
+                    .lfSectionHeadingStyle()
                     .foregroundStyle(Theme.textTertiary)
                 Toggle(isOn: $settings.remoteClipboardSharingEnabled) {
                     Label("Clipboard exchange", systemImage: "doc.on.clipboard")

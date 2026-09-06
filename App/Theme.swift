@@ -127,11 +127,15 @@ enum Theme {
 }
 
 /// Corner radii — one scale, used everywhere for a consistent silhouette.
+/// The shared radius scale. These are the phone's values: 8 for a glyph tile,
+/// 14 for a well, 18 for a panel, 21 for a bubble. They were 7/11/15/20, which
+/// is a scale of its own but not the same one — so a panel drawn with
+/// `Radius.lg` came out 15 next to an `lfCard` at 18.
 enum Radius {
-    static let sm: CGFloat = 7
-    static let md: CGFloat = 11
-    static let lg: CGFloat = 15
-    static let xl: CGFloat = 20
+    static let sm: CGFloat = 8
+    static let md: CGFloat = 14
+    static let lg: CGFloat = 18
+    static let xl: CGFloat = 21
 }
 
 /// The centered reading column shared by the transcript and the composer.
@@ -246,6 +250,16 @@ extension View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         return background(Theme.surface, in: shape)
             .overlay(shape.strokeBorder(Theme.hairline, lineWidth: 1))
+    }
+
+    /// The section-heading register, as one definition — the Mac half of the
+    /// phone's `remoteSectionHeadingStyle()`. Seven screens had drawn their own
+    /// with the same font and their own casing, so a settings group and a
+    /// dashboard group did not look like the same kind of thing.
+    func lfSectionHeadingStyle() -> some View {
+        font(.caption.weight(.semibold))
+            .tracking(0.9)
+            .foregroundStyle(Theme.textSecondary)
     }
 
     /// A titled group on a drawn page: the heading in the small-caps register
