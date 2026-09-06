@@ -114,11 +114,16 @@ jobs:
         run: brew install xcodegen
       - name: Generate project
         run: xcodegen generate
+      # No -sdk flag: it forces the simulator SDK onto SwiftTerm's host-side
+      # plugin generator too, which then cannot be found in the simulator
+      # products directory ("Build input file cannot be found:
+      # .../Debug/SwiftTermBuildInfoGenerator"). The destination alone is what
+      # the tests job uses, and it builds.
       - name: Build for the simulator
         run: >-
           xcodebuild -project BeetCode.xcodeproj -scheme BeetCodeRemoteIOS
-          -configuration Debug -sdk iphonesimulator
-          -destination 'platform=iOS Simulator,name=iPhone 17'
+          -configuration Debug
+          -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5'
           -derivedDataPath "$RUNNER_TEMP/Derived"
           CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
           -skipPackagePluginValidation -skipMacroValidation build
@@ -129,7 +134,8 @@ jobs:
           BUNDLE=com.beetcode.remote.ios
           OUT="$RUNNER_TEMP/screens"
           mkdir -p "$OUT"
-          DEVICE=$(xcrun simctl create harness com.apple.CoreSimulator.SimDeviceType.iPhone-17)
+          DEVICE=$(xcrun simctl list devices available -j \
+            | python3 -c "import sys,json;d=json.load(sys.stdin)['devices'];print(next(x['udid'] for v in d.values() for x in v if x['name']=='iPhone 17'))")
           xcrun simctl boot "$DEVICE"
           xcrun simctl bootstatus "$DEVICE" -b
           xcrun simctl install "$DEVICE" "$APP"
