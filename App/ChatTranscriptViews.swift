@@ -13,14 +13,12 @@ struct ChatHeaderView: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            Image(systemName: "bubble.left.and.bubble.right.fill")
+            // A washed tile around a filled glyph made the chat title look
+            // like a badge. The title is the thing here.
+            Image(systemName: "bubble.left.and.bubble.right")
                 .accessibilityHidden(true)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Theme.accentText)
-                .frame(width: 24, height: 24)
-                .background(
-                    Theme.wash(Theme.accent),
-                    in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+                .font(.caption)
+                .foregroundStyle(Theme.textTertiary)
 
             Text(title)
                 .font(.caption.weight(.semibold))
@@ -1822,15 +1820,22 @@ struct PlanCard: View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             TranscriptCardHeader(
                 title: "Plan — approve before any tool runs",
-                systemImage: "list.bullet.clipboard.fill",
-                tint: Theme.accent)
-            Text(plan)
-                .font(.callout)
-                .foregroundStyle(Theme.textPrimary)
-                .padding(Spacing.md)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-                .textSelection(.enabled)
+                systemImage: "list.bullet.clipboard",
+                tint: Theme.textSecondary)
+            // Steps, when it is a list of them; the paragraph only when it
+            // genuinely is one.
+            if let items = PlanTaskParser.parse(plan) {
+                PlanTaskList(title: "Plan", items: items)
+            } else {
+                Text(plan)
+                    .font(.callout)
+                    .foregroundStyle(Theme.textPrimary)
+                    .padding(Spacing.md)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.surfaceInset,
+                                in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .textSelection(.enabled)
+            }
             HStack(spacing: Spacing.sm) {
                 // Command-Return only: Return must submit revision feedback,
                 // never accidentally approve and execute.
@@ -1852,7 +1857,6 @@ struct PlanCard: View {
             }
         }
         .padding(Spacing.lg)
-        .padding(.leading, Spacing.sm)
         .lfTranscriptCard(Theme.accent)
     }
 }
