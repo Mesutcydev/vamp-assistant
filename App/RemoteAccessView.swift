@@ -103,7 +103,7 @@ struct RemoteAccessView: View {
             .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
         }
         .padding(18)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+        .lfCard()
     }
 
     private var runningState: some View {
@@ -229,7 +229,7 @@ struct RemoteAccessView: View {
                 .foregroundStyle(Theme.textTertiary)
         }
         .padding(18)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+        .lfCard()
     }
 
     @ViewBuilder
@@ -397,7 +397,7 @@ struct RemoteAccessConsentView: View {
                     detail: "Share files up to 20 MB through Vamp Assistant Remote Downloads.",
                     trailing: AnyView(Toggle("", isOn: $allowFiles).labelsHidden()))
             }
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+            .lfCard()
             .overlay(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
                 .strokeBorder(Theme.hairline, lineWidth: 0.75))
 

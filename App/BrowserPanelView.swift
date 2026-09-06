@@ -167,7 +167,7 @@ private struct BrowserPanelChrome: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
         }
-        .lfGlass()
+        .lfCard()
         .onAppear { syncURLDraft() }
         .onChange(of: controller.currentURL) { _, newValue in
             if !urlFocused, let newValue {

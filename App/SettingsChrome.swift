@@ -9,33 +9,32 @@ struct SettingsCard<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.md) {
-            Label {
-                Text(title)
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(Theme.textPrimary)
-            } icon: {
-                Image(systemName: icon)
-                    .font(.app(size: 12, weight: .semibold, design: .serif))
-                    .foregroundStyle(Theme.accentText)
-            }
+        VStack(alignment: .leading, spacing: 8) {
+            // The heading sits outside the panel, in the small-caps register
+            // both clients use, and without its accent glyph: a settings group
+            // is not an item, and a tinted icon per group turned the window
+            // into a column of badges.
+            Text(title.uppercased())
+                .font(.caption.weight(.semibold))
+                .tracking(0.9)
+                .foregroundStyle(Theme.textSecondary)
 
             VStack(alignment: .leading, spacing: Spacing.md) {
                 content
             }
+            .padding(Spacing.lg)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .lfCard()
 
             if let footer {
                 Text(footer)
                     .font(.callout)
-                    .foregroundStyle(Theme.textSecondary)
+                    .foregroundStyle(Theme.textTertiary)
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 2)
             }
         }
-        .padding(Spacing.lg)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        // Neutral glass: atmosphere supplies depth without a colored tint.
-        .lfCard()
     }
 }
 

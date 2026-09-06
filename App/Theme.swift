@@ -235,9 +235,35 @@ extension Font {
 }
 
 extension View {
-    /// Standard elevated card: raised surface + hairline border.
-    func lfCard(radius: CGFloat = Radius.lg) -> some View {
-        lfGlass(radius: radius, contentLegibility: true)
+    /// A panel: the card surface and a hairline, nothing else.
+    ///
+    /// This used to be `lfGlass` — a translucent, shadowed, brightness-lifted
+    /// slab. Glass belongs to what floats above a page (popovers, the toolbar,
+    /// the stream chrome); a settings group or a dashboard section is the page,
+    /// and lifting all of them made the window a stack of trays. Matches the
+    /// phone, where a fill means "you can touch this" or "this is on top".
+    func lfCard(radius: CGFloat = 18) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        return background(Theme.surface, in: shape)
+            .overlay(shape.strokeBorder(Theme.hairline, lineWidth: 1))
+    }
+
+    /// A titled group on a drawn page: the heading in the small-caps register
+    /// both clients use, then the panel under it.
+    func lfSection(_ title: String, footnote: String? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title.uppercased())
+                .font(.caption.weight(.semibold))
+                .tracking(0.9)
+                .foregroundStyle(Theme.textSecondary)
+            self
+            if let footnote {
+                Text(footnote)
+                    .font(.callout)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     /// Cursor/ChatGPT-style hover affordance for small chips and accessory
@@ -254,11 +280,15 @@ extension View {
         buttonStyle(LFPlainPressButtonStyle())
     }
 
-    /// Semantic accent-washed card (approval / question / plan / error).
-    func lfWashCard(_ tint: Color, radius: CGFloat = Radius.lg) -> some View {
-        background(Theme.wash(tint), in: RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .strokeBorder(Theme.washBorder(tint), lineWidth: 1))
+    /// Semantic panel (approval / question / plan / error).
+    ///
+    /// The tint used to fill it and colour its border. With a monochrome
+    /// accent that wash was a grey film over the words, so the panel is an
+    /// outline now and the tint stays on the one glyph that names it. The
+    /// argument is kept so call sites read unchanged.
+    func lfWashCard(_ tint: Color, radius: CGFloat = 18) -> some View {
+        overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .strokeBorder(Theme.hairline, lineWidth: 1))
     }
 
     /// Native Liquid Glass surface, ported from the Vamp Mac client recipe

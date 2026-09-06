@@ -269,7 +269,7 @@ struct SidebarView: View {
         }
         .padding(Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+        .lfCard()
         .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
             .strokeBorder(Theme.hairline, lineWidth: 1))
         .listRowInsets(EdgeInsets(top: Spacing.sm, leading: SidebarMetrics.inset, bottom: Spacing.sm, trailing: SidebarMetrics.inset))
@@ -491,7 +491,7 @@ struct SidebarView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+        .lfCard()
         .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
             .strokeBorder(Theme.hairline, lineWidth: 1))
         .listRowInsets(EdgeInsets(top: Spacing.sm, leading: SidebarMetrics.inset, bottom: Spacing.sm, trailing: SidebarMetrics.inset))
@@ -534,7 +534,7 @@ struct SidebarView: View {
             }
         }
         .padding(10)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+        .lfCard()
         .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
             .strokeBorder(Theme.hairline, lineWidth: 1))
         .listRowInsets(EdgeInsets(top: Spacing.xs, leading: SidebarMetrics.inset, bottom: Spacing.xs, trailing: SidebarMetrics.inset))

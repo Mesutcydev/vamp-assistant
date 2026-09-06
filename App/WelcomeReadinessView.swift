@@ -148,7 +148,7 @@ struct WelcomeReadinessView: View {
                 actionTitle: agentReady ? nil : "Choose Model",
                 action: onOpenModelManager)
         }
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+        .lfCard()
         .overlay(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
             .strokeBorder(Theme.hairline, lineWidth: 1))
         .shadow(color: Theme.cardShadow, radius: 10, y: 3)
@@ -192,7 +192,7 @@ struct WelcomeReadinessView: View {
                 ready: (readiness.snapshot?.connectedDeviceCount ?? 0) > 0,
                 optional: true)
         }
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+        .lfCard()
         .overlay(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
             .strokeBorder(Theme.hairline, lineWidth: 1))
         .shadow(color: Theme.cardShadow, radius: 10, y: 3)

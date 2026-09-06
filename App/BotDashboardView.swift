@@ -140,7 +140,7 @@ struct BotDashboardView: View {
             }
         }
         .padding(16)
-        .lfGlass(radius: 18, contentLegibility: true)
+        .lfCard()
     }
 
     private func selectWorkflowModel() {
@@ -260,7 +260,7 @@ private struct BotSpecialistCard: View {
             }
         }
         .padding(16)
-        .lfGlass(radius: 18, contentLegibility: true)
+        .lfCard()
         .onAppear { selectAvailableModel() }
         .onChange(of: models.map(\.id)) { _, _ in selectAvailableModel() }
     }

@@ -541,7 +541,7 @@ private struct ModelManagerEmptySearch: View {
         }
         .padding(Spacing.lg)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+        .lfCard()
         .overlay(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
     }
 }
@@ -603,7 +603,7 @@ private struct ModelCard: View {
             ModelActions(model: model, isActive: isActive, downloadState: downloadState, budget: budget)
         }
         .padding(Spacing.md)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+        .lfCard()
         .overlay(
             RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
                 .strokeBorder(isActive ? Theme.washBorder(Theme.accent) : Theme.hairline,
@@ -957,7 +957,7 @@ private struct RemoteSection: View {
                 }
             }
             .padding(Spacing.md)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+            .lfCard()
             .overlay(
                 RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
                     .strokeBorder(Theme.hairline, lineWidth: 1))
