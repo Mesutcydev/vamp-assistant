@@ -25,7 +25,7 @@ struct RemoteBotDetailView: View {
     }
 
     var body: some View {
-        Form {
+        List {
             Section { hero }
             if !store.isConnected {
                 Section { RemoteOfflineRow(store: store) }
@@ -36,8 +36,7 @@ struct RemoteBotDetailView: View {
             if profile.isSpecialist { newRunSection }
             if let run, run.isTerminal { lastRunSection(run) }
         }
-        .scrollContentBackground(.hidden)
-        .background { RemoteBackdrop() }
+        .remotePlainList()
         .refreshable { try? await store.refresh() }
         .navigationTitle(profile.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -89,7 +88,7 @@ struct RemoteBotDetailView: View {
                     .foregroundStyle(.secondary)
             }
         } header: {
-            Text("Chat")
+            RemoteSectionHeading("Chat")
         } footer: {
             Text("A normal conversation, with this bot's brief applied.")
         }
@@ -127,7 +126,7 @@ struct RemoteBotDetailView: View {
             }
             runControls(run)
         } header: {
-            Text("Running now")
+            RemoteSectionHeading("Running now")
         }
         .remoteListRow()
     }
@@ -198,6 +197,7 @@ struct RemoteBotDetailView: View {
                 Picker("Model", selection: $selectedModelID) {
                     ForEach(store.startModels) { Text($0.name).tag($0.id) }
                 }
+                .pickerStyle(.menu)
                 .accessibilityLabel("Model for this run")
             }
             TextField("Task for \(profile.name)", text: $prompt, axis: .vertical)
@@ -216,7 +216,7 @@ struct RemoteBotDetailView: View {
             .disabled(!canStartRun)
             .accessibilityHint(store.isConnected ? "" : "Connect to your Mac first")
         } header: {
-            Text("Run autonomously")
+            RemoteSectionHeading("Run autonomously")
         } footer: {
             Text("\(profile.name) works the task on its own and reports back.")
         }
@@ -240,7 +240,7 @@ struct RemoteBotDetailView: View {
                 Button("Open the transcript") { onOpen(sessionID) }
             }
         } header: {
-            Text("Last run")
+            RemoteSectionHeading("Last run")
         }
         .remoteListRow()
     }

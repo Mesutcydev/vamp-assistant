@@ -93,9 +93,7 @@ struct SessionListView: View {
                 }
             }
         }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
-        .background { RemoteBackdrop() }
+        .remotePlainList()
         .refreshable { try? await store.refresh() }
         // Under the title rather than floating at the bottom: the floating
         // field sat on top of the last section, so Imported was invisible at

@@ -29,8 +29,7 @@ struct RemoteShareSheet: View {
                 clipboardSection
                 filesSection
             }
-            .scrollContentBackground(.hidden)
-            .background { RemoteBackdrop() }
+            .remotePlainList()
             .navigationTitle("Share with Mac")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
@@ -88,7 +87,7 @@ struct RemoteShareSheet: View {
                 Label("Send to Mac", systemImage: "arrow.up.doc")
             }
         } header: {
-            Text("Clipboard")
+            RemoteSectionHeading("Clipboard")
         }
         .disabled(!store.isConnected)
         .remoteListRow()

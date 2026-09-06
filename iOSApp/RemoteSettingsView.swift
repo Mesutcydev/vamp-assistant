@@ -47,13 +47,12 @@ struct RemoteSettingsSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 identitySection
                 appearanceSection
                 connectionSection
             }
-            .scrollContentBackground(.hidden)
-            .background { RemoteBackdrop() }
+            .remotePlainList()
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }

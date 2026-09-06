@@ -5,7 +5,7 @@ struct RemoteDiagnosticsView: View {
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section {
                     LabeledContent("Status", value: store.isConnected ? "Connected" : "Disconnected")
                     LabeledContent("Mac version", value: store.hostStatus?.appVersion ?? "Not reported")
@@ -17,7 +17,7 @@ struct RemoteDiagnosticsView: View {
                     Button("Check connection") { Task { await store.connectSaved() } }
                         .disabled(store.isConnecting || !store.hasSavedConnection)
                 } header: {
-                    Text("Connection")
+                    RemoteSectionHeading("Connection")
                 }
                 .remoteListRow()
                 Section {
@@ -29,8 +29,7 @@ struct RemoteDiagnosticsView: View {
                 }
                 .remoteListRow()
             }
-            .scrollContentBackground(.hidden)
-            .background { RemoteBackdrop() }
+            .remotePlainList()
             .navigationTitle("Connection details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }

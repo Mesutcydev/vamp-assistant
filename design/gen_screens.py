@@ -11,7 +11,7 @@ def sessions(t, name):
         </div>'''
     def srow(title, sub, time, running=False, last=False):
         dot = f'<div style="width:7px;height:7px;border-radius:4px;background:{br};flex:none"></div>' if running else '<div style="width:7px;flex:none"></div>'
-        return f'''<div style="display:flex;align-items:center;gap:10px;padding:11px 14px">
+        return f'''<div style="display:flex;align-items:center;gap:11px;min-height:60px">
             {dot}
             <div style="flex:1;min-width:0">
               <div class="h" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{title}</div>
@@ -19,58 +19,51 @@ def sessions(t, name):
             </div>
             <div class="sub" style="flex:none;font-variant-numeric:tabular-nums">{time}</div>
             {ico('chevron', t['text3'], 14, 2)}
-          </div>''' + ('' if last else f'<div class="div" style="margin-left:31px"></div>')
+          </div>''' + ('' if last else '<div class="div"></div>')
+
     return head(t) + f'''<div class="screen">
   <div class="atmos"></div>
-  <div class="layer">
-    <div style="display:flex;align-items:flex-end;justify-content:space-between;padding:14px 18px 8px">
+  <div class="layer" style="padding:0 20px">
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;padding:14px 0 8px">
       <div class="t1">Sessions</div>
       <div class="navpill">{ico('compose', br, 18)}</div>
     </div>
 
-    <div style="padding:6px 18px 12px">
-      <div class="well" style="display:flex;align-items:center;gap:8px;height:38px;padding:0 12px;border-radius:19px;border:0.75px solid {t['rim']}">
+    <div style="padding:6px 0 14px">
+      <div class="well" style="display:flex;align-items:center;gap:8px;height:38px;padding:0 12px;border-radius:19px">
         {ico('search', t['text3'], 17)}<div class="sub" style="color:{t['text3']}">Search sessions</div>
       </div>
     </div>
 
-    <div style="padding:0 18px">
-      <div class="glass">
-        <div class="row">
-          <div style="width:9px;height:9px;border-radius:5px;background:{t['green']}"></div>
-          <div class="b" style="flex:1">vamp-mini</div>
-          <div class="sub">Connected</div>
-          {ico('chevron', t['text3'], 14, 2)}
-        </div>
-        <div class="div"></div>
-        <div style="display:flex;gap:8px;padding:8px">
-          {action('display','Stream')}{action('people','Bots')}{action('share','Share')}{action('gear','Settings')}
-        </div>
-      </div>
+    <div class="div"></div>
+    <div style="display:flex;align-items:center;gap:11px;min-height:56px">
+      <div style="width:9px;height:9px;border-radius:5px;background:{t['green']};flex:none"></div>
+      <div class="b" style="flex:1">vamp-mini</div>
+      <div class="sub">Connected</div>
+      {ico('chevron', t['text3'], 14, 2)}
+    </div>
+    <div class="div"></div>
+
+    <div style="display:flex;gap:8px;padding:12px 0 2px">
+      {action('display','Stream')}{action('people','Bots')}{action('share','Share')}{action('gear','Settings')}
     </div>
 
-    <div class="cap" style="padding:22px 20px 8px">Today</div>
-    <div style="padding:0 18px">
-      <div class="glass" style="padding:2px 0">
-        {srow('Fix the composer layout','Editing · vamp-assistant','6:39 AM',running=True)}
-        {srow('Audit the pairing flow','vamp-assistant · 8 messages','1:40 AM',last=True)}
-      </div>
-    </div>
+    <div class="cap" style="padding:22px 0 6px">Today</div>
+    <div class="div"></div>
+    {srow('Fix the composer layout','Editing · vamp-assistant','6:39 AM',running=True)}
+    {srow('Audit the pairing flow','vamp-assistant · 8 messages','1:40 AM',last=True)}
+    <div class="div"></div>
 
-    <div class="cap" style="padding:20px 20px 8px">Yesterday</div>
-    <div style="padding:0 18px">
-      <div class="glass" style="padding:2px 0">
-        {srow('Explain the checkpoint format','Chat · 31 messages','9:40 PM')}
-        {srow('Port the diff viewer','forgesign · 112 messages','12:40 AM',last=True)}
-      </div>
-    </div>
+    <div class="cap" style="padding:22px 0 6px">Yesterday</div>
+    <div class="div"></div>
+    {srow('Explain the checkpoint format','Chat · 31 messages','9:40 PM')}
+    {srow('Port the diff viewer','forgesign · 112 messages','12:40 AM',last=True)}
+    <div class="div"></div>
 
-    <div class="cap" style="padding:20px 20px 8px">Imported</div>
-    <div style="padding:0 18px">
-      <div class="glass" style="padding:2px 0">
-        {srow('Hair test timelines','Codex · 14 messages','Tue',last=True)}
-      </div>
-    </div>
+    <div class="cap" style="padding:22px 0 6px">Imported</div>
+    <div class="div"></div>
+    {srow('Hair test timelines','Codex · 14 messages','Tue',last=True)}
+    <div class="div"></div>
   </div>
 </div>
 ''' + TAIL

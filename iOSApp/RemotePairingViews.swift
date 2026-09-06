@@ -323,8 +323,7 @@ struct ComputerSwitcherSheet: View {
                 computersSection
                 actionsSection
             }
-            .scrollContentBackground(.hidden)
-            .background { RemoteBackdrop() }
+            .remotePlainList()
             .navigationTitle("Computers")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

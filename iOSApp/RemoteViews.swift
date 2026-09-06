@@ -171,13 +171,28 @@ enum RemoteSurface {
 /// own row geometry and semantics while letting the backdrop read — and it
 /// goes fully opaque for anyone who has asked for less transparency.
 struct RemoteListRowBackground: ViewModifier {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.remoteAppearance) private var appearance
 
     func body(content: Content) -> some View {
-        // Opaque, always. Sheer cells let the engraving through the words,
-        // which is what made the type look dirty at every size.
-        content.listRowBackground(RemoteSurface.card(appearance))
+        // No card fill. One register for the whole app: sections of rows on
+        // the ground, divided by hairlines, with fills reserved for things you
+        // touch — fields, chips, buttons — and for what floats above the page.
+        content
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
+            .listRowSeparatorTint(RemoteSurface.separator(appearance))
+            .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+    }
+}
+
+extension View {
+    /// The chrome every list-shaped screen wears: plain rows, no system
+    /// background, the engraving behind.
+    func remotePlainList() -> some View {
+        self
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background { RemoteBackdrop() }
     }
 }
 
@@ -636,112 +651,6 @@ struct RemoteCardSurface: ViewModifier {
 extension View {
     func remoteCardSurface(pressed: Bool = false, radius: CGFloat = 18) -> some View {
         modifier(RemoteCardSurface(pressed: pressed, radius: radius))
-    }
-}
-
-/// A titled group on a drawn page: the heading in the app's small-caps
-/// register, then one card holding the group's content.
-struct RemoteCardGroup<Content: View>: View {
-    let title: String?
-    var footnote: String?
-    @ViewBuilder var content: Content
-
-    init(_ title: String? = nil, footnote: String? = nil, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.footnote = footnote
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let title {
-                Text(title.uppercased())
-                    .font(.caption.weight(.semibold))
-                    .tracking(0.9)
-                    .foregroundStyle(.primary.opacity(0.55))
-            }
-            VStack(spacing: 0) { content }
-                .remoteCardSurface()
-            if let footnote {
-                Text(footnote)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 2)
-            }
-        }
-    }
-}
-
-/// One tappable line inside a `RemoteCardGroup`: what it is on the left, what
-/// it is currently set to on the right.
-struct RemoteCardRow: View {
-    @Environment(\.remoteAppearance) private var appearance
-    let title: String
-    var icon: String?
-    var value: String?
-    var detail: String?
-    var showsChevron = true
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                if let icon {
-                    Image(systemName: icon)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(BeetTheme.accent)
-                        .frame(width: 26, height: 26)
-                        .background(RemoteSurface.well(appearance),
-                                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .accessibilityHidden(true)
-                }
-                Text(title)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.primary)
-                Spacer(minLength: 10)
-                if let value {
-                    VStack(alignment: .trailing, spacing: 1) {
-                        Text(value)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        if let detail {
-                            Text(detail)
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-                    }
-                }
-                if showsChevron {
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                        .accessibilityHidden(true)
-                }
-            }
-            .padding(.horizontal, 14)
-            .frame(minHeight: 52)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(value == nil ? title : "\(title), \(value ?? "")")
-    }
-}
-
-/// The hairline between two rows of a card, inset past the row's glyph.
-struct RemoteCardDivider: View {
-    @Environment(\.remoteAppearance) private var appearance
-    var inset: CGFloat = 14
-
-    var body: some View {
-        Rectangle()
-            .fill(RemoteSurface.separator(appearance))
-            .frame(height: 0.75)
-            .padding(.leading, inset)
     }
 }
 

@@ -124,40 +124,58 @@ def swatch(c, sel=False):
 
 settings = head(t) + f'''<div class="screen">
   <div class="atmos"></div>
-  <div class="layer" style="padding:0 18px">
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0 16px">
+  <div class="layer" style="padding:0 20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0 18px">
       <div class="t1">Settings</div>
-      <div class="chip">Done</div>
+      <div class="b" style="color:{br};font-size:16px">Done</div>
     </div>
 
     <div class="cap" style="padding-bottom:8px">Appearance</div>
-    <div class="glass" style="padding:10px 12px;margin-bottom:20px">
-      <div style="display:flex;gap:2px;padding:2px;border-radius:9px;background:{t['glass']}">
+    <div class="div"></div>
+    <div style="padding:12px 0">
+      <div style="display:flex;gap:2px;padding:2px;border-radius:9px;background:{t['well']}">
         <div style="flex:1;text-align:center;padding:7px 0;font-size:13px;font-weight:500;color:{t['text2']}">System</div>
         <div style="flex:1;text-align:center;padding:7px 0;font-size:13px;font-weight:500;color:{t['text2']}">Light</div>
         <div style="flex:1;text-align:center;padding:7px 0;font-size:13px;font-weight:600;border-radius:7px;background:{t['card']};box-shadow:0 1px 3px {t['shadow']}">Dark</div>
       </div>
-      <div style="display:flex;align-items:center;gap:10px;padding:14px 2px 4px">
-        {swatch('#686868', sel=True)}{swatch('#445677')}{swatch('#B05E3C')}{swatch('#487A5C')}{swatch('#B03055')}{swatch('#C13570')}{swatch('#3F7BC4')}
+    </div>
+    <div class="div"></div>
+    <div style="display:flex;align-items:center;gap:10px;min-height:56px">
+      {swatch('#686868', sel=True)}{swatch('#4A4A4E')}{swatch('#445677')}{swatch('#487A5C')}{swatch('#B05E3C')}{swatch('#B03055')}{swatch('#3F7BC4')}
+    </div>
+    <div class="div"></div>
+    <div style="display:flex;align-items:center;gap:12px;min-height:56px">
+      <div style="flex:1;font-size:16px">Background image</div>
+      <div style="width:51px;height:31px;border-radius:16px;background:{br};display:flex;align-items:center;justify-content:flex-end;padding:2px;flex:none">
+        <div style="width:27px;height:27px;border-radius:14px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3)"></div>
       </div>
     </div>
+    <div class="div"></div>
+    <div class="fn" style="padding:9px 0 0;line-height:17px">The engraved atmosphere sits behind every screen. Off replaces it with a plain ground.</div>
 
-    <div class="cap" style="padding-bottom:8px">Backdrop</div>
-    <div class="glass">
-      <div class="row">
-        <div style="flex:1;font-size:15px;font-weight:500">Show the engraving</div>
-        <div style="width:51px;height:31px;border-radius:16px;background:{br};display:flex;align-items:center;justify-content:flex-end;padding:2px;flex:none">
-          <div style="width:27px;height:27px;border-radius:14px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3)"></div>
-        </div>
+    <div class="cap" style="padding:24px 0 8px">Mac</div>
+    <div class="div"></div>
+    <div style="display:flex;align-items:center;gap:13px;min-height:56px">
+      {ico('display', br, 20)}<div style="font-size:16px">Computer</div><div style="flex:1"></div>
+      <div class="sub">vamp-mini</div>{ico('chevron', t['text3'], 13, 2)}
+    </div>
+    <div class="div"></div>
+    <div style="display:flex;align-items:center;gap:13px;min-height:56px">
+      {ico('pulse', br, 20)}<div style="font-size:16px">Diagnostics</div><div style="flex:1"></div>
+      {ico('chevron', t['text3'], 13, 2)}
+    </div>
+    <div class="div"></div>
+
+    <div class="cap" style="padding:24px 0 8px">About</div>
+    <div class="div"></div>
+    <div style="display:flex;align-items:center;gap:13px;min-height:56px">
+      <div style="width:34px;height:34px;border-radius:9px;overflow:hidden;flex:none;border:0.75px solid {t['rim']}">
+        <img src="atmosphere.jpg" alt="" style="width:100%;height:100%;object-fit:cover;filter:grayscale(1)">
       </div>
+      <div style="flex:1"><div style="font-size:16px">Vamp Assistant</div>
+      <div class="c2" style="margin-top:1px">0.1.37 · build 72</div></div>
     </div>
-    <div class="fn" style="margin:8px 2px 20px">Off replaces it with a plain warm ground on every screen.</div>
-
-    <div class="cap" style="padding-bottom:8px">Mac</div>
-    <div class="glass">
-      {card_row('display','Computer','vamp-mini')}
-      {card_row('pulse','Diagnostics','', last=True)}
-    </div>
+    <div class="div"></div>
   </div>
 </div>
 ''' + TAIL

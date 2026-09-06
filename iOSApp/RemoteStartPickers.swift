@@ -66,7 +66,7 @@ struct RemoteWorkspacePickerSheet: View {
                                 }
                         }
                     } header: {
-                        Text("Project folder")
+                        RemoteSectionHeading("Project folder")
                     } footer: {
                         if store.workspaces.isEmpty {
                             Text("No recent folders yet. Create one, or open a path that already exists on your Mac.")
@@ -88,8 +88,7 @@ struct RemoteWorkspacePickerSheet: View {
                     .remoteListRow()
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background { RemoteBackdrop() }
+            .remotePlainList()
             .navigationTitle("Where it works")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
@@ -179,8 +178,7 @@ struct RemoteBotPickerSheet: View {
                 }
                 .remoteListRow()
             }
-            .scrollContentBackground(.hidden)
-            .background { RemoteBackdrop() }
+            .remotePlainList()
             .navigationTitle("Bot")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
@@ -214,7 +212,7 @@ struct RemoteStartAdvancedSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 if !store.isConnected {
                     Section { RemoteOfflineRow(store: store) }
                         .remoteListRow()
@@ -256,7 +254,7 @@ struct RemoteStartAdvancedSheet: View {
                 prepareButton(title: "Prepare bot computers", profileID: nil)
             }
         } header: {
-            Text("Bot computer")
+            RemoteSectionHeading("Bot computer")
         } footer: {
             Text("Attach one and the session runs there instead of in a project folder.")
         }
@@ -339,6 +337,7 @@ struct RemoteStartAdvancedSheet: View {
                 Text("OpenCode Zen").tag("openCode")
                 Text("OpenCode Go").tag("openCodeGo")
             }
+            .pickerStyle(.menu)
             SecureField("Paste key", text: $keyDraft)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -348,7 +347,7 @@ struct RemoteStartAdvancedSheet: View {
                 Text(keyMessage).font(.footnote).foregroundStyle(.secondary)
             }
         } header: {
-            Text("API key")
+            RemoteSectionHeading("API key")
         } footer: {
             Text("Stored securely in the Mac Keychain; the key is never saved on this device or in chat.")
         }

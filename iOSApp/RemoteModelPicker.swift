@@ -124,7 +124,7 @@ struct RemoteModelPickerSheet: View {
                                 .remoteListRow()
                             }
                         }
-                        .listStyle(.insetGrouped)
+                        .listStyle(.plain)
                         .scrollContentBackground(.hidden)
                         .refreshable { await onRefresh?() }
                     }
