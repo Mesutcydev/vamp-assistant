@@ -21,7 +21,19 @@
 #   VAMP_SIGN_IDENTITY="Apple Development: you@example.com (TEAMID)" scripts/update-local-install.sh
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Where the repo is, even when the script itself is not in it: piping it out
+# of git into /tmp is the sane way to run it without checking the branch out,
+# and that made $0's parent "/" — which is where it went looking for
+# project.yml.
+ROOT="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)"
+if [[ ! -f "$ROOT/project.yml" ]]; then
+  ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+fi
+[[ -f "$ROOT/project.yml" ]] || {
+  echo "not inside the vamp-assistant checkout: no project.yml at $ROOT" >&2
+  echo "cd into the repo first, or pass a built .app / .zip / .dmg" >&2
+  exit 1
+}
 INSTALLED="${VAMP_INSTALLED_APP:-/Applications/Vamp Assistant.app}"
 SOURCE="${1:-}"
 
