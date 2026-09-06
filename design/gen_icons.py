@@ -123,3 +123,61 @@ tracked(d, "VAMP", ImageFont.truetype(SERIF, 128), S/2, S*0.885, 24, CREAM)
 save(im, "icon-frame")
 
 print("wrote 8")
+
+# ---------------------------------------------------------------- second set
+# Four more, all from the Frame direction the drawn border started: a border is
+# the one device that survives being shrunk to 40pt, because it is the only
+# thing on the tile that is not the engraving.
+
+# 9 — Frame, light. The same construction on paper instead of ink.
+eng = plate(box=(280, 10, 1290, 1020), contrast=1.18, bright=1.2)
+paper = Image.new("RGB", (S, S), CREAM)
+im = Image.blend(paper, eng, 0.58)
+d = ImageDraw.Draw(im)
+d.rectangle([S*0.055, S*0.735, S*0.945, S*0.945], fill=(238, 233, 223))
+d.line([S*0.055, S*0.735, S*0.945, S*0.735], fill=(120, 116, 108), width=3)
+d.rectangle([S*0.055, S*0.055, S*0.945, S*0.945], outline=(58, 56, 52), width=4)
+tracked(d, "VAMP", ImageFont.truetype(SERIF, 128), S/2, S*0.885, 24, (26, 25, 23))
+save(im, "icon-frame-light")
+
+# 10 — Cartouche. The plate cut to an arch, the way the building itself ends.
+base = Image.new("RGB", (S, S), (16, 16, 18))
+art = plate(box=(430, 60, 1150, 780), size=int(S*0.70), contrast=1.06)
+mask = Image.new("L", art.size, 0)
+md = ImageDraw.Draw(mask)
+w, h = art.size
+md.rounded_rectangle([0, int(h*0.30), w, h], radius=int(w*0.04), fill=255)
+md.pieslice([0, 0, w, int(h*0.60)], 180, 360, fill=255)
+base.paste(art, (int(S*0.15), int(S*0.10)), mask)
+d = ImageDraw.Draw(base)
+d.rounded_rectangle([S*0.15, S*0.10 + h*0.30, S*0.15 + w, S*0.10 + h],
+                    radius=int(w*0.04), outline=(206, 201, 190), width=3)
+d.arc([S*0.15, S*0.10, S*0.15 + w, S*0.10 + h*0.60], 180, 360, fill=(206, 201, 190), width=3)
+tracked(d, "VAMP", ImageFont.truetype(SERIF, 118), S/2, S*0.935, 22, CREAM)
+save(base, "icon-cartouche")
+
+# 11 — Placard. The name on a museum label rather than across the picture.
+im = plate(box=(280, 10, 1290, 1020), contrast=1.04, bright=0.94)
+d = ImageDraw.Draw(im)
+d.rectangle([S*0.045, S*0.045, S*0.955, S*0.955], outline=(232, 228, 218), width=4)
+d.rectangle([S*0.072, S*0.072, S*0.928, S*0.928], outline=(232, 228, 218), width=2)
+d.rounded_rectangle([S*0.195, S*0.685, S*0.805, S*0.865], radius=int(S*0.014),
+                    fill=(241, 237, 228))
+d.rounded_rectangle([S*0.195, S*0.685, S*0.805, S*0.865], radius=int(S*0.014),
+                    outline=(120, 116, 108), width=2)
+tracked(d, "VAMP", ImageFont.truetype(SERIF, 104), S/2, S*0.808, 28, (26, 25, 23))
+save(im, "icon-placard")
+
+# 12 — Masthead. An editorial band across the top: the name reads first.
+im = plate(box=(280, 10, 1290, 1020), bright=0.98, contrast=1.04)
+d = ImageDraw.Draw(im)
+d.rectangle([0, 0, S, S*0.26], fill=(17, 17, 19))
+d.line([0, S*0.26, S, S*0.26], fill=(196, 191, 181), width=3)
+f = ImageFont.truetype(SERIF, 128)
+x = S*0.085
+for ch, w in [(c, d.textlength(c, font=f)) for c in "VAMP"]:
+    d.text((x, S*0.195), ch, font=f, fill=CREAM, anchor="ls")
+    x += w + 26
+save(im, "icon-masthead")
+
+print("wrote 4 more")

@@ -11,7 +11,7 @@
     * { box-sizing: border-box; }
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
     a { color: #9A9A9E; } a:hover { color: #F2F2F4; }
-    .screen { position: relative; width: 900px; height: 760px; overflow: hidden;
+    .screen { position: relative; width: 900px; height: 1080px; overflow: hidden;
       background: #0F0F10; color: #F2F2F4; }
     .atmos { position: absolute; inset: 0; background-image: url("atmosphere.jpg");
       background-size: cover; background-position: center; filter: grayscale(1);
@@ -39,15 +39,45 @@
       background: rgba(37,37,40,0.58); border: 0.75px solid rgba(255,255,255,0.13); font-size: 13px; font-weight: 500; }
   </style>
 </helmet>
-<div class="screen" style="width:900px;height:760px">
+<div class="screen" style="width:900px;height:1080px">
   <div class="atmos"></div>
   <div class="layer" style="padding:26px 30px;gap:20px;overflow:hidden">
     <div>
       <div class="t1" style="font-size:26px">Icon studies</div>
-      <div class="sub" style="margin-top:6px">Eight cuts of the same engraving, one serif, no new marks — the plate the app already carries, framed eight ways.</div>
+      <div class="sub" style="margin-top:6px">Twelve cuts of one engraving in one serif. The first row follows the drawn border, which is the device that still reads at 40pt.</div>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:20px">
+    <div style="display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:20px 20px">
       <div style="display:flex;flex-direction:column;gap:9px">
+  <img src="icon-frame.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
+  <div>
+    <div style="font-size:13px;font-weight:600">Frame</div>
+    <div class="c2" style="margin-top:3px;line-height:15px">Drawn border, name in a solid foot. Reads as a plate in a book.</div>
+  </div>
+</div><div style="display:flex;flex-direction:column;gap:9px">
+  <img src="icon-frame-light.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
+  <div>
+    <div style="font-size:13px;font-weight:600">Frame, light</div>
+    <div class="c2" style="margin-top:3px;line-height:15px">The same construction on paper — the border is what survives being shrunk to 40pt.</div>
+  </div>
+</div><div style="display:flex;flex-direction:column;gap:9px">
+  <img src="icon-cartouche.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
+  <div>
+    <div style="font-size:13px;font-weight:600">Cartouche</div>
+    <div class="c2" style="margin-top:3px;line-height:15px">The plate cut to an arch, the way the building ends, name in the ink margin below.</div>
+  </div>
+</div><div style="display:flex;flex-direction:column;gap:9px">
+  <img src="icon-placard.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
+  <div>
+    <div style="font-size:13px;font-weight:600">Placard</div>
+    <div class="c2" style="margin-top:3px;line-height:15px">The name on a museum label rather than across the picture. Double rule, small plaque.</div>
+  </div>
+</div><div style="display:flex;flex-direction:column;gap:9px">
+  <img src="icon-masthead.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
+  <div>
+    <div style="font-size:13px;font-weight:600">Masthead</div>
+    <div class="c2" style="margin-top:3px;line-height:15px">An editorial band across the top: the word reads before the engraving does.</div>
+  </div>
+</div><div style="display:flex;flex-direction:column;gap:9px">
   <img src="icon-portico.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
   <div>
     <div style="font-size:13px;font-weight:600">Portico</div>
@@ -57,13 +87,13 @@
   <img src="icon-columns.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
   <div>
     <div style="font-size:13px;font-weight:600">Columns</div>
-    <div class="c2" style="margin-top:3px;line-height:15px">Cropped to the order itself — reads at 40pt where the wide scene turns to mush.</div>
+    <div class="c2" style="margin-top:3px;line-height:15px">Cropped to the order itself — reads where the wide scene turns to mush.</div>
   </div>
 </div><div style="display:flex;flex-direction:column;gap:9px">
   <img src="icon-monogram.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
   <div>
     <div style="font-size:13px;font-weight:600">Monogram</div>
-    <div class="c2" style="margin-top:3px;line-height:15px">One letter, cut out of the plate by a vignette. The only one that works with no name at all.</div>
+    <div class="c2" style="margin-top:3px;line-height:15px">One letter cut out of the plate. The only one that works with no name at all.</div>
   </div>
 </div><div style="display:flex;flex-direction:column;gap:9px">
   <img src="icon-statue.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
@@ -75,7 +105,7 @@
   <img src="icon-medallion.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
   <div>
     <div style="font-size:13px;font-weight:600">Medallion</div>
-    <div class="c2" style="margin-top:3px;line-height:15px">The plate held in a ring on flat ink. No type, so it never competes with the label beneath it.</div>
+    <div class="c2" style="margin-top:3px;line-height:15px">The plate in a ring on flat ink, no type, so it never repeats the label beneath it.</div>
   </div>
 </div><div style="display:flex;flex-direction:column;gap:9px">
   <img src="icon-plate.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
@@ -89,15 +119,9 @@
     <div style="font-size:13px;font-weight:600">Rule</div>
     <div class="c2" style="margin-top:3px;line-height:15px">Wordmark over a hairline with the second word tracked beneath. The most formal.</div>
   </div>
-</div><div style="display:flex;flex-direction:column;gap:9px">
-  <img src="icon-frame.jpg" alt="" style="width:100%;border-radius:22.37%;display:block">
-  <div>
-    <div style="font-size:13px;font-weight:600">Frame</div>
-    <div class="c2" style="margin-top:3px;line-height:15px">Drawn border, name in a solid foot. Reads as a plate in a book.</div>
-  </div>
 </div>
     </div>
-    <div class="fn" style="line-height:18px">Each is a real 1024px PNG, generated from WindowAtmosphere — the clean plate. VampBackdrop carries the wordmark baked in, which is why type drawn over it printed VAMP twice.</div>
+    <div class="fn" style="line-height:18px">Built at 1024 from WindowAtmosphere — the clean plate. VampBackdrop carries the wordmark baked in, which is why type drawn over it printed VAMP twice.</div>
   </div>
 </div>
 </x-dc>
