@@ -1,6 +1,15 @@
 from kit import head, TAIL
 from tokens import DARK as t
 
+PEDIMENTS = [
+ ("ped-plate",     "Plate",     "Ink on paper, name beneath, one course of stylobate. The one you picked, tidied."),
+ ("ped-relief",    "Relief",    "The same front reversed out of ink, no name — the mark alone."),
+ ("ped-three",     "Three",     "Fewer, heavier columns. The version that still resolves at 20pt."),
+ ("ped-sealed",    "Sealed",    "The front inside the drawn border, name set in the frame."),
+ ("ped-tympanum",  "Tympanum",  "The letter carried in the gable, the way a temple carries one."),
+ ("ped-steps",     "Steps",     "Paper, no name, three courses: all architecture, nothing else."),
+]
+
 MARKS = [
  ("mark-portal",      "Portal",        "A temple cut out of a solid tile. All silhouette, no picture — the one that still reads at 20pt."),
  ("mark-flutedv",     "Fluted V",      "The letter built as two shafts of the order, fluted, with a capital across the top."),
@@ -33,14 +42,18 @@ def grid(items):
   </div>
 </div>''' for n, title, note in items)
 
-html = head(t, 1180, 1000) + f'''<div class="screen" style="width:1180px;height:1000px">
+html = head(t, 1180, 1420) + f'''<div class="screen" style="width:1180px;height:1420px">
   <div class="atmos"></div>
   <div class="layer" style="padding:26px 30px;gap:20px;overflow:hidden">
     <div>
       <div class="t1" style="font-size:26px">Icon studies</div>
-      <div class="sub" style="margin-top:6px">Two families. The marks are constructed — geometry and type, nothing photographic — which is what lets them survive being 40pt on a Home Screen. The framings below are all one plate, so they can only differ by a shade.</div>
+      <div class="sub" style="margin-top:6px">Three rows. The pediment set is the direction in play; the other marks are constructed the same way — geometry and type, nothing photographic — which is what lets them survive being 40pt on a Home Screen. The framings below are all one plate, so they can only differ by a shade.</div>
     </div>
-    <div class="cap">Drawn marks — geometry and type, no engraving</div>
+    <div class="cap">Around the pediment</div>
+    <div style="display:grid;grid-template-columns:repeat(6, minmax(0, 1fr));gap:18px">
+      {grid(PEDIMENTS)}
+    </div>
+    <div class="cap" style="padding-top:6px">Other drawn marks</div>
     <div style="display:grid;grid-template-columns:repeat(5, minmax(0, 1fr));gap:18px">
       {grid(MARKS)}
     </div>
