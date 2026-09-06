@@ -292,10 +292,11 @@ struct StartSessionSheet: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            // A disabled prominent button fills with a near-black grey over
-            // this backdrop and reads as broken. Tinting the disabled state
-            // keeps the shape legible as "not yet".
-            .tint(canStart ? BeetTheme.accent : Color.secondary)
+            .tint(BeetTheme.accent)
+            // The system's disabled fill is near-black over this backdrop and
+            // reads as a broken control. Keeping the accent and dimming it
+            // says "not yet" instead.
+            .opacity(canStart ? 1 : 0.45)
             .disabled(!canStart)
             .accessibilityHint(blockedReason ?? "")
         }

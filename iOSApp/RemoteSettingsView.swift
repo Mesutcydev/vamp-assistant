@@ -169,6 +169,16 @@ struct AccentSwatchPicker: View {
     @Binding var selection: AccentPalette
 
     var body: some View {
+        // Eleven palettes no longer fit a phone width: the row silently clipped
+        // its first and last swatches, including the selected one.
+        ScrollView(.horizontal) {
+            swatches.padding(.vertical, 2)
+        }
+        .scrollIndicators(.hidden)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var swatches: some View {
         HStack(spacing: 12) {
             ForEach(AccentPalette.allCases) { palette in
                 Button {
@@ -200,9 +210,7 @@ struct AccentSwatchPicker: View {
                 .accessibilityLabel("\(palette.label) accent")
                 .accessibilityAddTraits(palette == selection ? .isSelected : [])
             }
-            Spacer(minLength: 0)
         }
-        .accessibilityElement(children: .contain)
     }
 
     private func color(_ palette: AccentPalette) -> Color {

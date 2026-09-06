@@ -94,6 +94,10 @@ struct SessionListView: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background { RemoteBackdrop() }
+        // The search field floats over the bottom of the list; without this the
+        // last section — Imported — sits underneath it and cannot be scrolled
+        // clear.
+        .contentMargins(.bottom, 72, for: .scrollContent)
         .refreshable { try? await store.refresh() }
         .searchable(text: $search, prompt: "Search sessions")
         .navigationTitle("Sessions")
