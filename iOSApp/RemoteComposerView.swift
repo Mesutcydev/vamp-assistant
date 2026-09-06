@@ -13,6 +13,15 @@ struct RemoteComposer: View {
     let isRunning: Bool
     var isReachable: Bool = true
     var isSending: Bool = false
+    /// The new-session sheet uses this same bar to type its first message, and
+    /// there are no session commands to run before a session exists.
+    var showsCommands: Bool = true
+    /// What the round action means here. Sending the first message of a new
+    /// session is starting it, and the button should say so to VoiceOver.
+    var sendLabel: String? = nil
+    /// The new-session sheet asks its own question rather than "Message your
+    /// assistant…", which is about a session that already exists.
+    var placeholderOverride: String? = nil
     let onSend: () -> Void
     var onQueue: (() -> Void)? = nil
     var onSteer: (() -> Void)? = nil
@@ -27,18 +36,20 @@ struct RemoteComposer: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 10) {
-            Button {
-                showCommands = true
-            } label: {
-                Image(systemName: "plus")
-                    .font(.body.weight(.semibold))
-                    .frame(width: 32, height: 32)
-                    .background(RemoteSurface.well(appearance), in: Circle())
+            if showsCommands {
+                Button {
+                    showCommands = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 32, height: 32)
+                        .background(RemoteSurface.well(appearance), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .padding(.bottom, 3)
+                .accessibilityLabel("Commands and context")
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .padding(.bottom, 3)
-            .accessibilityLabel("Commands and context")
 
             HStack(alignment: .bottom, spacing: 8) {
                 TextField(placeholder, text: $draft, axis: .vertical)
@@ -71,7 +82,7 @@ struct RemoteComposer: View {
                 .disabled(!isReachable || isSending || !hasDraft)
                 .opacity(hasDraft && isReachable && !isSending ? 1 : 0.35)
                 .padding(.bottom, 4)
-                .accessibilityLabel(isRunning ? "Queue follow-up" : "Send")
+                .accessibilityLabel(sendLabel ?? (isRunning ? "Queue follow-up" : "Send"))
             }
             .padding(.leading, 14)
             .padding(.trailing, 5)
@@ -105,6 +116,7 @@ struct RemoteComposer: View {
     }
 
     private var placeholder: String {
+        if let placeholderOverride, isReachable { return placeholderOverride }
         if !isReachable { return "Draft a message while reconnecting…" }
         if isRunning { return "Queue a follow-up or steer…" }
         return "Message your assistant…"

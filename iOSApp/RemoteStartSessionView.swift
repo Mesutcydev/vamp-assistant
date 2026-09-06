@@ -18,7 +18,6 @@ struct StartSessionSheet: View {
     let onStarted: (UUID) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.remoteAppearance) private var appearance
-    @FocusState private var promptFocused: Bool
 
     private var preferences: RemoteStartPreferences { .shared }
 
@@ -106,14 +105,13 @@ struct StartSessionSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    if !store.isConnected { reconnectCard.padding(.bottom, 22) }
-                    promptField
+                    if !store.isConnected { reconnectCard.padding(.bottom, 20) }
                     setupRow
                     startersList
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 8)
-                .padding(.bottom, 24)
+                .padding(.top, 4)
+                .padding(.bottom, 20)
             }
             .scrollDismissesKeyboard(.interactively)
             .background { RemoteBackdrop() }
@@ -198,31 +196,6 @@ struct StartSessionSheet: View {
         }
         .padding(14)
         .remoteCardSurface()
-    }
-
-    /// The screen is the question.
-    ///
-    /// This was a Form: a hero, a card with the field in it, a Setup section of
-    /// three rows, a More section, and a full-width bar. Six containers for one
-    /// sentence and three settings. The sentence is now the page — set in the
-    /// size a title would be — the three settings are chips underneath it, and
-    /// Start lives in the field's own row.
-    private var promptField: some View {
-        ZStack(alignment: .topLeading) {
-            if prompt.isEmpty {
-                Text("What should it work on?")
-                    .font(.system(size: 27, weight: .regular))
-                    .foregroundStyle(.primary.opacity(0.32))
-                    .padding(.top, 2)
-                    .allowsHitTesting(false)
-            }
-            TextField("", text: $prompt, axis: .vertical)
-                .font(.system(size: 27, weight: .regular))
-                .lineLimit(1...6)
-                .focused($promptFocused)
-                .accessibilityLabel("First prompt")
-        }
-        .frame(minHeight: 84, alignment: .topLeading)
     }
 
     /// The four things a session is, as a row of cells rather than a rail of
@@ -320,8 +293,10 @@ struct StartSessionSheet: View {
                     .padding(.bottom, 6)
                 ForEach(botProfile.starters, id: \.self) { starter in
                     Button {
+                        // Tapping a starter fills the composer rather than
+                        // starting immediately: it is a first draft, not a
+                        // command.
                         prompt = starter
-                        promptFocused = true
                         UISelectionFeedbackGenerator().selectionChanged()
                     } label: {
                         HStack(spacing: 10) {
@@ -347,50 +322,36 @@ struct StartSessionSheet: View {
         }
     }
 
+    /// The chat's own composer, so the first message of a session is typed
+    /// where every message after it will be.
+    ///
+    /// This screen used to have a bar of its own — a hint line and a capsule
+    /// labelled Start — which meant the app had two input bars that looked
+    /// nothing alike, and the one you met first was the odd one.
     private var startBar: some View {
         VStack(spacing: 0) {
             Rectangle()
                 .fill(RemoteSurface.separator(appearance))
                 .frame(height: 0.75)
-            HStack(alignment: .center, spacing: 12) {
-                Text(blockedReason ?? "Return sends. This is where it begins.")
+            if let blockedReason {
+                Text(blockedReason)
                     .font(.footnote)
-                    .foregroundStyle(.primary.opacity(blockedReason == nil ? 0.45 : 0.7))
-                    .lineLimit(2)
+                    .foregroundStyle(.primary.opacity(0.62))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                    .background(RemoteSurface.card(appearance))
                     .accessibilityHidden(true)
-                Spacer(minLength: 8)
-                Button(action: start) {
-                    HStack(spacing: 7) {
-                        if isStarting {
-                            ProgressView().controlSize(.small).tint(.white)
-                        }
-                        Text(isStarting ? "Starting" : "Start")
-                            .font(.subheadline.weight(.semibold))
-                        if !isStarting {
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 13, weight: .bold))
-                        }
-                    }
-                    .padding(.horizontal, 18)
-                    .frame(height: 44)
-                    // Drawn rather than .borderedProminent, whose disabled fill
-                    // is white on a light sheet and near-black on a dark one.
-                    .background(canStart ? AnyShapeStyle(BeetTheme.accent)
-                                         : AnyShapeStyle(RemoteSurface.well(appearance)),
-                                in: Capsule())
-                    .foregroundStyle(canStart ? AnyShapeStyle(Color.white)
-                                              : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
-                }
-                .buttonStyle(.plain)
-                .disabled(!canStart)
-                .accessibilityLabel(isStarting ? "Starting" : "Start session")
-                .accessibilityHint(blockedReason ?? "")
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 10)
-            // Opaque, in the app's own grey. `.bar` painted a white slab across
-            // the bottom of a dark sheet and let the list show through it.
-            .background(RemoteSurface.card(appearance))
+            RemoteComposer(
+                draft: $prompt,
+                isRunning: false,
+                isReachable: store.isConnected,
+                isSending: isStarting,
+                showsCommands: false,
+                sendLabel: isStarting ? "Starting" : "Start session",
+                placeholderOverride: "What should it work on?",
+                onSend: start)
         }
     }
 
@@ -410,9 +371,7 @@ struct StartSessionSheet: View {
             in: store.workspaces, rememberedPath: preferences.workspacePath)
         attachMatchingBotComputer()
         isLoading = false
-        // Focus last: the field is the only thing left to fill in, and doing it
-        // before the sheet settles loses the keyboard on slower connections.
-        promptFocused = prompt.isEmpty
+
     }
 
     private func applyRememberedModel() {
