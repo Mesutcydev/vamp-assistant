@@ -1,0 +1,40 @@
+{
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1320,
+      "h": 856,
+      "title": "Chat \u2014 dark"
+    },
+    {
+      "file": "MainLight.dc.html",
+      "x": 1440,
+      "y": 0,
+      "w": 1320,
+      "h": 856,
+      "title": "Chat \u2014 light"
+    },
+    {
+      "file": "Bots.dc.html",
+      "x": 2880,
+      "y": 0,
+      "w": 1320,
+      "h": 856,
+      "title": "Bots"
+    },
+    {
+      "file": "Settings.dc.html",
+      "x": 4320,
+      "y": 0,
+      "w": 1320,
+      "h": 856,
+      "title": "Settings"
+    }
+  ],
+  "launch": {
+    "view": "focused",
+    "file": "Main.dc.html"
+  }
+}

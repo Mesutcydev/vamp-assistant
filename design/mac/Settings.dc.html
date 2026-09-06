@@ -1,0 +1,138 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #4A4A4E; } a:hover { color: #141416; }
+    .screen { position: relative; width: 1320px; height: 856px; overflow: hidden;
+      background: #F1F1F3; color: #141416; }
+    .atmos { position: absolute; inset: 0; background-image: url("atmosphere.jpg");
+      background-size: cover; background-position: center; filter: grayscale(1);
+      opacity: 0.15; pointer-events: none; }
+    .layer { position: relative; height: 100%; display: flex; flex-direction: column; }
+    .glass { background: rgba(252,252,253,0.80); -webkit-backdrop-filter: blur(24px) saturate(1.4);
+      backdrop-filter: blur(24px) saturate(1.4); border: 0.75px solid rgba(255,255,255,0.80);
+      box-shadow: 0 8px 22px rgba(0,0,0,0.10), inset 0 0.75px 0 rgba(255,255,255,0.85); border-radius: 18px; }
+    .well { background: rgba(252,252,253,0.64); border-radius: 12px; }
+    .cap { font-size: 11px; font-weight: 600; letter-spacing: 0.9px; text-transform: uppercase;
+      color: rgba(20,20,22,0.60); }
+    .t1 { font-size: 34px; font-weight: 700; letter-spacing: -0.8px; line-height: 41px; }
+    .h  { font-size: 17px; font-weight: 600; letter-spacing: -0.4px; }
+    .b  { font-size: 17px; letter-spacing: -0.4px; line-height: 25px; }
+    .sub { font-size: 15px; color: rgba(20,20,22,0.60); letter-spacing: -0.2px; }
+    .fn { font-size: 13px; color: rgba(20,20,22,0.60); }
+    .c2 { font-size: 11px; color: rgba(20,20,22,0.36); }
+    .mono { font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace; font-size: 13px; }
+    .row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 14px; }
+    .div { height: 0.75px; background: rgba(0,0,0,0.10); }
+    .stack { display: flex; flex-direction: column; }
+    .navpill { width: 34px; height: 34px; border-radius: 17px; display: flex; align-items: center;
+      justify-content: center; background: rgba(252,252,253,0.64); border: 0.75px solid rgba(255,255,255,0.80); }
+    .chip { display: flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px;
+      background: rgba(252,252,253,0.64); border: 0.75px solid rgba(255,255,255,0.80); font-size: 13px; font-weight: 500; }
+  </style>
+</helmet>
+<div class="screen" style="width:1320px;height:856px;border-radius:12px">
+  <div class="atmos"></div>
+  <div class="layer">
+    <div style="height:52px;flex:none;display:flex;align-items:center;gap:14px;
+      padding:0 16px;border-bottom:0.75px solid rgba(0,0,0,0.10);background:rgba(252,252,253,0.80);
+      -webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px)">
+      <div style="display:flex;gap:8px;padding-right:6px"><div style="width:12px;height:12px;border-radius:6px;background:#FF5F57"></div><div style="width:12px;height:12px;border-radius:6px;background:#FEBC2E"></div><div style="width:12px;height:12px;border-radius:6px;background:#28C840"></div></div>
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="rgba(20,20,22,0.60)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18"/></svg>
+      <div style="font-size:14px;font-weight:600;letter-spacing:-0.2px">Settings</div>
+      <div style="flex:1"></div>
+      <div style="display:flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:8px;background:#E8E8EB"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(20,20,22,0.60)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg><div style="font-size:12.5px;color:rgba(20,20,22,0.60);font-weight:500">Done</div></div>
+    </div>
+    <div style="flex:1;display:flex;min-height:0">
+      <div style="width:216px;flex:none;border-right:0.75px solid rgba(0,0,0,0.10);padding:12px 8px;background:rgba(252,252,253,0.64)">
+        <div style="background:#E8E8EB;display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(20,20,22,0.60)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.2M12 18.8V21M21 12h-2.2M5.2 12H3M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6M18.4 18.4l-1.6-1.6M7.2 7.2L5.6 5.6"/></svg>
+          <div style="font-size:13px;font-weight:600">General</div>
+        </div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(20,20,22,0.36)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M10 3v3M14 3v3M10 18v3M14 18v3M3 10h3M3 14h3M18 10h3M18 14h3"/></svg>
+          <div style="font-size:13px;font-weight:400">Models</div>
+        </div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(20,20,22,0.36)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="3.2"/><path d="M5.5 20c0-3.4 2.9-6 6.5-6s6.5 2.6 6.5 6"/></svg>
+          <div style="font-size:13px;font-weight:400">Agent</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(20,20,22,0.36)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg>
+          <div style="font-size:13px;font-weight:400">Providers</div>
+        </div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(20,20,22,0.36)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5a12 12 0 0116 0"/><path d="M7.5 13a7 7 0 019 0"/><circle cx="12" cy="17" r="1.4"/></svg>
+          <div style="font-size:13px;font-weight:400">Network</div>
+        </div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(20,20,22,0.36)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 6.5l4-4 4 4-4 4z"/><path d="M13.5 6.5l-2.2 2.2"/><path d="M11.3 8.7L4 16v4h4l7.3-7.3"/><path d="M9 14l1.5 1.5"/></svg>
+          <div style="font-size:13px;font-weight:400">Plugins</div>
+        </div>
+      </div>
+      <div style="flex:1;min-width:0;padding:26px 0;overflow:hidden">
+        <div style="max-width:640px;margin:0 auto">
+          <div style="font-size:24px;font-weight:700;letter-spacing:-0.5px">General</div>
+          <div class="cap" style="font-size:10px;padding:24px 0 6px">APPEARANCE</div>
+          <div class="div"></div>
+          <div style="display:flex;align-items:center;gap:14px;min-height:52px">
+          <div style="flex:1"><div style="font-size:13.5px">Theme</div></div>
+          <div style="font-size:12.5px;color:rgba(20,20,22,0.60)">Dark</div>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(20,20,22,0.36)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+        </div><div class="div"></div>
+          <div style="display:flex;align-items:center;gap:14px;min-height:52px">
+            <div style="flex:1;font-size:13.5px">Accent</div>
+            <div style="display:flex;gap:10px">
+              <div style="width:22px;height:22px;border-radius:11px;background:#686868;box-shadow:0 0 0 2px #F1F1F3,0 0 0 3.5px rgba(20,20,22,0.60);"></div><div style="width:22px;height:22px;border-radius:11px;background:#6E7F9B;"></div><div style="width:22px;height:22px;border-radius:11px;background:#7C7060;"></div><div style="width:22px;height:22px;border-radius:11px;background:#6F8A72;"></div>
+            </div>
+          </div>
+          <div class="div"></div>
+          <div style="display:flex;align-items:center;gap:14px;min-height:52px">
+          <div style="flex:1"><div style="font-size:13.5px">Atmosphere</div><div style="font-size:11.5px;color:rgba(20,20,22,0.36);margin-top:3px;max-width:420px;line-height:17px">The engraving stays in the margins — never behind a paragraph.</div></div>
+          <div style="font-size:12.5px;color:rgba(20,20,22,0.60)">On</div>
+          <div style="width:38px;height:22px;border-radius:11px;background:#303030;display:flex;align-items:center;justify-content:flex-end;padding:0 2px"><div style="width:18px;height:18px;border-radius:9px;background:#fff"></div></div>
+        </div><div class="div"></div>
+          <div style="display:flex;align-items:center;gap:14px;min-height:52px">
+          <div style="flex:1"><div style="font-size:13.5px">Text size</div></div>
+          <div style="font-size:12.5px;color:rgba(20,20,22,0.60)">Comfortable</div>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(20,20,22,0.36)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+        </div><div class="div"></div>
+          <div class="cap" style="font-size:10px;padding:24px 0 6px">THIS MAC</div>
+          <div class="div"></div>
+          <div style="display:flex;align-items:center;gap:14px;min-height:52px">
+          <div style="flex:1"><div style="font-size:13.5px">Remote access</div></div>
+          <div style="font-size:12.5px;color:rgba(20,20,22,0.60)">vamp-mini · paired</div>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(20,20,22,0.36)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+        </div><div class="div"></div>
+          <div style="display:flex;align-items:center;gap:14px;min-height:52px">
+          <div style="flex:1"><div style="font-size:13.5px">Workspace</div></div>
+          <div style="font-size:12.5px;color:rgba(20,20,22,0.60)">~/Developer/vamp-assistant</div>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(20,20,22,0.36)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+        </div><div class="div"></div>
+          <div style="display:flex;align-items:center;gap:14px;min-height:52px">
+          <div style="flex:1"><div style="font-size:13.5px">Launch at login</div></div>
+          <div style="font-size:12.5px;color:rgba(20,20,22,0.60)"></div>
+          <div style="width:38px;height:22px;border-radius:11px;background:#303030;display:flex;align-items:center;justify-content:flex-end;padding:0 2px"><div style="width:18px;height:18px;border-radius:9px;background:#fff"></div></div>
+        </div><div class="div"></div>
+          <div class="cap" style="font-size:10px;padding:24px 0 6px">ABOUT</div>
+          <div class="div"></div>
+          <div style="display:flex;align-items:center;gap:14px;min-height:52px">
+          <div style="flex:1"><div style="font-size:13.5px">Version</div></div>
+          <div style="font-size:12.5px;color:rgba(20,20,22,0.60)">2.4.0 (89)</div>
+          
+        </div><div class="div"></div>
+          <div style="display:flex;align-items:center;gap:14px;min-height:52px">
+          <div style="flex:1"><div style="font-size:13.5px">Diagnostics</div></div>
+          <div style="font-size:12.5px;color:rgba(20,20,22,0.60)">Open</div>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(20,20,22,0.36)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+        </div><div class="div"></div>
+        </div>
+      </div>
+    </div></div>
+</div></x-dc>
+</body>
+</html>
