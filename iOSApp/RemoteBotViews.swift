@@ -2,41 +2,6 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-private struct RemoteInlineNotice: View {
-    let title: String
-    let detail: String
-    var actionTitle: String?
-    var action: (() -> Void)?
-    @Environment(\.remoteAppearance) private var appearance
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 11) {
-            Image(systemName: "exclamationmark.circle.fill")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(BeetTheme.accentBright)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text(detail).font(.caption).foregroundStyle(BeetTheme.secondaryText(appearance))
-            }
-            Spacer(minLength: 8)
-            if let actionTitle, let action {
-                Button(actionTitle, action: action)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(BeetTheme.accentBright)
-                    .padding(.horizontal, 12)
-                    .frame(minHeight: 44)
-                    .contentShape(Rectangle())
-                    .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 13)
-        .padding(.vertical, 11)
-        .remoteGlass(appearance, radius: 15)
-        .accessibilityElement(children: .contain)
-    }
-}
-
 /// Bots have their own screen now: an index of every profile with its live run
 /// state, and a detail page per bot. They used to be split between a cramped
 /// home-screen strip (start a chat) and a grid of dense cards (start a run), so
@@ -45,50 +10,46 @@ struct RemoteBotsView: View {
     let store: RemoteStore
     let onOpen: (UUID) -> Void
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.remoteAppearance) private var appearance
     @State private var path: [String] = []
     @State private var workflowPrompt = ""
     @State private var selectedModelID = ""
 
     var body: some View {
         NavigationStack(path: $path) {
-            ZStack {
-                RemoteBackdrop()
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
-                        if !store.isConnected {
-                            RemoteInlineNotice(
-                                title: "Mac unreachable",
-                                detail: "Bots run on your Mac. Reconnect to start or steer a run.",
-                                actionTitle: "Retry",
-                                action: { Task { await store.connectSaved() } })
-                        } else if let notice = store.backgroundNotice {
-                            RemoteInlineNotice(
-                                title: "Some bot data didn't load",
-                                detail: notice,
-                                actionTitle: "Retry",
-                                action: { Task { try? await store.refresh() } })
-                        }
-                        workflowCard
-                        Text("BOTS")
-                            .font(.caption2.weight(.bold)).tracking(1.1)
-                            .foregroundStyle(BeetTheme.secondaryText(appearance))
-                            .padding(.top, 2)
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 12)], spacing: 12) {
-                            ForEach(RemoteBotProfile.profiles) { profile in
-                                NavigationLink(value: profile.id) {
-                                    RemoteBotIndexCard(profile: profile, run: run(for: profile.id))
-                                }
-                                .buttonStyle(RemotePressButtonStyle())
-                            }
+            List {
+                Section {
+                    RemotePageHero(
+                        icon: "person.3.sequence",
+                        title: "Bots",
+                        subtitle: "Five specialists that run on your Mac. Open one to start or steer its work.")
+                }
+                if !store.isConnected {
+                    Section { RemoteOfflineRow(store: store) }
+                        .remoteListRow()
+                } else if let notice = store.backgroundNotice {
+                    Section {
+                        Label(notice, systemImage: "exclamationmark.circle")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Button("Retry") { Task { try? await store.refresh() } }
+                    }
+                    .remoteListRow()
+                }
+                workflowSection
+                Section {
+                    ForEach(RemoteBotProfile.profiles) { profile in
+                        NavigationLink(value: profile.id) {
+                            RemoteBotIndexRow(profile: profile, run: run(for: profile.id))
                         }
                     }
-                    .padding(16)
-                    .frame(maxWidth: 760)
-                    .frame(maxWidth: .infinity)
+                } header: {
+                    Text("Bots")
                 }
-                .refreshable { try? await store.refresh() }
+                .remoteListRow()
             }
+            .scrollContentBackground(.hidden)
+            .background { RemoteBackdrop() }
+            .refreshable { try? await store.refresh() }
             .navigationTitle("Bots")
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: String.self) { id in
@@ -101,8 +62,6 @@ struct RemoteBotsView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
-            .toolbarBackground(BeetTheme.background(appearance).opacity(0.94), for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
             .task {
                 if store.startModels.isEmpty { await store.loadStartModels() }
                 if selectedModelID.isEmpty { selectedModelID = store.startModels.first?.id ?? "" }
@@ -122,13 +81,8 @@ struct RemoteBotsView: View {
             && !workflowPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private var workflowCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Adaptive workflow", systemImage: "point.3.connected.trianglepath.dotted")
-                .font(.headline)
-            Text("Describe an outcome and the bots divide the work between them.")
-                .font(.caption)
-                .foregroundStyle(BeetTheme.secondaryText(appearance))
+    private var workflowSection: some View {
+        Section {
             if !store.startModels.isEmpty {
                 Picker("Model", selection: $selectedModelID) {
                     ForEach(store.startModels) { Text($0.name).tag($0.id) }
@@ -137,7 +91,6 @@ struct RemoteBotsView: View {
             }
             TextField("Describe the complete outcome", text: $workflowPrompt, axis: .vertical)
                 .lineLimit(2...4)
-                .textFieldStyle(.roundedBorder)
             Button("Orchestrate") {
                 let prompt = workflowPrompt
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -148,21 +101,24 @@ struct RemoteBotsView: View {
                     }
                 }
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
             .disabled(!canOrchestrate)
             .accessibilityHint(store.isConnected ? "" : "Connect to your Mac first")
+        } header: {
+            Text("Adaptive workflow")
+        } footer: {
+            Text("Describe an outcome and the bots divide the work between them.")
         }
-        .padding(14)
-        .remoteGlass(appearance, radius: 18, strong: true)
+        .remoteListRow()
     }
 }
 
 /// One tile in the bot index: who the bot is, plus whatever it is doing now.
-private struct RemoteBotIndexCard: View {
+/// One row in the bot index. The portrait stays: it is the only thing on this
+/// screen that is ours rather than the platform's, and it is what makes the
+/// list read as five characters instead of five settings.
+private struct RemoteBotIndexRow: View {
     let profile: RemoteBotProfile
     let run: RemoteBotRun?
-    @Environment(\.remoteAppearance) private var appearance
 
     private var isActive: Bool { run.map { !$0.isTerminal } ?? false }
 
@@ -174,41 +130,25 @@ private struct RemoteBotIndexCard: View {
 
     var body: some View {
         HStack(spacing: 13) {
-            RemoteBotThumbnail(profile: profile, size: 54)
+            RemoteBotThumbnail(profile: profile, size: 46)
             VStack(alignment: .leading, spacing: 3) {
                 Text(profile.name).font(.headline)
                 Text(profile.subtitle)
-                    .font(.caption)
-                    .foregroundStyle(BeetTheme.secondaryText(appearance))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                 HStack(spacing: 5) {
                     Circle()
-                        .fill(isActive ? BeetTheme.accentBright : BeetTheme.secondaryText(appearance).opacity(0.45))
+                        .fill(isActive ? BeetTheme.accentBright : Color.secondary.opacity(0.45))
                         .frame(width: 6, height: 6)
-                    Text(statusText).font(.caption2.weight(.medium))
+                    Text(statusText)
+                        .font(.caption)
                 }
-                .foregroundStyle(BeetTheme.secondaryText(appearance))
-                .padding(.top, 1)
+                .foregroundStyle(isActive ? BeetTheme.accentBright : Color.secondary)
             }
             Spacer(minLength: 6)
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(BeetTheme.secondaryText(appearance))
-                .accessibilityHidden(true)
         }
-        .padding(13)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .remoteGlass(appearance, radius: 18)
-        .overlay {
-            // Only the active bot draws its own ring; the rest keep the
-            // gradient hairline that remoteGlass already applies.
-            if isActive {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(BeetTheme.accentBright.opacity(0.6), lineWidth: 1.25)
-            }
-        }
-        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
     }
 }
 
@@ -219,7 +159,6 @@ private struct RemoteBotDetailView: View {
     let profile: RemoteBotProfile
     @Binding var selectedModelID: String
     let onOpen: (UUID) -> Void
-    @Environment(\.remoteAppearance) private var appearance
     @State private var prompt = ""
     @State private var steerDraft = ""
     @State private var answerDraft = ""
@@ -236,33 +175,22 @@ private struct RemoteBotDetailView: View {
     }
 
     var body: some View {
-        ZStack {
-            RemoteBackdrop()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    hero
-                    if !store.isConnected {
-                        RemoteInlineNotice(
-                            title: "Mac unreachable",
-                            detail: "Reconnect to start a chat or a run with \(profile.name).",
-                            actionTitle: "Retry",
-                            action: { Task { await store.connectSaved() } })
-                    }
-                    chatCard
-                    if let run, !run.isTerminal { activeRunCard(run) }
-                    if profile.isSpecialist { newRunCard }
-                    if let run, run.isTerminal { lastRunCard(run) }
-                }
-                .padding(16)
-                .frame(maxWidth: 760)
-                .frame(maxWidth: .infinity)
+        Form {
+            Section { hero }
+            if !store.isConnected {
+                Section { RemoteOfflineRow(store: store) }
+                    .remoteListRow()
             }
-            .refreshable { try? await store.refresh() }
+            chatSection
+            if let run, !run.isTerminal { activeRunSection(run) }
+            if profile.isSpecialist { newRunSection }
+            if let run, run.isTerminal { lastRunSection(run) }
         }
+        .scrollContentBackground(.hidden)
+        .background { RemoteBackdrop() }
+        .refreshable { try? await store.refresh() }
         .navigationTitle(profile.name)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(BeetTheme.background(appearance).opacity(0.94), for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
         .sheet(isPresented: $showStartChat) {
             StartSessionSheet(store: store, initialBotID: RemoteBotProfile.resolvedID(profile.id) ?? "") { sessionID in
                 showStartChat = false
@@ -274,68 +202,61 @@ private struct RemoteBotDetailView: View {
     private var hero: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 14) {
-                RemoteBotThumbnail(profile: profile, size: 76)
+                RemoteBotThumbnail(profile: profile, size: 68)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(profile.name).font(.title3.weight(.semibold))
+                    Text(profile.name).font(.title2.weight(.semibold))
                     Text(profile.subtitle)
                         .font(.subheadline)
-                        .foregroundStyle(BeetTheme.secondaryText(appearance))
+                        .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
             }
             Text(profile.instruction ?? "A general assistant with no specialist brief. Good for planning, explaining, and deciding.")
                 .font(.subheadline)
-                .foregroundStyle(BeetTheme.secondaryText(appearance))
+                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(15)
+        .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .remoteGlass(appearance, radius: 20, strong: true)
+        .listRowBackground(Color.clear)
+        .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 10, trailing: 20))
+        .accessibilityElement(children: .combine)
     }
 
-    private var chatCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Chat with \(profile.name)", systemImage: "bubble.left.and.bubble.right.fill")
-                .font(.headline)
-            Text("A normal conversation, with this bot's brief applied.")
-                .font(.caption)
-                .foregroundStyle(BeetTheme.secondaryText(appearance))
-            if !profile.starters.isEmpty {
-                Text("Openers").font(.caption2.weight(.bold)).tracking(0.8)
-                    .foregroundStyle(BeetTheme.secondaryText(appearance))
-                ForEach(profile.starters, id: \.self) { starter in
-                    Text("· \(starter)")
-                        .font(.caption)
-                        .foregroundStyle(BeetTheme.secondaryText(appearance))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
+    private var chatSection: some View {
+        Section {
             Button {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 showStartChat = true
             } label: {
-                Label("Start a chat", systemImage: "plus.bubble.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: 46)
+                Label("Start a chat", systemImage: "plus.bubble")
             }
-            .buttonStyle(RemotePrimaryButtonStyle())
             .disabled(!store.isConnected)
             .accessibilityHint(store.isConnected ? "" : "Connect to your Mac first")
+            ForEach(profile.starters, id: \.self) { starter in
+                Text(starter)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Chat")
+        } footer: {
+            Text("A normal conversation, with this bot's brief applied.")
         }
-        .padding(15)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .remoteGlass(appearance, radius: 20)
+        .remoteListRow()
     }
 
-    private func activeRunCard(_ run: RemoteBotRun) -> some View {
-        VStack(alignment: .leading, spacing: 11) {
+    private func activeRunSection(_ run: RemoteBotRun) -> some View {
+        Section {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
                 Text(run.phase.capitalized).font(.subheadline.weight(.semibold))
-                Spacer()
+                Spacer(minLength: 8)
                 if let queue = run.queuePosition {
-                    Text("Queue #\(queue)").font(.caption)
-                        .foregroundStyle(BeetTheme.secondaryText(appearance))
+                    Text("Queue #\(queue)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
                 }
             }
             Text(run.prompt).font(.subheadline).lineLimit(4)
@@ -344,19 +265,21 @@ private struct RemoteBotDetailView: View {
             if !run.latestOutput.isEmpty {
                 Text(run.latestOutput)
                     .font(.caption)
-                    .foregroundStyle(BeetTheme.secondaryText(appearance))
+                    .foregroundStyle(.secondary)
                     .lineLimit(6)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let gate = run.pendingInteraction ?? run.errorMessage {
-                Text(gate).font(.caption.weight(.semibold)).foregroundStyle(BeetTheme.accentBright)
+                Label(gate, systemImage: "exclamationmark.circle")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(BeetTheme.accentBright)
                     .fixedSize(horizontal: false, vertical: true)
             }
             runControls(run)
+        } header: {
+            Text("Running now")
         }
-        .padding(15)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .remoteGlass(appearance, radius: 20, strong: true)
+        .remoteListRow()
     }
 
     @ViewBuilder
@@ -364,43 +287,41 @@ private struct RemoteBotDetailView: View {
         switch run.state {
         case "recoverable":
             Button("Resume from checkpoint") { Task { _ = await store.resumeBotRun(run.id) } }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+                .fontWeight(.semibold)
         case "needsApproval":
-            HStack(spacing: 10) {
+            HStack(spacing: 16) {
                 Button("Approve") { Task { _ = await store.approveBotRun(run.id, approved: true) } }
-                    .buttonStyle(.borderedProminent)
+                    .fontWeight(.semibold)
                 Button("Decline", role: .destructive) { Task { _ = await store.approveBotRun(run.id, approved: false) } }
+                Spacer(minLength: 0)
             }
-            .controlSize(.large)
+            .buttonStyle(.borderless)
         case "needsInput":
             TextField("Answer \(profile.name)", text: $answerDraft, axis: .vertical)
                 .lineLimit(1...4)
-                .textFieldStyle(.roundedBorder)
             Button("Send answer") {
                 let answer = answerDraft
                 Task { if await store.answerBotRun(run.id, answer: answer) { answerDraft = "" } }
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
+            .fontWeight(.semibold)
             .disabled(answerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         default:
             TextField("Steer this run", text: $steerDraft, axis: .vertical)
                 .lineLimit(1...4)
-                .textFieldStyle(.roundedBorder)
-            HStack(spacing: 10) {
+            HStack(spacing: 16) {
                 Button("Steer") {
                     let message = steerDraft
                     Task { if await store.steerBotRun(run.id, message: message) { steerDraft = "" } }
                 }
+                .fontWeight(.semibold)
                 .disabled(steerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 if let sessionID = run.sessionID {
                     Button("Inspect") { onOpen(sessionID) }
                 }
-                Spacer()
+                Spacer(minLength: 0)
                 Button("Stop", role: .destructive) { Task { _ = await store.stopBotRun(run.id) } }
             }
-            .controlSize(.large)
+            .buttonStyle(.borderless)
         }
     }
 
@@ -417,17 +338,12 @@ private struct RemoteBotDetailView: View {
                 Label("Retry \(retry)", systemImage: "arrow.clockwise")
             }
         }
-        .font(.caption2)
-        .foregroundStyle(BeetTheme.secondaryText(appearance))
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
 
-    private var newRunCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Run autonomously", systemImage: "play.circle.fill")
-                .font(.headline)
-            Text("\(profile.name) works the task on its own and reports back.")
-                .font(.caption)
-                .foregroundStyle(BeetTheme.secondaryText(appearance))
+    private var newRunSection: some View {
+        Section {
             if !store.startModels.isEmpty {
                 Picker("Model", selection: $selectedModelID) {
                     ForEach(store.startModels) { Text($0.name).tag($0.id) }
@@ -436,7 +352,6 @@ private struct RemoteBotDetailView: View {
             }
             TextField("Task for \(profile.name)", text: $prompt, axis: .vertical)
                 .lineLimit(2...5)
-                .textFieldStyle(.roundedBorder)
             Button("Start run") {
                 let text = prompt
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -447,38 +362,37 @@ private struct RemoteBotDetailView: View {
                     }
                 }
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
+            .fontWeight(.semibold)
             .disabled(!canStartRun)
             .accessibilityHint(store.isConnected ? "" : "Connect to your Mac first")
+        } header: {
+            Text("Run autonomously")
+        } footer: {
+            Text("\(profile.name) works the task on its own and reports back.")
         }
-        .padding(15)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .remoteGlass(appearance, radius: 20)
+        .remoteListRow()
     }
 
-    private func lastRunCard(_ run: RemoteBotRun) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("LAST RUN").font(.caption2.weight(.bold)).tracking(0.8)
-                .foregroundStyle(BeetTheme.secondaryText(appearance))
-            Text(run.phase.capitalized).font(.subheadline.weight(.semibold))
-            Text(run.prompt).font(.caption).foregroundStyle(BeetTheme.secondaryText(appearance))
-                .lineLimit(3).fixedSize(horizontal: false, vertical: true)
+    private func lastRunSection(_ run: RemoteBotRun) -> some View {
+        Section {
+            LabeledContent("Finished", value: run.phase.capitalized)
+            Text(run.prompt)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
             if let trace = run.traceID {
                 Text("Trace \(trace.suffix(10)) · \(run.artifacts?.count ?? 0) artifacts")
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(BeetTheme.secondaryText(appearance))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
             }
             if let sessionID = run.sessionID {
                 Button("Open the transcript") { onOpen(sessionID) }
-                    .font(.subheadline.weight(.semibold))
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
             }
+        } header: {
+            Text("Last run")
         }
-        .padding(15)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .remoteGlass(appearance, radius: 20)
+        .remoteListRow()
     }
 }
 
@@ -550,34 +464,5 @@ private struct RemoteBotThumbnail: View {
             }
             .shadow(color: profile.tint.opacity(0.22), radius: 8, y: 4)
             .accessibilityHidden(true)
-    }
-}
-
-struct RemoteBotStarters: View {
-    let starters: [String]
-    let tint: Color
-    let appearance: RemoteAppearance
-    @Binding var prompt: String
-
-    var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 7) {
-                ForEach(starters, id: \.self) { starter in
-                    Button(starter) {
-                        prompt = starter
-                        UISelectionFeedbackGenerator().selectionChanged()
-                    }
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(BeetTheme.secondaryText(appearance))
-                    .padding(.horizontal, 11)
-                    .frame(minHeight: 34)
-                    .background(BeetTheme.surfaceStrong(appearance), in: Capsule())
-                    .overlay(Capsule().stroke(tint.opacity(0.16), lineWidth: 0.75))
-                    .buttonStyle(RemotePressButtonStyle())
-                }
-            }
-        }
-        .scrollIndicators(.hidden)
-        .accessibilityLabel("Suggested tasks")
     }
 }
