@@ -277,12 +277,20 @@ def bots(t):
 # -------------------------------------------------------------- settings
 
 def settings(t):
-    def tab(glyph, label, sel=False):
+    def tab(glyph, label, sel=False, key=''):
         bg = f'background:{t["well"]};' if sel else ''
-        return f'''<div style="{bg}display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px">
-          {ico(glyph, t['text2'] if sel else t['text3'], 15)}
-          <div style="font-size:13px;font-weight:{600 if sel else 400}">{label}</div>
+        marker = (f'<div style="position:absolute;left:2px;top:50%;transform:translateY(-50%);'
+                  f'width:2.5px;height:15px;border-radius:2px;background:{t["accent"]}"></div>' if sel else '')
+        return f'''<div style="position:relative;{bg}display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px">
+          {marker}
+          {ico(glyph, t['accent'] if sel else t['text3'], 14)}
+          <div style="flex:1;font-size:13px;font-weight:{600 if sel else 400};color:{t['text'] if sel else t['text2']}">{label}</div>
+          <div style="font-size:11px;color:{t['text3']}">{key}</div>
         </div>'''
+
+    def railcap(text):
+        return (f'<div class="cap" style="font-size:9.5px;padding:12px 10px 4px;color:{t["text3"]}">'
+                f'{text.upper()}</div>')
 
     def row(label, detail, sub=None, control='chev'):
         ctl = {'chev': ico('chevron', t['text3'], 13, 2),
@@ -303,11 +311,26 @@ def settings(t):
         return f'<div style="width:22px;height:22px;border-radius:11px;background:{hexv};{ring}"></div>'
 
     body = f'''
-    {toolbar(t, "Settings", tbtn(t, "xmark", "Done"))}
+    {toolbar(t, "Settings", '')}
     <div style="flex:1;display:flex;min-height:0">
-      <div style="width:216px;flex:none;border-right:0.75px solid {t['sep']};padding:12px 8px;background:{t['glass']}">
-        {tab('gear','General', True)}{tab('cpu','Models')}{tab('person','Agent')}
-        {tab('box','Providers')}{tab('wifi','Network')}{tab('hammer','Plugins')}
+      <div style="width:246px;flex:none;border-right:0.75px solid {t['sep']};padding:12px 8px;
+        background:{t['glass']};display:flex;flex-direction:column">
+        <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;color:{t['text2']}">
+          {ico('back', t['text3'], 14, 2)}<div style="font-size:13px">Back to Assistant</div>
+        </div>
+        <div class="div" style="margin:7px 0"></div>
+        {railcap('This app')}
+        {tab('gear','General', True, '⌘1')}
+        {railcap('Intelligence')}
+        {tab('box','Models &amp; Providers', key='⌘2')}
+        {tab('cpu','Agent', key='⌘3')}
+        {tab('people','Bots', key='⌘4')}
+        {railcap('System')}
+        {tab('wifi','Network', key='⌘5')}
+        {tab('hammer','Plugins', key='⌘6')}
+        <div style="flex:1"></div>
+        <div class="div"></div>
+        <div style="font-size:11px;color:{t['text3']};padding:12px 10px">Vamp Assistant 0.10.29 (83)</div>
       </div>
       <div style="flex:1;min-width:0;padding:26px 0;overflow:hidden">
         <div style="max-width:640px;margin:0 auto">
