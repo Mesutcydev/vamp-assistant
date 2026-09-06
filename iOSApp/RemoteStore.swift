@@ -90,6 +90,10 @@ final class RemoteStore {
     private var consecutivePollingFailures = 0
     private var pollIdleSeconds: Int = 4
     private(set) var sendingSessionIDs: Set<UUID> = []
+#if DEBUG
+    /// Set only by `fixtures()`; see `client`.
+    fileprivate var usesFixtures = false
+#endif
 
     init(
         connectionStorage: any RemoteConnectionPersisting = RemoteConnectionStorage(),
@@ -1079,6 +1083,12 @@ final class RemoteStore {
     }
 
     private var client: RemoteAPIClient? {
+        // Fixtures look connected but must never reach the network: every
+        // network entry point already begins by unwrapping this, so returning
+        // nil disables all of them without touching each one.
+#if DEBUG
+        if usesFixtures { return nil }
+#endif
         guard let baseURL, let token else { return nil }
         return RemoteAPIClient(baseURL: baseURL, token: token, session: apiSession)
     }
@@ -1345,3 +1355,99 @@ final class RemoteStore {
             || parts[0] == 127
     }
 }
+
+#if DEBUG
+extension RemoteStore {
+    /// A store full of plausible data and no network, for the screenshot
+    /// harness in CI.
+    ///
+    /// Fixtures are decoded from JSON rather than built with initialisers on
+    /// purpose: the wire models keep private members, so their memberwise inits
+    /// are private too — and going through `JSONDecoder` means the harness
+    /// renders exactly what a real snapshot would.
+    static func fixtures() -> RemoteStore {
+        let store = RemoteStore(observesNotifications: false)
+        store.usesFixtures = true
+        let decoder = JSONDecoder()
+        store.baseURL = URL(string: "http://100.73.221.10:4536")
+        store.token = "fixture"
+        store.connectionAvailable = true
+        store.connectionLabel = "Connected"
+        store.pairedComputers = [
+            PairedBeetCodeComputer(
+                name: "vamp-mini",
+                baseURL: URL(string: "http://100.73.221.10:4536")!,
+                networkKind: "tailscale")
+        ]
+        store.activeComputerID = store.pairedComputers.first?.id
+
+        let now = Date().timeIntervalSince1970
+        let sessionsJSON = """
+        [
+          {"id":"3F2504E0-4F89-11D3-9A0C-0305E82C3301","title":"Fix the composer layout",
+           "workspace":"vamp-assistant","workspacePath":"/Users/me/vamp-assistant","mode":"code",
+           "messageCount":24,"updatedAt":\(now - 60),"isRunning":true,"phase":"editing"},
+          {"id":"3F2504E0-4F89-11D3-9A0C-0305E82C3302","title":"Audit the pairing flow",
+           "workspace":"vamp-assistant","workspacePath":"/Users/me/vamp-assistant","mode":"code",
+           "messageCount":8,"updatedAt":\(now - 5 * 3600),"isRunning":false,"phase":"idle"},
+          {"id":"3F2504E0-4F89-11D3-9A0C-0305E82C3303","title":"Explain the checkpoint model",
+           "workspace":"Chat","workspacePath":null,"mode":"chat",
+           "messageCount":31,"updatedAt":\(now - 9 * 3600),"isRunning":false,"phase":"idle"},
+          {"id":"3F2504E0-4F89-11D3-9A0C-0305E82C3304","title":"Port the diff viewer",
+           "workspace":"forgesign","workspacePath":"/Users/me/forgesign","mode":"code",
+           "messageCount":112,"updatedAt":\(now - 30 * 3600),"isRunning":false,"phase":"idle"},
+          {"id":"3F2504E0-4F89-11D3-9A0C-0305E82C3305","title":"Draft the Tailscale doc",
+           "workspace":"Chat","workspacePath":null,"mode":"chat",
+           "messageCount":5,"updatedAt":\(now - 4 * 24 * 3600),"isRunning":false,"phase":"idle"}
+        ]
+        """
+        store.sessions = (try? decoder.decode([RemoteSessionSummary].self,
+                                              from: Data(sessionsJSON.utf8))) ?? []
+
+        let detailJSON = """
+        {"id":"3F2504E0-4F89-11D3-9A0C-0305E82C3301","title":"Fix the composer layout",
+         "workspace":"vamp-assistant","workspacePath":"/Users/me/vamp-assistant","mode":"code",
+         "modelID":"gpt-5","isRunning":true,"phase":"editing","streamingText":"",
+         "agentMode":"auto","fullAccess":false,
+         "messages":[
+           {"id":"m1","role":"user","timestamp":\(now - 300),
+            "content":"The composer buttons shift when I start typing — make the bar stop moving."},
+           {"id":"m2","role":"reasoning","timestamp":\(now - 280),
+            "content":"Steer is inserted conditionally into the same HStack as the send button, so the row re-lays out as soon as a draft exists."},
+           {"id":"m3","role":"assistant","timestamp":\(now - 260),
+            "content":"Found it. The Steer button joins the same row as Send, so the stack re-lays out the moment a draft exists. Pinning the trailing group fixes it."},
+           {"id":"m4","role":"toolCall","toolName":"read_file","timestamp":\(now - 240),
+            "content":"{}"},
+           {"id":"m5","role":"toolResult","toolName":"read_file","timestamp":\(now - 235),"failed":false,
+            "content":"RemoteComposerView.swift — 166 lines"},
+           {"id":"m6","role":"toolResult","toolName":"edit_file","timestamp":\(now - 200),"failed":false,
+            "content":"RemoteComposerView.swift +18 -4"},
+           {"id":"m7","role":"assistant","timestamp":\(now - 120),
+            "content":"Pinned the trailing group at 96 pt, so Steer now appears inside it rather than beside it."}
+         ]}
+        """
+        store.selectedSession = try? decoder.decode(RemoteSessionDetail.self,
+                                                    from: Data(detailJSON.utf8))
+
+        let modelsJSON = """
+        [
+          {"id":"gpt-5","name":"gpt-5","source":"api","detail":"OpenAI","reasoningEfforts":["low","medium","high"],"defaultReasoningEffort":"medium"},
+          {"id":"qwen3.5-9b","name":"Qwen3.5 9B Abliterated MLX 4bit","source":"local","detail":"9B · 4-bit","reasoningEfforts":null,"defaultReasoningEffort":null},
+          {"id":"claude-opus","name":"claude-opus-4","source":"api","detail":"Anthropic","reasoningEfforts":null,"defaultReasoningEffort":null}
+        ]
+        """
+        store.startModels = (try? decoder.decode([RemoteStartModelOption].self,
+                                                 from: Data(modelsJSON.utf8))) ?? []
+
+        let workspacesJSON = """
+        [
+          {"path":"/Users/me/vamp-assistant","name":"vamp-assistant","isCurrent":true},
+          {"path":"/Users/me/forgesign","name":"forgesign","isCurrent":false}
+        ]
+        """
+        store.workspaces = (try? decoder.decode([RemoteWorkspace].self,
+                                                from: Data(workspacesJSON.utf8))) ?? []
+        return store
+    }
+}
+#endif

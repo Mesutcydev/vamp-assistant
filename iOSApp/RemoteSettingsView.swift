@@ -41,7 +41,7 @@ struct RemoteSettingsSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @AppStorage("remoteAppearanceSetting") private var appearanceSetting = RemoteAppearanceSetting.dark
-    @AppStorage("remoteAccent") private var accent = AccentPalette.beetRed
+    @AppStorage("remoteAccent") private var accent = AccentPalette.clay
     @AppStorage(RemoteBackdropSetting.key) private var showsBackdrop = true
     @State private var showForgetMac = false
 

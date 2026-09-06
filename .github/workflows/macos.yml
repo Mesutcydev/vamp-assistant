@@ -100,3 +100,58 @@ jobs:
             dist/*.ipa
             dist/*.sha256
           retention-days: 14
+
+  screens:
+    name: Simulator screenshots
+    # On demand only: this exists so a reviewer (or an agent with no Mac) can
+    # look at the real screens without pairing hardware.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen generate
+      - name: Build for the simulator
+        run: >-
+          xcodebuild -project BeetCode.xcodeproj -scheme BeetCodeRemoteIOS
+          -configuration Debug -sdk iphonesimulator
+          -destination 'platform=iOS Simulator,name=iPhone 17'
+          -derivedDataPath "$RUNNER_TEMP/Derived"
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+          -skipPackagePluginValidation -skipMacroValidation build
+      - name: Shoot every screen, light and dark
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/Derived/Build/Products/Debug-iphonesimulator/Vamp Assistant.app"
+          BUNDLE=com.beetcode.remote.ios
+          OUT="$RUNNER_TEMP/screens"
+          mkdir -p "$OUT"
+          DEVICE=$(xcrun simctl create harness com.apple.CoreSimulator.SimDeviceType.iPhone-17)
+          xcrun simctl boot "$DEVICE"
+          xcrun simctl bootstatus "$DEVICE" -b
+          xcrun simctl install "$DEVICE" "$APP"
+          for appearance in light dark; do
+            xcrun simctl ui "$DEVICE" appearance "$appearance"
+            for screen in sessions conversation new-session settings bots share computers; do
+              xcrun simctl terminate "$DEVICE" "$BUNDLE" 2>/dev/null || true
+              xcrun simctl launch --terminate-running-process \
+                "$DEVICE" "$BUNDLE" \
+                --setenv VAMP_REMOTE_TEST_SCREEN="$screen" >/dev/null
+              # The first frame is a blank window; give SwiftUI a moment to
+              # lay out and the backdrop image to decode.
+              sleep 4
+              xcrun simctl io "$DEVICE" screenshot "$OUT/$appearance-$screen.png"
+            done
+          done
+          xcrun simctl shutdown "$DEVICE"
+          ls -la "$OUT"
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulator-screens
+          path: ${{ runner.temp }}/screens
+          retention-days: 14

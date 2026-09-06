@@ -22,7 +22,7 @@ private struct RemoteRootShell: View {
     // beetRed, not graphite: docs/BRAND-KIT.md §2 names it the default and says
     // to fix the code when the two disagree. Graphite left every stock control
     // — switches, segmented controls, prominent buttons — a flat grey.
-    @AppStorage("remoteAccent") private var accent = AccentPalette.beetRed
+    @AppStorage("remoteAccent") private var accent = AccentPalette.clay
     @Environment(\.colorScheme) private var systemScheme
     @Environment(\.scenePhase) private var scenePhase
 
@@ -129,7 +129,7 @@ extension EnvironmentValues {
 @Observable
 private final class RemotePaletteState {
     var palette = UserDefaults.standard.string(forKey: "remoteAccent")
-        .flatMap(AccentPalette.init(rawValue:)) ?? .beetRed
+        .flatMap(AccentPalette.init(rawValue:)) ?? .clay
 }
 
 enum BeetTheme {

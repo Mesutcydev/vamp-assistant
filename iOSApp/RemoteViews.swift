@@ -6,16 +6,66 @@ struct RemoteRootView: View {
     let store: RemoteStore
     @ViewBuilder var body: some View {
 #if DEBUG
-        if ProcessInfo.processInfo.environment["VAMP_REMOTE_TEST_SCREEN"] == "disconnected-control" {
+        // VAMP_REMOTE_TEST_SCREEN renders one screen against fixtures, so the
+        // screenshot job can photograph the real views without a paired Mac.
+        // Every value here is a screen a reviewer would otherwise have to pair
+        // hardware to see.
+        let screen = ProcessInfo.processInfo.environment["VAMP_REMOTE_TEST_SCREEN"] ?? ""
+        switch screen {
+        case "disconnected-control":
             RemoteControlView(store: store)
-        } else if store.hasSavedConnection { SessionNavigationView(store: store) }
-        else { PairingView(store: store) }
+        case "sessions":
+            SessionNavigationView(store: RemoteStore.fixtures())
+        case "conversation":
+            RemoteFixtureConversation()
+        case "new-session":
+            RemoteFixtureSheet { store in
+                StartSessionSheet(store: store, initialBotID: "") { _ in }
+            }
+        case "settings":
+            RemoteFixtureSheet { store in
+                RemoteSettingsSheet(store: store, onSwitchComputer: {}, onDiagnostics: {})
+            }
+        case "bots":
+            RemoteFixtureSheet { store in RemoteBotsView(store: store) { _ in } }
+        case "share":
+            RemoteFixtureSheet { store in RemoteShareSheet(store: store) }
+        case "computers":
+            RemoteFixtureSheet { store in ComputerSwitcherSheet(store: store) }
+        default:
+            if store.hasSavedConnection { SessionNavigationView(store: store) }
+            else { PairingView(store: store) }
+        }
 #else
         if store.hasSavedConnection { SessionNavigationView(store: store) }
         else { PairingView(store: store) }
 #endif
     }
 }
+
+#if DEBUG
+/// Presents one sheet full-screen against fixtures. The sheets are written to
+/// be presented, so the harness gives them a host rather than reaching inside
+/// them.
+private struct RemoteFixtureSheet<Content: View>: View {
+    @ViewBuilder let content: (RemoteStore) -> Content
+    @State private var store = RemoteStore.fixtures()
+
+    var body: some View {
+        content(store)
+    }
+}
+
+private struct RemoteFixtureConversation: View {
+    @State private var store = RemoteStore.fixtures()
+
+    var body: some View {
+        NavigationStack {
+            ConversationView(store: store, sessionID: store.sessions.first?.id ?? UUID())
+        }
+    }
+}
+#endif
 
 private struct KeyboardDismissToolbarModifier: ViewModifier {
     func body(content: Content) -> some View {
