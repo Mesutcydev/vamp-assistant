@@ -47,11 +47,11 @@ struct RemoteApprovalPreviewView: View {
                 }
             }
             .padding(11)
-            .background(BeetTheme.surfaceStrong(appearance),
+            .background(RemoteSurface.well(appearance),
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(BeetTheme.line(appearance).opacity(0.7), lineWidth: 0.75)
+                    .stroke(RemoteSurface.separator(appearance), lineWidth: 0.75)
             }
         }
     }

@@ -145,9 +145,9 @@ struct PairingActions: View {
                     onForget: onForget
                 )
                 HStack(spacing: 10) {
-                    Capsule().fill(BeetTheme.line(appearance)).frame(height: 1)
+                    Capsule().fill(RemoteSurface.separator(appearance)).frame(height: 1)
                     Text("or pair another Mac").font(.caption).foregroundStyle(BeetTheme.secondaryText(appearance))
-                    Capsule().fill(BeetTheme.line(appearance)).frame(height: 1)
+                    Capsule().fill(RemoteSurface.separator(appearance)).frame(height: 1)
                 }
                 .padding(.vertical, 2)
             }
@@ -174,7 +174,10 @@ struct PairingActions: View {
             }.tint(BeetTheme.secondaryText(appearance))
         }
         .padding(16)
-        .remoteGlass(appearance, radius: 22, strong: true)
+        .background(RemoteSurface.card(appearance),
+                    in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .strokeBorder(RemoteSurface.separator(appearance), lineWidth: 0.75))
     }
 }
 
@@ -191,7 +194,7 @@ struct SavedMacReconnectCard: View {
         VStack(alignment: .leading, spacing: 13) {
             HStack(spacing: 11) {
                 ZStack {
-                    Circle().fill(BeetTheme.surfaceStrong(appearance)).frame(width: 38, height: 38)
+                    Circle().fill(RemoteSurface.well(appearance)).frame(width: 38, height: 38)
                     Image(systemName: "desktopcomputer").font(.subheadline.weight(.semibold)).foregroundStyle(BeetTheme.accentBright)
                 }
                 VStack(alignment: .leading, spacing: 2) {
@@ -221,7 +224,10 @@ struct SavedMacReconnectCard: View {
             .disabled(isConnecting)
         }
         .padding(14)
-        .remoteGlass(appearance, radius: 17)
+        .background(RemoteSurface.card(appearance),
+                    in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .strokeBorder(RemoteSurface.separator(appearance), lineWidth: 0.75))
         .confirmationDialog(
             "Forget this Mac?",
             isPresented: $showForget,
@@ -261,8 +267,8 @@ struct RemoteField: View {
                     }
                 }
                 .padding(.horizontal, 14).frame(minHeight: 50)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay { RoundedRectangle(cornerRadius: 14).stroke(BeetTheme.line(appearance)) }
+                .background(RemoteSurface.well(appearance), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay { RoundedRectangle(cornerRadius: 14).stroke(RemoteSurface.separator(appearance)) }
         }
     }
 }
@@ -316,8 +322,8 @@ struct RemoteSecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.foregroundStyle(BeetTheme.secondaryText(appearance))
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .background(BeetTheme.surfaceStrong(appearance).opacity(0.2), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay { RoundedRectangle(cornerRadius: 14).stroke(BeetTheme.line(appearance)) }
+            .background(RemoteSurface.well(appearance), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 14).stroke(RemoteSurface.separator(appearance)) }
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.975 : 1).animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
@@ -518,7 +524,7 @@ struct RemoteReconnectBanner: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(.thinMaterial)
-            .background(BeetTheme.surface(appearance).opacity(0.3))
+            .background(RemoteSurface.card(appearance))
         }
         .buttonStyle(.plain)
         .disabled(store.isConnecting)

@@ -197,7 +197,7 @@ struct MessageTranscript: View {
                 .padding(.horizontal, 14)
                 .frame(minHeight: 44)
                 .background(.regularMaterial, in: Capsule())
-                .overlay { Capsule().stroke(BeetTheme.line(appearance), lineWidth: 0.75) }
+                .overlay { Capsule().stroke(RemoteSurface.separator(appearance), lineWidth: 0.75) }
                 .contentShape(Capsule())
         }
         .buttonStyle(RemotePressButtonStyle())
