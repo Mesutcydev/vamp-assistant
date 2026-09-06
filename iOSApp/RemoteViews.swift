@@ -470,9 +470,12 @@ struct RemoteContentSheet: View {
         } else if #available(iOS 26.0, *) {
             // Tint over glass, not glass alone: clear glass refracts the
             // engraving rather than covering it, so at full bleed the
-            // atmosphere landed inside the paragraphs. Light needs more of the
-            // card than dark — a pale ground shows the mottle far sooner.
-            shape.fill(RemoteSurface.card(appearance).opacity(appearance == .light ? 0.46 : 0.40))
+            // atmosphere landed inside the paragraphs. Dark needs far more of
+            // the card than light: the engraving's highlights are brighter
+            // than an ink ground, so on the phone the columns read straight
+            // through the session list — while on paper the same image is
+            // darker than the page and 46% already settles it.
+            shape.fill(RemoteSurface.card(appearance).opacity(appearance == .light ? 0.46 : 0.68))
                 .background {
                     GeometryReader { geometry in
                         Color.clear
