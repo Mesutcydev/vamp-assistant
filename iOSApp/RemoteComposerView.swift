@@ -85,7 +85,7 @@ struct RemoteComposer: View {
                 showCommands = false
                 isComposerFocused = true
             }
-            .presentationDetents([.height(392)])
+            .presentationDetents([.height(376)])
             .presentationDragIndicator(.visible)
             .presentationBackground(RemoteSurface.card(appearance))
         }
@@ -172,25 +172,23 @@ private struct RemoteCommandPopover: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
                 Text(group.0.uppercased())
-                    .font(.caption2.weight(.semibold))
-                    .tracking(0.8)
-                    .foregroundStyle(.primary.opacity(0.5))
-                    .padding(.horizontal, 14)
-                    .padding(.top, index == 0 ? 12 : 14)
-                    .padding(.bottom, 4)
+                    .remoteSectionHeadingStyle()
+                    .padding(.horizontal, 16)
+                    .padding(.top, index == 0 ? 14 : 16)
+                    .padding(.bottom, 6)
                 ForEach(group.1) { command in
                     row(command)
                     if command.id != group.1.last?.id {
                         Rectangle()
                             .fill(RemoteSurface.separator(appearance))
                             .frame(height: 0.75)
-                            .padding(.leading, 48)
+                            .padding(.leading, 50)
                     }
                 }
             }
         }
-        .padding(.bottom, 10)
-        .frame(width: 292)
+        .padding(.bottom, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func row(_ command: RemoteComposerCommand) -> some View {
@@ -198,13 +196,11 @@ private struct RemoteCommandPopover: View {
             draft = command.prompt
             onChoose()
         } label: {
-            HStack(spacing: 11) {
+            HStack(spacing: 12) {
                 Image(systemName: command.symbol)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.primary.opacity(0.7))
-                    .frame(width: 26, height: 26)
-                    .background(RemoteSurface.well(appearance),
-                                in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(.primary.opacity(0.8))
+                    .frame(width: 22)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(command.title)
@@ -212,13 +208,13 @@ private struct RemoteCommandPopover: View {
                         .foregroundStyle(.primary)
                     Text(command.detail)
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.primary.opacity(0.55))
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 14)
-            .frame(minHeight: 46)
+            .padding(.horizontal, 16)
+            .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

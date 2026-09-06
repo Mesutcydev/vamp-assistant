@@ -106,7 +106,7 @@ struct StartSessionSheet: View {
                 VStack(alignment: .leading, spacing: 0) {
                     if !store.isConnected { reconnectCard.padding(.bottom, 22) }
                     promptField
-                    chipRow
+                    setupRow
                     startersList
                 }
                 .padding(.horizontal, 20)
@@ -217,22 +217,29 @@ struct StartSessionSheet: View {
         .frame(minHeight: 84, alignment: .topLeading)
     }
 
-    private var chipRow: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                RemoteSettingChip(
-                    title: locationValue,
-                    icon: isChatOnly ? "bubble.left.and.bubble.right" : "folder") {
-                        sheet = .workspace
-                    }
-                RemoteSettingChip(title: botProfile.name, icon: botProfile.symbol) {
-                    sheet = .bot
-                }
-                RemoteSettingChip(
-                    title: selectedModel?.name ?? (isLoading ? "Loading…" : "Choose a model"),
-                    icon: "cpu") {
-                        sheet = .model
-                    }
+    /// The four things a session is, as a row of cells rather than a rail of
+    /// pills.
+    ///
+    /// The pills scrolled sideways, so the model — the one setting people
+    /// actually change — sat half off the screen and the row read as a filter
+    /// bar. This is the shape the home screen already uses for the Mac's
+    /// actions: even cells on the ground between two hairlines, a glyph over
+    /// what the setting is currently set to.
+    private var setupRow: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(RemoteSurface.separator(appearance))
+                .frame(height: 0.75)
+            HStack(spacing: 0) {
+                setupCell(icon: isChatOnly ? "bubble.left.and.bubble.right" : "folder",
+                          value: locationValue,
+                          spoken: "Works in, \(locationValue)") { sheet = .workspace }
+                setupCell(icon: botProfile.symbol,
+                          value: botProfile.name,
+                          spoken: "Bot, \(botProfile.name)") { sheet = .bot }
+                setupCell(icon: "cpu",
+                          value: shortModelName,
+                          spoken: "Model, \(selectedModel?.name ?? "none chosen")") { sheet = .model }
                 if let model = selectedModel, let efforts = model.reasoningEfforts, !efforts.isEmpty {
                     Menu {
                         Picker("Reasoning", selection: $selectedReasoningEffort) {
@@ -242,20 +249,58 @@ struct StartSessionSheet: View {
                             }
                         }
                     } label: {
-                        RemoteSettingChipLabel(
-                            title: selectedReasoningEffort?.capitalized ?? "Auto",
-                            icon: "brain")
+                        setupCellLabel(icon: "brain",
+                                       value: selectedReasoningEffort?.capitalized ?? "Auto")
                     }
-                }
-                RemoteSettingChip(title: "Sandboxes & keys", icon: "shippingbox") {
-                    sheet = .advanced
+                    .accessibilityLabel("Reasoning, \(selectedReasoningEffort?.capitalized ?? "Auto")")
+                } else {
+                    setupCell(icon: "shippingbox",
+                              value: "Keys",
+                              spoken: "Sandboxes and keys") { sheet = .advanced }
                 }
             }
-            .padding(.vertical, 2)
+            .frame(height: 64)
+            Rectangle()
+                .fill(RemoteSurface.separator(appearance))
+                .frame(height: 0.75)
         }
-        .scrollIndicators(.hidden)
-        .padding(.top, 20)
+        .padding(.top, 22)
         .accessibilityLabel("Session setup")
+    }
+
+    private func setupCell(icon: String,
+                           value: String,
+                           spoken: String,
+                           action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            setupCellLabel(icon: icon, value: value)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(spoken)
+    }
+
+    private func setupCellLabel(icon: String, value: String) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 20, weight: .regular))
+                .foregroundStyle(.primary.opacity(0.85))
+                .frame(height: 22)
+            Text(value)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.primary.opacity(0.6))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .minimumScaleFactor(0.85)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+    }
+
+    /// Model names run long ("Qwen3.5 9B Abliterated MLX 4bit"); a cell shows
+    /// the part that identifies it.
+    private var shortModelName: String {
+        guard let name = selectedModel?.name else { return isLoading ? "Loading" : "Choose" }
+        return name.split(separator: " ").prefix(2).joined(separator: " ")
     }
 
     @ViewBuilder
