@@ -218,15 +218,17 @@ struct SessionListView: View {
             // bar. These are actions, not places, so they sit in the card
             // that names the Mac they act on, at the top of the screen.
             RemoteQuickActionRow {
+                // One family of glyphs: outline weights, no mixed fills.
                 RemoteQuickAction(title: "Stream",
-                                  symbol: "display.and.arrow.down",
+                                  symbol: "display",
                                   spokenLabel: "Stream this Mac",
-                                  hint: store.isConnected ? "" : "Connect to your Mac first") {
+                                  hint: store.isConnected ? "" : "Connect to your Mac first",
+                                  showsDivider: false) {
                     stage = .display
                 }
                 .disabled(!store.isConnected)
                 RemoteQuickAction(title: "Bots",
-                                  symbol: "person.3.sequence.fill",
+                                  symbol: "person.3.sequence",
                                   spokenLabel: "Specialist bots") {
                     showBotRuns = true
                 }
@@ -242,7 +244,8 @@ struct SessionListView: View {
                 }
             }
             .remoteListRow()
-            .listRowInsets(EdgeInsets(top: 6, leading: 10, bottom: 8, trailing: 10))
+            .listRowInsets(EdgeInsets(top: 10, leading: 20, bottom: 12, trailing: 20))
+            .listRowSeparator(.hidden)
         } footer: {
             if !store.isConnected {
                 Text(store.connectionSubtitle)

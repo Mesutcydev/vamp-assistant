@@ -4,11 +4,13 @@ from tokens import DARK, LIGHT
 
 def sessions(t, name):
     a = t['accent']; br = t['bright']
-    def action(icon, label):
-        return f'''<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;padding:10px 0;border-radius:14px;background:{t['glass']};min-height:60px;justify-content:center">
-          {ico(icon, br, 19)}
+    def action(icon, label, first=False):
+        edge = '' if first else f'border-left:0.75px solid {t["sep"]};'
+        return f'''<div style="flex:1;{edge}display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;height:62px">
+          {ico(icon, t['text'], 19, 1.5)}
           <div style="font-size:11px;font-weight:500;color:{t['text2']}">{label}</div>
         </div>'''
+
     def srow(title, sub, time, running=False, last=False):
         dot = f'<div style="width:7px;height:7px;border-radius:4px;background:{br};flex:none"></div>' if running else '<div style="width:7px;flex:none"></div>'
         return f'''<div style="display:flex;align-items:center;gap:11px;min-height:60px">
@@ -44,8 +46,8 @@ def sessions(t, name):
     </div>
     <div class="div"></div>
 
-    <div style="display:flex;gap:8px;padding:12px 0 2px">
-      {action('display','Stream')}{action('people','Bots')}{action('share','Share')}{action('gear','Settings')}
+    <div style="display:flex;margin:12px 0 2px;border-radius:16px;background:{t['well']};border:0.75px solid {t['sep']};overflow:hidden">
+      {action('display','Stream', first=True)}{action('people','Bots')}{action('share','Share')}{action('gear','Settings')}
     </div>
 
     <div class="cap" style="padding:22px 0 6px">Today</div>

@@ -565,15 +565,27 @@ enum RemoteBackdropSetting {
 /// anywhere to come back from. They live at the top instead, in the same card
 /// as the Mac they mostly act on, and they scroll away with it.
 struct RemoteQuickActionRow<Content: View>: View {
+    @Environment(\.remoteAppearance) private var appearance
     @ViewBuilder var content: Content
 
     var body: some View {
-        HStack(spacing: 8) { content }
-            .padding(.vertical, 2)
+        // One strip, not four tiles. Four separately filled wells floating on
+        // the ground read as four unrelated buttons and put three gaps of
+        // nothing between them; a single well divided by the app's own
+        // hairlines is one control that happens to have four cells — and it
+        // matches the rows above and below it, which are also hairline-divided.
+        HStack(spacing: 0) { content }
+            .frame(height: 62)
+            .background(RemoteSurface.well(appearance),
+                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(RemoteSurface.separator(appearance), lineWidth: 0.75)
+            }
     }
 }
 
-/// One action in `RemoteQuickActionRow`: a glyph over a short name, on a well.
+/// One cell of `RemoteQuickActionRow`: a glyph over a short name.
 struct RemoteQuickAction: View {
     @Environment(\.remoteAppearance) private var appearance
     @Environment(\.isEnabled) private var isEnabled
@@ -581,26 +593,39 @@ struct RemoteQuickAction: View {
     let symbol: String
     let spokenLabel: String
     var hint: String = ""
+    /// Every cell but the first carries the hairline that separates it from
+    /// the one before, so the strip needs no divider views of its own.
+    var showsDivider = true
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 5) {
+            VStack(spacing: 6) {
                 Image(systemName: symbol)
-                    .font(.system(size: 18, weight: .medium))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(isEnabled ? AnyShapeStyle(BeetTheme.accent)
+                    .font(.system(size: 19, weight: .regular))
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(isEnabled ? AnyShapeStyle(HierarchicalShapeStyle.primary)
                                                : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
+                    .frame(height: 21)
                 Text(title)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.primary.opacity(isEnabled ? 0.72 : 0.32))
+                    .font(.system(size: 11, weight: .medium))
+                    .tracking(0.1)
+                    .foregroundStyle(.primary.opacity(isEnabled ? 0.62 : 0.28))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .minimumScaleFactor(0.85)
             }
-            .frame(maxWidth: .infinity, minHeight: 56)
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
         }
-        .buttonStyle(RemoteQuickActionStyle(appearance: appearance))
+        .buttonStyle(RemoteQuickActionStyle())
+        .overlay(alignment: .leading) {
+            if showsDivider {
+                Rectangle()
+                    .fill(RemoteSurface.separator(appearance))
+                    .frame(width: 0.75)
+                    .padding(.vertical, 12)
+            }
+        }
         .accessibilityLabel(spokenLabel)
         .accessibilityHint(hint)
     }
@@ -608,17 +633,13 @@ struct RemoteQuickAction: View {
 
 private struct RemoteQuickActionStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    let appearance: RemoteAppearance
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .background {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(RemoteSurface.well(appearance))
-                    .opacity(configuration.isPressed ? 1 : 0.55)
-            }
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            // The press tints the cell rather than scaling it: a cell inside a
+            // strip cannot shrink without tearing the strip's edge.
+            .background(Color.primary.opacity(configuration.isPressed ? 0.07 : 0))
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
