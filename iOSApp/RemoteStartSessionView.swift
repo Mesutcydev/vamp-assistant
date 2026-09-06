@@ -242,7 +242,7 @@ struct StartSessionSheet: View {
                 detail: selectedModel?.detail,
                 action: { showModelPicker = true })
         } header: {
-            Text("Setup")
+            RemoteSectionHeading("Setup")
         } footer: {
             Text("Starts with the folder, bot and model you used last.")
         }
@@ -267,7 +267,7 @@ struct StartSessionSheet: View {
                 icon: "shippingbox",
                 action: { showAdvanced = true })
         } header: {
-            Text("More")
+            RemoteSectionHeading("More")
         }
         .remoteListRow()
     }
@@ -307,7 +307,7 @@ struct StartSessionSheet: View {
         .padding(.horizontal, 20)
         .padding(.top, 10)
         .padding(.bottom, 12)
-        .background(.bar)
+        .background(RemoteSurface.card(appearance))
         // Over a pale backdrop the bar material alone is nearly invisible, so
         // the button reads as floating loose at the bottom of the sheet.
         .overlay(alignment: .top) { Divider() }

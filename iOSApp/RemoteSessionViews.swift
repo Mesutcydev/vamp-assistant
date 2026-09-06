@@ -72,7 +72,7 @@ struct SessionListView: View {
                 Section { emptyState }
             } else {
                 ForEach(SessionDaySection.group(visible)) { section in
-                    Section(section.title) {
+                    Section {
                         ForEach(section.sessions) { session in
                             NavigationLink(value: session.id) { SessionRow(session: session) }
                                 .remoteListRow()
@@ -87,6 +87,8 @@ struct SessionListView: View {
                                     .tint(.gray)
                                 }
                         }
+                    } header: {
+                        RemoteSectionHeading(section.title)
                     }
                 }
             }
@@ -388,7 +390,7 @@ struct SessionRow: View {
                 .lineLimit(1)
                 .monospacedDigit()
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 6)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(session.isRunning ? .updatesFrequently : [])
     }

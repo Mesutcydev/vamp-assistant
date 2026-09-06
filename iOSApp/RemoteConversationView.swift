@@ -11,6 +11,7 @@ import UniformTypeIdentifiers
 struct ConversationView: View {
     @Bindable var store: RemoteStore
     let sessionID: UUID
+    @Environment(\.remoteAppearance) private var appearance
     private var draft: String { store[draftFor: sessionID] }
     @State private var showSharing = false
     @State private var showComputers = false
@@ -186,9 +187,7 @@ struct ConversationView: View {
         .padding(.leading, 14)
         .padding(.trailing, 8)
         .padding(.vertical, 7)
-        .background(
-            Color(uiColor: .secondarySystemGroupedBackground).opacity(0.9),
-            in: Capsule())
+        .background(RemoteSurface.card(appearance), in: Capsule())
         .padding(.horizontal, 12)
         .accessibilityElement(children: .contain)
     }

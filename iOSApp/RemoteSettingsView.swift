@@ -97,7 +97,7 @@ struct RemoteSettingsSheet: View {
             AccentSwatchPicker(selection: $accent)
             Toggle("Background image", isOn: $showsBackdrop)
         } header: {
-            Text("Appearance")
+            RemoteSectionHeading("Appearance")
         } footer: {
             Text(showsBackdrop
                  ? "The engraved atmosphere sits behind every screen."
@@ -131,7 +131,7 @@ struct RemoteSettingsSheet: View {
             }
             Button("Forget this Mac", role: .destructive) { showForgetMac = true }
         } header: {
-            Text("Mac")
+            RemoteSectionHeading("Mac")
         }
         .remoteListRow()
     }

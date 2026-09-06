@@ -129,6 +129,38 @@ extension View {
     }
 }
 
+/// The app's own surface palette.
+///
+/// The system's grouped greys are cool, and they were translucent over a warm
+/// sepia engraving — so every card picked up texture through it and the whole
+/// app read muddy rather than calm. These are warm to match the engraving and
+/// the clay accent, and they are opaque: the atmosphere belongs in the margins
+/// around content, not behind the words.
+enum RemoteSurface {
+    /// Behind everything, when the backdrop image is off.
+    static func ground(_ appearance: RemoteAppearance) -> Color {
+        appearance == .light ? Color(red: 0.949, green: 0.937, blue: 0.914)
+                             : Color(red: 0.082, green: 0.075, blue: 0.063)
+    }
+
+    /// Cards, rows, sheets.
+    static func card(_ appearance: RemoteAppearance) -> Color {
+        appearance == .light ? Color(red: 0.992, green: 0.988, blue: 0.980)
+                             : Color(red: 0.129, green: 0.118, blue: 0.102)
+    }
+
+    /// A well inside a card: fields, chips, the composer.
+    static func well(_ appearance: RemoteAppearance) -> Color {
+        appearance == .light ? Color(red: 0.933, green: 0.921, blue: 0.898)
+                             : Color(red: 0.180, green: 0.165, blue: 0.145)
+    }
+
+    static func separator(_ appearance: RemoteAppearance) -> Color {
+        appearance == .light ? Color(red: 0.235, green: 0.216, blue: 0.176).opacity(0.14)
+                             : Color(red: 1.0, green: 0.973, blue: 0.922).opacity(0.10)
+    }
+}
+
 /// Grouped-list rows over the app's backdrop.
 ///
 /// A stock `insetGrouped` list paints opaque cells, which would hide the
@@ -139,20 +171,10 @@ struct RemoteListRowBackground: ViewModifier {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.remoteAppearance) private var appearance
 
-    /// Light mode needs a nearly opaque cell. The engraving is dark lines on
-    /// pale paper, so at the dark mode's alpha it reads straight through white
-    /// cells and text ends up sitting on texture. Dark mode has the opposite
-    /// problem — an opaque cell there kills the depth entirely — so the two
-    /// appearances get different alphas rather than a compromise that suits
-    /// neither.
-    private var alpha: Double {
-        if reduceTransparency { return 1 }
-        return appearance == .light ? 0.97 : 0.94
-    }
-
     func body(content: Content) -> some View {
-        content.listRowBackground(
-            Color(uiColor: .secondarySystemGroupedBackground).opacity(alpha))
+        // Opaque, always. Sheer cells let the engraving through the words,
+        // which is what made the type look dirty at every size.
+        content.listRowBackground(RemoteSurface.card(appearance))
     }
 }
 
@@ -250,6 +272,24 @@ struct RemoteOfflineRow: View {
     }
 }
 
+/// A section header with the app's own typographic register: smaller, wider
+/// tracked and quieter than the system's, so headers recede and the content
+/// carries the page.
+struct RemoteSectionHeading: View {
+    let text: String
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text.uppercased())
+            .font(.caption.weight(.semibold))
+            .tracking(0.9)
+            .foregroundStyle(.secondary)
+            .padding(.top, 4)
+            .padding(.bottom, 2)
+    }
+}
+
 /// A page's own opening: a glyph, a name, and one line saying what the screen
 /// is for. Each screen picks its own, which is what keeps a stack of grouped
 /// lists from reading as the same page four times.
@@ -259,24 +299,27 @@ struct RemotePageHero: View {
     let subtitle: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             Image(systemName: icon)
-                .font(.system(size: 28, weight: .medium))
+                .font(.system(size: 22, weight: .regular))
                 .foregroundStyle(BeetTheme.accentBright)
-                .frame(height: 32)
+                .padding(.bottom, 2)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.title2.weight(.semibold))
-                Text(subtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text(title)
+                // Tighter and larger than a section header: this is the line
+                // that tells you where you are.
+                .font(.system(.title, design: .default, weight: .semibold))
+                .tracking(-0.5)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(subtitle)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 4)
-        .padding(.bottom, 10)
+        .padding(.top, 12)
+        .padding(.bottom, 18)
         .listRowBackground(Color.clear)
         .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
         .accessibilityElement(children: .combine)
@@ -451,20 +494,13 @@ struct RemoteBackdrop: View {
                 .saturation(0)
                 .frame(width: proxy.size.width, height: proxy.size.height)
                 .clipped()
-                .overlay(appearance == .light
-                    ? Color.white.opacity(0.66)
-                    : Color.black.opacity(0.64))
-                .overlay {
-                    LinearGradient(
-                        colors: appearance == .light
-                            ? [.white.opacity(0.30), .white.opacity(0.68)]
-                            : [.black.opacity(0.12), .black.opacity(0.50)],
-                        startPoint: .top,
-                        endPoint: .bottom)
-                }
+                // Pushed much further back than before. The engraving is a
+                // room the content sits in, not a pattern printed behind it —
+                // at the old strength it competed with every card edge.
+                .opacity(appearance == .light ? 0.32 : 0.28)
                 .accessibilityHidden(true)
         }
-        .background(BeetTheme.background(appearance))
+        .background(RemoteSurface.ground(appearance))
         .ignoresSafeArea()
     }
 }

@@ -218,7 +218,7 @@ struct MessageBubble: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
                 .background(
-                    Color(uiColor: .secondarySystemGroupedBackground).opacity(0.86),
+                    RemoteSurface.card(appearance),
                     in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .accessibilityLabel("You: \(message.content)")
         }
@@ -346,7 +346,7 @@ struct CheckpointMessageRow: View {
         .padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            Color(uiColor: .secondarySystemGroupedBackground).opacity(0.86),
+            RemoteSurface.card(appearance),
             in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .confirmationDialog("Restore this checkpoint?",
                             isPresented: $confirming,
@@ -386,7 +386,7 @@ struct RemoteChatErrorCard: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            Color(uiColor: .secondarySystemGroupedBackground).opacity(0.86),
+            RemoteSurface.card(appearance),
             in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
@@ -402,6 +402,7 @@ struct MarkdownText: View {
 /// lines of JSON whether anyone wanted them or not.
 struct ToolMessageCard: View {
     let message: RemoteMessage
+    @Environment(\.remoteAppearance) private var appearance
     @State private var expanded = false
 
     var body: some View {
@@ -447,7 +448,7 @@ struct ToolMessageCard: View {
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            Color(uiColor: .secondarySystemGroupedBackground).opacity(0.86),
+            RemoteSurface.card(appearance),
             in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
@@ -538,7 +539,7 @@ struct QueuedFollowUpsView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(
-                    Color(uiColor: .secondarySystemGroupedBackground).opacity(0.86),
+                    RemoteSurface.card(appearance),
                     in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
         }

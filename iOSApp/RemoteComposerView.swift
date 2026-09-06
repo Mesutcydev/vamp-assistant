@@ -16,6 +16,7 @@ struct RemoteComposer: View {
     let onSend: () -> Void
     var onQueue: (() -> Void)? = nil
     var onSteer: (() -> Void)? = nil
+    @Environment(\.remoteAppearance) private var appearance
     @FocusState private var isComposerFocused: Bool
     @State private var showCommands = false
 
@@ -31,7 +32,7 @@ struct RemoteComposer: View {
                 Image(systemName: "plus")
                     .font(.body.weight(.semibold))
                     .frame(width: 32, height: 32)
-                    .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+                    .background(RemoteSurface.well(appearance), in: Circle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -75,8 +76,8 @@ struct RemoteComposer: View {
             .padding(.trailing, 5)
             .background(
                 Capsule()
-                    .fill(Color(uiColor: .secondarySystemGroupedBackground).opacity(0.7)))
-            .overlay(Capsule().stroke(Color(uiColor: .separator), lineWidth: 0.5))
+                    .fill(RemoteSurface.well(appearance)))
+            .overlay(Capsule().stroke(RemoteSurface.separator(appearance), lineWidth: 0.5))
         }
         .animation(.easeOut(duration: 0.16), value: isRunning && hasDraft)
         .frame(maxWidth: 720)
@@ -84,7 +85,7 @@ struct RemoteComposer: View {
         .padding(.top, 6)
         .padding(.bottom, 8)
         .frame(maxWidth: .infinity)
-        .background(.bar)
+        .background(RemoteSurface.card(appearance))
         .sheet(isPresented: $showCommands) {
             RemoteCommandPalette(draft: $draft) {
                 showCommands = false
@@ -201,6 +202,7 @@ struct PendingInteractionView: View {
     let pending: RemotePendingInteraction
     var isResolving = false
     let onResolve: (String) -> Void
+    @Environment(\.remoteAppearance) private var appearance
     @State private var answer = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 13) {
@@ -265,7 +267,7 @@ struct PendingInteractionView: View {
         }
         .padding(14)
         .background(
-            Color(uiColor: .secondarySystemGroupedBackground).opacity(0.92),
+            RemoteSurface.card(appearance),
             in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .padding(.horizontal, 12)
         .padding(.bottom, 8)
