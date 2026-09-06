@@ -320,39 +320,8 @@ struct ComputerSwitcherSheet: View {
                         title: "Your computers",
                         subtitle: "Every Mac this device is paired with. Pick one to work on.")
                 }
-                Section {
-                    ForEach(store.pairedComputers) { computer in
-                        RemoteSelectionRow(
-                            title: computer.name,
-                            subtitle: computer.baseURL.host ?? computer.baseURL.absoluteString,
-                            isSelected: computer.id == store.activeComputerID) {
-                                Task {
-                                    await store.switchComputer(to: computer.id)
-                                    if store.isConnected { dismiss() }
-                                }
-                            }
-                            .swipeActions(edge: .trailing) {
-                                Button("Remove", systemImage: "trash", role: .destructive) {
-                                    pendingRemoval = computer
-                                }
-                            }
-                    }
-                } footer: {
-                    if let active = store.pairedComputers.first(where: { $0.id == store.activeComputerID }) {
-                        Text(store.isConnected
-                             ? "Connected to \(active.name)."
-                             : "\(active.name) is selected but not reachable.")
-                    }
-                }
-                .remoteListRow()
-
-                Section {
-                    Button("Pair another computer", systemImage: "plus") { showPairing = true }
-                    RemoteDisclosureRow(title: "Connection details", icon: "network") {
-                        showDiagnostics = true
-                    }
-                }
-                .remoteListRow()
+                computersSection
+                actionsSection
             }
             .scrollContentBackground(.hidden)
             .background { RemoteBackdrop() }
@@ -376,6 +345,115 @@ struct ComputerSwitcherSheet: View {
                 }
             .sheet(isPresented: $showDiagnostics) { RemoteDiagnosticsView(store: store) }
             .sheet(isPresented: $showPairing) { PairAnotherMacSheet(store: store) }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    /// Split out of `body`: as one expression the whole list defeated the type
+    /// checker ("unable to type-check this expression in reasonable time").
+    private var computersSection: some View {
+        Section {
+            ForEach(store.pairedComputers) { computer in
+                RemoteSelectionRow(
+                    title: computer.name,
+                    subtitle: computer.baseURL.host ?? computer.baseURL.absoluteString,
+                    isSelected: computer.id == store.activeComputerID) {
+                        Task {
+                            await store.switchComputer(to: computer.id)
+                            if store.isConnected { dismiss() }
+                        }
+                    }
+                    .swipeActions(edge: .trailing) {
+                        Button("Remove", systemImage: "trash", role: .destructive) {
+                            pendingRemoval = computer
+                        }
+                    }
+            }
+        } footer: {
+            connectionFooter
+        }
+        .remoteListRow()
+    }
+
+    @ViewBuilder
+    private var connectionFooter: some View {
+        if let active = store.pairedComputers.first(where: { $0.id == store.activeComputerID }) {
+            Text(store.isConnected
+                 ? "Connected to \(active.name)."
+                 : "\(active.name) is selected but not reachable.")
+        }
+    }
+
+    private var actionsSection: some View {
+        Section {
+            Button("Pair another computer", systemImage: "plus") { showPairing = true }
+            RemoteDisclosureRow(title: "Connection details", icon: "network") {
+                showDiagnostics = true
+            }
+        }
+        .remoteListRow()
+    }
+}
+
+struct PairAnotherMacSheet: View {
+    let store: RemoteStore
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.remoteAppearance) private var appearance
+    @State private var address = ""
+    @State private var code = ""
+    @State private var showScanner = false
+    @State private var showManual = true
+    @FocusState private var focusedField: PairingField?
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                RemoteBackdrop()
+                ScrollView {
+                    VStack(spacing: 16) {
+                        Text("Scan the QR on your Mac, or enter its LAN or Tailscale address and pairing code.")
+                            .font(.subheadline)
+                            .foregroundStyle(BeetTheme.secondaryText(appearance))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        PairingActions(
+                            address: $address,
+                            code: $code,
+                            showManual: $showManual,
+                            focusedField: $focusedField,
+                            savedAddress: nil,
+                            requiresPairing: false,
+                            isConnecting: store.isConnecting,
+                            onScan: { showScanner = true },
+                            onReconnect: {},
+                            onForget: {},
+                            onConnect: {
+                                Task {
+                                    if await store.connect(address: address, code: code) { dismiss() }
+                                }
+                            })
+                    }
+                    .padding(18)
+                }
+            }
+            .navigationTitle("Pair another Mac")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .sheet(isPresented: $showScanner) {
+                QRScannerSheet(onScan: { value in
+                    address = value
+                    showScanner = false
+                    Task {
+                        if await store.connect(address: value, code: "") { dismiss() }
+                    }
+                }, onCancel: { showScanner = false })
+            }
+            .keyboardDismissToolbar()
+            .scrollDismissesKeyboard(.interactively)
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
