@@ -540,44 +540,23 @@ enum RemoteBackdropSetting {
     static let key = "remoteShowsBackdrop"
 }
 
-/// The standing actions of a screen, drawn as one strip rather than five
-/// system buttons.
+/// The screen's standing actions, laid out inside the card they belong to.
 ///
-/// A stock `.bottomBar` renders tinted text on the navigation bar's material,
-/// which reads as a debug toolbar over this app's warm ground — the labels
-/// float with nothing holding them together, and their tint fights the
-/// accent used for content. So the bar is a single card: the same surface,
-/// hairline and shadow the rows above it use, floated clear of the ground so
-/// the engraving still runs behind it, with the actions laid out on a shared
-/// baseline inside.
-struct RemoteActionBar<Content: View>: View {
-    @Environment(\.remoteAppearance) private var appearance
+/// Not a bar pinned to the bottom: a strip floating there reads as a tab bar,
+/// and these are actions, not places — pressing Share does not take you
+/// anywhere to come back from. They live at the top instead, in the same card
+/// as the Mac they mostly act on, and they scroll away with it.
+struct RemoteQuickActionRow<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        HStack(spacing: 0) { content }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 6)
-            .background {
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .fill(RemoteSurface.card(appearance))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 26, style: .continuous)
-                            .strokeBorder(RemoteSurface.separator(appearance), lineWidth: 0.75)
-                    }
-                    .shadow(color: .black.opacity(appearance == .light ? 0.10 : 0.38),
-                            radius: 18, y: 8)
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 6)
+        HStack(spacing: 8) { content }
+            .padding(.vertical, 2)
     }
 }
 
-/// One action inside `RemoteActionBar`: a glyph over a short name.
-///
-/// The name is short because five of them share a phone's width; the long
-/// form is what VoiceOver reads.
-struct RemoteActionBarButton: View {
+/// One action in `RemoteQuickActionRow`: a glyph over a short name, on a well.
+struct RemoteQuickAction: View {
     @Environment(\.remoteAppearance) private var appearance
     @Environment(\.isEnabled) private var isEnabled
     let title: String
@@ -588,38 +567,37 @@ struct RemoteActionBarButton: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 4) {
+            VStack(spacing: 5) {
                 Image(systemName: symbol)
-                    .font(.system(size: 17, weight: .medium))
+                    .font(.system(size: 18, weight: .medium))
                     .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(isEnabled ? AnyShapeStyle(BeetTheme.accent)
                                                : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
                 Text(title)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.primary.opacity(isEnabled ? 0.66 : 0.3))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.primary.opacity(isEnabled ? 0.72 : 0.32))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+                    .minimumScaleFactor(0.8)
             }
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .padding(.vertical, 4)
-            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .frame(maxWidth: .infinity, minHeight: 56)
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
-        .buttonStyle(RemoteActionBarButtonStyle(appearance: appearance))
+        .buttonStyle(RemoteQuickActionStyle(appearance: appearance))
         .accessibilityLabel(spokenLabel)
         .accessibilityHint(hint)
     }
 }
 
-private struct RemoteActionBarButtonStyle: ButtonStyle {
+private struct RemoteQuickActionStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let appearance: RemoteAppearance
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(RemoteSurface.well(appearance))
-                    .opacity(configuration.isPressed ? 1 : 0)
+                    .opacity(configuration.isPressed ? 1 : 0.55)
             }
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)

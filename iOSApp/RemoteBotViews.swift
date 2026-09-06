@@ -2,160 +2,9 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-/// Bots have their own screen now: an index of every profile with its live run
-/// state, and a detail page per bot. They used to be split between a cramped
-/// home-screen strip (start a chat) and a grid of dense cards (start a run), so
-/// nothing ever said what a bot is or what it is currently doing.
-struct RemoteBotsView: View {
-    let store: RemoteStore
-    let onOpen: (UUID) -> Void
-    @Environment(\.dismiss) private var dismiss
-    @State private var path: [String] = []
-    @State private var workflowPrompt = ""
-    @State private var selectedModelID = ""
-
-    var body: some View {
-        NavigationStack(path: $path) {
-            List {
-                Section {
-                    RemotePageHero(
-                        icon: "person.3.sequence",
-                        title: "Five specialists",
-                        subtitle: "Each runs on your Mac with its own brief. Open one to start or steer its work.")
-                }
-                if !store.isConnected {
-                    Section { RemoteOfflineRow(store: store) }
-                        .remoteListRow()
-                } else if let notice = store.backgroundNotice {
-                    Section {
-                        Label(notice, systemImage: "exclamationmark.circle")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        Button("Retry") { Task { try? await store.refresh() } }
-                    }
-                    .remoteListRow()
-                }
-                workflowSection
-                Section {
-                    ForEach(RemoteBotProfile.profiles) { profile in
-                        NavigationLink(value: profile.id) {
-                            RemoteBotIndexRow(profile: profile, run: run(for: profile.id))
-                        }
-                    }
-                } header: {
-                    Text("Bots")
-                }
-                .remoteListRow()
-            }
-            .scrollContentBackground(.hidden)
-            .background { RemoteBackdrop() }
-            .refreshable { try? await store.refresh() }
-            .navigationTitle("Bots")
-            .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: String.self) { id in
-                RemoteBotDetailView(
-                    store: store,
-                    profile: RemoteBotProfile.profile(id: id),
-                    selectedModelID: $selectedModelID,
-                    onOpen: onOpen)
-            }
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-            }
-            .keyboardDismissToolbar()
-            .task {
-                if store.startModels.isEmpty { await store.loadStartModels() }
-                if selectedModelID.isEmpty { selectedModelID = store.startModels.first?.id ?? "" }
-                try? await store.refresh()
-            }
-        }
-        .presentationDetents([.large])
-    }
-
-    private func run(for profileID: String) -> RemoteBotRun? {
-        store.botRuns.first { $0.profileID == profileID && !$0.isTerminal }
-            ?? store.botRuns.first { $0.profileID == profileID }
-    }
-
-    private var canOrchestrate: Bool {
-        store.isConnected && !selectedModelID.isEmpty
-            && !workflowPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var workflowSection: some View {
-        Section {
-            if !store.startModels.isEmpty {
-                Picker("Model", selection: $selectedModelID) {
-                    ForEach(store.startModels) { Text($0.name).tag($0.id) }
-                }
-                .accessibilityLabel("Model for the workflow")
-            }
-            TextField("Describe the complete outcome", text: $workflowPrompt, axis: .vertical)
-                .lineLimit(2...4)
-            Button("Orchestrate") {
-                let prompt = workflowPrompt
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                Task {
-                    if await store.orchestrateBots(modelID: selectedModelID, prompt: prompt) {
-                        workflowPrompt = ""
-                        UINotificationFeedbackGenerator().notificationOccurred(.success)
-                    }
-                }
-            }
-            .disabled(!canOrchestrate)
-            .accessibilityHint(store.isConnected ? "" : "Connect to your Mac first")
-        } header: {
-            Text("Adaptive workflow")
-        } footer: {
-            Text("Describe an outcome and the bots divide the work between them.")
-        }
-        .remoteListRow()
-    }
-}
-
-/// One tile in the bot index: who the bot is, plus whatever it is doing now.
-/// One row in the bot index. The portrait stays: it is the only thing on this
-/// screen that is ours rather than the platform's, and it is what makes the
-/// list read as five characters instead of five settings.
-private struct RemoteBotIndexRow: View {
-    let profile: RemoteBotProfile
-    let run: RemoteBotRun?
-
-    private var isActive: Bool { run.map { !$0.isTerminal } ?? false }
-
-    private var statusText: String {
-        guard let run else { return profile.isSpecialist ? "Idle" : "Chat only" }
-        if run.isTerminal { return "Last run \(run.phase)" }
-        return run.phase.capitalized
-    }
-
-    var body: some View {
-        HStack(spacing: 13) {
-            RemoteBotThumbnail(profile: profile, size: 46)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(profile.name).font(.headline)
-                Text(profile.subtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(isActive ? BeetTheme.accentBright : Color.secondary.opacity(0.45))
-                        .frame(width: 6, height: 6)
-                    Text(statusText)
-                        .font(.caption)
-                }
-                .foregroundStyle(isActive ? BeetTheme.accentBright : Color.secondary)
-            }
-            Spacer(minLength: 6)
-        }
-        .padding(.vertical, 4)
-        .accessibilityElement(children: .combine)
-    }
-}
-
 /// The page for one bot: what it does, what it is running, and the two ways to
 /// put it to work — a chat session, or an autonomous run.
-private struct RemoteBotDetailView: View {
+struct RemoteBotDetailView: View {
     let store: RemoteStore
     let profile: RemoteBotProfile
     @Binding var selectedModelID: String
@@ -448,7 +297,7 @@ struct RemoteBotProfile: Identifiable, Hashable {
     var isSpecialist: Bool { id != RemoteBotProfile.general.id }
 }
 
-private struct RemoteBotThumbnail: View {
+struct RemoteBotThumbnail: View {
     let profile: RemoteBotProfile
     var size: CGFloat = 56
 

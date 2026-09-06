@@ -118,44 +118,6 @@ struct SessionListView: View {
                 .accessibilityHint(store.isConnected ? "" : "Connect to your Mac first")
             }
         }
-        // The screen's standing actions, on one strip. A bottom bar is
-        // where iOS puts them, but the stock one paints tinted text on the
-        // navigation material — five loose labels over this app's warm
-        // ground. Drawn as a card instead, it belongs to the same surface
-        // family as the rows above it.
-        .safeAreaInset(edge: .bottom) {
-            RemoteActionBar {
-                RemoteActionBarButton(title: "Mac",
-                                      symbol: "display.and.arrow.down",
-                                      spokenLabel: "Control Mac",
-                                      hint: store.isConnected ? "" : "Connect to your Mac first") {
-                    stage = .display
-                }
-                .disabled(!store.isConnected)
-                RemoteActionBarButton(title: "Apps",
-                                      symbol: "macwindow.on.rectangle",
-                                      spokenLabel: "App Stream",
-                                      hint: store.isConnected ? "" : "Connect to your Mac first") {
-                    stage = .application
-                }
-                .disabled(!store.isConnected)
-                RemoteActionBarButton(title: "Bots",
-                                      symbol: "person.3.sequence.fill",
-                                      spokenLabel: "Specialist bots") {
-                    showBotRuns = true
-                }
-                RemoteActionBarButton(title: "Share",
-                                      symbol: "square.and.arrow.up",
-                                      spokenLabel: "Share clipboard or files") {
-                    showSharing = true
-                }
-                RemoteActionBarButton(title: "Settings",
-                                      symbol: "gearshape",
-                                      spokenLabel: "Settings") {
-                    showSettings = true
-                }
-            }
-        }
         .confirmationDialog(
             "Delete this chat?",
             isPresented: Binding(get: { pendingDelete != nil },
@@ -253,6 +215,36 @@ struct SessionListView: View {
             .remoteListRow()
             .accessibilityLabel("\(store.activeComputerName), \(store.isConnected ? "connected" : store.connectionLabel)")
             .accessibilityHint(store.isConnected ? "Switch computer" : "Reconnect")
+            // The screen's other half — the Mac — used to be behind an
+            // ellipsis, then behind a strip at the bottom that read as a tab
+            // bar. These are actions, not places, so they sit in the card
+            // that names the Mac they act on, at the top of the screen.
+            RemoteQuickActionRow {
+                RemoteQuickAction(title: "Stream",
+                                  symbol: "display.and.arrow.down",
+                                  spokenLabel: "Stream this Mac",
+                                  hint: store.isConnected ? "" : "Connect to your Mac first") {
+                    stage = .display
+                }
+                .disabled(!store.isConnected)
+                RemoteQuickAction(title: "Bots",
+                                  symbol: "person.3.sequence.fill",
+                                  spokenLabel: "Specialist bots") {
+                    showBotRuns = true
+                }
+                RemoteQuickAction(title: "Share",
+                                  symbol: "square.and.arrow.up",
+                                  spokenLabel: "Share clipboard or files") {
+                    showSharing = true
+                }
+                RemoteQuickAction(title: "Settings",
+                                  symbol: "gearshape",
+                                  spokenLabel: "Settings") {
+                    showSettings = true
+                }
+            }
+            .remoteListRow()
+            .listRowInsets(EdgeInsets(top: 6, leading: 10, bottom: 8, trailing: 10))
         } footer: {
             if !store.isConnected {
                 Text(store.connectionSubtitle)

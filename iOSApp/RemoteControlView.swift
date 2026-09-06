@@ -342,7 +342,11 @@ private struct RemoteMacUnlockState: View {
 
 struct RemoteControlView: View {
     let store: RemoteStore
-    let sourceMode: RemoteControlSourceMode
+    /// Was a `let`: App Stream had its own button on the sessions screen, so
+    /// the mode was fixed when the screen opened. That button is gone — a
+    /// whole screen and one app's window are two views of the same Mac, not
+    /// two destinations — so the mode is switched here instead.
+    @State private var sourceMode: RemoteControlSourceMode
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -412,7 +416,7 @@ struct RemoteControlView: View {
 
     init(store: RemoteStore, sourceMode: RemoteControlSourceMode = .display) {
         self.store = store
-        self.sourceMode = sourceMode
+        _sourceMode = State(initialValue: sourceMode)
         _inputSender = State(initialValue: RemoteInputSender(sendCommands: { commands in
             _ = try await store.sendMacControlBatch(commands)
         }))
@@ -602,6 +606,15 @@ struct RemoteControlView: View {
             decoder.reset()
             videoBinder.reset()
             streamState.reset()
+            streamRestart.bump()
+        }
+        .onChange(of: sourceMode) { _, mode in
+            selectedWindowID = nil
+            if mode == .application { selectedDisplayID = nil }
+            decoder.reset()
+            videoBinder.reset()
+            streamState.reset()
+            resetZoom()
             streamRestart.bump()
         }
         .onChange(of: selectedDisplayID) { _, _ in
@@ -860,6 +873,13 @@ struct RemoteControlView: View {
                 showKeyboard.toggle()
             }
             classicIconButton(systemName: "terminal") { showTerminal = true }
+            classicIconButton(
+                systemName: sourceMode == .application ? "macwindow.on.rectangle" : "display",
+                active: sourceMode == .application
+            ) {
+                sourceMode = sourceMode == .application ? .display : .application
+            }
+            .accessibilityLabel(sourceMode == .application ? "Stream the whole screen" : "Stream one app")
             classicIconButton(
                 systemName: audioPlayer.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
                 active: audioPlayer.isActive && !audioPlayer.isMuted
