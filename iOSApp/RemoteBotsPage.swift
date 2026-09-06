@@ -80,7 +80,6 @@ struct RemoteBotsView: View {
                 RemoteDelegateSheet(store: store, selectedModelID: $selectedModelID)
                     .environment(\.remoteAppearance, appearance)
             }
-            .keyboardDismissToolbar()
             .task {
                 if store.startModels.isEmpty { await store.loadStartModels() }
                 if selectedModelID.isEmpty { selectedModelID = store.startModels.first?.id ?? "" }
@@ -364,7 +363,7 @@ private struct RemoteDelegateSheet: View {
             .navigationTitle("Delegate")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
-            .keyboardDismissToolbar()
+            .scrollDismissesKeyboard(.interactively)
             .task { focused = true }
         }
         .presentationDetents([.medium])

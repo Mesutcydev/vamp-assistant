@@ -12,7 +12,6 @@ struct SessionNavigationView: View {
         }
             .alert(store.errorTitle, isPresented: errorBinding) { Button("OK") { store.errorMessage = nil } }
                 message: { Text(store.errorMessage ?? "Unknown error") }
-            .keyboardDismissToolbar()
             .task(id: RemoteNotificationCenter.shared.pendingNavigation) {
                 guard let target = RemoteNotificationCenter.shared.pendingNavigation else { return }
                 guard await store.openNotification(target) else {
@@ -98,6 +97,11 @@ struct SessionListView: View {
         }
         .remotePlainList()
         .remoteContentSheet()
+        // No keyboard-dismiss chip on this stack: search dismisses on scroll
+        // and by its own Cancel, and the chip used to follow the push into the
+        // conversation, where it stacked a second trailing button directly
+        // under the composer's Send.
+        .scrollDismissesKeyboard(.interactively)
         .refreshable { try? await store.refresh() }
         // Under the title rather than floating at the bottom: the floating
         // field sat on top of the last section, so Imported was invisible at

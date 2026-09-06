@@ -56,7 +56,7 @@ struct RemoteBotConsoleView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .keyboardDismissToolbar()
+            .scrollDismissesKeyboard(.interactively)
             .task { await loadFiles() }
         }
     }
