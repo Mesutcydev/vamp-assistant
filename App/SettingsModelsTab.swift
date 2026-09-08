@@ -37,8 +37,10 @@ struct ModelsAndProvidersTab: View {
     @State private var compactSectionBar = false
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 12) {
             sectionBar
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
 
             switch section {
             case .library:
