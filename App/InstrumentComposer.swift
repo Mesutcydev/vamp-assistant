@@ -524,6 +524,15 @@ struct InstrumentComposer: View {
                                 controller.stop()
                                 return .handled
                             }
+                            if press.key == .return,
+                               let editor = NSApp.keyWindow?.firstResponder as? NSTextView {
+                                if editor.hasMarkedText() { return .ignored }
+                                if press.modifiers == .shift || press.modifiers == .option
+                                    || (press.modifiers.isEmpty && !settings.enterSends) {
+                                    editor.insertNewlineIgnoringFieldEditor(nil)
+                                    return .handled
+                                }
+                            }
                             if ShortcutBinding(rawValue: settings.sendShortcut).matches(press) {
                                 _ = store.submit()
                                 return .handled
