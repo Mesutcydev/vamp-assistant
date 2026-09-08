@@ -164,6 +164,7 @@ struct SidebarView: View {
                     .foregroundStyle(Instrument.inkSecondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 Image(systemName: "chevron.up")
                     .font(.system(size: 8, weight: .semibold))
                     .foregroundStyle(Instrument.inkSecondary)
@@ -185,8 +186,8 @@ struct SidebarView: View {
                 NotificationCenter.default.post(name: .openModelManager, object: nil)
             }
         }
-        .fixedSize()
-        .help("Connection and services")
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .help("\(connectionLabel) — Connection and services")
         .accessibilityLabel("Connection: \(connectionLabel). Menu shows remote sessions and models.")
     }
 
