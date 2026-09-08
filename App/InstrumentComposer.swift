@@ -1117,6 +1117,7 @@ struct SuggestionRow: View {
 struct InstrumentLiveSignal: View {
     let active: Bool
     var bars = false
+    var tint: Color = Instrument.signalGreen
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
@@ -1125,7 +1126,7 @@ struct InstrumentLiveSignal: View {
         TimelineView(.animation(minimumInterval: 1.0 / 20, paused: !animates)) { context in
             let time = animates ? context.date.timeIntervalSinceReferenceDate : 0
             let breath = animates ? (sin(time * 2.1) + 1) / 2 : 1
-            let color = active ? Instrument.signalGreen : Instrument.signalIdle
+            let color = active ? tint : Instrument.signalIdle
             if bars {
                 HStack(alignment: .center, spacing: 2) {
                     ForEach(0..<4) { index in

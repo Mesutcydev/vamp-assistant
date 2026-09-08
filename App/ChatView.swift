@@ -381,6 +381,17 @@ private struct WelcomeIdentityView: View {
             // the remaining welcome space, not the full window or sidebar.
             Spacer(minLength: 0)
                 .frame(height: max(24, min(112, geometry.size.height * 0.24)))
+            // Decorative brand motion stays visible even before a model or remote host is ready.
+            HStack(spacing: 12) {
+                InstrumentLiveSignal(active: true, tint: Instrument.accentOrange)
+                    .frame(width: 8, height: 8)
+                InstrumentLiveSignal(active: true, bars: true, tint: Instrument.accentOrange)
+                    .scaleEffect(1.4)
+                    .frame(width: 22, height: 18)
+            }
+            .padding(.bottom, 16)
+            .accessibilityHidden(true)
+
             WelcomeWordmark(compact: geometry.size.width < 600,
                             showsEyebrow: geometry.size.width >= 350)
                 .frame(width: min(420, max(0, geometry.size.width - 32)))
