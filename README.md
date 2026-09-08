@@ -36,7 +36,7 @@ The [Vamp Assistant site](https://mesutcydev.github.io/vamp-assistant/) has the 
 
 The repository includes a native SwiftUI companion app that connects to the Mac app's existing private Remote Sessions endpoint. It supports camera QR pairing, one-tap reconnection, secure token storage, session browsing, new local/API sessions, live responses, prompts, stop controls, approvals/questions, and permission-gated clipboard and file exchange.
 
-[Download the latest unsigned iPhone/iPad IPA](https://github.com/Mesutcydev/vamp-assistant/releases/download/ios-v0.1.36/Vamp-Assistant-iOS-0.1.36-build-58-unsigned.ipa)
+[Download the latest unsigned iPhone/iPad IPA](https://github.com/Mesutcydev/vamp-assistant/releases/download/ios-v0.10.35/Vamp-Assistant-iOS-0.10.35-build-95-unsigned.ipa)
 
 [Add the Vamp Assistant AltStore source](https://mesutcydev.github.io/vamp-assistant/apps.json)
 
@@ -344,7 +344,7 @@ Docs: [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) ·
 - **Major provider coverage**: OpenAI Responses and chat completions,
   Anthropic Messages, Gemini, OpenRouter, DeepSeek, Alibaba DashScope,
   LongCat, OpenCode Zen/Go, Mistral, Groq, xAI, Together AI, Fireworks,
-  Cerebras, Perplexity, Cohere, Hugging Face, NVIDIA NIM, DeepInfra, and
+  Cerebras, Perplexity, Cohere, Hugging Face, NVIDIA API (NIM), DeepInfra, and
   Tabitoken.
   Custom OpenAI-compatible endpoints continue to cover Ollama, LM Studio,
   vLLM, llama.cpp, and private gateways.
@@ -516,7 +516,7 @@ Project policy reference: [`docs/PROJECT-POLICY.md`](docs/PROJECT-POLICY.md).
 ## v0.9.0 — ChatGPT account access and provider surfaces
 
 - OpenAI account sign-in uses the official local Codex app-server browser/device-code flow; Vamp Assistant never stores ChatGPT refresh tokens or treats account access as an API key.
-- Live account model discovery appears beside local and BYOK API models in the composer picker.
+- Live account model discovery appears beside local and BYOK API models in the composer picker. GPT-6 Astra is pinned as the latest ChatGPT model even when Codex hides it from its default list.
 - Account-backed turns reuse the native transcript, reasoning, approvals, MCP/tool events, persisted thread continuity, and a working Stop/interrupt path.
 - Settings now gives account access its own card and keeps API-key providers independent.
 

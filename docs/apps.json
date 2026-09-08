@@ -20,6 +20,16 @@
       "category": "utilities",
       "versions": [
         {
+          "version": "0.10.35",
+          "buildVersion": "95",
+          "marketingVersion": "0.10.35 (95)",
+          "date": "2026-09-08",
+          "localizedDescription": "Docked machined composer with recessed editor plate, bayed control rail, neutral dark chassis, direct Auto/Full mode toggles, and clearer bay separators.",
+          "downloadURL": "https://github.com/Mesutcydev/vamp-assistant/releases/download/ios-v0.10.35/Vamp-Assistant-iOS-0.10.35-build-95-unsigned.ipa",
+          "size": 8918966,
+          "minOSVersion": "18.0"
+        },
+        {
           "version": "0.1.36",
           "buildVersion": "58",
           "marketingVersion": "0.1.36 (58)",
@@ -75,6 +85,16 @@
     }
   ],
   "news": [
+    {
+      "title": "Vamp Assistant 0.10.35",
+      "identifier": "vamp-assistant-ios-0.10.35",
+      "caption": "Docked machined composer with recessed editor plate, bayed control rail, neutral dark chassis, direct Auto/Full mode toggles, and clearer bay separators.",
+      "date": "2026-09-08",
+      "tintColor": "#6E6E73",
+      "notify": true,
+      "url": "https://github.com/Mesutcydev/vamp-assistant/releases/tag/ios-v0.10.35",
+      "appID": "com.beetcode.remote.ios"
+    },
     {
       "title": "Vamp Assistant 0.1.36",
       "identifier": "vamp-assistant-ios-0.1.36",

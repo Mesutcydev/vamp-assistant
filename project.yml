@@ -56,8 +56,8 @@ targets:
       properties:
         CFBundleDisplayName: "Vamp Assistant"
         CFBundleIconName: AppIcon
-        CFBundleShortVersionString: "0.10.29"
-        CFBundleVersion: "82"
+        CFBundleShortVersionString: "0.10.35"
+        CFBundleVersion: "93"
         LSApplicationCategoryType: public.app-category.developer-tools
         LSMinimumSystemVersion: "15.0"
         NSHumanReadableCopyright: "Copyright © 2026 Vamp Assistant contributors"
@@ -196,8 +196,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.beetcode.remote.ios
         PRODUCT_NAME: "Vamp Assistant"
         PRODUCT_MODULE_NAME: BeetCodeRemoteIOS
-        MARKETING_VERSION: "0.1.36"
-        CURRENT_PROJECT_VERSION: "58"
+        MARKETING_VERSION: "0.10.35"
+        CURRENT_PROJECT_VERSION: "95"
         CODE_SIGN_ENTITLEMENTS: iOSApp/BeetCodeRemote.entitlements
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: iOSApp/Info.plist
@@ -239,6 +239,22 @@ targets:
         SWIFT_STRICT_CONCURRENCY: complete
         SWIFT_APPROACHABLE_CONCURRENCY: YES
 
+  BeetCodeRemoteIOSUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - iOSUITests
+    dependencies:
+      - target: BeetCodeRemoteIOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.beetcode.remote.ios.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: BeetCodeRemoteIOS
+        SWIFT_STRICT_CONCURRENCY: complete
+        SWIFT_APPROACHABLE_CONCURRENCY: YES
+
 schemes:
   BeetCode:
     build:
@@ -268,3 +284,4 @@ schemes:
       config: Debug
       targets:
         - BeetCodeRemoteIOSTests
+        - BeetCodeRemoteIOSUITests
