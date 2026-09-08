@@ -9,8 +9,8 @@ struct CatalogModel: Codable, Identifiable, Sendable, Hashable {
         case mlx
         case gguf
         /// Apple Core AI resource pack (`metadata.json` + `.aimodel[c]`).
-        /// Execution is isolated in `CoreAIEngine`; these resources must
-        /// never be offered to MLX or llama.cpp.
+        /// Detected so MLX and llama.cpp never try to load it. Generation
+        /// is refused until a catalog pack and runner ship.
         case coreAI
     }
 
@@ -53,7 +53,7 @@ struct CatalogModel: Codable, Identifiable, Sendable, Hashable {
     var recommendedRAMGB: Int
     var notes: String
     /// Weights format — decides which engine runs it. MLX safetensors run
-    /// in-process, GGUF uses llama.cpp, and Core AI uses Apple's runner.
+    /// in-process; GGUF uses llama.cpp; Core AI is detected and refused.
     var format: Format = .mlx
     var role: Role = .chat
     var kind: Kind = .general

@@ -430,6 +430,9 @@ actor AgentLoop {
         continuation.yield(.taskStarted)
         record.messages.append(
             SessionMessage(role: .user, content: userMessage, toolName: nil, timestamp: Date()))
+        if let persistenceError = persist() {
+            continuation.yield(.persistenceFailed(persistenceError))
+        }
         Task { await self.step(userMessage: userMessage) }
     }
 
@@ -557,6 +560,13 @@ actor AgentLoop {
                 do {
                     raw = try await generate()
                 } catch {
+                    if pendingSteer != nil && !cancelled {
+                        // A steer intentionally cancels this generation. Drain
+                        // cancellation before starting the replacement stream.
+                        await engineCancelTask?.value
+                        engineCancelTask = nil
+                        continue
+                    }
                     guard Self.isContextOverflow(error),
                           await recoverFromContextOverflow(error) else {
                         throw error
@@ -734,6 +744,7 @@ actor AgentLoop {
                 record.messages.append(
                     SessionMessage(role: .assistant, content: visible, toolName: nil, timestamp: Date(), thoughtSignature: thoughtSignature))
                 history.append(ChatTurn(role: .assistant, content: visible, thoughtSignature: thoughtSignature))
+                _ = persist()
 
                 // 3a. One tool call per reply. Multiple calls are a
                 // structured protocol error observation, never a bundled
@@ -1005,6 +1016,7 @@ actor AgentLoop {
                 record.messages.append(
                     SessionMessage(role: .toolResult, content: result.output, toolName: call.name, timestamp: Date()))
                 history.append(ChatTurn(role: .tool, content: result.output))
+                _ = persist()
 
                 if result.failed {
                     if isVerificationCall(call) { lastVerificationFailed = true }
@@ -1082,14 +1094,13 @@ actor AgentLoop {
             contextTokens: contextTokens,
             contextWindow: configuration.contextWindowTokens)
 
-        let unsent = Array(history[sentTurnCount...])
-        sentTurnCount = history.count
-
         var result = ""
         let maxTokens = configuration.thermalTokenCeiling.map {
             min(configuration.maxTokensPerTurn, $0)
         } ?? configuration.maxTokensPerTurn
         do {
+            let unsent = Array(history[sentTurnCount...])
+            sentTurnCount = history.count
             let stream = engine.stream(
                 adding: unsent,
                 maxTokens: maxTokens,
@@ -1100,7 +1111,7 @@ actor AgentLoop {
                 eventContinuation?.yield(.tokenDelta(chunk))
             }
         } catch is CancellationError {
-            if cancelled { throw CancellationError() }
+            throw CancellationError()
         }
         return result
     }
@@ -1300,11 +1311,14 @@ actor AgentLoop {
             case .user:
                 return ChatTurn(role: .user, content: message.content)
             case .assistant:
-                return ChatTurn(role: .assistant, content: message.content)
+                return ChatTurn(
+                    role: .assistant,
+                    content: message.content,
+                    thoughtSignature: message.thoughtSignature)
             case .reasoning:
                 return nil
             case .toolResult:
-                return ChatTurn(role: .tool, content: message.content)
+                return ChatTurn(role: .tool, content: message.content, toolName: message.toolName)
             case .system:
                 return ChatTurn(role: .system, content: message.content)
             case .toolCall:
@@ -1443,11 +1457,14 @@ actor AgentLoop {
             case .user:
                 return ChatTurn(role: .user, content: message.content)
             case .assistant:
-                return ChatTurn(role: .assistant, content: message.content)
+                return ChatTurn(
+                    role: .assistant,
+                    content: message.content,
+                    thoughtSignature: message.thoughtSignature)
             case .reasoning:
                 return nil
             case .toolResult:
-                return ChatTurn(role: .tool, content: message.content)
+                return ChatTurn(role: .tool, content: message.content, toolName: message.toolName)
             case .system:
                 return ChatTurn(role: .system, content: message.content)
             case .toolCall:
@@ -1552,17 +1569,37 @@ actor AgentLoop {
             replacePending(.question(requestID, question, continuation))
         }
     }
+    /// Human-readable one-line summary for an activity row. Extracts the
+    /// meaningful argument when present (command, path, query/pattern);
+    /// otherwise falls back to a NEUTRAL action label — never the serialized
+    /// argument JSON, which reads as raw plumbing in the transcript.
     private func invocationSummary(_ call: ParsedToolCall) -> String {
         switch call.name {
         case "run_command":
-            return call.string("command") ?? call.argumentsJSON
-        case "read_file", "write_file", "apply_patch":
-            return call.string("path") ?? call.argumentsJSON
+            return call.string("command") ?? "Run a command"
+        case "read_file", "list_directory", "find_files", "glob":
+            return call.string("path") ?? call.string("directory") ?? "Read files"
+        case "write_file", "apply_patch", "move_file":
+            return call.string("path") ?? "Edit files"
         case "search":
-            return call.string("pattern") ?? call.argumentsJSON
+            return call.string("pattern") ?? call.string("query") ?? "Search the workspace"
+        case "web_search":
+            return call.string("query") ?? "Search the web"
+        case "build_diagnostics", "sim_build_run", "macos_build_run":
+            return call.string("target") ?? "Build and diagnose"
+        case "task":
+            return call.string("description") ?? call.string("prompt") ?? "Delegate a task"
         default:
-            return call.argumentsJSON
+            return call.string("path") ?? call.string("command") ?? call.string("query")
+                ?? Self.neutralActionLabel(call.name)
         }
+    }
+
+    /// Neutral verb phrase for tools whose arguments carry no displayable
+    /// summary, so activity rows stay meaningful without inventing detail.
+    private static func neutralActionLabel(_ name: String) -> String {
+        let readable = name.replacingOccurrences(of: "_", with: " ")
+        return readable.prefix(1).uppercased() + readable.dropFirst()
     }
 
     /// Rule-based memory extraction on completion: stores a session summary
@@ -1644,11 +1681,11 @@ actor AgentLoop {
         return nil
     }
 
-    /// Nested agent. Shares the parent's engine through IsolatedReplayEngine
-    /// so the parent conversation is not reset. Writes and commands go
-    /// through the same PermissionGate; approvals are forwarded to the
-    /// parent UI. Role-specific tools keep read-only work read-only, while
-    /// implementation children inherit the parent's verification setting.
+    /// Nested agent. Shares the parent's engine and replays its own
+    /// transcript so the parent conversation is not reset. Writes and
+    /// commands go through the same PermissionGate; approvals are forwarded
+    /// to the parent UI. Role-specific tools keep read-only work read-only,
+    /// while implementation children inherit the parent's verification setting.
     private func runSubagent(
         prompt: String,
         role: SubagentRole,
@@ -1701,49 +1738,35 @@ actor AgentLoop {
                     .init(action: "edit", resource: "*", effect: .deny),
                 ])))
 
+        let inspect: [any AgentTool] = [
+            ReadFileTool(),
+            ListDirectoryTool(),
+            SearchTool(),
+            TinyFishSearchTool(),
+            WebFetchTool(),
+            FindFilesTool(),
+        ]
         let childTools: [any AgentTool]
         switch role {
         case .research:
-            childTools = [
-                ReadFileTool(),
-                ListDirectoryTool(),
-                SearchTool(),
-                TinyFishSearchTool(),
-                WebFetchTool(),
-                FindFilesTool(),
-                FindFilesTool(name: "glob"),
-            ]
+            childTools = inspect
         case .implement:
-            childTools = [
-                ReadFileTool(),
+            childTools = inspect + [
                 WriteFileTool(),
                 MoveFileTool(),
                 ApplyPatchTool(),
-                ListDirectoryTool(),
-                SearchTool(),
-                TinyFishSearchTool(),
-                WebFetchTool(),
-                FindFilesTool(),
-                FindFilesTool(name: "glob"),
                 RunCommandTool(),
                 BuildDiagnosticsTool(),
             ]
         case .verify, .review:
-            childTools = [
-                ReadFileTool(),
-                ListDirectoryTool(),
-                SearchTool(),
-                TinyFishSearchTool(),
-                WebFetchTool(),
-                FindFilesTool(),
-                FindFilesTool(name: "glob"),
+            childTools = inspect + [
                 RunCommandTool(),
                 BuildDiagnosticsTool(),
             ]
         }
 
         let child = AgentLoop(
-            engine: IsolatedReplayEngine(base: engine),
+            engine: IsolatedReplayEngine(engine),
             workspace: childWorkspace,
             tools: childTools,
             permissions: childGate,

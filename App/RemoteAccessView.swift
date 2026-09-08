@@ -37,7 +37,7 @@ struct RemoteAccessView: View {
         }
         .padding(24)
         .frame(minWidth: 560, minHeight: 560)
-        .background { AtmosphereBackground(intensity: .conversation) }
+        .background { Theme.workspaceCanvas }
         .task {
             while !Task.isCancelled {
                 appState.refreshRemoteSessionStatus()
@@ -54,10 +54,10 @@ struct RemoteAccessView: View {
                     .fill(Theme.wash(Theme.accent))
                     .frame(width: 44, height: 44)
                 Image(systemName: "iphone")
-                    .font(.app(size: 22, weight: .semibold, design: .serif))
+                    .font(.app(size: 22, weight: .semibold ))
                     .foregroundStyle(Theme.accentText)
                 Image(systemName: "qrcode")
-                    .font(.app(size: 9, weight: .bold, design: .serif))
+                    .font(.app(size: 9, weight: .bold ))
                     .foregroundStyle(Theme.textPrimary)
                     .padding(3)
                     .background(Theme.surface, in: Circle())
@@ -103,7 +103,7 @@ struct RemoteAccessView: View {
             .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
         }
         .padding(18)
-        .lfCard()
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
     }
 
     private var runningState: some View {
@@ -140,8 +140,8 @@ struct RemoteAccessView: View {
                         .font(.headline)
                         .foregroundStyle(Theme.textPrimary)
                     networkHint
-                    Text("Pairing code".uppercased())
-                        .lfSectionHeadingStyle()
+                    Text("Pairing code")
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(Theme.textTertiary)
                     Text(appState.remotePairingCode)
                         .font(.app(size: 28, weight: .bold, design: .monospaced))
@@ -164,8 +164,8 @@ struct RemoteAccessView: View {
 
             Divider().overlay(Theme.hairline)
             VStack(alignment: .leading, spacing: 10) {
-                Text("Sharing permissions".uppercased())
-                    .lfSectionHeadingStyle()
+                Text("Sharing permissions")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.textTertiary)
                 Toggle(isOn: $settings.remoteClipboardSharingEnabled) {
                     Label("Clipboard exchange", systemImage: "doc.on.clipboard")
@@ -229,7 +229,7 @@ struct RemoteAccessView: View {
                 .foregroundStyle(Theme.textTertiary)
         }
         .padding(18)
-        .lfCard()
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
     }
 
     @ViewBuilder
@@ -264,8 +264,7 @@ struct RemoteAccessView: View {
                 .foregroundStyle(Theme.textSecondary)
                 .textSelection(.enabled)
             Button("Retry") { appState.retryRemoteSessionHost() }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.accent)
+                .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
         }
     }
 
@@ -361,7 +360,7 @@ struct RemoteAccessConsentView: View {
         VStack(alignment: .leading, spacing: 22) {
             HStack(alignment: .top, spacing: 14) {
                 Image(systemName: "lock.shield.fill")
-                    .font(.app(size: 22, weight: .semibold, design: .serif))
+                    .font(.app(size: 22, weight: .semibold ))
                     .foregroundStyle(Theme.accentText)
                     .frame(width: 46, height: 46)
                     .background(Theme.wash(Theme.accent), in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
@@ -397,7 +396,7 @@ struct RemoteAccessConsentView: View {
                     detail: "Share files up to 20 MB through Vamp Assistant Remote Downloads.",
                     trailing: AnyView(Toggle("", isOn: $allowFiles).labelsHidden()))
             }
-            .lfCard()
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
                 .strokeBorder(Theme.hairline, lineWidth: 0.75))
 
@@ -433,7 +432,7 @@ struct RemoteAccessConsentView: View {
     ) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
-                .font(.app(size: 15, weight: .semibold, design: .serif))
+                .font(.app(size: 15, weight: .semibold ))
                 .foregroundStyle(Theme.accentText)
                 .frame(width: 36, height: 36)
                 .background(Theme.wash(Theme.accent), in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))

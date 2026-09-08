@@ -141,18 +141,15 @@ public enum OpenAIRoutes {
         let created = Int(Date().timeIntervalSince1970)
         let modelName = await Self.reportedModelID(engine: engine, requested: requestedModel)
 
-        let isolated = IsolatedReplayEngine(base: engine)
-        await isolated.reset()
-
         if stream {
             return .stream(
                 LocalAPIServer.Response(status: 200, contentType: "text/event-stream"),
                 lines: streamCompletion(
-                    engine: isolated, turns: turns, id: completionID, model: modelName,
+                    engine: engine, turns: turns, id: completionID, model: modelName,
                     created: created, maxTokens: maxTokens, temperature: temperature))
         } else {
             return .response(await nonStreamingCompletion(
-                engine: isolated, turns: turns, id: completionID, model: modelName,
+                engine: engine, turns: turns, id: completionID, model: modelName,
                     created: created, maxTokens: maxTokens, temperature: temperature))
         }
     }
@@ -196,7 +193,7 @@ public enum OpenAIRoutes {
     ) async -> LocalAPIServer.Response {
         var collected = ""
         do {
-            let stream = engine.stream(adding: turns, maxTokens: maxTokens, temperature: temperature)
+            let stream = engine.streamReplay(turns, maxTokens: maxTokens, temperature: temperature)
             for try await chunk in stream {
                 collected += chunk
             }
@@ -242,7 +239,7 @@ public enum OpenAIRoutes {
 
                 var caughtError: String?
                 do {
-                    let stream = engine.stream(adding: turns, maxTokens: maxTokens, temperature: temperature)
+                    let stream = engine.streamReplay(turns, maxTokens: maxTokens, temperature: temperature)
                     for try await chunk in stream {
                         if Task.isCancelled { break }
                         if chunk.isEmpty { continue }
@@ -332,17 +329,14 @@ public enum OpenAIRoutes {
         let messageID = "msg_\(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(24))"
         let modelName = await reportedModelID(engine: engine, requested: requestedModel)
 
-        let isolated = IsolatedReplayEngine(base: engine)
-        await isolated.reset()
-
         if stream {
             return .stream(
                 LocalAPIServer.Response(status: 200, contentType: "text/event-stream"),
                 lines: anthropicStream(
-                    engine: isolated, turns: turns, id: messageID, model: modelName, maxTokens: maxTokens))
+                    engine: engine, turns: turns, id: messageID, model: modelName, maxTokens: maxTokens))
         } else {
             return .response(await anthropicNonStreaming(
-                engine: isolated, turns: turns, id: messageID, model: modelName, maxTokens: maxTokens))
+                engine: engine, turns: turns, id: messageID, model: modelName, maxTokens: maxTokens))
         }
     }
 
@@ -351,7 +345,7 @@ public enum OpenAIRoutes {
     ) async -> LocalAPIServer.Response {
         var collected = ""
         do {
-            let stream = engine.stream(adding: turns, maxTokens: maxTokens, temperature: nil)
+            let stream = engine.streamReplay(turns, maxTokens: maxTokens, temperature: nil)
             for try await chunk in stream {
                 collected += chunk
             }
@@ -408,7 +402,7 @@ public enum OpenAIRoutes {
 
                 var caughtError: String?
                 do {
-                    let stream = engine.stream(adding: turns, maxTokens: maxTokens, temperature: nil)
+                    let stream = engine.streamReplay(turns, maxTokens: maxTokens, temperature: nil)
                     for try await chunk in stream {
                         if Task.isCancelled { break }
                         if chunk.isEmpty { continue }

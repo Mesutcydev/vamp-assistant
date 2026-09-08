@@ -153,7 +153,7 @@ final class AgentLoopTests: XCTestCase {
         XCTAssertFalse(finished[0].2, finished[0].1)
         XCTAssertTrue(finished[0].1.contains("hello from readme"), finished[0].1)
         XCTAssertEqual(collector.finish, .completed("Subagent finished. Task complete."))
-        // Parent engine still holds the scripted FIFO — child used streamReplay,
+        // Parent engine still holds the scripted FIFO — child used IsolatedReplayEngine,
         // so the third response belongs to the parent, not a stolen turn.
         XCTAssertGreaterThanOrEqual(engine.streamCallCount, 3)
     }

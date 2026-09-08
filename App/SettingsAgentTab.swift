@@ -24,7 +24,7 @@ struct AgentTab: View {
                     stepperControl(label: "Max agent turns", value: $settings.maxTurns, range: 5...100, step: 1)
                 }
                 SettingRow(label: "Max tokens per turn") {
-                    stepperControl(label: "Max tokens per turn", value: $settings.maxTokensPerTurn, range: 256...8192, step: 256)
+                    stepperControl(label: "Max tokens per turn", value: $settings.maxTokensPerTurn, range: 256...32768, step: 256)
                 }
                 SettingRow(label: "Temperature") {
                     HStack(spacing: Spacing.sm) {
@@ -198,6 +198,7 @@ private struct ComputerControlCard: View {
     @ObservedObject private var settings = SettingsStore.shared
     @State private var accessibilityGranted = false
     @State private var screenRecordingGranted = false
+    @State private var requestedScreenRecording = false
 
     var body: some View {
         SettingsCard(
@@ -218,9 +219,15 @@ private struct ComputerControlCard: View {
                     grant: { ComputerPermission.requestAccessibility() })
                 permissionRow(
                     label: "Screen Recording",
-                    value: "Capture windows for vision models",
+                    value: requestedScreenRecording && !screenRecordingGranted
+                        ? "Quit and reopen Vamp Assistant to finish"
+                        : "Capture windows for vision models",
                     granted: screenRecordingGranted,
-                    grant: { ComputerPermission.requestScreenRecording() })
+                    pending: requestedScreenRecording && !screenRecordingGranted,
+                    grant: {
+                        ComputerPermission.requestScreenRecording()
+                        requestedScreenRecording = true
+                    })
             }
         }
         .onAppear(perform: refresh)
@@ -235,19 +242,20 @@ private struct ComputerControlCard: View {
         label: String,
         value: String,
         granted: Bool,
+        pending: Bool = false,
         grant: @escaping () -> Void
     ) -> some View {
         SettingRow(label: label, value: value) {
             HStack(spacing: Spacing.sm) {
                 HStack(spacing: 5) {
                     Circle()
-                        .fill(granted ? Theme.accentBright : Theme.textTertiary)
+                        .fill(granted ? Theme.accentBright : (pending ? Theme.warning : Theme.textTertiary))
                         .frame(width: 7, height: 7)
-                    Text(granted ? "Granted" : "Not granted")
+                    Text(granted ? "Granted" : (pending ? "Quit and reopen" : "Not granted"))
                         .font(.callout)
                         .foregroundStyle(Theme.textSecondary)
                 }
-                if !granted {
+                if !granted && !pending {
                     Button("Grant…", action: grant)
                         .controlSize(.small)
                 }

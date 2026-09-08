@@ -400,4 +400,19 @@ final class LoginWindowInputServiceTests: XCTestCase {
             XCTAssertFalse(error.localizedDescription.contains("never-log-this"))
         }
     }
+
+    func testLaunchResolverPrefersCanonicalAppOverBackupCopies() {
+        let canonical = URL(fileURLWithPath: "/Applications/Vamp Assistant.app")
+        let backup = URL(fileURLWithPath: "/Applications/Vamp Assistant.before-build-86.app")
+        let previous = URL(fileURLWithPath: "/Applications/Vamp Assistant.previous.app")
+        let derived = URL(fileURLWithPath:
+            "/Users/m/Library/Developer/Xcode/DerivedData/BeetCode/Build/Products/Debug/Vamp Assistant.app")
+        XCTAssertEqual(
+            ApplicationLaunchResolver.preferredURL(
+                appName: "Vamp Assistant",
+                candidates: [backup, previous, derived, canonical]),
+            canonical)
+        XCTAssertTrue(ApplicationLaunchResolver.isBackupAppName("Vamp Assistant.before-build83-20260906"))
+        XCTAssertFalse(ApplicationLaunchResolver.isBackupAppName("Vamp Assistant"))
+    }
 }

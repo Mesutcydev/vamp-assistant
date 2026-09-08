@@ -84,11 +84,18 @@ struct ToolInvocation: Sendable, Identifiable, Equatable {
     let argumentsJSON: String
     let summary: String
 
-    init(call: ParsedToolCall, summary: String) {
-        self.id = UUID()
-        self.name = call.name
-        self.argumentsJSON = call.argumentsJSON
+    init(id: UUID = UUID(), name: String, argumentsJSON: String, summary: String) {
+        self.id = id
+        self.name = name
+        self.argumentsJSON = argumentsJSON
         self.summary = summary
+    }
+
+    init(call: ParsedToolCall, summary: String) {
+        self.init(
+            name: call.name,
+            argumentsJSON: call.argumentsJSON,
+            summary: summary)
     }
 }
 

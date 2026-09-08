@@ -156,27 +156,19 @@ final class RemoteLLMEngine: LLMEngine, NativeToolConfigurable, @unchecked Senda
     }
 
     func streamReplay(_ turns: [ChatTurn], maxTokens: Int?, temperature: Double?) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                let saved = self.withLock { () -> [ChatTurn] in
+        IsolatedTranscriptReplay.stream(
+            turns,
+            maxTokens: maxTokens,
+            temperature: temperature,
+            swapOut: {
+                self.withLock {
                     let old = self.accumulated
                     self.accumulated = []
                     return old
                 }
-                defer { self.withLock { self.accumulated = saved } }
-                let inner = self.stream(adding: turns, maxTokens: maxTokens, temperature: temperature)
-                do {
-                    for try await chunk in inner {
-                        if Task.isCancelled { break }
-                        continuation.yield(chunk)
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
+            },
+            swapIn: { saved in self.withLock { self.accumulated = saved } },
+            generate: { self.stream(adding: $0, maxTokens: $1, temperature: $2) })
     }
 
     /// Real usage accounting (P9): the provider reports completion tokens;

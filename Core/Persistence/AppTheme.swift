@@ -12,9 +12,6 @@ import Foundation
 /// Foundation-only (no SwiftUI) so the CLI target can compile this file;
 /// the SwiftUI swatch extension lives in App/Theme.swift.
 enum AccentPalette: String, CaseIterable, Codable, Identifiable, Sendable {
-    case clay
-    case sage
-    case ink
     case graphite
     case beetRed
     case rose
@@ -26,7 +23,7 @@ enum AccentPalette: String, CaseIterable, Codable, Identifiable, Sendable {
 
     /// Explicit order — this is the swatch order in Settings, not source order.
     static let allCases: [AccentPalette] = [
-        .graphite, .ink, .clay, .sage, .beetRed, .rose, .amber, .forest, .ocean, .indigo, .violet,
+        .graphite, .beetRed, .rose, .amber, .forest, .ocean, .indigo, .violet,
     ]
 
     var id: String { rawValue }
@@ -40,9 +37,6 @@ enum AccentPalette: String, CaseIterable, Codable, Identifiable, Sendable {
 
     var label: String {
         switch self {
-        case .clay: "Clay"
-        case .sage: "Sage"
-        case .ink: "Ink"
         case .graphite: "Graphite"
         case .beetRed: "Beet"
         case .rose: "Rose"
@@ -56,19 +50,6 @@ enum AccentPalette: String, CaseIterable, Codable, Identifiable, Sendable {
 
     var hexes: Hexes {
         switch self {
-        // Natural, low-chroma pairs — the register the chat assistants settled
-        // on, and the one that suits a tool you keep open for hours. Every
-        // value here is contrast-checked the same way as the rest: the accents
-        // carry white glyphs, brightDark sits on the dark grouped cell.
-        case .clay:
-            Hexes(accentLight: 0x9A4B2E, accentDark: 0xB05E3C,
-                  brightLight: 0xA65033, brightDark: 0xE0906E)
-        case .sage:
-            Hexes(accentLight: 0x3D6B52, accentDark: 0x487A5C,
-                  brightLight: 0x456F57, brightDark: 0x7FC49D)
-        case .ink:
-            Hexes(accentLight: 0x33415C, accentDark: 0x445677,
-                  brightLight: 0x3B4A69, brightDark: 0x9DAECF)
         case .graphite:
             Hexes(accentLight: 0x303030, accentDark: 0x686868,
                   brightLight: 0x505050, brightDark: 0x888888)
@@ -119,10 +100,10 @@ enum AppTypeface: String, CaseIterable, Codable, Identifiable, Sendable {
 
     var help: String {
         switch self {
-        case .serif: "New York — an editorial serif."
-        case .sans: "San Francisco — the system face, and the default."
-        case .rounded: "SF Rounded — softer, friendlier chrome."
-        case .mono: "SF Mono — everything in a fixed pitch."
+        case .serif: "New York — editorial prose."
+        case .sans: "San Francisco — the macOS system face."
+        case .rounded: "SF Rounded — softer, friendlier prose."
+        case .mono: "SF Mono — prose in a fixed pitch."
         }
     }
 }

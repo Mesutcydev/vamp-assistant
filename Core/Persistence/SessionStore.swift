@@ -313,6 +313,12 @@ enum SessionCrypto {
             throw SessionCryptoError.keyStorageFailed(status)
         }
         if status == errSecItemNotFound {
+            if hasExistingSessionFiles() {
+                // A missing key with existing ciphertext means the designated
+                // requirement changed. Minting a new key would orphan every chat.
+                setNeedsInteractiveUnlock(true)
+                throw SessionCryptoError.keyStorageFailed(status)
+            }
             var newKey = Data(count: 32)
             let result = newKey.withUnsafeMutableBytes { buffer in
                 SecRandomCopyBytes(kSecRandomDefault, buffer.count, buffer.baseAddress!)
@@ -343,6 +349,13 @@ enum SessionCrypto {
         nonInteractiveReadFailed = true
         keyCacheLock.unlock()
         throw SessionCryptoError.keyStorageFailed(status)
+    }
+
+    private static func hasExistingSessionFiles() -> Bool {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("BeetCode/Sessions", isDirectory: true)
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        return names.contains { $0.hasSuffix(".session") }
     }
 
     /// Test seam — clears the in-memory key cache.
@@ -391,6 +404,8 @@ final class SessionStore: @unchecked Sendable {
     /// later explicit retry can persist them without ever falling back to
     /// plaintext on disk.
     private var pendingSaves: [UUID: SessionRecord] = [:]
+    /// Bumped on delete so a save that finishes after delete cannot recreate the file.
+    private var saveGenerations: [UUID: UInt64] = [:]
 
     /// Test seam: redirects the sessions directory away from the real
     /// Application Support folder.
@@ -433,6 +448,9 @@ final class SessionStore: @unchecked Sendable {
         // redacted and oversized tool results are truncated before writing.
         record.messages = Self.redactAndBound(record.messages)
         let target = url(for: record.id)
+        lock.lock()
+        let generation = saveGenerations[record.id] ?? 0
+        lock.unlock()
         // Encrypt + write OUTSIDE the store lock: encryption can block on
         // Keychain/securityd IPC, and holding the lock across it deadlocks
         // every concurrent load().
@@ -456,6 +474,11 @@ final class SessionStore: @unchecked Sendable {
             return rememberFailedSave(record, error: .permissionsFailed(error.localizedDescription))
         }
         lock.lock()
+        if (saveGenerations[record.id] ?? 0) != generation {
+            lock.unlock()
+            try? FileManager.default.removeItem(at: target)
+            return .success(())
+        }
         pendingSaves.removeValue(forKey: record.id)
         lock.unlock()
         invalidateCache()
@@ -533,6 +556,8 @@ final class SessionStore: @unchecked Sendable {
     func delete(_ record: SessionRecord) {
         lock.lock()
         defer { lock.unlock() }
+        saveGenerations[record.id] = (saveGenerations[record.id] ?? 0) &+ 1
+        pendingSaves.removeValue(forKey: record.id)
         try? FileManager.default.removeItem(at: url(for: record.id))
         allCache = nil
     }

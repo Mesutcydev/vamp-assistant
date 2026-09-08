@@ -65,6 +65,49 @@ final class GoldenPathTests: XCTestCase {
         XCTAssertEqual(SimBuildRunTool.findBuiltApp(in: derived)?.lastPathComponent, "Demo.app")
     }
 
+    func testFindBuiltAppReadsLastLaunchableProductFromXcodebuildLog() {
+        let output = """
+            CompileSwift normal arm64
+            Touch /tmp/Derived/Build/Products/Debug/BeetCode.app (in target 'BeetCode' from project 'BeetCode')
+            Touch /tmp/Derived/Build/Products/Debug/Vamp Assistant.app (in target 'BeetCode' from project 'BeetCode')
+            CodeSign /tmp/Derived/Build/Products/Debug/BeetCodeUITests-Runner.app (in target 'BeetCodeUITests' from project 'BeetCode')
+            """
+        XCTAssertEqual(
+            BuiltAppLocator.appURL(fromBuildOutput: output)?.lastPathComponent,
+            "Vamp Assistant.app")
+    }
+
+    func testFindBuiltAppPrefersNewestMacProductOverStaleLeftovers() throws {
+        let derived = FileManager.default.temporaryDirectory
+            .appendingPathComponent("beet-golden-stale-\(UUID().uuidString)", isDirectory: true)
+        let old = derived.appendingPathComponent("Build/Products/Debug/BeetCode.app", isDirectory: true)
+        let current = derived.appendingPathComponent("Build/Products/Debug/Vamp Assistant.app", isDirectory: true)
+        let simulator = derived.appendingPathComponent(
+            "Build/Products/Debug-iphonesimulator/Demo.app", isDirectory: true)
+        let runner = derived.appendingPathComponent(
+            "Build/Products/Debug/BeetCodeUITests-Runner.app", isDirectory: true)
+        for url in [old, current, simulator, runner] {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        }
+        defer { try? FileManager.default.removeItem(at: derived) }
+
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSinceNow: -3_600)], ofItemAtPath: old.path)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date()], ofItemAtPath: current.path)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSinceNow: 60)], ofItemAtPath: runner.path)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date()], ofItemAtPath: simulator.path)
+
+        XCTAssertEqual(
+            BuiltAppLocator.findBuiltApp(in: derived, sdk: .macOS)?.lastPathComponent,
+            "Vamp Assistant.app")
+        XCTAssertEqual(
+            BuiltAppLocator.findBuiltApp(in: derived, sdk: .iOSSimulator)?.lastPathComponent,
+            "Demo.app")
+    }
+
     @MainActor
     func testDefaultCodingToolsIncludeSimulatorLoop() {
         let names = Set(AgentSessionController.defaultTools.map(\.name))

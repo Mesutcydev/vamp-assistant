@@ -1,6 +1,72 @@
 import Foundation
+import AppKit
+import SwiftUI
 import XCTest
 @testable import BeetCode
+
+@MainActor
+final class AppearanceConvergenceTests: XCTestCase {
+    func testAppearanceRoundTripsThroughIsolatedPreferences() {
+        let domain = "com.beetcode.tests.appearance.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: domain)!
+        defer { defaults.removePersistentDomain(forName: domain) }
+        let settings = SettingsStore(defaults: defaults, persistentDomainName: domain,
+                                     apiTokenService: domain)
+        for requested in [AppAppearance.light, .dark, .system] {
+            settings.appearance = requested
+            let restored = SettingsStore(defaults: defaults, persistentDomainName: domain,
+                                         apiTokenService: domain)
+            XCTAssertEqual(restored.appearance, requested)
+        }
+    }
+
+    func testSystemOverrideDoesNotFallBackToSavedLightOrDark() {
+        for saved in [AppAppearance.light, .dark, .system] {
+            let requested = AppAppearance.resolved(saved: saved, override: .system)
+            XCTAssertEqual(requested, .system)
+            XCTAssertNil(requested.colorScheme)
+        }
+    }
+
+    func testSavedAppearanceRemainsTheProductionRequest() {
+        for saved in [AppAppearance.light, .dark, .system] {
+            XCTAssertEqual(AppAppearance.resolved(saved: saved, override: nil), saved)
+        }
+    }
+
+    func testAppKitFollowsTheSameRequest() {
+        let previous = Theme.currentAppearance
+        defer { Theme.applyAppearance(previous) }
+        for requested in [AppAppearance.light, .dark, .system] {
+            Theme.applyAppearance(requested)
+            XCTAssertEqual(Theme.currentAppearance, requested)
+            switch requested {
+            case .light:
+                XCTAssertEqual(NSApplication.shared.appearance?.bestMatch(from: [.aqua, .darkAqua]), .aqua)
+            case .dark:
+                XCTAssertEqual(NSApplication.shared.appearance?.bestMatch(from: [.aqua, .darkAqua]), .darkAqua)
+            case .system:
+                XCTAssertNil(NSApplication.shared.appearance)
+            }
+        }
+    }
+
+    func testNeutralCanvasResolvesForBothSystemAppearances() {
+        func components(_ name: NSAppearance.Name) -> NSColor {
+            var color = NSColor.black
+            NSAppearance(named: name)!.performAsCurrentDrawingAppearance {
+                color = NSColor(Theme.workspaceCanvas).usingColorSpace(.sRGB)!
+            }
+            return color
+        }
+        let light = components(.aqua)
+        let dark = components(.darkAqua)
+        XCTAssertGreaterThan(light.redComponent, 0.8)
+        XCTAssertLessThan(dark.redComponent, 0.2)
+        XCTAssertEqual(dark.redComponent, dark.greenComponent, accuracy: 0.005)
+        XCTAssertEqual(dark.greenComponent, dark.blueComponent, accuracy: 0.005)
+    }
+}
 
 // MARK: - Stream display filter ("thinking thinking…" fix)
 

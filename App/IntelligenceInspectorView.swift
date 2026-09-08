@@ -159,7 +159,7 @@ struct IntelligenceInspectorView: View {
     private func domainSection(_ model: IntelligenceInspectorModel) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("PROJECT INTELLIGENCE")
-                .lfSectionHeadingStyle()
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.textTertiary)
             ForEach(model.domains) { domain in
                 HStack(spacing: 8) {
@@ -183,7 +183,7 @@ struct IntelligenceInspectorView: View {
     private func requestSection(_ model: IntelligenceInspectorModel) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("CONTEXT FOR CURRENT REQUEST")
-                .lfSectionHeadingStyle()
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.textTertiary)
             ForEach(model.requestRows) { row in
                 HStack {
@@ -206,7 +206,7 @@ struct IntelligenceInspectorView: View {
 
             if !model.itemDetails.isEmpty {
                 Text("ITEMS")
-                    .lfSectionHeadingStyle()
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.textTertiary)
                     .padding(.top, 6)
                 ForEach(model.itemDetails) { item in

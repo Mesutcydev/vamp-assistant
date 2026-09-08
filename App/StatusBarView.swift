@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Status bar: monospaced digits, consistent units, chip-style segments with
-/// generous spacing — scannable at a glance instead of a run-on sentence.
+/// Status strip immediately above the composer. Reference export: 30pt high,
+/// 22pt side padding, 18pt item gap. Ordering: activity → model/runtime →
+/// workspace → changed-file count → trailing context. Every value is real.
 struct StatusBarView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var settings = SettingsStore.shared
@@ -11,221 +12,139 @@ struct StatusBarView: View {
             statusRow(includeSecondary: true)
             statusRow(includeSecondary: false)
         }
-        .padding(.horizontal, Spacing.md)
-        .padding(.vertical, Spacing.xs)
-        .font(.caption)
-        .foregroundStyle(Theme.textSecondary)
+        .padding(.horizontal, Chrome.statusHPadding)
+        .foregroundStyle(Theme.secondaryOnSilver)
         .lineLimit(1)
-        // Flat bar, not a material slab: matches the window's other chrome and
-        // stops the bar sampling the transcript scrolling behind it.
-        .background(Theme.surface)
-        .overlay(alignment: .top) { Rectangle().fill(Theme.hairline).frame(height: 1) }
+        .frame(minHeight: 30, maxHeight: 30)
+        .frame(maxWidth: .infinity)
+        .background(
+            LinearGradient(colors: [Instrument.silverTop, Instrument.silverMid],
+                           startPoint: .top, endPoint: .bottom))
+        .overlay(alignment: .top) {
+            Rectangle().fill(Theme.structuralDivider.opacity(0.6)).frame(height: 0.75)
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.white.opacity(0.4)).frame(height: 0.5)
+        }
     }
 
     @ViewBuilder
     private func statusRow(includeSecondary: Bool) -> some View {
-        HStack(spacing: 10) {
-            chip(icon: appState.activeModelID == nil ? "cpu" : "checkmark.seal",
-                 tint: appState.activeModelID == nil ? Theme.textSecondary : Theme.success) {
-                Text(appState.activeModel?.displayName ?? "No model")
+        HStack(spacing: 0) {
+            activityChip
+
+            chip(icon: "cpu", tint: Theme.textTertiary) {
+                Text(modelRuntimeLabel)
                     .lineLimit(1)
             }
-            .help(appState.isRemoteActive ? "Active remote (BYOK) engine" : "Active local MLX model")
+            .help(appState.statusModelHelp)
             .layoutPriority(2)
 
-            if appState.lastEngineStats.acceleration != .standard {
-                chip(
-                    icon: accelerationIcon,
-                    tint: appState.lastEngineStats.acceleration == .dflash
-                        ? Theme.success : Theme.info
-                ) {
-                    Text(accelerationLabel)
+            if let workspace = appState.sessions.workspaceURL {
+                chip(icon: "folder", tint: Theme.textTertiary) {
+                    Text(workspace.lastPathComponent)
                 }
-                .help(Text(accelerationHelp))
+                .help(workspace.path)
             }
 
-            if appState.lastEngineStats.mlxPromptCacheActive
-                || appState.lastEngineStats.mlxQuantizedKVActive
-            {
-                chip(icon: "memorychip.fill", tint: Theme.info) {
-                    Text(mlxExperimentLabel)
+            if changedFileCount > 0 {
+                chip(icon: "arrow.triangle.branch", tint: Theme.textTertiary) {
+                    Text("\(changedFileCount) FILE\(changedFileCount == 1 ? "" : "S") CHANGED")
                 }
-                .help(Text(mlxExperimentHelp))
-            }
-
-            chip(icon: "memorychip", tint: Theme.info) {
-                Text(ByteFormatter.bytes(appState.currentFootprint))
-                    .monospacedDigit()
-                Text("/")
-                    .foregroundStyle(Theme.textTertiary)
-                Text(ByteFormatter.bytes(appState.availableBudget))
-                    .monospacedDigit()
-            }
-            .help("Process footprint vs. remaining model budget.")
-            .layoutPriority(1)
-
-            thermalChip
-            cpuChip
-            runPhaseChip
-
-            if settings.intelligenceInspectorEnabled {
-                IntelligenceInspectorButton()
+                .help("Files edited in the current turn")
             }
 
             Spacer(minLength: 0)
 
-            if includeSecondary, let tps = appState.lastEngineStats.tokensPerSecond {
-                chip(icon: "speedometer", tint: Theme.accent) {
-                    Text(String(format: "%.1f", tps))
-                        .monospacedDigit()
-                    Text("tok/s")
-                        .foregroundStyle(Theme.textTertiary)
-                }
-                .help("Tokens per second from the last generation")
+            if includeSecondary, let tps = appState.lastEngineStats.tokensPerSecond, tps > 0 {
+                Text(String(format: "%.0f tok/s", tps))
+                    .font(.app(size: 11.5 ))
+                    .foregroundStyle(Theme.textTertiary)
+                    .monospacedDigit()
+                    .help("Tokens per second from the last generation")
             }
 
             if includeSecondary, appState.sessionUsage.totalTokens > 0 {
-                let label = appState.sessionUsage.compactLabel(
-                    provider: appState.engine.activeRemoteEndpoint?.provider)
-                chip(icon: "sum", tint: Theme.info) {
-                    Text(label)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                }
-                .help("This chat: \(appState.sessionUsage.promptTokens) prompt + \(appState.sessionUsage.completionTokens) completion tokens across \(appState.sessionUsage.turns) generation(s). Cost is a published-rate estimate, not a bill.")
-            }
-        }
-    }
-
-    private var accelerationIcon: String {
-        switch appState.lastEngineStats.acceleration {
-        case .dflash: "bolt.fill"
-        case .ngram: "text.word.spacing"
-        case .mtp: "arrow.trianglehead.2.clockwise.rotate.90"
-        case .standard: ""
-        }
-    }
-
-    private var accelerationLabel: LocalizedStringResource {
-        switch appState.lastEngineStats.acceleration {
-        case .dflash: "DFlash"
-        case .ngram: "N-gram"
-        case .mtp: "MTP"
-        case .standard: "Standard"
-        }
-    }
-
-    private var accelerationHelp: LocalizedStringResource {
-        switch appState.lastEngineStats.acceleration {
-        case .dflash: "Experimental DFlash speculative decoding is active."
-        case .ngram: "Experimental model-free n-gram speculative decoding is active."
-        case .mtp: "Built-in multi-token prediction is active."
-        case .standard: "Standard decoding is active."
-        }
-    }
-
-    private var mlxExperimentLabel: LocalizedStringResource {
-        if appState.lastEngineStats.mlxPromptCacheActive
-            && appState.lastEngineStats.mlxQuantizedKVActive
-        {
-            return "MLX cache + KV8"
-        }
-        if appState.lastEngineStats.mlxPromptCacheActive {
-            return "MLX cache"
-        }
-        return "MLX KV8"
-    }
-
-    private var mlxExperimentHelp: LocalizedStringResource {
-        if appState.lastEngineStats.mlxPromptCacheActive
-            && appState.lastEngineStats.mlxQuantizedKVActive
-        {
-            return "Verified in-memory prompt reuse and experimental 8-bit MLX KV cache are active."
-        }
-        if appState.lastEngineStats.mlxPromptCacheActive {
-            return "Verified in-memory MLX prompt reuse is active."
-        }
-        return "Experimental 8-bit MLX KV cache is active after the first 512 tokens."
-    }
-
-    /// Thermal state only — never a percentage, so nobody reads it as a
-    /// temperature reading.
-    private var thermalChip: some View {
-        let state = appState.thermal.effectiveState
-        return chip(icon: state.uiIcon, tint: color(for: state)) {
-            Text(state.uiLabel)
-        }
-        .help("Thermal state merges the kernel thermal state with a sustained-CPU-load proxy (sustained load escalates even when the kernel reports nominal). Serious caps tokens per turn; critical blocks model loads.")
-    }
-
-    /// Whole-machine CPU load. Hidden while the machine is idle so the bar
-    /// stays model + phase + RAM first.
-    @ViewBuilder
-    private var cpuChip: some View {
-        let busy = appState.thermal.cpuBusyFraction
-        let elevated = appState.thermal.effectiveState != .nominal || busy > 0.35
-        if elevated {
-            chip(icon: "gauge.medium", tint: Theme.textSecondary) {
-                Text("CPU")
-                Text(String(format: "%d%%", Int(busy * 100)))
+                Text(contextLabel)
+                    .font(.app(size: 11.5 ))
+                    .foregroundStyle(Theme.textTertiary)
                     .monospacedDigit()
+                    .help("This chat: \(appState.sessionUsage.promptTokens) prompt + \(appState.sessionUsage.completionTokens) completion tokens across \(appState.sessionUsage.turns) generation(s).")
             }
-            .help("Whole-machine CPU load averaged over the last ~30 seconds.")
         }
     }
 
-    /// A small native status lane for the agent state. It makes the chat's
-    /// current phase visible even when the transcript is scrolled away, and
-    /// uses the system progress affordance instead of another busy animation.
-    @ViewBuilder
-    private var runPhaseChip: some View {
-        if appState.sessions.isRunning || appState.sessions.pendingApproval != nil
-            || appState.sessions.pendingQuestion != nil || appState.sessions.pendingPlan != nil {
-            let phase = appState.sessions.currentPhase
-            chip(icon: phaseIcon(phase), tint: phaseColor(phase)) {
-                if appState.sessions.isRunning {
-                    ProgressView().controlSize(.mini)
-                }
-                Text(phaseLabel(phase))
+    private var activityChip: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(activityDot)
+                .frame(width: 6, height: 6)
+            if appState.sessions.isRunning {
+                ProgressView().controlSize(.mini)
             }
-            .help("Agent phase: \(phaseLabel(phase))")
-            .accessibilityLabel("Agent phase: \(phaseLabel(phase))")
-            .layoutPriority(2)
+            Text(activityLabel)
+                .font(.appUI(size: 10, weight: .semibold))
+                .tracking(0.7)
+                .foregroundStyle(Instrument.engraved)
+        }
+        .padding(.trailing, 14)
+        .overlay(alignment: .trailing) {
+            Rectangle().fill(Instrument.seam.opacity(0.45)).frame(width: 0.75, height: 16)
+        }
+        .accessibilityLabel("Agent phase: \(activityLabel)")
+        .layoutPriority(2)
+    }
+
+    private var activityLabel: String {
+        let phase = appState.sessions.currentPhase
+        if appState.sessions.pendingApproval != nil { return "NEEDS APPROVAL" }
+        if appState.sessions.pendingPlan != nil { return "REVIEW PLAN" }
+        if appState.sessions.pendingQuestion != nil { return "NEEDS ANSWER" }
+        switch phase {
+        case .planning: return "PLANNING"
+        case .awaitingPlanApproval: return "REVIEW PLAN"
+        case .working: return "WORKING"
+        case .awaitingApproval: return "NEEDS APPROVAL"
+        case .awaitingQuestion: return "NEEDS ANSWER"
+        case .verifying: return "VERIFYING"
+        case .finished: return "FINISHED"
+        case .idle: return appState.sessions.isRunning ? "WORKING" : "READY"
         }
     }
 
-    private func phaseLabel(_ phase: AgentPhase) -> String {
-        switch phase {
-        case .planning: "Planning"
-        case .awaitingPlanApproval: "Plan ready"
-        case .working: "Working"
-        case .awaitingApproval: "Needs approval"
-        case .awaitingQuestion: "Needs an answer"
-        case .verifying: "Verifying"
-        case .finished: "Finishing"
-        case .idle: "Idle"
+    private var activityDot: Color {
+        switch appState.sessions.currentPhase {
+        case .awaitingApproval, .awaitingPlanApproval, .awaitingQuestion:
+            Theme.warning
+        case .working, .planning, .verifying:
+            Theme.info
+        case .finished:
+            Theme.positive
+        case .idle:
+            Theme.statusNeutral
         }
     }
 
-    private func phaseIcon(_ phase: AgentPhase) -> String {
-        switch phase {
-        case .planning, .awaitingPlanApproval: "list.bullet.clipboard"
-        case .awaitingApproval: "hand.raised.fill"
-        case .awaitingQuestion: "questionmark.circle.fill"
-        case .verifying: "checkmark.shield"
-        case .working: "sparkles"
-        case .finished: "checkmark.circle"
-        case .idle: "circle"
+    private var modelRuntimeLabel: String {
+        if let tps = appState.lastEngineStats.tokensPerSecond, tps > 0 {
+            // When width is generous the secondary tok/s sits trailing; here
+            // it stays beside the model name so ViewThatFits can drop it.
+            _ = tps
         }
+        return appState.statusModelLabel
     }
 
-    private func phaseColor(_ phase: AgentPhase) -> Color {
-        switch phase {
-        case .awaitingApproval, .awaitingQuestion: Theme.warning
-        case .verifying: Theme.info
-        case .finished: Theme.success
-        default: Theme.accent
+    private var changedFileCount: Int {
+        CompletionSnapshot.make(transcript: appState.sessions.transcript).changedFileCount
+    }
+
+    private var contextLabel: String {
+        let total = appState.sessionUsage.totalTokens
+        guard total > 0 else { return "" }
+        if total >= 10_000 {
+            return String(format: "%.1fk context", Double(total) / 1_000)
         }
+        return "\(total) context"
     }
 
     private func chip<Content: View>(
@@ -233,24 +152,18 @@ struct StatusBarView: View {
         tint: Color,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 6) {
             Image(systemName: icon)
-                .font(.caption2.weight(.medium))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(tint)
             content()
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 4)
-        .background(Theme.surfaceInset.opacity(0.6), in: Capsule())
-    }
-
-    private func color(for state: ProcessInfo.ThermalState) -> Color {
-        switch state {
-        case .nominal: Theme.success
-        case .fair: Theme.warning
-        case .serious: Theme.warning
-        case .critical: Theme.danger
-        @unknown default: Theme.textSecondary
+        .font(.appUI(size: 10, weight: .medium))
+        .tracking(0.45)
+        .fixedSize(horizontal: true, vertical: false)
+        .padding(.horizontal, 14)
+        .overlay(alignment: .trailing) {
+            Rectangle().fill(Instrument.seam.opacity(0.45)).frame(width: 0.75, height: 16)
         }
     }
 }

@@ -1,12 +1,7 @@
 import Foundation
 
-/// Phase 22 — the public, UI-independent facade over the whole intelligence
-/// layer. One entry point for embedding (the app, the CLI, the MCP server,
-/// future SDK consumers): workspace registration → indexing → context
-/// compilation → search/graph/knowledge/handoff/verify.
-///
-/// Everything here is deterministic and store-backed; the facade adds no
-/// behavior of its own, only wiring.
+/// Facade used by the agent prompt inject and the optional inspector:
+/// index the workspace, then compile a bounded context packet.
 final class WorkspaceIntelligence: @unchecked Sendable {
 
     let identity: WorkspaceIdentity
@@ -132,57 +127,5 @@ final class WorkspaceIntelligence: @unchecked Sendable {
     /// Lexical symbol search (substring, case-insensitive).
     func searchSymbols(matching query: String, limit: Int = 20) throws -> [SymbolGraph.Node] {
         try graph().searchSymbols(matching: query, limit: limit)
-    }
-
-    /// Deterministic impact report for a symbol change.
-    func impact(ofSymbol name: String) throws -> ImpactReport {
-        try ImpactAnalyzer(graph: graph(), entities: try? entityStore())
-            .impact(ofSymbol: name)
-    }
-
-    // MARK: Knowledge lifecycle
-
-    /// Propose durable knowledge. Always passes through the pipeline —
-    /// evidence, secret scan, injection scan (Phases 9/19).
-    func proposeKnowledge(
-        kind: KnowledgeKind, scope: String, statement: String,
-        evidencePaths: [String] = [], evidenceSymbols: [String] = [],
-        origin: String = "agent"
-    ) throws -> KnowledgeProposalResult {
-        let pipeline = KnowledgePipeline(
-            store: try knowledgeStore(), graph: try graph(),
-            hashProvider: { path in
-                self.snapshotStore.loadLatest(workspaceID: self.identity.workspaceID)?
-                    .files[path]?.contentHash
-            },
-            gitCommitProvider: {
-                GitReader.read(workspaceRoot: self.root)?.commit
-            })
-        return try pipeline.propose(KnowledgeProposal(
-            kind: kind, scope: scope, statement: statement,
-            evidencePaths: evidencePaths, evidenceSymbols: evidenceSymbols,
-            branchScope: nil, origin: origin))
-    }
-
-    // MARK: Handoff
-
-    /// Branch-scoped handoff packet for the current session state.
-    func handoff(sessionBranch: String? = nil) throws -> HandoffPacket? {
-        guard FileManager.default.fileExists(atPath: metadataURL.path),
-              let store = try? WorkingStateStore(store: SQLiteStore(url: metadataURL))
-        else { return nil }
-        let branch = sessionBranch
-            ?? GitReader.read(workspaceRoot: root)?.branch ?? "main"
-        guard let state = try store.latest(
-            workspaceID: identity.workspaceID, branch: branch) else { return nil }
-        let relevant = (try? knowledgeStore().allRecords()) ?? []
-        return HandoffCompiler.compileWithProgress(
-            state: state, relevantKnowledge: relevant)
-    }
-
-    // MARK: Claim verification
-
-    func verifier() throws -> ClaimVerifier {
-        ClaimVerifier(graph: try graph())
     }
 }

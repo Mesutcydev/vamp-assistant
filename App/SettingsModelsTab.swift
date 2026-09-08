@@ -34,6 +34,7 @@ struct ModelsAndProvidersTab: View {
     /// view exists (Settings opens first, the destination request follows), so
     /// the selection has to live one level up or the notification is lost.
     @Binding var section: Section
+    @State private var compactSectionBar = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -48,33 +49,32 @@ struct ModelsAndProvidersTab: View {
                     .environmentObject(appState)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity)
+        .onGeometryChange(for: Bool.self) { $0.size.width < 600 } action: {
+            compactSectionBar = $0
+        }
     }
 
     private var sectionBar: some View {
-        HStack(spacing: Spacing.md) {
-            Picker("Section", selection: $section) {
-                ForEach(Section.allCases) { option in
-                    Label(option.rawValue, systemImage: option.icon).tag(option)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+        let layout = compactSectionBar
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: Spacing.md))
+        return layout {
+            InstrumentSegmentedControl(
+                selection: $section,
+                options: Section.allCases.map { ($0.rawValue, $0) })
             .frame(width: 260)
+            .accessibilityLabel("Models and providers section")
 
             Text(section.summary)
-                .font(.caption)
+                .font(.app(size: 11.5 ))
                 .foregroundStyle(Theme.textTertiary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-
-            Spacer(minLength: 0)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 12)
-        .background(Theme.surface.opacity(0.62))
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Theme.hairline.opacity(0.72)).frame(height: 0.75)
+            Rectangle().fill(Theme.hairline).frame(height: 0.75)
         }
     }
 }

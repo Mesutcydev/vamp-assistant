@@ -44,31 +44,30 @@ struct BotConsolePanel: View {
             }
         }
         .padding(16)
-        .background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .instrumentFaceplate(radius: Radius.card, shadow: false)
         .task(id: computer?.id) { await loadFiles(reset: true) }
     }
 
     private var headerRow: some View {
         HStack(spacing: 10) {
             Label("Console", systemImage: "rectangle.connected.to.line.below")
-                .font(.headline)
+                .font(.app(size: 13.5, weight: .semibold ))
+                .foregroundStyle(Theme.textPrimary)
             if let computer {
                 Text(computer.backend.title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Circle()
-                    .fill(computer.state == .running ? Color.green : Color.secondary)
-                    .frame(width: 7, height: 7)
+                    .font(.app(size: 11 ))
+                    .foregroundStyle(Theme.textTertiary)
+                VampStatusDot(color: computer.state == .running
+                              ? Theme.positive : Theme.statusNeutral)
                 Text(computer.state.rawValue.capitalized)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.app(size: 11 ))
+                    .foregroundStyle(Theme.textTertiary)
             }
             Spacer()
-            Picker("", selection: $tab) {
-                ForEach(Tab.allCases) { Label($0.rawValue, systemImage: $0.symbol).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            InstrumentSegmentedControl(
+                selection: $tab,
+                options: Tab.allCases.map { (title: $0.rawValue, value: $0) })
             .frame(width: 240)
         }
     }
@@ -77,8 +76,8 @@ struct BotConsolePanel: View {
     private func content(for computer: BotComputerRecord) -> some View {
         if let errorMessage {
             Text(errorMessage)
-                .font(.caption)
-                .foregroundStyle(.red)
+                .font(.app(size: 11.5 ))
+                .foregroundStyle(Theme.negative)
         }
         switch tab {
         case .output: outputTab
@@ -148,7 +147,7 @@ struct BotConsolePanel: View {
                 if isBusy { ProgressView().controlSize(.small) }
             }
             .padding(8)
-            .background(.background.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(Theme.surfaceInset.opacity(0.6), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .disabled(computer.state != .running && computer.backend == .appleContainer)
 
             if computer.state != .running, computer.backend == .appleContainer {
@@ -229,7 +228,7 @@ struct BotConsolePanel: View {
                     .frame(maxHeight: 160)
                 }
                 .padding(8)
-                .background(.background.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(Theme.surfaceInset.opacity(0.6), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
         }
     }

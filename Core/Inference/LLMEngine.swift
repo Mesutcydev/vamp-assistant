@@ -177,8 +177,9 @@ public protocol LLMEngine: AnyObject, Sendable {
     func stream(adding turns: [ChatTurn], maxTokens: Int?, temperature: Double?) -> AsyncThrowingStream<String, Error>
 
     /// Generate from an explicit transcript WITHOUT mutating the engine's
-    /// resident conversation. Used by nested `task` subagents so the parent
-    /// turn history / KV accumulation stays intact. Default: `stream(adding:)`.
+    /// resident conversation. Used by nested `task` subagents and the local
+    /// OpenAI-compatible API so the parent turn history / KV accumulation
+    /// stays intact. Default: `stream(adding:)`.
     func streamReplay(_ turns: [ChatTurn], maxTokens: Int?, temperature: Double?) -> AsyncThrowingStream<String, Error>
 
     /// Cancels queued/in-flight generation. In-flight Metal work completes;
@@ -221,4 +222,35 @@ extension LLMEngine {
     /// when a model was actually resident and got dumped.
     @discardableResult
     func dumpIfResident() async -> Bool { false }
+}
+
+/// Nested agents and the local OpenAI API need a full-transcript generation
+/// that does not keep the parent's accumulated turns. Engines swap their
+/// resident transcript out, generate, then put it back.
+enum IsolatedTranscriptReplay {
+    static func stream(
+        _ turns: [ChatTurn],
+        maxTokens: Int?,
+        temperature: Double?,
+        swapOut: @escaping @Sendable () -> [ChatTurn],
+        swapIn: @escaping @Sendable ([ChatTurn]) -> Void,
+        generate: @escaping @Sendable ([ChatTurn], Int?, Double?) -> AsyncThrowingStream<String, Error>
+    ) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                let saved = swapOut()
+                defer { swapIn(saved) }
+                do {
+                    for try await chunk in generate(turns, maxTokens, temperature) {
+                        if Task.isCancelled { break }
+                        continuation.yield(chunk)
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
 }

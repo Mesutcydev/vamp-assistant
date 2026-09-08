@@ -65,7 +65,7 @@ final class RemoteLLMClientTests: XCTestCase {
     }
 
     func testProviderRegistry() {
-        XCTAssertEqual(LLMProvider.allCases.count, 11)
+        XCTAssertEqual(LLMProvider.allCases.count, 12)
         XCTAssertEqual(LLMProvider.openAI.openAICompatibleBaseURL?.host, "api.openai.com")
         XCTAssertEqual(LLMProvider.deepSeek.openAICompatibleBaseURL?.host, "api.deepseek.com")
         XCTAssertEqual(LLMProvider.longCat.openAICompatibleBaseURL?.host, "api.longcat.chat")
@@ -73,6 +73,7 @@ final class RemoteLLMClientTests: XCTestCase {
         XCTAssertEqual(LLMProvider.alibaba.openAICompatibleBaseURL?.host, "dashscope.aliyuncs.com")
         XCTAssertEqual(LLMProvider.alibabaTokenPlan.openAICompatibleBaseURL?.host, "token-plan.ap-southeast-1.maas.aliyuncs.com")
         XCTAssertEqual(LLMProvider.openRouter.openAICompatibleBaseURL?.host, "openrouter.ai")
+        XCTAssertEqual(LLMProvider.nvidia.openAICompatibleBaseURL?.host, "integrate.api.nvidia.com")
         // Gemini is the only non-OpenAI-compatible provider.
         XCTAssertNil(LLMProvider.gemini.openAICompatibleBaseURL)
         XCTAssertNotNil(LLMProvider.gemini.geminiBaseURL)

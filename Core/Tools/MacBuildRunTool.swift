@@ -56,7 +56,9 @@ struct MacBuildRunTool: AgentTool {
                 + "\n\nraw output:\n" + RunCommandTool.truncate(build.output, limit: 8_000)
         }
 
-        guard let appURL = Self.findBuiltApp(in: derivedData) else {
+        guard let appURL = BuiltAppLocator.findBuiltApp(
+            in: derivedData, sdk: .macOS, buildOutput: build.output)
+        else {
             return "error: build succeeded but no .app found in \(derivedData.path)"
         }
 
@@ -101,15 +103,86 @@ struct MacBuildRunTool: AgentTool {
     private static func detectScheme(_ projectFile: URL) -> String {
         projectFile.deletingPathExtension().lastPathComponent
     }
+}
 
-    private static func findBuiltApp(in derivedData: URL) -> URL? {
-        let products = derivedData.appendingPathComponent("Build/Products", isDirectory: true)
-        guard let enumerator = FileManager.default.enumerator(
-            at: products, includingPropertiesForKeys: nil)
-        else { return nil }
-        for case let url as URL in enumerator where url.pathExtension == "app" {
-            return url
+/// Locates the product `.app` after `xcodebuild`. The first match in
+/// DerivedData is often a leftover (`BeetCode.app` after a PRODUCT_NAME
+/// rename, an older Debug stub, a UITest runner, or an iOS simulator
+/// product sitting next to a macOS one).
+enum BuiltAppLocator {
+    enum SDK: Equatable {
+        case macOS
+        case iOSSimulator
+
+        func matchesProductFolder(_ name: String) -> Bool {
+            switch self {
+            case .macOS:
+                return name == "Debug" || name == "Release"
+                    || name.hasSuffix("-macos") || name.hasSuffix("-macosx")
+            case .iOSSimulator:
+                return name.contains("iphonesimulator")
+            }
         }
-        return nil
+    }
+
+    static func findBuiltApp(in derivedData: URL, sdk: SDK, buildOutput: String? = nil) -> URL? {
+        if let fromLog = appURL(fromBuildOutput: buildOutput),
+           FileManager.default.fileExists(atPath: fromLog.path) {
+            return fromLog
+        }
+        return newestLaunchableApp(in: derivedData, sdk: sdk)
+    }
+
+    static func appURL(fromBuildOutput output: String?) -> URL? {
+        guard let output, !output.isEmpty else { return nil }
+        var last: URL?
+        for line in output.split(whereSeparator: \.isNewline) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("Touch ")
+                    || trimmed.hasPrefix("CodeSign ")
+                    || trimmed.hasPrefix("Validate ") else { continue }
+            let rest = trimmed.drop { $0 != " " }.dropFirst()
+            let pathPart: Substring
+            if let range = rest.range(of: " (in target") {
+                pathPart = rest[..<range.lowerBound]
+            } else {
+                pathPart = rest
+            }
+            let path = String(pathPart).trimmingCharacters(in: .whitespaces)
+            guard path.hasSuffix(".app"), !path.hasSuffix(".appex") else { continue }
+            let url = URL(fileURLWithPath: path)
+            guard isLaunchableAppName(url.deletingPathExtension().lastPathComponent) else { continue }
+            last = url
+        }
+        return last
+    }
+
+    static func isLaunchableAppName(_ name: String) -> Bool {
+        !name.hasSuffix("Tests") && !name.hasSuffix("-Runner") && !name.hasSuffix("UITests")
+    }
+
+    static func newestLaunchableApp(in derivedData: URL, sdk: SDK) -> URL? {
+        let products = derivedData.appendingPathComponent("Build/Products", isDirectory: true)
+        guard let folders = try? FileManager.default.contentsOfDirectory(
+            at: products,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else { return nil }
+
+        var ranked: [(URL, Date)] = []
+        for folder in folders where sdk.matchesProductFolder(folder.lastPathComponent) {
+            guard let children = try? FileManager.default.contentsOfDirectory(
+                at: folder,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+            for child in children where child.pathExtension == "app" {
+                guard isLaunchableAppName(child.deletingPathExtension().lastPathComponent) else { continue }
+                let date = (try? child.resourceValues(forKeys: [.contentModificationDateKey])
+                    .contentModificationDate) ?? .distantPast
+                ranked.append((child, date))
+            }
+        }
+        return ranked.max(by: { $0.1 < $1.1 })?.0
     }
 }

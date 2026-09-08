@@ -1,41 +1,43 @@
 import Foundation
 
-/// Wraps a parent engine so a nested `task` subagent can generate without
-/// resetting or appending to the parent's resident conversation.
-///
-/// `reset()` only clears this wrapper. `stream(adding:)` accumulates locally
-/// and calls `streamReplay` on the base engine.
+/// Nested `task` subagents share the parent engine. This wrapper keeps the
+/// child's transcript on the side and calls `streamReplay` so the parent's
+/// accumulated turns stay intact. `reset()` only clears the child side.
 final class IsolatedReplayEngine: LLMEngine, @unchecked Sendable {
-    private let base: any LLMEngine
+    private let inner: any LLMEngine
     private let lock = NSLock()
-    private var own: [ChatTurn] = []
+    private var childHistory: [ChatTurn] = []
 
-    init(base: any LLMEngine) {
-        self.base = base
+    init(_ inner: any LLMEngine) {
+        self.inner = inner
     }
 
-    var loadedModelID: String? {
-        get async { await base.loadedModelID }
-    }
-
-    var stats: EngineStats {
-        get async { await base.stats }
-    }
-
-    var effectiveContextWindow: Int? {
-        get async { await base.effectiveContextWindow }
-    }
+    var loadedModelID: String? { get async { await inner.loadedModelID } }
+    var stats: EngineStats { get async { await inner.stats } }
+    var effectiveContextWindow: Int? { get async { await inner.effectiveContextWindow } }
+    var externalResidentMemoryBytes: UInt64? { get async { await inner.externalResidentMemoryBytes } }
 
     func load(directory: URL, modelID: String, diskBytes: Int64) async throws {
-        try await base.load(directory: directory, modelID: modelID, diskBytes: diskBytes)
+        try await inner.load(directory: directory, modelID: modelID, diskBytes: diskBytes)
     }
 
-    func unload() async {
-        // Never unload the parent's resident model.
-    }
+    func unload() async { await inner.unload() }
 
     func reset() async {
-        withLock { own.removeAll() }
+        lock.withLock { childHistory = [] }
+    }
+
+    func rebaseConversation(to turns: [ChatTurn]) async -> SemanticRebaseResult {
+        lock.withLock { childHistory = turns }
+        return SemanticRebaseResult(installedHistory: true)
+    }
+
+    func prepareForGeneration(contextTokens: Int, contextWindow: Int) async {
+        await inner.prepareForGeneration(contextTokens: contextTokens, contextWindow: contextWindow)
+    }
+
+    func trimTransientMemory() async {
+        await inner.trimTransientMemory()
     }
 
     func stream(
@@ -43,24 +45,22 @@ final class IsolatedReplayEngine: LLMEngine, @unchecked Sendable {
         maxTokens: Int?,
         temperature: Double?
     ) -> AsyncThrowingStream<String, Error> {
-        let all = withLock { () -> [ChatTurn] in
-            own.append(contentsOf: turns)
-            return own
+        let transcript = lock.withLock { () -> [ChatTurn] in
+            childHistory.append(contentsOf: turns)
+            return childHistory
         }
-        return base.streamReplay(all, maxTokens: maxTokens, temperature: temperature)
+        return inner.streamReplay(transcript, maxTokens: maxTokens, temperature: temperature)
     }
 
-    func streamReplay(_ turns: [ChatTurn], maxTokens: Int?, temperature: Double?) -> AsyncThrowingStream<String, Error> {
-        base.streamReplay(turns, maxTokens: maxTokens, temperature: temperature)
+    func streamReplay(
+        _ turns: [ChatTurn],
+        maxTokens: Int?,
+        temperature: Double?
+    ) -> AsyncThrowingStream<String, Error> {
+        inner.streamReplay(turns, maxTokens: maxTokens, temperature: temperature)
     }
 
     func cancelGeneration() async {
-        await base.cancelGeneration()
-    }
-
-    private func withLock<T>(_ body: () -> T) -> T {
-        lock.lock()
-        defer { lock.unlock() }
-        return body()
+        await inner.cancelGeneration()
     }
 }

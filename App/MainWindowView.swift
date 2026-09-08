@@ -43,22 +43,29 @@ struct MainWindowView: View {
     /// tab here lets deep links (the composer, readiness card, and sidebar)
     /// open Models in the same split view instead of spawning a cramped sheet.
     @State private var settingsTab: SettingsView.Tab = .general
+    @State private var settingsModelsSection: ModelsAndProvidersTab.Section = .library
     @State private var showSimulator = false
     @State private var showBrowser = false
     @State private var showDiagnostics = false
     @State private var showRemoteAccess = false
     @State private var showRemoteAccessConsent = false
-    @State private var showCompactSidebar = false
     @State private var showChangedFilesReview = false
     @State private var showReadiness = false
     @State private var readinessIsOnboarding = false
     @State private var showBotsDashboard = false
     @State private var showSettings = false
+    @State private var showComposerFixture = false
+    @State private var fixtureStore = ComposerStore()
+    /// Dev-only visual-verification mode (`--design-preview <screen>`).
+    /// Nil in production launches; when present the app opens the requested
+    /// screen at the reference artboard size with inert fixture content.
+    @State private var designPreview: DesignPreviewScreen? = DesignPreviewScreen.fromLaunchArguments()
     /// The sidebar is a region of the window's root row, not a
     /// NavigationSplitView column: on macOS 26 that column is wrapped in an
     /// inset, rounded concentric-glass panel, which gave the drawer its own
     /// bottom-trailing corner instead of letting the window own the corners.
     @State private var sidebarVisible = true
+    @State private var composerDockHeight: CGFloat = 224
     @State private var sidebarWidth: CGFloat = SidebarMetrics.width
 
     private var dockedPanelOpen: Bool {
@@ -76,7 +83,8 @@ struct MainWindowView: View {
     /// One tool surface at a time — stacked Browser/Simulator/Diagnostics
     /// sheets (or three docked columns) hide the composer.
     private func presentToolPanel(_ panel: ToolPanel) {
-        showCompactSidebar = false
+        showSettings = false
+        showBotsDashboard = false
         showBrowser = panel == .browser
         showSimulator = panel == .simulator
         showDiagnostics = panel == .diagnostics
@@ -104,15 +112,38 @@ struct MainWindowView: View {
     }
 
     private var configuredLayout: some View {
-        Group {
-            if showSettings {
-                SettingsView(initialTab: settingsTab, onClose: { showSettings = false })
-                    .environmentObject(appState)
-            } else {
-                responsiveLayout
+        ZStack {
+            // One continuous instrument canvas for the whole window: the
+            // fixed silver shell every module mounts onto. No atmosphere,
+            // no wallpaper — the app reads as one industrial object family.
+            Theme.workspaceCanvas
+                .ignoresSafeArea()
+
+            Group {
+                if showComposerFixture {
+                    composerFixture
+                } else if showSettings {
+                    SettingsView(initialTab: settingsTab, initialModelsSection: settingsModelsSection, onClose: { showSettings = false })
+                        .environmentObject(appState)
+                } else {
+                    responsiveLayout
+                }
             }
         }
-            .navigationTitle(showSettings ? "Settings" : (showBotsDashboard ? "Bots" : (sessions.workspaceURL?.lastPathComponent ?? "Vamp Assistant")))
+            // Reference: one full-width 52pt chrome band styled as a quiet
+            // silver instrument strip; native traffic lights and toolbar
+            // items draw above it, content below keeps its own safe area.
+            .overlay(alignment: .top) {
+                VStack(spacing: 0) {
+                    LinearGradient(colors: [Instrument.silverTop, Instrument.silverMid],
+                                   startPoint: .top, endPoint: .bottom)
+                    Rectangle().fill(Instrument.seam).frame(height: 0.75)
+                }
+                .frame(height: Chrome.topBandHeight)
+                .ignoresSafeArea(edges: .top)
+                .allowsHitTesting(false)
+            }
+            .navigationTitle(windowTitle)
             .toolbar {
                 if !showSettings {
                     ToolbarItem(placement: .navigation) {
@@ -120,9 +151,12 @@ struct MainWindowView: View {
                             sidebarVisible.toggle()
                         } label: {
                             Image(systemName: "sidebar.left")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundStyle(Instrument.ink)
                         }
                         .help("Toggle sidebar")
                         .accessibilityLabel("Toggle sidebar")
+                        .accessibilityValue(sidebarVisible ? "Expanded" : "Collapsed")
                         .keyboardShortcut("s", modifiers: [.command, .control])
                     }
                 }
@@ -130,25 +164,23 @@ struct MainWindowView: View {
                 if #available(macOS 26.0, *) {
                     ToolbarItemGroup(placement: .primaryAction) {
                         topToolCluster
-                        botsToolButton
                         moreActionsMenu
                     }
                     .sharedBackgroundVisibility(.hidden)
                 } else {
                     ToolbarItemGroup(placement: .primaryAction) {
                         topToolCluster
-                        botsToolButton
                         moreActionsMenu
                     }
                 }
 #else
                 ToolbarItemGroup(placement: .primaryAction) {
                     topToolCluster
-                    botsToolButton
                     moreActionsMenu
                 }
 #endif
             }
+            .onAppear(perform: applyDesignPreview)
             .onChange(of: appState.enginePhase) { _, phase in
                 switch phase {
                 case .idle:
@@ -168,80 +200,85 @@ struct MainWindowView: View {
             // rectangles.
             .toolbarBackground(.hidden, for: .windowToolbar)
             .background(Theme.bg)
-            .onChange(of: showCompactSidebar) { _, on in
-                if on {
-                    showBrowser = false
-                    showSimulator = false
-                    showDiagnostics = false
-                    appState.isSimulatorPanelOpen = false
-                }
-            }
+    }
+
+    /// Window title follows the active chat (like the reference client),
+    /// falling back to the workspace name when there is no saved chat yet.
+    private var windowTitle: String {
+        if showSettings { return "Settings" }
+        if showBotsDashboard { return "Bots" }
+        if let id = sessions.activeSessionID,
+           let record = SessionStore.shared.load(id: id) {
+            let title = SessionTitle.display(for: record)
+            if !title.isEmpty { return title }
+        }
+        return sessions.workspaceURL?.lastPathComponent ?? "Vamp Assistant"
     }
 
     private var topToolCluster: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 8) {
             topToolButton("Browser", icon: "safari", active: showBrowser) {
                 toggleToolPanel(.browser)
             }
             topToolButton("Simulator", icon: "iphone", active: showSimulator) {
                 toggleToolPanel(.simulator)
             }
-            topToolButton("Remote", icon: "iphone.gen3.radiowaves.left.and.right", active: appState.remoteSessionRunning) {
-                requestRemoteAccess()
-            }
             topToolButton("Diagnostics", icon: "waveform.path.ecg", active: showDiagnostics) {
                 toggleToolPanel(.diagnostics)
             }
+            topBotsButton
         }
-        .padding(2)
-        .background(.ultraThinMaterial,
-                    in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-            .strokeBorder(Theme.hairline.opacity(0.42), lineWidth: 0.75))
     }
 
-    private var botsToolButton: some View {
-        Button {
-            NotificationCenter.default.post(name: .openBotsDashboard, object: nil)
-        } label: {
-            Label("Bots", systemImage: "person.2")
-                .font(.app(size: 13, weight: .medium, design: .serif))
-                .foregroundStyle(showBotsDashboard ? Theme.rose : Theme.textSecondary)
-                .padding(.horizontal, 11)
-                .frame(height: 32)
-                .background(showBotsDashboard ? Theme.surfaceInset : Color.clear,
-                            in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                    .strokeBorder(Theme.hairline.opacity(0.42), lineWidth: 0.75))
+    /// One Bots destination with a text label, matching the reference
+    /// client's trailing toolbar button.
+    private var topBotsButton: some View {
+        VampToolbarButton(active: showBotsDashboard) {
+            HStack(spacing: 5) {
+                Image(systemName: "person.2")
+                    .font(.app(size: 13, weight: .medium ))
+                Text("Bots")
+                    .font(.app(size: 12.5, weight: .medium ))
+            }
+        } action: {
+            showSettings = false
+            showBotsDashboard = true
+            showBrowser = false
+            showSimulator = false
+            showDiagnostics = false
         }
-        .buttonStyle(.plain)
-        .lfHoverLift()
         .help("Bots")
         .accessibilityLabel("Bots")
     }
 
     private var moreActionsMenu: some View {
-        Menu {
-            Button("Remote sessions…") { requestRemoteAccess() }
-            Button("Models…") { openModelsSettings() }
-            Divider()
-            Button("Export current chat as Markdown…") {
+        InstrumentMenu(menuWidth: 260) {
+            Image(systemName: "ellipsis")
+                .font(.system(size: Chrome.toolbarIcon, weight: .semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: Chrome.toolbarButtonHeight, height: Chrome.toolbarButtonHeight)
+                .background(Theme.surfaceInset,
+                            in: RoundedRectangle(cornerRadius: Chrome.toolbarButtonRadius,
+                                                 style: .continuous))
+        } options: {
+            InstrumentMenuRow(
+                title: settings.showHomeSuggestions ? "Hide homepage suggestions" : "Show homepage suggestions",
+                systemImage: settings.showHomeSuggestions ? "eye.slash" : "eye") {
+                settings.showHomeSuggestions.toggle()
+            }
+            InstrumentMenuRow(title: "Remote sessions…", systemImage: "antenna.radiowaves.left.and.right") {
+                requestRemoteAccess()
+            }
+            InstrumentMenuRow(title: "Models…", systemImage: "cpu") {
+                openModelsSettings()
+            }
+            InstrumentMenuRow(title: "Export current chat as Markdown…", systemImage: "doc.text") {
                 exportCurrentChat(format: .markdown)
             }
-            Button("Export current chat as JSON…") {
+            InstrumentMenuRow(title: "Export current chat as JSON…", systemImage: "curlybraces.square") {
                 exportCurrentChat(format: .json)
             }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.app(size: 13, weight: .semibold, design: .serif))
-                .foregroundStyle(Theme.textSecondary)
-                .frame(width: 32, height: 32)
-                .background(.ultraThinMaterial,
-                            in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                    .strokeBorder(Theme.hairline.opacity(0.42), lineWidth: 0.75))
         }
-        .menuStyle(.borderlessButton)
         .help("More app actions")
         .accessibilityLabel("More app actions")
     }
@@ -252,18 +289,7 @@ struct MainWindowView: View {
         active: Bool,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.app(size: 13, weight: .medium, design: .serif))
-                .foregroundStyle(active ? Theme.rose : Theme.textSecondary)
-                .frame(width: 30, height: 28)
-                .background(active ? Theme.surfaceInset : Color.clear,
-                            in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .lfHoverLift()
-        .help(title)
-        .accessibilityLabel(title)
+        VampToolbarIconButton(icon: icon, active: active, help: title, action: action)
     }
 
     private var presentationView: some View {
@@ -293,12 +319,14 @@ struct MainWindowView: View {
                 WelcomeReadinessView(
                     isOnboarding: readinessIsOnboarding,
                     onOpenWorkspace: {
+                        completeWelcome()
                         showReadiness = false
                         DispatchQueue.main.async { chooseWorkspace() }
                     },
                     onOpenModelManager: {
+                        completeWelcome()
                         showReadiness = false
-                        DispatchQueue.main.async { openModelsSettings() }
+                        DispatchQueue.main.async { openProvidersSettings() }
                     },
                     onComplete: completeWelcome)
                 .environmentObject(appState)
@@ -309,12 +337,22 @@ struct MainWindowView: View {
     private var notificationView: some View {
         AnyView(presentationView)
             .onReceive(appNotifications, perform: handleAppNotification)
+            .onReceive(NotificationCenter.default.publisher(for: .focusChatSearch)) { _ in
+                showBotsDashboard = false
+                guard !sidebarVisible else { return }
+                sidebarVisible = true
+                Task { @MainActor in
+                    await Task.yield()
+                    NotificationCenter.default.post(name: .focusChatSearch, object: nil)
+                }
+            }
     }
 
     private var appNotifications: AnyPublisher<Notification, Never> {
         Publishers.MergeMany([
             .openModelManager, .openWorkspace, .openSystemReadiness, .openRemoteAccess,
             .openBrowserPanel, .openBotsDashboard, .openAssistantHome, .openAppSettings,
+            .openProviderSettings,
             .toggleBrowserPanel, .toggleSimulatorPanel, .toggleDiagnosticsPanel,
             .gitStatus, .gitDiff, .undoCheckpoint, .exportChatMarkdown,
             .exportChatJSON, .exportTaskBundle, .newChat, .stopAgent,
@@ -347,6 +385,8 @@ struct MainWindowView: View {
             showBrowser = false
             showSimulator = false
             showDiagnostics = false
+        case .openProviderSettings:
+            openProvidersSettings()
         case .toggleBrowserPanel: toggleToolPanel(.browser)
         case .toggleSimulatorPanel: toggleToolPanel(.simulator)
         case .toggleDiagnosticsPanel: toggleToolPanel(.diagnostics)
@@ -369,6 +409,17 @@ struct MainWindowView: View {
     /// identical to every other settings destination.
     private func openModelsSettings() {
         settingsTab = .models
+        settingsModelsSection = .library
+        showSettings = true
+        showBotsDashboard = false
+        showBrowser = false
+        showSimulator = false
+        showDiagnostics = false
+    }
+
+    private func openProvidersSettings() {
+        settingsTab = .models
+        settingsModelsSection = .providers
         showSettings = true
         showBotsDashboard = false
         showBrowser = false
@@ -389,6 +440,87 @@ struct MainWindowView: View {
               !AppPreferencesStore.shared.current.hasCompletedWelcome else { return }
         readinessIsOnboarding = true
         showReadiness = true
+    }
+
+    /// Opens the requested screen for design capture and sizes the window to
+    /// the reference artboard (1320 × 856 content). Fixture content is inert:
+    /// no tools run, nothing persists, and approvals only clear locally.
+    private func applyDesignPreview() {
+        guard let screen = designPreview else { return }
+        designPreview = nil
+        Instrument.debugFrameReport = true
+        DispatchQueue.main.async {
+            // Design captures must not inherit a restored in-app destination.
+            // Reset every mutually exclusive workspace before selecting the
+            // requested fixture so the screenshot always shows the argument
+            // that launched this exact binary.
+            showComposerFixture = false
+            showSettings = false
+            showBotsDashboard = false
+            showBrowser = false
+            showSimulator = false
+            showDiagnostics = false
+            if let window = NSApplication.shared.windows.first {
+                let args = ProcessInfo.processInfo.arguments
+                var width: CGFloat = 1320
+                var height: CGFloat = 856
+                if let i = args.firstIndex(of: "--design-size"),
+                   args.indices.contains(i + 1) {
+                    let parts = args[i + 1].split(separator: "x")
+                    if parts.count == 2,
+                       let w = Double(parts[0]), let h = Double(parts[1]) {
+                        width = CGFloat(w)
+                        height = CGFloat(h)
+                    }
+                }
+                window.setContentSize(NSSize(width: width, height: height))
+                window.center()
+            }
+            switch screen {
+            case .chat:
+                DesignPreview.install(.chat, into: sessions)
+            case .composer:
+                showComposerFixture = true
+                sidebarVisible = false
+                DesignPreview.install(.composer, into: sessions)
+                fixtureStore.prompt = "Draft the release notes for 0.9.5"
+            case .welcome:
+                break
+            case .settingsGeneral:
+                settingsTab = .general
+                showSettings = true
+            case .settingsModels:
+                settingsTab = .models
+                settingsModelsSection = .library
+                showSettings = true
+            case .settingsBots:
+                settingsTab = .bots
+                showSettings = true
+            case .settingsAgent:
+                settingsTab = .agent
+                showSettings = true
+            case .settingsNetwork:
+                settingsTab = .network
+                showSettings = true
+            case .settingsPlugins:
+                settingsTab = .plugins
+                showSettings = true
+            case .settingsHover:
+                settingsTab = .general
+                showSettings = true
+                SettingsRail.previewHover = .models
+            case .settingsFocus:
+                settingsTab = .general
+                showSettings = true
+                SettingsRail.previewFocus = .bots
+            case .botsDashboard:
+                showSettings = false
+                showBotsDashboard = true
+            }
+            if ProcessInfo.processInfo.arguments.contains("--design-collapsed") {
+                sidebarVisible = false
+            }
+        }
     }
 
     /// Export the active conversation even when the sidebar is collapsed. The
@@ -474,13 +606,23 @@ struct MainWindowView: View {
 
     private var responsiveLayout: some View {
         GeometryReader { proxy in
-            Group {
-                if proxy.size.width < 900 {
-                    portraitLayout
-                } else {
-                    wideLayout
+            wideLayout(compact: proxy.size.width < 900)
+                .sheet(isPresented: Binding(get: { proxy.size.width < 900 && showBrowser }, set: { showBrowser = $0 })) {
+                    BrowserPanelView(onClose: { showBrowser = false })
+                        .frame(minWidth: 360, idealWidth: 520, minHeight: 520)
                 }
-            }
+                .sheet(isPresented: Binding(get: { proxy.size.width < 900 && showSimulator }, set: { showSimulator = $0 })) {
+                    SimulatorPanelView(onClose: {
+                        showSimulator = false
+                        appState.isSimulatorPanelOpen = false
+                    })
+                    .environmentObject(appState)
+                    .frame(minWidth: 360, idealWidth: 520, minHeight: 520)
+                }
+                .sheet(isPresented: Binding(get: { proxy.size.width < 900 && showDiagnostics }, set: { showDiagnostics = $0 })) {
+                    DiagnosticsPanelView(onClose: { showDiagnostics = false })
+                        .frame(minWidth: 360, idealWidth: 520, minHeight: 420)
+                }
         }
     }
 
@@ -488,11 +630,45 @@ struct MainWindowView: View {
     /// row. Nothing here is a card: no region carries a radius of its own, so
     /// the window mask is the only thing that rounds a corner and every
     /// interior junction — drawer/content and drawer/status bar — is square.
-    private var wideLayout: some View {
+    private func wideLayout(compact: Bool) -> some View {
         HStack(spacing: 0) {
-            if sidebarVisible {
-                SidebarView(showRemoteAccess: $showRemoteAccess)
+            ChatRail(showsBots: showBotsDashboard,
+                     composerHeight: composerDockHeight,
+                     onNewChat: { NotificationCenter.default.post(name: .newChat, object: nil) },
+                     onSearch: {
+                         showBotsDashboard = false
+                         sidebarVisible = true
+                         Task { @MainActor in
+                             await Task.yield()
+                             NotificationCenter.default.post(name: .focusChatSearch, object: nil)
+                         }
+                     },
+                     onExpand: {
+                         if showBotsDashboard {
+                             showBotsDashboard = false
+                             sidebarVisible = true
+                         } else {
+                             sidebarVisible.toggle()
+                         }
+                     },
+                     onBots: { showSettings = false; showBotsDashboard = true },
+                     onSettings: {
+                         settingsTab = .general
+                         showSettings = true
+                         showBotsDashboard = false
+                     })
+                SidebarView(showRemoteAccess: $showRemoteAccess,
+                            onClose: { sidebarVisible = false })
                     .frame(width: sidebarWidth)
+                    .background(Theme.workspaceCanvas)
+                    .mask(alignment: .leading) {
+                        Rectangle().frame(width: sidebarVisible ? sidebarWidth : 0)
+                    }
+                    .frame(width: !compact && sidebarVisible ? sidebarWidth : 0, alignment: .leading)
+                    .zIndex(1)
+                    .allowsHitTesting(sidebarVisible)
+                    .accessibilityHidden(!sidebarVisible)
+            if sidebarVisible && !compact {
                 SidebarSplitDivider(width: $sidebarWidth,
                                     range: SidebarMetrics.minWidth...SidebarMetrics.maxWidth)
             }
@@ -506,8 +682,8 @@ struct MainWindowView: View {
                         chatColumn
                     }
                 }
-                    .frame(minWidth: chatMinWidth, maxWidth: .infinity, maxHeight: .infinity)
-                if showSimulator {
+                .frame(minWidth: chatMinWidth, maxWidth: .infinity, maxHeight: .infinity)
+                if showSimulator && !compact {
                     Divider()
                     SimulatorPanelView(onClose: {
                         showSimulator = false
@@ -516,99 +692,42 @@ struct MainWindowView: View {
                     .environmentObject(appState)
                     .frame(minWidth: 260, idealWidth: 340, maxWidth: 440, maxHeight: .infinity)
                 }
-                if showBrowser {
+                if showBrowser && !compact {
                     Divider()
                     BrowserPanelView(onClose: { showBrowser = false })
                         .frame(minWidth: 280, idealWidth: 380, maxWidth: 520, maxHeight: .infinity)
                 }
-                if showDiagnostics {
+                if showDiagnostics && !compact {
                     Divider()
                     DiagnosticsPanelView(onClose: { showDiagnostics = false })
                         .frame(minWidth: 240, idealWidth: 320, maxWidth: 400, maxHeight: .infinity)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Theme.bg)
+            .background(Color.clear)
         }
+        .onPreferenceChange(ComposerDockHeightKey.self) { composerDockHeight = $0 }
     }
 
     private var chatColumn: some View {
-        VStack(spacing: 0) {
-            ChatView(controller: sessions)
-            Divider()
-            StatusBarView()
-        }
-        .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
-        .layoutPriority(1)
+        ChatView(controller: sessions)
+            .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
+            .layoutPriority(1)
     }
 
-    /// Portrait windows use one readable column. Sidebar/history and tools
-    /// become sheets instead of competing for horizontal space with the
-    /// transcript and composer.
-    private var portraitLayout: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Button {
-                    showCompactSidebar = true
-                } label: {
-                    Label("Chats", systemImage: "sidebar.left")
-                }
-                .buttonStyle(LFCapsuleButtonStyle())
-                Button {
-                    sessions.newSession()
-                } label: {
-                    Image(systemName: "square.and.pencil")
-                }
-                .buttonStyle(LFIconButtonStyle(size: 30))
-                .lfHoverLift()
-                .help("New chat")
-                Spacer()
-                Text(showBotsDashboard ? "Bots" : (sessions.workspaceURL?.lastPathComponent ?? "Vamp Assistant"))
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Theme.bg)
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(Theme.hairline).frame(height: 1)
-            }
-
-            if showSettings {
-                SettingsView(initialTab: settingsTab, onClose: { showSettings = false }).environmentObject(appState)
-            } else if showBotsDashboard {
-                BotDashboardView()
-                    .environmentObject(appState)
-                    .environmentObject(sessions)
-            } else {
-                chatColumn
-            }
+    /// Canonical composer fixture: the approved object spans the workspace
+    /// and docks flush to the usable bottom edge exactly like production.
+    /// Isolated store; no sends, permissions, or history mutation.
+    private var composerFixture: some View {
+        VStack {
+            Spacer(minLength: 0)
+            InstrumentComposer(store: fixtureStore, placement: .conversation)
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, Chrome.composerBottomGap)
         }
-        .background(Theme.bg)
-        .sheet(isPresented: $showCompactSidebar) {
-            SidebarView(showRemoteAccess: $showRemoteAccess,
-                        showsCloseButton: true)
-            .environmentObject(appState)
-            .environmentObject(sessions)
-            .frame(minWidth: 320, idealWidth: 360, minHeight: 500)
-        }
-        .sheet(isPresented: $showBrowser) {
-            BrowserPanelView(onClose: { showBrowser = false })
-                .frame(minWidth: 360, idealWidth: 520, minHeight: 520)
-        }
-        .sheet(isPresented: $showSimulator) {
-            SimulatorPanelView(onClose: {
-                showSimulator = false
-                appState.isSimulatorPanelOpen = false
-            })
-            .environmentObject(appState)
-            .frame(minWidth: 360, idealWidth: 520, minHeight: 520)
-        }
-        .sheet(isPresented: $showDiagnostics) {
-            DiagnosticsPanelView(onClose: { showDiagnostics = false })
-                .frame(minWidth: 360, idealWidth: 520, minHeight: 420)
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .environmentObject(appState)
+        .environmentObject(sessions)
     }
+
 }

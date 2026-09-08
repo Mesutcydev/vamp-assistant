@@ -13,12 +13,14 @@ struct ChatHeaderView: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            // A washed tile around a filled glyph made the chat title look
-            // like a badge. The title is the thing here.
-            Image(systemName: "bubble.left.and.bubble.right")
+            Image(systemName: "bubble.left.and.bubble.right.fill")
                 .accessibilityHidden(true)
-                .font(.caption)
-                .foregroundStyle(Theme.textTertiary)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.accentText)
+                .frame(width: 24, height: 24)
+                .background(
+                    Theme.wash(Theme.accent),
+                    in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
 
             Text(title)
                 .font(.caption.weight(.semibold))
@@ -96,46 +98,31 @@ struct ChatHeaderActions: View {
             .accessibilityLabel("Review changed files")
             .disabled(!canReview)
 
-            Menu {
-                menuButton("Browser", "safari", .toggleBrowserPanel)
-                menuButton("Simulator", "iphone", .toggleSimulatorPanel)
-                menuButton("Diagnostics", "stethoscope", .toggleDiagnosticsPanel)
-                Divider()
-                Group {
-                    menuButton("Git status", "circle.dashed", .gitStatus)
-                    menuButton("Review changes", "doc.text.magnifyingglass", .gitDiff)
-                    menuButton("Undo last checkpoint", "arrow.uturn.backward", .undoCheckpoint)
-                }
-                .disabled(!canReview)
-                Divider()
-                menuButton("Export as Markdown…", "doc.text", .exportChatMarkdown)
-                menuButton("Export as JSON…", "curlybraces.square", .exportChatJSON)
-                menuButton("Export task bundle…", "shippingbox", .exportTaskBundle)
-            } label: {
+            InstrumentMenu(menuWidth: 260) {
                 Image(systemName: "ellipsis")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(Theme.textSecondary)
                     .frame(width: 28, height: 28)
                     .background(Theme.surfaceInset, in: Circle())
                     .overlay(Circle().strokeBorder(Theme.hairline, lineWidth: 1))
+            } options: {
+                InstrumentMenuRow(title: "Browser", systemImage: "safari", action: { post(.toggleBrowserPanel) })
+                InstrumentMenuRow(title: "Simulator", systemImage: "iphone", action: { post(.toggleSimulatorPanel) })
+                InstrumentMenuRow(title: "Diagnostics", systemImage: "stethoscope", action: { post(.toggleDiagnosticsPanel) })
+                InstrumentMenuRow(title: "Git status", systemImage: "circle.dashed",
+                                  isDisabled: !canReview, action: { post(.gitStatus) })
+                InstrumentMenuRow(title: "Review changes", systemImage: "doc.text.magnifyingglass",
+                                  isDisabled: !canReview, action: { post(.gitDiff) })
+                InstrumentMenuRow(title: "Undo last checkpoint", systemImage: "arrow.uturn.backward",
+                                  isDisabled: !canReview, action: { post(.undoCheckpoint) })
+                InstrumentMenuRow(title: "Export as Markdown…", systemImage: "doc.text", action: { post(.exportChatMarkdown) })
+                InstrumentMenuRow(title: "Export as JSON…", systemImage: "curlybraces.square", action: { post(.exportChatJSON) })
+                InstrumentMenuRow(title: "Export task bundle…", systemImage: "shippingbox", action: { post(.exportTaskBundle) })
             }
-            .menuStyle(.borderlessButton)
             .fixedSize()
             .lfHoverLift()
             .help("More workspace actions")
             .accessibilityLabel("More workspace actions")
-        }
-    }
-
-    private func menuButton(
-        _ title: LocalizedStringKey,
-        _ icon: String,
-        _ notification: Notification.Name
-    ) -> some View {
-        Button {
-            post(notification)
-        } label: {
-            Label(title, systemImage: icon)
         }
     }
 
@@ -166,12 +153,10 @@ struct ChatPhaseBadge: View {
     }
 }
 
-/// User message: short prompts are a right-aligned pill (ChatGPT pattern);
-/// long or multiline messages (pasted logs, imported Claude/Codex/Cursor
-/// history) become a full-width left-aligned card — a narrow right pill
-/// wastes the column and mangles preformatted text. The fill is the elevated
-/// surface, not an accent wash: the 10 % wash read as pale pink on both
-/// light and beet backgrounds.
+/// User message: short prompts are a right-aligned bubble (reference-client
+/// pattern); long or multiline messages become a full-width left-aligned
+/// card. The fill is the raised inset surface with a quiet hairline — a
+/// calm dark bubble, never an accent wash.
 struct UserBubble: View {
     let item: AgentSessionController.TranscriptItem
 
@@ -181,47 +166,58 @@ struct UserBubble: View {
 
     var body: some View {
         if case .user(let text) = item.kind {
-            // The phone's shape, for the same reason: a prompt is yours and it
-            // is short, so it sits in a well-filled bubble on the right, sized
-            // to its words. The accent-tinted outline is gone — an outline on a
-            // filled bubble was two ways of saying the same thing.
-            HStack {
-                if !Self.isLongForm(text) { Spacer(minLength: 44) }
-                Text(text)
-                    .font(AppFont.chatBody)
-                    .lineSpacing(3)
-                    .foregroundStyle(Theme.textPrimary)
-                    .multilineTextAlignment(.leading)
-                    .padding(.horizontal, 15)
-                    .padding(.vertical, 11)
-                    .background(Theme.surfaceInset,
-                                in: RoundedRectangle(cornerRadius: 21, style: .continuous))
-                    .frame(maxWidth: Self.isLongForm(text) ? 760 : 520,
-                           alignment: Self.isLongForm(text) ? .leading : .trailing)
-                    .textSelection(.enabled)
-                if Self.isLongForm(text) { Spacer(minLength: 0) }
+            if Self.isLongForm(text) {
+                HStack {
+                    Text(text)
+                        .font(AppFont.chatUserBody)
+                        .lineSpacing(2)
+                        .tracking(-0.1)
+                        .foregroundStyle(Theme.textPrimary)
+                        .multilineTextAlignment(.leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: Radius.bubble, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: Radius.bubble, style: .continuous)
+                            .strokeBorder(Theme.hairline.opacity(0.55), lineWidth: 0.75))
+                        .frame(maxWidth: ContentColumn.maxWidth * 0.7, alignment: .leading)
+                        .textSelection(.enabled)
+                    Spacer(minLength: 0)
+                }
+            } else {
+                HStack {
+                    Spacer()
+                    Text(text)
+                        .font(AppFont.chatUserBody)
+                        .lineSpacing(2)
+                        .tracking(-0.1)
+                        .foregroundStyle(Color.white.opacity(0.92))
+                        .multilineTextAlignment(.leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Instrument.darkInsert.opacity(0.92),
+                                    in: RoundedRectangle(cornerRadius: Radius.bubble, style: .continuous))
+                        .frame(maxWidth: ContentColumn.maxWidth * 0.7, alignment: .trailing)
+                        .textSelection(.enabled)
+                }
             }
         }
     }
 }
 
-/// Assistant output: avatar-led, no bubble, full column width, block-aware
-/// markdown — lists, headings, and code blocks should read like an answer,
-/// not like one flattened line of text.
+/// Assistant output: plain full-column prose with block-aware markdown —
+/// lists, headings, and code blocks read like an answer. No avatar or
+/// bubble: the reference client keeps assistant text bare.
 struct AssistantMessage: View {
     let item: AgentSessionController.TranscriptItem
 
     var body: some View {
         if case .assistant(let text) = item.kind {
-            HStack(alignment: .top, spacing: 12) {
-                AssistantAvatar()
-                VStack(alignment: .leading, spacing: 12) {
-                    MarkdownText(text: text)
-                    AnswerFooterRow(text: text, metrics: item.answerMetrics)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
+            VStack(alignment: .leading, spacing: 12) {
+                MarkdownText(text: text)
+                AnswerFooterRow(text: text, metrics: item.answerMetrics)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
         }
     }
 }
@@ -538,7 +534,8 @@ struct MarkdownBlockView: View {
         case .paragraph(let text):
             inline(text)
                 .font(AppFont.chatBody)
-                .lineSpacing(5)
+                .lineSpacing(4)
+                .tracking(-0.1)
                 .fixedSize(horizontal: false, vertical: true)
 
         case .heading(let level, let text):
@@ -616,8 +613,8 @@ struct MarkdownBlockView: View {
 
     private func tableCell(_ source: String, emphasized: Bool) -> some View {
         inline(source)
-            .font(.app(size: 13.5 * CGFloat(Theme.currentTextSize.scale),
-                          weight: emphasized ? .semibold : .regular, design: .serif))
+            .font(.appProse(size: 13.5 * CGFloat(Theme.currentTextSize.scale),
+                          weight: emphasized ? .semibold : .regular))
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
             .frame(minWidth: 120, alignment: .leading)
@@ -638,9 +635,9 @@ struct MarkdownBlockView: View {
 
     private func headingFont(_ level: Int) -> Font {
         switch level {
-        case 1: .app(size: 22 * CGFloat(Theme.currentTextSize.scale), weight: .bold, design: .serif)
+        case 1: .appProse(size: 22 * CGFloat(Theme.currentTextSize.scale), weight: .bold)
         case 2: AppFont.chatHeading
-        default: .app(size: 16 * CGFloat(Theme.currentTextSize.scale), weight: .semibold, design: .serif)
+        default: .appProse(size: 16 * CGFloat(Theme.currentTextSize.scale), weight: .semibold)
         }
     }
 
@@ -649,8 +646,8 @@ struct MarkdownBlockView: View {
             ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                 HStack(alignment: .firstTextBaseline, spacing: 9) {
                     Text(numbered ? "\(index + 1)." : "•")
-                        .font(.app(size: 16 * CGFloat(Theme.currentTextSize.scale),
-                                      weight: numbered ? .regular : .semibold, design: .serif))
+                        .font(.appProse(size: 16 * CGFloat(Theme.currentTextSize.scale),
+                                      weight: numbered ? .regular : .semibold))
                         .foregroundStyle(Theme.textSecondary)
                         .frame(width: 20, alignment: .trailing)
                     inline(item)
@@ -675,10 +672,15 @@ struct MetaRow: View {
                 .foregroundStyle(Theme.textTertiary)
                 .frame(maxWidth: .infinity, alignment: .center)
         case .notice(let text):
-            Text(text)
-                .font(.caption)
-                .foregroundStyle(Theme.textTertiary)
-                .frame(maxWidth: .infinity, alignment: .center)
+            if text.hasPrefix("Codex plan\n") {
+                PlanSnapshotCard(text: text)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text(text)
+                    .font(.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
         default:
             EmptyView()
         }
@@ -693,116 +695,210 @@ struct AgentActivityCard: View {
     @State private var expanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var callCount: Int {
-        items.filter { if case .toolCall = $0.kind { return true }; return false }.count
-    }
     private var hasFailure: Bool {
         items.contains { if case .toolResult(_, _, let failed, _) = $0.kind { return failed }; return false }
     }
-    private var reasoningCount: Int {
-        items.filter { if case .reasoning = $0.kind { return true }; return false }.count
-    }
-    private var toolNames: [String] {
-        var names: [String] = []
-        for item in items {
-            if case .toolCall(let invocation) = item.kind, !names.contains(invocation.name) {
-                names.append(invocation.name)
-            }
-        }
-        return names
-    }
-    private var title: String {
-        if callCount == 0 { return "Thought through the task" }
-        return "\(callCount) action\(callCount == 1 ? "" : "s")"
-    }
-    private var summary: String {
-        if !toolNames.isEmpty {
-            return toolNames.map(Self.friendlyToolName).joined(separator: " · ")
-        }
-        return reasoningCount == 1 ? "Reasoning summary" : "Reasoning summaries"
+
+    /// Result status keyed by invocation id, so each call row carries its
+    /// own outcome without duplicating the result row beneath it.
+    private var failedResultIDs: Set<UUID> {
+        Set(items.compactMap { item in
+            if case .toolResult(let id, _, let failed, _) = item.kind, failed { return id }
+            return nil
+        })
     }
 
-    private static func friendlyToolName(_ name: String) -> String {
+    /// One compact presentation row per event. Raw arguments, results, and
+    /// reasoning stay behind the Details disclosure (ActivityRow below).
+    private struct ActivityEntry: Identifiable {
+        let id: UUID
+        let icon: String
+        let verb: String
+        let summary: String
+        let failed: Bool
+    }
+
+    private var compactEntries: [ActivityEntry] {
+        var entries: [ActivityEntry] = []
+        for item in items {
+            switch item.kind {
+            case .toolCall(let invocation):
+                entries.append(ActivityEntry(
+                    id: item.id,
+                    icon: Self.icon(for: invocation.name),
+                    verb: Self.verb(for: invocation.name),
+                    summary: invocation.summary,
+                    failed: failedResultIDs.contains(invocation.id)))
+            case .reasoning(let text):
+                // Consecutive reasoning events are one reading unit: merge
+                // them into a single row instead of stacking repeated
+                // fragments. The stored transcript is never mutated.
+                if let last = entries.last, last.verb == "think" {
+                    continue
+                }
+                entries.append(ActivityEntry(
+                    id: item.id,
+                    icon: "brain.head.profile",
+                    verb: "think",
+                    summary: Self.reasoningPreview(text),
+                    failed: false))
+            case .toolResult(_, _, let failed, _):
+                // The call row already carries the outcome; a failed result
+                // with no visible call still deserves its own row.
+                if failed {
+                    entries.append(ActivityEntry(
+                        id: item.id,
+                        icon: "exclamationmark.triangle",
+                        verb: "result",
+                        summary: "Failed",
+                        failed: true))
+                }
+            default:
+                break
+            }
+        }
+        return entries
+    }
+
+    /// Plain-language preview for the compact reasoning row: markdown
+    /// emphasis markers, backticks, and heading hashes never belong in a
+    /// one-line summary. Collapses whitespace and keeps the first sentence.
+    static func reasoningPreview(_ raw: String) -> String {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Fenced blocks collapse to a pointer — never dump code into a row.
+        if let range = text.range(of: "```") {
+            text = String(text[..<range.lowerBound])
+            if text.trimmingCharacters(in: .whitespaces).isEmpty {
+                text = "Worked through code"
+            }
+        }
+        text = text
+            .replacingOccurrences(of: "**", with: "")
+            .replacingOccurrences(of: "__", with: "")
+            .replacingOccurrences(of: "`", with: "")
+        // Strip heading hashes at line starts, then flatten newlines so the
+        // one-line row shows a single flowing sentence.
+        text = text
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " #*")) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        if let firstSentence = text.range(of: ". ") {
+            text = String(text[..<firstSentence.lowerBound]) + "."
+        }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Reasoning summary" : trimmed
+    }
+
+    private static func verb(for name: String) -> String {
         switch name {
         case "read_file", "list_directory", "search", "find_files", "glob":
-            "Explored code"
+            name == "search" ? "grep" : "read"
         case "write_file", "move_file", "apply_patch":
-            "Edited files"
+            "edit"
         case "run_command":
-            "Ran command"
+            "run"
         case "build_diagnostics":
-            "Checked build"
+            "build"
         case "sim_build_run":
-            "Verified in Simulator"
+            "build"
         case "macos_build_run":
-            "Built and launched"
+            "build"
         case "apple_ship":
-            "Prepared release"
+            "ship"
         case "task":
-            "Specialist agent"
+            "delegate"
         default:
-            name.replacingOccurrences(of: "_", with: " ").capitalized
+            name.replacingOccurrences(of: "_", with: " ")
+        }
+    }
+
+    private static func icon(for name: String) -> String {
+        switch name {
+        case "search": "magnifyingglass"
+        case "read_file", "list_directory", "find_files", "glob": "doc.text"
+        case "write_file", "move_file", "apply_patch": "pencil"
+        case "run_command": "terminal"
+        case "build_diagnostics", "sim_build_run", "macos_build_run": "hammer"
+        case "apple_ship": "shippingbox"
+        case "task": "person.crop.circle"
+        default: "wrench.and.screwdriver"
         }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                if reduceMotion {
-                    expanded.toggle()
-                } else {
-                    withAnimation(.easeInOut(duration: 0.16)) { expanded.toggle() }
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    // A badge in a filled disc made every step look like a
-                    // notification. Only a failure earns colour here.
-                    Image(systemName: hasFailure ? "xmark" : "checkmark")
-                        .accessibilityHidden(true)
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(hasFailure ? Theme.danger : Theme.textTertiary)
-                        .frame(width: 14)
-                    Text(title)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                    Text(summary)
-                        .font(.caption2)
-                        .foregroundStyle(Theme.textTertiary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer()
-                    Text(expanded ? "Hide" : "Details")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(Theme.textTertiary)
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(Theme.textTertiary)
-                        .rotationEffect(.degrees(expanded ? 90 : 0))
-                }
-                .frame(minHeight: 30)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(expanded ? "Hide agent activity" : "Show reasoning and tool activity")
-
-            if expanded {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(items) { item in
-                        ActivityRow(item: item)
-                    }
-                }
-                .padding(.top, 4)
-                .padding(.bottom, 8)
-            }
-        }
-        // A ledger against a rule, not a card. These are the run's margin
-        // notes; boxing them gave them the same weight as the answer.
-        .padding(.leading, 12)
-        .overlay(alignment: .leading) {
+        HStack(alignment: .top, spacing: 0) {
             Capsule()
-                .fill(Theme.hairline)
-                .frame(width: 1.5)
+                .fill(hasFailure ? Theme.negative.opacity(0.7) : Instrument.seam.opacity(0.6))
+                .frame(width: 2)
+                .padding(.leading, 2)
+                .padding(.top, 7)
+                .padding(.bottom, 7)
+
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(compactEntries) { entry in
+                    compactRow(entry)
+                }
+
+                Button {
+                    if reduceMotion {
+                        expanded.toggle()
+                    } else {
+                        withAnimation(.easeInOut(duration: 0.16)) { expanded.toggle() }
+                    }
+                } label: {
+                    HStack(spacing: 9) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Theme.textTertiary)
+                            .rotationEffect(.degrees(expanded ? 90 : 0))
+                        Text(expanded ? "Hide details" : "Details")
+                            .font(.app(size: 11.5))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .frame(minHeight: 27, alignment: .leading)
+                .padding(.leading, 14)
+                .help(expanded ? "Hide reasoning and tool output" : "Show reasoning and tool output")
+
+                if expanded {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(items) { item in
+                            ActivityRow(item: item)
+                        }
+                    }
+                    .padding(.leading, 14)
+                    .padding(.top, 6)
+                    .padding(.bottom, 8)
+                }
+            }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Agent activity")
+    }
+
+    private func compactRow(_ entry: ActivityEntry) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: entry.failed ? "exclamationmark.circle.fill" : entry.icon)
+                .accessibilityHidden(true)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(entry.failed ? Theme.negative : Theme.textTertiary)
+                .frame(width: 16, height: 16)
+            Text(entry.verb)
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(Theme.textPrimary)
+            Text(entry.summary)
+                .font(.app(size: 11.5))
+                .foregroundStyle(Theme.textTertiary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 0)
+        }
+        .frame(minHeight: 27)
+        .padding(.leading, 14)
+        .contentShape(Rectangle())
     }
 }
 
@@ -815,18 +911,17 @@ struct ActivityRow: View {
     var body: some View {
         switch item.kind {
         case .toolCall(let invocation):
-            HStack(spacing: 8) {
-                Image(systemName: "checkmark")
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.turn.down.right")
                     .accessibilityHidden(true)
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(Theme.textTertiary)
-                    .frame(width: 12)
-                Text(invocation.name)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(Theme.textPrimary)
-                Text(invocation.summary)
                     .font(.caption2)
                     .foregroundStyle(Theme.textTertiary)
+                Text(invocation.name)
+                    .font(.caption.monospaced().bold())
+                    .foregroundStyle(Theme.textPrimary)
+                Text(invocation.summary)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
@@ -874,7 +969,15 @@ struct ActivityRow: View {
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(Theme.accentText)
                     .frame(width: 14, height: 18)
-                Text(text)
+                Group {
+                    if let attributed = try? AttributedString(
+                        markdown: text,
+                        options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
+                        Text(attributed)
+                    } else {
+                        Text(text)
+                    }
+                }
                     .font(.callout)
                     .foregroundStyle(Theme.textSecondary)
                     .lineSpacing(2)
@@ -1081,16 +1184,20 @@ private extension View {
     /// Raised surface + hairline + a 3-pt leading bar in the card's semantic
     /// tint. Quieter and more native than a full tint wash, and every
     /// interactive card shares the exact same silhouette.
-    /// A panel in the transcript: an outline on the page, nothing more.
-    ///
-    /// It used to be a filled card with a coloured stripe down its left edge
-    /// and a shadow — a container with three separate ways of saying "this is
-    /// a container", stacked on a transcript whose other surfaces are all
-    /// open. The tint argument is kept so call sites read unchanged; only the
-    /// drawing is quieter.
-    func lfTranscriptCard(_ tint: Color, radius: CGFloat = 18) -> some View {
+    func lfTranscriptCard(_ tint: Color, radius: CGFloat = Radius.md) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
-        return self.overlay(shape.strokeBorder(Theme.hairline, lineWidth: 1))
+        return self
+            .background(Theme.surface.opacity(0.72), in: shape)
+            .overlay(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(tint)
+                    .frame(width: 3)
+                    .padding(.vertical, 10)
+                    .padding(.leading, 6)
+                    .allowsHitTesting(false)
+            }
+            .overlay(shape.strokeBorder(Theme.hairline, lineWidth: 1))
+            .shadow(color: Theme.cardShadow.opacity(0.35), radius: 8, y: 2)
     }
 }
 
@@ -1101,10 +1208,13 @@ struct TranscriptCardHeader: View {
     var detail: String? = nil
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Spacing.sm) {
             Image(systemName: systemImage)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.app(size: 13, weight: .semibold))
                 .foregroundStyle(tint)
+                .frame(width: 30, height: 30)
+                .background(Theme.washStrong(tint),
+                            in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
             Text(title)
                 .font(.callout.weight(.semibold))
                 .foregroundStyle(Theme.textPrimary)
@@ -1123,6 +1233,62 @@ struct TranscriptCardHeader: View {
     }
 }
 
+/// Reference-export card header: one small glyph, one 13.5pt semibold title,
+/// no icon chip. Used by the plan, approval, and question cards.
+struct TranscriptCardTitle: View {
+    let title: String
+    let systemImage: String
+    var detail: String? = nil
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.textTertiary)
+            Text(title)
+                .font(.app(size: 13.5, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if let detail {
+                Text(detail)
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+/// 28pt-high, 8pt-radius card action. The filled tone is the deliberate
+/// choice (Allow); the default tone is the quiet outline beside it.
+struct CompactActionButtonStyle: ButtonStyle {
+    var filled: Bool = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.app(size: 12.5, weight: filled ? .semibold : .medium))
+            .foregroundStyle(filled ? Color.white : Instrument.ink)
+            .padding(.horizontal, 14)
+            .frame(minHeight: 28)
+            .background(
+                filled
+                    ? AnyShapeStyle(Instrument.darkInsert)
+                    : AnyShapeStyle(LinearGradient(
+                        colors: [Instrument.silverTop, Instrument.silverLow],
+                        startPoint: .top, endPoint: .bottom)),
+                in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
+                .strokeBorder(filled ? Color.white.opacity(0.12) : Instrument.seam,
+                              lineWidth: 0.75))
+            .contentShape(RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+            .opacity(configuration.isPressed ? 0.85 : (isEnabled ? 1 : 0.45))
+    }
+}
+
 struct ApprovalCard: View {
     let request: ApprovalRequest
     let onDecision: (Bool, Bool) -> Void
@@ -1136,79 +1302,94 @@ struct ApprovalCard: View {
             || request.invocation.name == "apple_ship"
     }
 
+    /// Reference-client header: file edits read as "Edit <path>" with a
+    /// pencil; everything else keeps the approval title.
+    private var isDiffPreview: Bool {
+        if case .diff = request.preview { return true }
+        return false
+    }
+
+    private var approvalTitle: String {
+        if case .diff(_, let path) = request.preview { return "Edit \(path)" }
+        return "Approval required"
+    }
+
+    private var approvalIcon: String {
+        isDiffPreview ? "pencil" : "hand.raised.fill"
+    }
+
     private var isComputer: Bool {
         request.invocation.name.hasPrefix("computer_")
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            TranscriptCardHeader(
-                title: "Approval required",
-                systemImage: "hand.raised.fill",
-                tint: Theme.warning,
-                detail: request.invocation.name)
+            TranscriptCardTitle(
+                title: approvalTitle,
+                systemImage: approvalIcon,
+                detail: isDiffPreview ? nil : request.invocation.name)
+
+            Rectangle()
+                .fill(Instrument.seam.opacity(0.45))
+                .frame(height: 0.75)
 
             switch request.preview {
             case .command(let command):
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     Text("Command preview")
-                        .font(.callout.weight(.semibold))
+                        .font(.app(size: 11.5, weight: .semibold))
                         .foregroundStyle(Theme.textSecondary)
                     Text(command)
-                        .font(.callout.monospaced())
+                        .font(.system(size: 12, design: .monospaced))
                         .foregroundStyle(Theme.textPrimary)
-                        .lineSpacing(1)
+                        .lineSpacing(3)
                         .padding(Spacing.sm)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .strokeBorder(Theme.hairline.opacity(0.8), lineWidth: 1))
+                        .background(Theme.surfaceInset.opacity(0.6), in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
+                            .strokeBorder(Theme.hairline.opacity(0.8), lineWidth: 0.75))
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
-            case .diff(let diff, let path):
+            case .diff(let diff, _):
                 VStack(alignment: .leading, spacing: Spacing.xs) {
-                    Text("Edit \(path)")
-                        .font(.caption)
-                        .foregroundStyle(Theme.textSecondary)
                     DiffPreview(diff: diff)
                 }
             case .none:
                 Text(request.invocation.summary)
-                    .font(.caption.monospaced())
+                    .font(.system(size: 12, design: .monospaced))
                     .padding(Spacing.sm)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+                    .background(Theme.surfaceInset.opacity(0.6), in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
                     .textSelection(.enabled)
             }
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
+                Rectangle()
+                    .fill(Instrument.seam.opacity(0.45))
+                    .frame(height: 0.75)
                 ViewThatFits(in: .horizontal) {
                     approvalButtonRow
                     approvalButtonColumn
                 }
                 if request.invocation.name == "run_command" {
                     Text("This command runs in the workspace only after you approve it.")
-                        .font(.callout)
+                        .font(.app(size: 11.5))
                         .foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
-        .padding(Spacing.lg)
-        // Outlined, never filled: every other surface in the transcript lets
-        // the page through now, and a shadowed card here read as a
-        // notification dropped on the conversation rather than a turn in it.
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Theme.hairline, lineWidth: 1))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        // Silver instrument chassis with an attached action strip.
+        .instrumentFaceplate(radius: Radius.card, shadow: false)
     }
 
     private var approvalButtonRow: some View {
         HStack(spacing: Spacing.sm) {
             approveButton
             alwaysAllowButton
-            Spacer(minLength: 0)
             declineButton
         }
     }
@@ -1228,35 +1409,31 @@ struct ApprovalCard: View {
         Button {
             onDecision(true, false)
         } label: {
-            Label("Approve", systemImage: "checkmark")
+            Text("Allow")
         }
         .keyboardShortcut(KeyEquivalent.return, modifiers: .command)
-        .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
+        .buttonStyle(CompactActionButtonStyle(filled: true))
     }
 
     private var alwaysAllowButton: some View {
         Button {
             onDecision(true, true)
         } label: {
-            Label(isComputer ? "Allow computer actions this run"
-                    : (isCommand ? "Always allow safe commands" : "Always allow edits"),
-                  systemImage: "checkmark.seal")
+            Text(isComputer ? "Allow computer actions this run"
+                    : (isCommand ? "Always allow safe commands" : "Allow for this chat"),
+                  )
         }
-        .buttonStyle(LFCapsuleButtonStyle())
+        .buttonStyle(CompactActionButtonStyle())
         .help(isComputer
             ? "Approve this and later computer actions for this run; target restoration and verification remain active"
             : (isCommand
                 ? "Approve this and auto-approve policy-safe commands for this run and future runs"
-                : "Approve this and auto-approve file edits for this run and future runs"))
+                : "Approve this and auto-approve file edits for this chat"))
     }
 
     private var declineButton: some View {
-        Button("Decline", role: .destructive) { onDecision(false, false) }
-            .buttonStyle(.plain)
-            .font(.callout.weight(.semibold))
-            .foregroundStyle(Theme.danger)
-            .padding(.horizontal, Spacing.sm)
-            .frame(minHeight: 34)
+        Button("Reject") { onDecision(false, false) }
+            .buttonStyle(CompactActionButtonStyle())
     }
 }
 
@@ -1268,20 +1445,17 @@ struct DiffPreview: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: Spacing.xs) {
                 Text("+\(diff.addedCount)")
-                    .foregroundStyle(Theme.success)
+                    .foregroundStyle(Theme.positive)
                 Text("−\(diff.removedCount)")
-                    .foregroundStyle(Theme.danger)
+                    .foregroundStyle(Theme.negative)
                 Spacer()
-                Picker("Diff layout", selection: $split) {
-                    Text("Split").tag(true)
-                    Text("Unified").tag(false)
-                }
-                .pickerStyle(.segmented)
+                InstrumentSegmentedControl(
+                    selection: $split,
+                    options: [("Split", true), ("Unified", false)])
                 .frame(width: 150)
-                .controlSize(.mini)
-                .labelsHidden()
+                .accessibilityLabel("Diff layout")
             }
-            .font(.caption2.monospaced().bold())
+            .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
             .padding(.horizontal, Spacing.sm)
             .padding(.vertical, 5)
             Divider().overlay(Theme.hairline)
@@ -1290,7 +1464,8 @@ struct DiffPreview: View {
                     sideBySide
                 } else {
                     Text(diff.unified)
-                        .font(.caption.monospaced())
+                        .font(.system(size: 12, design: .monospaced))
+                        .lineSpacing(3)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                         .padding(Spacing.sm)
@@ -1317,7 +1492,8 @@ struct DiffPreview: View {
 
     private func diffCell(_ text: String?, kind: DiffEngine.LineKind?) -> some View {
         Text(text ?? " ")
-            .font(.caption.monospaced())
+            .font(.system(size: 12, design: .monospaced))
+            .lineSpacing(3)
             .foregroundStyle(diffColor(kind))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, Spacing.sm)
@@ -1328,16 +1504,16 @@ struct DiffPreview: View {
 
     private func diffColor(_ kind: DiffEngine.LineKind?) -> Color {
         switch kind {
-        case .added: Theme.success
-        case .removed: Theme.danger
+        case .added: Theme.positive
+        case .removed: Theme.negative
         default: Theme.textPrimary
         }
     }
 
     private func diffFill(_ kind: DiffEngine.LineKind?) -> Color {
         switch kind {
-        case .added: Theme.success.opacity(0.08)
-        case .removed: Theme.danger.opacity(0.08)
+        case .added: Theme.positive.opacity(0.10)
+        case .removed: Theme.negative.opacity(0.10)
         default: Color.clear
         }
     }
@@ -1352,44 +1528,25 @@ struct QuestionCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            TranscriptCardHeader(
+            TranscriptCardTitle(
                 title: "The agent has a question",
-                systemImage: "questionmark.circle.fill",
-                tint: Theme.info)
+                systemImage: "questionmark.circle")
             Text(question)
-                .font(.callout)
+                .font(AppFont.chatBody)
+                .lineSpacing(4)
                 .foregroundStyle(Theme.textPrimary)
                 .textSelection(.enabled)
             if !choices.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
                     ForEach(choices, id: \.self) { choice in
-                        Button {
-                            onAnswer(choice)
-                        } label: {
-                            HStack(spacing: 10) {
-                                Text(choice)
-                                    .font(.callout.weight(.medium))
-                                    .foregroundStyle(Theme.textPrimary)
-                                    .multilineTextAlignment(.leading)
-                                Spacer(minLength: 8)
-                                Image(systemName: "arrow.up.left")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(Theme.textTertiary)
-                            }
-                            .padding(.horizontal, 14)
-                            .frame(minHeight: 40)
-                            .frame(maxWidth: .infinity)
-                            .background(Theme.surfaceInset,
-                                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
+                        Button(choice) { onAnswer(choice) }
+                            .buttonStyle(CompactActionButtonStyle(filled: true))
                     }
                 }
             }
             HStack(spacing: Spacing.sm) {
                 TextField("Your answer…", text: $answer)
-                    .textFieldStyle(.roundedBorder)
+                    .vampField()
                     .onSubmit {
                         guard !answer.isEmpty else { return }
                         onAnswer(answer)
@@ -1400,12 +1557,125 @@ struct QuestionCard: View {
                     onAnswer(answer)
                     answer = ""
                 }
-                .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
+                .buttonStyle(CompactActionButtonStyle(filled: true))
                 .disabled(answer.isEmpty)
             }
         }
-        .padding(Spacing.lg)
-        .lfTranscriptCard(Theme.info)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .padding(.leading, Spacing.sm)
+        .lfTranscriptCard(Theme.info, radius: Radius.card)
+    }
+}
+
+/// The live plan card: one card per run, replaced in place by every plan
+/// snapshot. Counts derive from the actual task statuses.
+struct LivePlanCard: View {
+    let tasks: [AgentSessionController.PlanEntry]
+
+    var body: some View {
+        PlanCardBody(
+            total: tasks.count,
+            completed: tasks.filter(\.isComplete).count,
+            rows: tasks.map { task in
+                PlanCardBody.Row(
+                    text: task.step,
+                    complete: task.isComplete,
+                    inProgress: task.isInProgress)
+            })
+    }
+}
+
+/// A finished run's persisted plan, reconstructed from the transcript
+/// notice ("Codex plan\n<status>: <step>\n…") so restored sessions keep the
+/// plan the run ended with.
+struct PlanSnapshotCard: View {
+    let text: String
+
+    private struct ParsedRow {
+        let text: String
+        let complete: Bool
+        let inProgress: Bool
+    }
+
+    private var rows: [ParsedRow] {
+        guard let payload = text.split(separator: "\n", maxSplits: 1).last else { return [] }
+        return payload.split(separator: "\n").compactMap { line in
+            let parts = line.split(separator: ":", maxSplits: 1)
+            guard parts.count == 2 else { return nil }
+            let status = parts[0].trimmingCharacters(in: .whitespaces).lowercased()
+            return ParsedRow(
+                text: String(parts[1].trimmingCharacters(in: .whitespaces)),
+                complete: status == "completed",
+                inProgress: status == "in_progress" || status == "inprogress" || status == "running")
+        }
+    }
+
+    var body: some View {
+        PlanCardBody(
+            total: rows.count,
+            completed: rows.filter(\.complete).count,
+            rows: rows.map { PlanCardBody.Row(text: $0.text, complete: $0.complete, inProgress: $0.inProgress) })
+    }
+}
+
+/// Shared plan-card presentation: 14pt radius, hairline outline, compact
+/// PLAN · n OF total header, 29pt task rows.
+struct PlanCardBody: View {
+    struct Row: Identifiable {
+        var id: String { text }
+        let text: String
+        let complete: Bool
+        let inProgress: Bool
+    }
+
+    let total: Int
+    let completed: Int
+    let rows: [Row]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("PLAN · \(completed) OF \(total)")
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(0.9)
+                .foregroundStyle(Theme.textSecondary)
+
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(rows) { row in
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        planIcon(row)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(row.inProgress ? Theme.accentText : Theme.textTertiary)
+                            .frame(width: 14)
+                        Text(row.text)
+                            .font(.app(size: 13.5))
+                            .foregroundStyle(row.complete ? Theme.textTertiary : Theme.textPrimary)
+                            .strikethrough(row.complete)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                    .frame(minHeight: 29, alignment: .top)
+                }
+            }
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // Silver instrument module: engraved seam, machined face, no shadow.
+        .instrumentFaceplate(radius: Radius.card, shadow: false)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Plan: \(completed) of \(total) tasks complete")
+    }
+
+    @ViewBuilder
+    private func planIcon(_ row: Row) -> some View {
+        if row.complete {
+            Image(systemName: "checkmark")
+        } else if row.inProgress {
+            Image(systemName: "circle.dotted")
+        } else {
+            Image(systemName: "square")
+        }
     }
 }
 
@@ -1544,15 +1814,9 @@ struct FinishBanner: View {
 
     private var completionCard: some View {
         HStack(alignment: .center, spacing: Spacing.sm) {
-            Image(systemName: summary.artifact == nil ? "checkmark.seal.fill" : "shippingbox.fill")
-                .font(.app(size: 13, weight: .semibold, design: .serif))
-                .foregroundStyle(Theme.success)
-                .frame(width: 30, height: 30)
-                .background(Theme.wash(Theme.success), in: Circle())
-
             VStack(alignment: .leading, spacing: 2) {
                 Text(completionTitle)
-                    .font(.callout.weight(.semibold))
+                    .font(.appMono(size: 12, weight: .medium))
                     .foregroundStyle(Theme.textPrimary)
 
                 ViewThatFits(in: .horizontal) {
@@ -1614,8 +1878,7 @@ struct FinishBanner: View {
         if summary.checksPassed > 0 {
             metric(
                 "\(summary.checksPassed) check\(summary.checksPassed == 1 ? "" : "s") passed",
-                icon: "checkmark.circle",
-                tint: Theme.success)
+                icon: "checkmark.circle")
         }
         if summary.checksFailed > 0 {
             metric(
@@ -1624,14 +1887,7 @@ struct FinishBanner: View {
                 tint: Theme.danger)
         }
         if summary.artifact != nil {
-            metric("Release packaged", icon: "shippingbox", tint: Theme.success)
-        }
-        if summary.actionCount == 0,
-           summary.changedFileCount == 0,
-           summary.checksPassed == 0,
-           summary.checksFailed == 0,
-           summary.artifact == nil {
-            metric("Completed", icon: "checkmark")
+            metric("Release packaged", icon: "shippingbox")
         }
     }
 
@@ -1676,20 +1932,17 @@ struct StreamingCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            AssistantAvatar()
-            VStack(alignment: .leading, spacing: 4) {
-                StreamingMarkdownText(text: text)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                // Caret: a brand-gradient bar, pulsing while generating
-                // (solid under Reduce Motion).
-                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                    .fill(Theme.accentGradient)
-                    .frame(width: 3, height: 16)
-                    .opacity(caretVisible ? 1 : 0.25)
-            }
-            .textSelection(.enabled)
+        VStack(alignment: .leading, spacing: 4) {
+            StreamingMarkdownText(text: text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            // Caret: a brand-gradient bar, pulsing while generating
+            // (solid under Reduce Motion).
+            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                .fill(Theme.accentGradient)
+                .frame(width: 3, height: 16)
+                .opacity(caretVisible ? 1 : 0.25)
         }
+        .textSelection(.enabled)
         .task {
             guard !reduceMotion else { return }
             while !Task.isCancelled {
@@ -1737,15 +1990,12 @@ private struct StreamingMarkdownText: View {
 /// Reduce Motion: static text, no pulse.
 struct ReasoningIndicator: View {
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            AssistantAvatar()
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.mini)
-                Text("Working…")
-                    .font(.callout)
-            }
-            .foregroundStyle(Theme.textSecondary)
+        HStack(spacing: 6) {
+            ProgressView().controlSize(.mini)
+            Text("Working…")
+                .font(.callout)
         }
+        .foregroundStyle(Theme.textSecondary)
         .accessibilityLabel("The model is working")
     }
 }
@@ -1818,32 +2068,25 @@ struct PlanCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            TranscriptCardHeader(
+            TranscriptCardTitle(
                 title: "Plan — approve before any tool runs",
-                systemImage: "list.bullet.clipboard",
-                tint: Theme.textSecondary)
-            // Steps, when it is a list of them; the paragraph only when it
-            // genuinely is one.
-            if let items = PlanTaskParser.parse(plan) {
-                PlanTaskList(title: "Plan", items: items)
-            } else {
-                Text(plan)
-                    .font(.callout)
-                    .foregroundStyle(Theme.textPrimary)
-                    .padding(Spacing.md)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.surfaceInset,
-                                in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .textSelection(.enabled)
-            }
+                systemImage: "list.bullet.clipboard")
+            Text(plan)
+                .font(AppFont.chatBody)
+                .foregroundStyle(Theme.textPrimary)
+                .padding(Spacing.md)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineSpacing(4)
+                .background(Theme.surfaceInset.opacity(0.6), in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+                .textSelection(.enabled)
             HStack(spacing: Spacing.sm) {
                 // Command-Return only: Return must submit revision feedback,
                 // never accidentally approve and execute.
                 Button("Approve & Execute ⌘↩") { onDecision(nil) }
                     .keyboardShortcut(KeyEquivalent.return, modifiers: .command)
-                    .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
+                    .buttonStyle(CompactActionButtonStyle(filled: true))
                 TextField("Revise: feedback…", text: $feedback)
-                    .textFieldStyle(.roundedBorder)
+                    .vampField()
                     .onSubmit {
                         guard !feedback.isEmpty else { return }
                         onDecision(feedback)
@@ -1852,11 +2095,13 @@ struct PlanCard: View {
                     guard !feedback.isEmpty else { return }
                     onDecision(feedback)
                 }
-                .buttonStyle(LFCapsuleButtonStyle())
+                .buttonStyle(CompactActionButtonStyle())
                 .disabled(feedback.isEmpty)
             }
         }
-        .padding(Spacing.lg)
-        .lfTranscriptCard(Theme.accent)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .padding(.leading, Spacing.sm)
+        .lfTranscriptCard(Theme.accent, radius: Radius.card)
     }
 }

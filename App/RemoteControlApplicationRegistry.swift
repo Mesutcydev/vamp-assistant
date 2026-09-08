@@ -117,15 +117,25 @@ final class RemoteControlApplicationRegistry {
         if let clientViewportAspect {
             try Self.validate(aspect: clientViewportAspect)
         }
-        if let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).first {
+        guard let url = ApplicationLaunchResolver.resolveLaunchURL(
+            appName: nil, bundleID: bundleIdentifier)
+        else { throw RegistryError.applicationUnavailable }
+        let preferred = url.standardizedFileURL
+        if let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
+            .first(where: { $0.bundleURL?.standardizedFileURL == preferred }) {
             running.activate(options: [.activateAllWindows])
         } else {
-            guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
-                throw RegistryError.applicationUnavailable
-            }
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = true
-            _ = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+            _ = try await NSWorkspace.shared.openApplication(at: preferred, configuration: configuration)
+        }
+        for running in NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier) {
+            guard let runningURL = running.bundleURL?.standardizedFileURL,
+                  runningURL != preferred,
+                  ApplicationLaunchResolver.isBackupAppName(
+                    runningURL.deletingPathExtension().lastPathComponent)
+            else { continue }
+            running.terminate()
         }
 
         var requestedNewWindow = false

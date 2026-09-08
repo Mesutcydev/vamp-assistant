@@ -22,8 +22,8 @@ struct NetworkTab: View {
             SettingsCard(title: "Local API Server", icon: "network", footer: "Loopback-only OpenAI-compatible endpoint for the active model. Nothing outside this Mac can reach it.") {
                 SettingToggle(label: "Enable local API server", isOn: $settings.apiServerEnabled)
                 SettingRow(label: "Port") {
-                    TextField("1234", value: $settings.apiServerPort, format: .number)
-                        .textFieldStyle(.roundedBorder)
+                    TextField("1234", value: $settings.apiServerPort, format: .number.grouping(.never))
+                        .vampField()
                         .frame(width: 90)
                         .monospacedDigit()
                 }
@@ -36,7 +36,7 @@ struct NetworkTab: View {
                                 SecureField("Required", text: $apiTokenDraft)
                             }
                         }
-                        .textFieldStyle(.roundedBorder)
+                        .vampField()
                         .font(.caption.monospaced())
                         .frame(minWidth: 180)
                         Button(revealAPIToken ? "Hide token" : "Reveal token",
@@ -51,7 +51,7 @@ struct NetworkTab: View {
                                 ? "Saved to Keychain."
                                 : "Keychain unavailable; kept in local preferences."
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(LFCapsuleButtonStyle())
                         .controlSize(.small)
                     }
                 }
@@ -93,7 +93,7 @@ struct NetworkTab: View {
                             """,
                             forType: .string)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(LFCapsuleButtonStyle())
                     .controlSize(.small)
                     .disabled(!appState.apiServerRunning)
                 }
@@ -104,9 +104,15 @@ struct NetworkTab: View {
 
             SettingsCard(title: "Remote Vamp Assistant Sessions", icon: "iphone", footer: "Off by default. Uses port \(RemoteSessionPorts.defaultPort) so it can run beside Vamp Host (9475). LAN and Tailscale connections still require the one-time QR pairing code.") {
                 SettingToggle(label: "Enable remote session access", isOn: $settings.remoteSessionEnabled)
+                    .onChange(of: settings.remoteSessionEnabled) { _, enabled in
+                        if enabled, !settings.remoteAccessConsentCompleted {
+                            settings.remoteSessionEnabled = false
+                            NotificationCenter.default.post(name: .openRemoteAccess, object: nil)
+                        }
+                    }
                 SettingRow(label: "Port") {
-                    TextField("\(RemoteSessionPorts.defaultPort)", value: $settings.remoteSessionPort, format: .number)
-                        .textFieldStyle(.roundedBorder)
+                    TextField("\(RemoteSessionPorts.defaultPort)", value: $settings.remoteSessionPort, format: .number.grouping(.never))
+                        .vampField()
                         .frame(width: 90)
                         .monospacedDigit()
                 }
@@ -143,7 +149,7 @@ struct NetworkTab: View {
                         Button("Open pairing", systemImage: "iphone") {
                             NotificationCenter.default.post(name: .openRemoteAccess, object: nil)
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(LFCapsuleButtonStyle())
                         .controlSize(.small)
                     }
                 }

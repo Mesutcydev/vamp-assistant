@@ -2,6 +2,75 @@ import XCTest
 @testable import BeetCode
 
 final class BotComputerServiceTests: XCTestCase {
+    @MainActor
+    func testDraftsSurviveStoreRecreationAndStayPrivate() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("drafts.json")
+        let drafts = BotDraftStore(url: url)
+        drafts.set("Keep this task", for: "builder:task")
+        drafts.set("Research draft", for: "researcher:task")
+        let restored = BotDraftStore(url: url)
+        XCTAssertEqual(restored.value(for: "builder:task"), "Keep this task")
+        XCTAssertEqual(restored.value(for: "researcher:task"), "Research draft")
+        XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber, 0o600)
+    }
+
+    @MainActor
+    func testFailedPersistencePreventsRuntimeStartAndCanRetry() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("blocked".utf8).write(to: root)
+        let coordinator = BotRunCoordinator(store: BotRunStore(root: root))
+        var starts = 0
+        coordinator.startHandler = { _ in starts += 1; return .accepted(UUID()) }
+        _ = try coordinator.start(profileID: "builder", profileName: "Builder", modelID: "api|test", prompt: "Task").get()
+        await settle()
+        XCTAssertEqual(starts, 0)
+        XCTAssertNotNil(coordinator.persistenceError)
+        try FileManager.default.removeItem(at: root)
+        await coordinator.retryPersistence()
+        await settle()
+        XCTAssertEqual(starts, 1)
+        XCTAssertNil(coordinator.persistenceError)
+    }
+
+    @MainActor
+    func testAnswerIsNotDeliveredWhenCommandStorageFails() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = BotRunStore(root: root)
+        var run = BotRunRecord.queued(profileID: "builder", profileName: "Builder", modelID: "api|test", prompt: "Task")
+        run.state = .needsInput
+        run.sessionID = UUID()
+        try await store.save([run])
+        let coordinator = BotRunCoordinator(store: store)
+        await settle()
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("bot-run-commands.json"), withIntermediateDirectories: true)
+        var delivered = false
+        coordinator.answerHandler = { _, _ in delivered = true; return true }
+        let accepted = await coordinator.deliverCommand(runID: run.id, kind: .answer, payload: "Keep my answer")
+        XCTAssertFalse(accepted)
+        XCTAssertFalse(delivered)
+        XCTAssertNotNil(coordinator.run(for: "builder")?.errorMessage)
+    }
+
+    @MainActor
+    func testRejectedAnswerReturnsFalseAndRecordsRejection() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = BotRunStore(root: root)
+        var run = BotRunRecord.queued(profileID: "builder", profileName: "Builder", modelID: "api|test", prompt: "Task")
+        run.state = .needsInput
+        try await store.save([run])
+        let coordinator = BotRunCoordinator(store: store)
+        await settle()
+        coordinator.answerHandler = { _, _ in false }
+        let accepted = await coordinator.deliverCommand(runID: run.id, kind: .answer, payload: "Answer")
+        XCTAssertFalse(accepted)
+        XCTAssertNotNil(coordinator.run(for: "builder")?.errorMessage)
+    }
+
     func testPrepareCreatesPrivateSeparateWorkspaceAndBrowserProfile() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("BeetCodeBotComputerTests-\(UUID().uuidString)")

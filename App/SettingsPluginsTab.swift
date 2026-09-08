@@ -38,8 +38,7 @@ struct PluginsTab: View {
                     Spacer()
                     if !commands.isEmpty {
                         Button("View commands") { showsCommands = true }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
+                            .buttonStyle(LFCapsuleButtonStyle())
                     }
                 }
 
@@ -71,9 +70,7 @@ struct PluginsTab: View {
                         Text("\(summary.count)")
                             .font(.caption2.weight(.semibold).monospacedDigit())
                             .foregroundStyle(summary.count == 0 ? Theme.textTertiary : Theme.success)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(Theme.surfaceInset, in: Capsule())
+                            .frame(width: 34, alignment: .trailing)
                     }
                 }
             }

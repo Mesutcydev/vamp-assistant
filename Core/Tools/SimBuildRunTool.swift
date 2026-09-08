@@ -64,7 +64,9 @@ struct SimBuildRunTool: AgentTool {
         }
 
         // 5. Locate the built .app.
-        guard let appURL = Self.findBuiltApp(in: derivedData) else {
+        guard let appURL = BuiltAppLocator.findBuiltApp(
+            in: derivedData, sdk: .iOSSimulator, buildOutput: build.output)
+        else {
             return "error: build succeeded but no .app found in \(derivedData.path)"
         }
         let bundleID = call.string("bundleId") ?? SimctlRunner.bundleIdentifier(of: appURL)
@@ -139,14 +141,7 @@ struct SimBuildRunTool: AgentTool {
     }
 
     static func findBuiltApp(in derivedData: URL) -> URL? {
-        let products = derivedData.appendingPathComponent("Build/Products", isDirectory: true)
-        guard let enumerator = FileManager.default.enumerator(
-            at: products, includingPropertiesForKeys: nil)
-        else { return nil }
-        for case let url as URL in enumerator where url.pathExtension == "app" {
-            return url
-        }
-        return nil
+        BuiltAppLocator.findBuiltApp(in: derivedData, sdk: .iOSSimulator)
     }
 
     /// Picks the preferred UDID, else a booted iPhone, else boots the first

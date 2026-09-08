@@ -5,11 +5,8 @@ import UniformTypeIdentifiers
 struct SidebarView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var sessions: AgentSessionController
-    @Environment(\.dismiss) private var dismiss
     @Binding var showRemoteAccess: Bool
-    /// The compact portrait sidebar is presented as a sheet, so it must offer
-    /// an explicit escape hatch in addition to Escape and the window chrome.
-    var showsCloseButton: Bool = false
+    let onClose: () -> Void
     // Sessions are decrypted OFF the main thread: loadAll() does Keychain +
     // AES-GCM per file, which blocked body evaluation (and hung the app when
     // the ad-hoc build raised a Keychain prompt). The list renders from
@@ -53,24 +50,17 @@ struct SidebarView: View {
                 queuedTasks: pendingQueueTasks,
                 isImporting: isImporting,
                 isImportingBundle: isImportingBundle,
-                showsCloseButton: showsCloseButton,
                 onChooseWorkspace: chooseWorkspace,
                 onChatOnly: startChatOnly,
                 onImport: runImport,
                 onImportTaskBundle: runTaskBundleImport,
                 onRefresh: { Task { await reloadSessions() } },
-                onNewSession: {
-                    sessions.newSession()
-                    selectedSessionID = nil
-                    sidebarTab = .sessions
-                },
                 onSelectTab: { sidebarTab = $0 },
                 onRunNext: { appState.drainTaskQueue() },
                 onRemoveQueuedTask: { appState.removeQueuedTask($0) },
-                onClose: { dismiss() }
+                onClose: onClose
             )
-            SidebarDivider()
-            List(selection: $selectedSessionID) {
+            List {
                 if sidebarTab == .sessions {
                     ownSections
                 } else {
@@ -80,21 +70,23 @@ struct SidebarView: View {
             // NavigationSplitView already owns the sidebar silhouette. A
             // nested `.sidebar` list adds its own inset border and rounded
             // bottom corners on current macOS, which leaves a doubled frame
-            // that cannot follow the window corners. Plain keeps native list
-            // selection and keyboard behavior without introducing a second
-            // container shape.
+            // that cannot follow the window corners. Plain keeps the list's
+            // scrolling behavior without introducing a second container
+            // shape; rows own their selection so AppKit cannot override it.
             .listStyle(.plain)
             // Let the window atmosphere show through the single native
             // NavigationSplitView sidebar surface.
             .scrollContentBackground(.hidden)
             .background(Color.clear)
-            sidebarFooter
+            // Keep the last history row above the fixed navigation tools. A
+            // sibling footer lets AppKit's scroll view draw underneath it,
+            // which clipped the final message count in the drawer.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                sidebarFooter
+            }
         }
         .sidebarSurface()
-        .onExitCommand {
-            guard showsCloseButton else { return }
-            dismiss()
-        }
+        .accessibilityIdentifier("conversation-browser")
         // Selection IS the restore: picking a tagged row switches to that
         // session (and reports why when it can't — no more silent no-ops).
         .onChange(of: selectedSessionID) { _, newValue in
@@ -122,12 +114,11 @@ struct SidebarView: View {
             }
             Task { await reloadSessions() }
         }
-        .onReceive(sessions.objectWillChange) { _ in
-            // Throttled: objectWillChange also fires per streamed token, and
-            // a full decrypt-all pass per token would melt the disk.
-            let now = Date()
-            guard now.timeIntervalSince(lastSessionReload) > 2 else { return }
-            lastSessionReload = now
+        .onChange(of: sessions.isRunning) { _, running in
+            guard !running else { return }
+            Task { await reloadSessions() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .sessionTitleChanged)) { _ in
             Task { await reloadSessions() }
         }
     }
@@ -141,28 +132,93 @@ struct SidebarView: View {
     /// The sidebar footer is intentionally limited to destinations that
     /// belong to navigation. Browser, Simulator and Diagnostics live in the
     /// window toolbar.
+    /// Bottom drawer status: a connection dot + label on the left (like the
+    /// reference client's "Codex · connected"). Settings is owned by the
+    /// permanent spine, so the drawer does not duplicate its button.
     private var sidebarFooter: some View {
-        HStack(spacing: 4) {
-            footerTool("Models", icon: "cpu", isActive: false) {
+        HStack(spacing: Spacing.sm) {
+            connectionMenu
+            Spacer(minLength: 4)
+        }
+        .padding(.horizontal, SidebarMetrics.inset)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity)
+        // The footer is the drawer's own base — it continues the sidebar
+        // surface exactly, never a contrasting strip.
+        .background(
+            LinearGradient(colors: [Theme.navigationSurface, Instrument.silverLow.opacity(0.94)],
+                           startPoint: .top, endPoint: .bottom))
+        .overlay(alignment: .top) { SidebarDivider() }
+        .zIndex(1)
+    }
+
+    /// One connection indicator with a readable label; secondary services
+    /// (remote sessions, models) live in the disclosure popover, preserving
+    /// their real actions without crowding the strip.
+    private var connectionMenu: some View {
+        InstrumentMenu(menuWidth: 240) {
+            HStack(spacing: 6) {
+                VampStatusDot(color: connectionColor)
+                Text(connectionLabel)
+                    .font(.appUI(size: 12, weight: .medium))
+                    .foregroundStyle(Instrument.inkSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(Instrument.inkSecondary)
+            }
+            .frame(height: 30)
+            .contentShape(Rectangle())
+        } options: {
+            InstrumentMenuRow(title: "Connection: \(connectionLabel)",
+                              systemImage: "circle.fill",
+                              isSelected: false,
+                              help: "Current engine state") {}
+            InstrumentMenuRow(
+                title: appState.remoteSessionRunning
+                    ? "Remote sessions — running" : "Remote sessions…",
+                systemImage: "antenna.radiowaves.left.and.right") {
+                showRemoteAccess = true
+            }
+            InstrumentMenuRow(title: "Models…", systemImage: "cpu") {
                 NotificationCenter.default.post(name: .openModelManager, object: nil)
             }
-            footerTool("Settings", icon: "gearshape", isActive: false) {
-                NotificationCenter.default.post(name: .openAppSettings, object: nil)
-            }
         }
-        .padding(SidebarMetrics.inset)
-        .background(Color.clear)
-        .overlay(alignment: .top) { SidebarDivider() }
+        .fixedSize()
+        .help("Connection and services")
+        .accessibilityLabel("Connection: \(connectionLabel). Menu shows remote sessions and models.")
     }
+
+    /// Engine connection state for the footer status line.
+    private var connectionColor: Color {
+        switch appState.enginePhase {
+        case .ready: Theme.positive
+        case .loading: Theme.warning
+        case .failed: Theme.danger
+        case .idle: Theme.statusNeutral
+        }
+    }
+
+    private var connectionLabel: String {
+        switch appState.enginePhase {
+        case .ready(let name): return "\(name) · connected"
+        case .loading(let name): return "Loading \(name)…"
+        case .failed: return "Model failed"
+        case .idle:
+            return appState.remoteSessionRunning ? "Remote · connected" : "No model"
+        }
+    }
+
 
     private func footerTool(_ title: String, icon: String, isActive: Bool,
                             action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: SidebarMetrics.iconGap) {
                 Image(systemName: icon)
-                    .font(.app(size: 12, weight: .semibold, design: .serif))
+                    .font(.app(size: 12, weight: .semibold ))
                 Text(title)
-                    .font(.app(size: 12, weight: .medium, design: .serif))
+                    .font(.app(size: 12, weight: .medium ))
                     .lineLimit(1)
             }
             .foregroundStyle(isActive ? Theme.rose : Theme.textSecondary)
@@ -234,6 +290,29 @@ struct SidebarView: View {
             Section {
                 ownHistoryEmptyState
             }
+        } else if historySearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // Reference-client history: flat date sections (TODAY /
+            // YESTERDAY / EARLIER), newest first — not project folders.
+            ForEach(dateSections(own), id: \.title) { section in
+                Section {
+                    ForEach(sortedTasks(section.records)) { record in
+                        sessionRow(record, subtitle: workspaceSubtitle(for: record))
+                    }
+                } header: {
+                    HStack(spacing: 7) {
+                        Text(section.title.uppercased())
+                            .font(.appUI(size: 10, weight: .semibold))
+                            .tracking(1.25)
+                            .foregroundStyle(Instrument.engraved)
+                        Rectangle()
+                            .fill(Instrument.seam.opacity(0.42))
+                            .frame(height: 0.75)
+                    }
+                    .padding(.leading, 2)
+                    .padding(.top, 10)
+                    .padding(.bottom, 3)
+                }
+            }
         } else {
             ForEach(projectGroups(own)) { group in
                 collapsibleGroup(key: "own:" + group.key, icon: group.icon,
@@ -244,22 +323,51 @@ struct SidebarView: View {
 
     }
 
+    /// Short workspace name used as the history row subtitle, so each chat
+    /// reads like the reference client ("vamp-assistant · 14 messages").
+    private func workspaceSubtitle(for record: SessionRecord) -> String? {
+        guard !record.workspacePath.isEmpty else { return nil }
+        return URL(fileURLWithPath: record.workspacePath).lastPathComponent
+    }
+
+    /// Splits history into TODAY / YESTERDAY / EARLIER by last activity.
+    private func dateSections(_ records: [SessionRecord]) -> [(title: String, records: [SessionRecord])] {
+        let calendar = Calendar.current
+        var today: [SessionRecord] = []
+        var yesterday: [SessionRecord] = []
+        var earlier: [SessionRecord] = []
+        for record in records {
+            if calendar.isDateInToday(record.updatedAt) {
+                today.append(record)
+            } else if calendar.isDateInYesterday(record.updatedAt) {
+                yesterday.append(record)
+            } else {
+                earlier.append(record)
+            }
+        }
+        var sections: [(title: String, records: [SessionRecord])] = []
+        if !today.isEmpty { sections.append((title: "Today", records: today)) }
+        if !yesterday.isEmpty { sections.append((title: "Yesterday", records: yesterday)) }
+        if !earlier.isEmpty { sections.append((title: "Earlier", records: earlier)) }
+        return sections
+    }
+
     private var ownHistoryEmptyState: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
+        VStack(alignment: .leading, spacing: 10) {
             Image(systemName: "bubble.left.and.bubble.right")
-                .font(.app(size: 18, weight: .medium, design: .serif))
+                .font(.app(size: 18, weight: .medium ))
                 .foregroundStyle(Theme.accentText)
             Text("Your work will stay close")
-                .font(.app(size: 12, weight: .semibold, design: .serif))
+                .font(.app(size: 12, weight: .semibold ))
                 .foregroundStyle(Theme.textPrimary)
             Text("Chats are saved locally and grouped by project as soon as you start a task.")
-                .font(.app(size: 11, design: .serif))
+                .font(.app(size: 11 ))
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .lfCard()
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
             .strokeBorder(Theme.hairline, lineWidth: 1))
         .listRowInsets(EdgeInsets(top: Spacing.sm, leading: SidebarMetrics.inset, bottom: Spacing.sm, trailing: SidebarMetrics.inset))
@@ -395,7 +503,7 @@ struct SidebarView: View {
                     ProgressView()
                         .controlSize(.small)
                     Text(importStatus)
-                        .font(.app(size: 11, weight: .medium, design: .serif))
+                        .font(.app(size: 11, weight: .medium ))
                         .foregroundStyle(Theme.textSecondary)
                         .lineLimit(2)
                         .truncationMode(.middle)
@@ -461,27 +569,27 @@ struct SidebarView: View {
         VStack(alignment: .leading, spacing: 8) {
             Image(systemName: "arrow.down.doc")
                 .accessibilityHidden(true)
-                .font(.app(size: 18, weight: .medium, design: .serif))
+                .font(.app(size: 18, weight: .medium ))
                 .foregroundStyle(Theme.accentText)
             Text("Continue work from other tools")
-                .font(.app(size: 12, weight: .semibold, design: .serif))
+                .font(.app(size: 12, weight: .semibold ))
                 .foregroundStyle(Theme.textPrimary)
             Text("Find Claude, Codex, and Cursor chats, then organize them by project. Everything stays on this Mac.")
-                .font(.app(size: 11, design: .serif))
+                .font(.app(size: 11 ))
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             Button {
                 runImport()
             } label: {
                 Label("Scan for chats", systemImage: "arrow.clockwise")
-                    .font(.app(size: 11, weight: .semibold, design: .serif))
+                    .font(.app(size: 11, weight: .semibold ))
             }
             .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
             .disabled(isImporting)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .lfCard()
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
             .strokeBorder(Theme.hairline, lineWidth: 1))
         .listRowInsets(EdgeInsets(top: Spacing.sm, leading: SidebarMetrics.inset, bottom: Spacing.sm, trailing: SidebarMetrics.inset))
@@ -494,7 +602,7 @@ struct SidebarView: View {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(Theme.textTertiary)
             Text(message)
-                .font(.app(size: 11, weight: .medium, design: .serif))
+                .font(.app(size: 11, weight: .medium ))
                 .foregroundStyle(Theme.textSecondary)
         }
         .padding(.vertical, 8)
@@ -524,7 +632,7 @@ struct SidebarView: View {
             }
         }
         .padding(10)
-        .lfCard()
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
             .strokeBorder(Theme.hairline, lineWidth: 1))
         .listRowInsets(EdgeInsets(top: Spacing.xs, leading: SidebarMetrics.inset, bottom: Spacing.xs, trailing: SidebarMetrics.inset))
@@ -682,6 +790,10 @@ struct SidebarView: View {
             workspaceAvailable: workspaceAvailable,
             workspaceLabel: workspacePathLabel(record.workspacePath),
             onTogglePinned: { togglePinned(record) },
+            onSelect: {
+                NotificationCenter.default.post(name: .openAssistantHome, object: nil)
+                selectedSessionID = record.id
+            },
             onRename: { renameSession(record) },
             onDelete: { deleteSession(record) },
             onExport: { export(record, format: $0) },
@@ -907,7 +1019,6 @@ struct SidebarView: View {
         }
     }
 
-    @State private var lastSessionReload = Date.distantPast
     @State private var needsKeychainUnlock = false
 
     private func reloadSessions() async {
@@ -1041,31 +1152,180 @@ struct SidebarView: View {
     }
 }
 
-private struct SidebarPrimaryDestinations: View {
-    let onAssistant: () -> Void
+/// Collapsed chat navigation: a permanent 58-point silver utility rail with
+/// 42-point interaction slots for New chat, Search, History/Expand, Bots, and
+/// Settings. Names appear beside icons on hover/focus as overlays — the rail
+/// never expands on pointer entry and never pushes content.
+struct ChatRail: View {
+    let showsBots: Bool
+    var composerHeight: CGFloat = 224
+    let onNewChat: () -> Void
+    let onSearch: () -> Void
+    let onExpand: () -> Void
     let onBots: () -> Void
+    let onSettings: () -> Void
 
-    var body: some View {
-        HStack(spacing: Spacing.sm) {
-            destination("Assistant", icon: "sparkles", action: onAssistant)
-            destination("Bots", icon: "person.3.sequence.fill", action: onBots)
-        }
-        .padding(SidebarMetrics.inset)
-        .background(Color.clear)
+    @State private var hovered: String?
+    @State private var tooltip: String?
+    @State private var hoverTask: Task<Void, Never>?
+    @FocusState private var focused: String?
+
+    private struct Item: Identifiable {
+        let id: String
+        let icon: String
+        let name: String
     }
 
-    private func destination(
-        _ title: LocalizedStringKey,
-        icon: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: icon)
-                .font(.callout.weight(.semibold))
-                .frame(maxWidth: .infinity, minHeight: 32)
-                .background(Theme.surfaceInset.opacity(0.5), in: RoundedRectangle(cornerRadius: Radius.md))
+    private var items: [Item] {
+        [
+            Item(id: "new", icon: "square.and.pencil", name: "New chat"),
+            Item(id: "search", icon: "magnifyingglass", name: "Search chats"),
+            Item(id: "history", icon: "bubble.left.and.bubble.right", name: "Conversation history"),
+            Item(id: "bots", icon: "person.2", name: "Bots"),
+        ]
+    }
+
+    var body: some View {
+        VStack(spacing: 6) {
+            ForEach(items) { item in
+                railButton(item)
+            }
+            Spacer(minLength: 0)
+            railButton(Item(id: "settings", icon: "gearshape", name: "Settings"))
+            if !showsBots {
+                ComposerHardwareSpine()
+                    .frame(height: composerHeight)
+                    .background(LinearGradient(
+                        colors: [Instrument.silverTop, Instrument.silverMid, Instrument.silverLow],
+                        startPoint: .top, endPoint: .bottom))
+                    .overlay(alignment: .top) {
+                        Rectangle().fill(Instrument.seamLight).frame(height: 1)
+                    }
+                    .padding(.top, 2)
+            }
+        }
+        .padding(.top, 12)
+        .padding(.bottom, showsBots ? 10 : 0)
+        .frame(width: SidebarMetrics.collapsedWidth)
+        .frame(maxHeight: .infinity)
+        .background {
+            LinearGradient(colors: [Instrument.silverTop, Instrument.silverMid, Instrument.silverLow],
+                           startPoint: .top, endPoint: .bottom)
+                .overlay {
+                    Rectangle()
+                        .fill(ImagePaint(image: Image(nsImage: InstrumentComposer.grainImage), scale: 1))
+                        .opacity(0.06)
+                        .allowsHitTesting(false)
+                }
+                .ignoresSafeArea(.container, edges: [.bottom])
+        }
+        .overlay(alignment: .trailing) {
+            Rectangle().fill(Instrument.seam).frame(width: 0.75)
+        }
+        .overlayPreferenceValue(RailAnchors.self) { anchors in
+            GeometryReader { proxy in
+                if let tooltip, let anchor = anchors[tooltip] {
+                    let center = proxy[anchor]
+                    Text(tooltip)
+                        .font(.app(size: 12.5, weight: .medium))
+                        .foregroundStyle(Instrument.ink)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Instrument.silverTop,
+                                    in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .strokeBorder(Instrument.seam, lineWidth: 0.75))
+                        .shadow(color: .black.opacity(0.25), radius: 5, y: 2)
+                        .fixedSize()
+                        .offset(x: SidebarMetrics.collapsedWidth + 8,
+                                y: center.y - 13)
+                        .allowsHitTesting(false)
+                }
+            }
+            .allowsHitTesting(false)
+        }
+        .onHover { inside in
+            if !inside { clearHover() }
+        }
+    }
+
+    private func railButton(_ item: Item) -> some View {
+        Button(action: { activate(item) }) {
+            Image(systemName: item.icon)
+                .font(.system(size: SidebarMetrics.railIcon, weight: .medium))
+                .foregroundStyle(item.id == "bots" && showsBots
+                                 ? Color.white
+                                 : (hovered == item.id || focused == item.id
+                                    ? Instrument.ink : Instrument.inkSecondary))
+                .frame(width: SidebarMetrics.railFace, height: SidebarMetrics.railFace)
+                .background(
+                    item.id == "bots" && showsBots
+                        ? AnyShapeStyle(Instrument.darkInsert)
+                        : AnyShapeStyle(LinearGradient(
+                            colors: [Instrument.silverTop, Instrument.silverLow],
+                            startPoint: .top, endPoint: .bottom)),
+                    in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(item.id == "bots" && showsBots
+                                  ? Color.white.opacity(0.12)
+                                  : Instrument.seam.opacity(0.65), lineWidth: 0.75))
+                .frame(width: SidebarMetrics.railTarget, height: SidebarMetrics.railTarget)
+                .overlay(alignment: .leading) {
+                    if item.id == "bots" && showsBots {
+                        Capsule().fill(Instrument.accentOrange)
+                            .frame(width: SidebarMetrics.railMarkerWidth,
+                                   height: SidebarMetrics.railMarkerHeight)
+                            .padding(.leading, SidebarMetrics.railMarkerInset)
+                    }
+                }
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onHover { inside in
+            if inside {
+                hovered = item.id
+                hoverTask?.cancel()
+                hoverTask = Task {
+                    try? await Task.sleep(for: .milliseconds(300))
+                    guard !Task.isCancelled, hovered == item.id else { return }
+                    tooltip = item.name
+                }
+            } else if hovered == item.id {
+                clearHover()
+            }
+        }
+        .focused($focused, equals: item.id)
+        .onChange(of: focused) { _, newValue in
+            tooltip = newValue.flatMap { id in items.first { $0.id == id }?.name }
+        }
+        .anchorPreference(key: RailAnchors.self, value: .center) { [item.name: $0] }
+        .help(item.name)
+        .accessibilityLabel(item.name)
+    }
+
+    private func clearHover() {
+        hovered = nil
+        hoverTask?.cancel()
+        hoverTask = nil
+        if focused == nil { tooltip = nil }
+    }
+
+    private func activate(_ item: Item) {
+        switch item.id {
+        case "new": onNewChat()
+        case "search": onSearch()
+        case "history": onExpand()
+        case "bots": onBots()
+        default: onSettings()
+        }
+    }
+
+    private struct RailAnchors: PreferenceKey {
+        static let defaultValue: [String: Anchor<CGPoint>] = [:]
+        static func reduce(value: inout [String: Anchor<CGPoint>],
+                           nextValue: () -> [String: Anchor<CGPoint>]) {
+            value.merge(nextValue(), uniquingKeysWith: { $1 })
+        }
     }
 }
 
@@ -1083,96 +1343,98 @@ struct SessionHistoryRow: View {
     let workspaceAvailable: Bool
     let workspaceLabel: String
     let onTogglePinned: () -> Void
+    let onSelect: () -> Void
     let onRename: () -> Void
     let onDelete: () -> Void
     let onExport: (SessionExporter.Format) -> Void
     let onExportTaskBundle: () -> Void
     @State private var isHovered = false
+    @FocusState private var actionsFocused: Bool
 
-    private var sourceIcon: String {
-        switch record.source {
-        case .app: "bubble.left.fill"
-        case .claude: "sparkles"
-        case .codex: "terminal.fill"
-        case .cursor: "cursorarrow.rays"
-        case .bundle: "shippingbox.fill"
-        }
+    /// Metadata stays reachable (context menu, ellipsis, tooltip) but never
+    /// competes with the title on every row.
+    private var metadataLine: String {
+        var parts: [String] = []
+        if let subtitle { parts.append(subtitle) }
+        parts.append("\(record.messages.count) messages")
+        parts.append(SessionTitle.compactAge(record.updatedAt))
+        return parts.joined(separator: " · ")
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(SessionTitle.display(for: record))
-                        .font(AppFont.navigationTitle)
-                        .foregroundStyle(workspaceAvailable ? Theme.textPrimary : Theme.textTertiary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Spacer(minLength: 4)
-                    Text(SessionTitle.compactAge(record.updatedAt))
-                        .font(AppFont.navigationMeta)
-                        .monospacedDigit()
-                        .foregroundStyle(Theme.textTertiary)
-                }
-                HStack(spacing: 5) {
-                    if let subtitle {
-                        Text(subtitle)
-                            .font(AppFont.navigationMeta.weight(.medium))
-                            .foregroundStyle(Theme.textSecondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    Text("\(record.messages.count) messages")
-                        .monospacedDigit()
+        Button(action: onSelect) {
+            HStack(spacing: 6) {
+                Text(SessionTitle.display(for: record))
+                    .font(.appUI(size: 13, weight: selected ? .semibold : .regular))
+                    .foregroundStyle(workspaceAvailable
+                                     ? Instrument.ink : Instrument.inkSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer(minLength: 4)
+
+                // Reserved trailing slot: state dot when actionable, plus an
+                // ellipsis that appears on hover/focus. Space is always
+                // reserved so titles never reflow when controls appear.
+                HStack(spacing: 6) {
                     if pinned {
                         Image(systemName: "pin.fill")
-                            .font(.app(size: 8, weight: .semibold, design: .serif))
-                            .foregroundStyle(Theme.accentText)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(Instrument.inkSecondary)
                             .accessibilityLabel("Pinned")
                     }
-                    if statusTitle != nil {
-                        Text("·")
-                            .foregroundStyle(Theme.textTertiary)
-                    }
                     if let statusTitle {
-                        HStack(spacing: 3) {
-                            Image(systemName: statusIcon)
-                                .font(.app(size: 8, weight: .semibold, design: .serif))
-                            Text(statusTitle)
-                                .lineLimit(1)
-                        }
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(statusColor)
-                        .accessibilityLabel(statusTitle)
+                        Circle()
+                            .fill(statusColor)
+                            .frame(width: 6, height: 6)
+                            .accessibilityLabel(statusTitle)
                     }
+                    Menu {
+                        rowMenu
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Instrument.inkSecondary)
+                            .frame(width: 20, height: 20)
+                            .contentShape(Rectangle())
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .focused($actionsFocused)
+                    .opacity(isHovered || selected || actionsFocused ? 1 : 0)
+                    .accessibilityLabel("Conversation actions")
                 }
-                .font(AppFont.navigationMeta)
-                .foregroundStyle(Theme.textTertiary)
+                .frame(width: 40, alignment: .trailing)
             }
+            .padding(.horizontal, SidebarMetrics.rowPadding)
+            .frame(minHeight: SidebarMetrics.rowHeight)
+            .background(
+                selected ? Instrument.recessFill.opacity(0.98)
+                    : isHovered ? Theme.libraryRowHover : Color.clear,
+                in: RoundedRectangle(cornerRadius: SidebarMetrics.selectionRadius,
+                                     style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: SidebarMetrics.selectionRadius,
+                                 style: .continuous)
+                    .strokeBorder(selected ? Instrument.seam.opacity(0.9) : Color.clear,
+                                  lineWidth: 0.75))
+            .overlay(alignment: .leading) {
+                if selected {
+                    Capsule()
+                        .fill(Instrument.accentOrange)
+                        .frame(width: 2, height: 16)
+                        .padding(.leading, 2)
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: SidebarMetrics.selectionRadius,
+                                           style: .continuous))
         }
-        .padding(.horizontal, SidebarMetrics.rowPadding)
-        .padding(.vertical, Spacing.sm)
-        .background(
-            selected
-                ? Theme.washStrong(Theme.accent)
-                : isHovered ? Theme.surfaceInset.opacity(0.42) : Color.clear,
-            in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .strokeBorder(Color.clear, lineWidth: 1))
-        .contentShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+        .buttonStyle(.plain)
         .onHover { isHovered = $0 }
-        .animation(.easeOut(duration: 0.12), value: isHovered)
-        .tag(record.id)
+        .accessibilityAddTraits(selected ? .isSelected : [])
         .contextMenu {
-            Button(pinned ? "Unpin task" : "Pin task", action: onTogglePinned)
-            Button("Rename chat…", action: onRename)
-            Divider()
-            Button("Export as Markdown…") { onExport(.markdown) }
-            Button("Export as JSON…") { onExport(.json) }
-            Button("Export task bundle…", action: onExportTaskBundle)
-            Divider()
-            Button("Delete chat", role: .destructive, action: onDelete)
+            rowMenu
         }
         .listRowInsets(EdgeInsets(top: 1, leading: SidebarMetrics.inset,
                                   bottom: 1, trailing: SidebarMetrics.inset))
@@ -1180,10 +1442,22 @@ struct SessionHistoryRow: View {
         .listRowSeparator(.hidden)
         .disabled(!workspaceAvailable)
         .help(workspaceAvailable
-            ? "Restore this session"
+            ? "\(SessionTitle.display(for: record)) — \(metadataLine)"
             : "Project folder missing: \(record.workspacePath)")
         .accessibilityValue(
-            "\(pinned ? "Pinned. " : "")\(statusTitle ?? "Completed"). Workspace: \(workspaceLabel)")
+            "\(pinned ? "Pinned. " : "")\(statusTitle ?? "Completed"). \(metadataLine)")
+    }
+
+    @ViewBuilder
+    private var rowMenu: some View {
+        Button(pinned ? "Unpin task" : "Pin task", action: onTogglePinned)
+        Button("Rename chat…", action: onRename)
+        Divider()
+        Button("Export as Markdown…") { onExport(.markdown) }
+        Button("Export as JSON…") { onExport(.json) }
+        Button("Export task bundle…", action: onExportTaskBundle)
+        Divider()
+        Button("Delete chat", role: .destructive, action: onDelete)
     }
 }
 
@@ -1197,134 +1471,119 @@ struct SidebarHeaderView: View {
     let queuedTasks: [QueuedAgentTask]
     let isImporting: Bool
     let isImportingBundle: Bool
-    let showsCloseButton: Bool
     let onChooseWorkspace: () -> Void
     let onChatOnly: () -> Void
     let onImport: () -> Void
     let onImportTaskBundle: () -> Void
     let onRefresh: () -> Void
-    let onNewSession: () -> Void
     let onSelectTab: (SidebarHistoryTab) -> Void
     let onRunNext: () -> Void
     let onRemoveQueuedTask: (UUID) -> Void
     let onClose: () -> Void
     @FocusState private var searchFocused: Bool
-    @State private var searchPresented = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.md) {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
             identityRow
-            primaryActions
-            quietNavigation
-            if searchPresented || !historySearch.isEmpty {
-                searchField
-            }
+            searchField
             if !queuedTasks.isEmpty {
                 queueSummary
             }
         }
         .padding(.horizontal, SidebarMetrics.inset)
-        .padding(.top, Spacing.md)
-        .padding(.bottom, Spacing.md)
+        .padding(.top, SidebarMetrics.inset)
+        .padding(.bottom, 10)
         .background(Color.clear)
         .onReceive(NotificationCenter.default.publisher(for: .focusChatSearch)) { _ in
             presentSearch()
         }
+        .onExitCommand {
+            if !historySearch.isEmpty {
+                historySearch = ""
+            } else {
+                searchFocused = false
+                onClose()
+            }
+        }
     }
 
+    /// Conversation-browser identity. Top-level navigation belongs to the rail.
     private var identityRow: some View {
-        HStack(spacing: Spacing.sm) {
-            workspaceMark
-            VStack(alignment: .leading, spacing: 2) {
-                Text("WORKSPACE")
-                    .font(.app(size: 9, weight: .bold, design: .serif))
-                    .tracking(0.8)
-                    .foregroundStyle(Theme.textTertiary)
-                Text(workspaceURL?.lastPathComponent ?? "Chat only")
-                    .font(.app(size: 13.5, weight: .semibold, design: .serif))
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text("CHATS")
+                    .font(.appUI(size: 10, weight: .semibold))
+                    .tracking(1.4)
+                    .foregroundStyle(Instrument.engraved)
+                Spacer(minLength: 0)
+                importFilterButton
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Instrument.inkSecondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(InstrumentPressStyle())
+                .help("Close history")
+                .accessibilityLabel("Close history")
             }
-            Spacer(minLength: 4)
-            Button(action: onChooseWorkspace) {
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.caption2.weight(.bold))
+            Menu {
+                Button("Open project…", action: onChooseWorkspace)
+                Button("Chat without a project", action: onChatOnly)
+                Divider()
+                Button("Import conversations…", action: onImport)
+                    .disabled(isImporting)
+                Button("Import task bundle…", action: onImportTaskBundle)
+                    .disabled(isImportingBundle)
+                Button("Refresh history", action: onRefresh)
+            } label: {
+                HStack(spacing: 5) {
+                    workspaceMark
+                    Text(workspaceURL?.lastPathComponent ?? "No project")
+                        .font(.appUI(size: 11))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(Instrument.inkSecondary)
             }
-            .buttonStyle(LFIconButtonStyle(size: 26))
-            .lfHoverLift()
-            .help("Switch workspace")
-            .accessibilityLabel("Switch workspace")
-
-            if showsCloseButton {
-                PanelCloseButton(action: onClose)
-            }
-        }
-        .padding(.horizontal, Spacing.sm)
-        .padding(.vertical, Spacing.xs)
-    }
-
-    private var primaryActions: some View {
-        Button(action: onNewSession) {
-            Label("New chat", systemImage: "square.and.pencil")
-                .font(.app(size: 13.5, weight: .medium, design: .serif))
-                .foregroundStyle(Theme.textPrimary)
-                .frame(maxWidth: .infinity, minHeight: 34)
-                .background(Theme.surfaceInset.opacity(0.6),
-                            in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                    .strokeBorder(Theme.hairline, lineWidth: 1))
-        }
-        .buttonStyle(LFPlainPressButtonStyle())
-        .help("Start a new chat")
-    }
-
-    private var quietNavigation: some View {
-        VStack(spacing: 2) {
-            quietNavigationRow("Search", icon: "magnifyingglass", trailing: "⌘F") {
-                presentSearch()
-            }
-            quietNavigationRow(
-                sidebarTab == .imported ? "My chats" : "Imported",
-                icon: sidebarTab == .imported ? "bubble.left.and.bubble.right" : "tray.and.arrow.down",
-                trailing: nil
-            ) {
-                onSelectTab(sidebarTab == .imported ? .sessions : .imported)
-            }
+            .menuStyle(.borderlessButton)
+            .help(workspaceURL?.path ?? "Conversation workspace and import actions")
+            .accessibilityLabel("Workspace: \(workspaceURL?.lastPathComponent ?? "Chat only")")
         }
     }
 
-    private func quietNavigationRow(
-        _ title: String,
-        icon: String,
-        trailing: String?,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: SidebarMetrics.iconGap) {
-                Image(systemName: icon)
-                    .accessibilityHidden(true)
-                    .font(.app(size: 12.5, weight: .medium, design: .serif))
-                    .frame(width: SidebarMetrics.iconWidth)
-                Text(title).font(.app(size: 13, design: .serif))
-                Spacer()
-                if let trailing {
-                    Text(trailing)
-                        .font(.app(size: 10.5, design: .monospaced))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .overlay(RoundedRectangle(cornerRadius: Radius.sm)
-                            .strokeBorder(Theme.hairline, lineWidth: 1))
+    /// Imported conversations live behind a compact filter toggle (the
+    /// control selects the imported library; the import command itself stays
+    /// in the workspace menu / empty states). Active state is visible.
+    private var importFilterButton: some View {
+        Button {
+            onSelectTab(sidebarTab == .imported ? .sessions : .imported)
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: sidebarTab == .imported
+                      ? "line.3.horizontal.decrease.circle.fill"
+                      : "line.3.horizontal.decrease.circle")
+                    .font(.system(size: 12, weight: .medium))
+                if sidebarTab == .imported {
+                    Text("Imported")
+                        .font(.app(size: 11, weight: .medium ))
                 }
             }
-            .foregroundStyle(Theme.textSecondary)
-            .padding(.horizontal, SidebarMetrics.rowPadding)
-            .frame(height: SidebarMetrics.rowHeight)
+            .foregroundStyle(sidebarTab == .imported
+                             ? Instrument.ink : Instrument.inkSecondary)
+            .frame(height: 26)
+            .padding(.horizontal, 6)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(Theme.surfaceInset.opacity(0.001), in: RoundedRectangle(cornerRadius: Radius.sm))
         .lfHoverLift()
+        .help(sidebarTab == .imported
+              ? "Showing imported conversations — click to return to your chats"
+              : "Filter to imported conversations")
+        .accessibilityLabel(sidebarTab == .imported
+                            ? "Imported filter active" : "Show imported conversations")
     }
 
     private var workspaceMark: some View {
@@ -1335,96 +1594,25 @@ struct SidebarHeaderView: View {
                     .interpolation(.high)
                     .aspectRatio(contentMode: .fit)
             } else {
-                Image(systemName: workspaceURL == nil ? "bubble.left.and.bubble.right.fill" : "folder.fill")
-                    .font(.app(size: 13, weight: .medium, design: .serif))
-                    .foregroundStyle(Theme.textSecondary)
+                Image(systemName: workspaceURL == nil ? "bubble.left.and.bubble.right" : "folder")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Theme.textTertiary)
             }
         }
-        .frame(width: 28, height: 28)
-        .background(Theme.rose.opacity(0.14), in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-        .foregroundStyle(Theme.rose)
+        .frame(width: 16, height: 16)
         .accessibilityHidden(true)
     }
 
-    private var historyModeBar: some View {
-        HStack(spacing: Spacing.xs) {
-            historyModeButton(.sessions, title: "My chats", icon: "bubble.left.and.bubble.right")
-            historyModeButton(.imported, title: "Other tools", icon: "arrow.down.doc")
-        }
-        .padding(4)
-        .background(Theme.surfaceInset.opacity(0.52),
-                    in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-            .strokeBorder(Theme.hairline.opacity(0.75), lineWidth: 1))
-    }
-
-    private func historyModeButton(
-        _ mode: SidebarHistoryTab,
-        title: String,
-        icon: String,
-        count: Int? = nil
-    ) -> some View {
-        let active = sidebarTab == mode
-        return Button {
-            onSelectTab(mode)
-        } label: {
-            HStack(spacing: SidebarMetrics.iconGap) {
-                Image(systemName: icon)
-                    .accessibilityHidden(true)
-                    .font(.app(size: 12, weight: .semibold, design: .serif))
-                Text(title)
-                    .font(.app(size: 13, weight: active ? .semibold : .medium, design: .serif))
-                if let count, count > 0 {
-                    Text("\(min(count, 99))")
-                        .font(.caption2.weight(.bold))
-                        .monospacedDigit()
-                        .foregroundStyle(active ? Theme.textPrimary : Theme.textTertiary)
-                }
-            }
-            .foregroundStyle(active ? Theme.textPrimary : Theme.textSecondary)
-            .frame(maxWidth: .infinity, minHeight: SidebarMetrics.rowHeight)
-            .background(active ? Theme.surface : Color.clear,
-                        in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).strokeBorder(
-                active ? Theme.hairline : Color.clear, lineWidth: 1))
-            .shadow(color: active ? Theme.cardShadow.opacity(0.45) : .clear, radius: 2, y: 1)
-        }
-        .buttonStyle(.plain)
-        .animation(.easeOut(duration: 0.14), value: active)
-        .accessibilityAddTraits(active ? [.isSelected] : [])
-    }
 
     private var searchField: some View {
-        HStack(spacing: Spacing.sm) {
-            Image(systemName: "magnifyingglass")
-                .font(.app(size: 12, weight: .semibold, design: .serif))
-                .foregroundStyle(Theme.textTertiary)
-                .accessibilityHidden(true)
-            TextField("Search all history", text: $historySearch)
-                .textFieldStyle(.plain)
-                .font(.app(size: 13, design: .serif))
-                .focused($searchFocused)
-            if !historySearch.isEmpty {
-                Button { historySearch = "" } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.app(size: 11, design: .serif))
-                        .foregroundStyle(Theme.textTertiary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear search")
-            }
-        }
-        .padding(.horizontal, 9)
-        .frame(height: 34)
-        .background(Theme.surfaceInset.opacity(0.65), in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-            .strokeBorder(Theme.hairline.opacity(0.8), lineWidth: 1))
+        VampSearchField(placeholder: "Search chats",
+                        text: $historySearch,
+                        focus: $searchFocused)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Search chat history")
     }
 
     private func presentSearch() {
-        searchPresented = true
         DispatchQueue.main.async {
             searchFocused = true
         }
@@ -1435,10 +1623,10 @@ struct SidebarHeaderView: View {
         return VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 7) {
                 Image(systemName: "clock.arrow.circlepath")
-                    .font(.app(size: 11, weight: .semibold, design: .serif))
+                    .font(.app(size: 11, weight: .semibold ))
                     .foregroundStyle(Theme.info)
                 Text(queuedTasks.count == 1 ? "1 task in queue" : "\(queuedTasks.count) tasks in queue")
-                    .font(.app(size: 11, weight: .semibold, design: .serif))
+                    .font(.app(size: 11, weight: .semibold ))
                     .foregroundStyle(Theme.textPrimary)
                 Spacer(minLength: 4)
                 Button("Run next", action: onRunNext)

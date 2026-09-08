@@ -8,27 +8,29 @@ struct SettingsCard<Content: View>: View {
     var footer: String? = nil
     @ViewBuilder var content: Content
 
+    /// One silver faceplate per group: engraved technical heading inside,
+    /// aligned rows beneath, helper text below the plate.
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // The heading sits outside the panel, in the small-caps register
-            // both clients use, and without its accent glyph: a settings group
-            // is not an item, and a tinted icon per group turned the window
-            // into a column of badges.
-            Text(title.uppercased())
-                .font(.caption.weight(.semibold))
-                .tracking(0.9)
-                .foregroundStyle(Theme.textSecondary)
-
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                content
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                HStack(spacing: 6) {
+                    Image(systemName: icon)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Instrument.engraved)
+                    Instrument.microLabel(title)
+                    Spacer(minLength: 0)
+                }
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    content
+                }
             }
-            .padding(Spacing.lg)
+            .padding(Chrome.cardHPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .lfCard()
+            .instrumentFaceplate(radius: Radius.card, shadow: false)
 
             if let footer {
                 Text(footer)
-                    .font(.callout)
+                    .font(.app(size: 11.5 ))
                     .foregroundStyle(Theme.textTertiary)
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -45,24 +47,7 @@ struct SettingRow<Control: View>: View {
     @ViewBuilder var control: Control
 
     var body: some View {
-        HStack(spacing: Spacing.md) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(label)
-                    .font(.callout)
-                    .foregroundStyle(Theme.textPrimary)
-                if let value {
-                    Text(value)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(Theme.textTertiary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-            Spacer(minLength: 24)
-            control
-                .frame(maxWidth: 420, alignment: .trailing)
-        }
-        .frame(minHeight: 26)
+        VampRow(label: label, value: value) { control }
     }
 }
 
@@ -90,8 +75,14 @@ struct ShortcutEditor: View {
 
     var body: some View {
         TextField(placeholder, text: $value)
-            .textFieldStyle(.roundedBorder)
-            .frame(width: 170)
+            .textFieldStyle(.plain)
+            .font(.app(size: 12, design: .monospaced))
+            .foregroundStyle(Theme.textPrimary)
+            .padding(.horizontal, 10)
+            .frame(width: 170, height: Chrome.buttonHeight)
+            .background(Theme.surfaceInset,
+                        in: RoundedRectangle(cornerRadius: Chrome.buttonRadius,
+                                             style: .continuous))
             .onSubmit {
                 value = ShortcutBinding(rawValue: value).canonicalValue
             }
@@ -133,7 +124,7 @@ struct PaletteSwatchPicker: View {
                     // the palette's fixed light accent (see swatchColor), so
                     // this checkmark is white in both appearances by design.
                     Image(systemName: "checkmark")
-                        .font(.app(size: 10, weight: .bold, design: .serif))
+                        .font(.app(size: 10, weight: .bold ))
                         .foregroundStyle(.white)
                         .shadow(color: .black.opacity(0.35), radius: 1)
                 }
@@ -159,16 +150,16 @@ struct PaletteSwatchPicker: View {
     }
 }
 
+/// Settings page content wrapper: one vertical rhythm, no width or scroll
+/// ownership. The Settings column owns centering/width; the Settings shell
+/// owns scrolling. Keeping both here would double-center and double-scroll.
 struct TabScroll<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
-        ScrollView {
-            VStack(spacing: Spacing.lg) {
-                content
-            }
-            .padding(Spacing.lg)
+        VStack(alignment: .leading, spacing: Chrome.sectionGap) {
+            content
         }
-        .background(Color.clear)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -182,18 +173,14 @@ struct InfoBanner: View {
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.md) {
             Image(systemName: icon)
-                .font(.app(size: 13, weight: .semibold, design: .serif))
-                .foregroundStyle(Theme.info)
-                .frame(width: 30, height: 30)
-                .background(Theme.washStrong(Theme.info),
-                            in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.textTertiary)
             Text(text)
-                .font(.callout)
+                .font(.app(size: 12.5 ))
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(Spacing.md)
-        .lfWashCard(Theme.info)
+        .vampOutlineCard(padding: EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
     }
 }

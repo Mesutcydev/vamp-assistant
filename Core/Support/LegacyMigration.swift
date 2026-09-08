@@ -50,6 +50,7 @@ enum LegacyMigration {
         didRun = true
         runLock.unlock()
         migrateKeychainItems()
+        migratePromotedGatewayKeys()
         migrateAppSupportFolder()
         seedConfiguredProviderHints()
     }
@@ -117,6 +118,22 @@ enum LegacyMigration {
     private static func migrateKeychainItems() {
         for (legacy, current) in keychainRenames {
             _ = copyGenericPasswords(from: legacy, to: current)
+        }
+    }
+
+    /// NVIDIA moved from a compatible-gateway preset to a first-class
+    /// provider card. Copy the old dynamic Keychain item so an existing
+    /// nvapi- key keeps working without a second paste.
+    private static func migratePromotedGatewayKeys() {
+        let dynamicNVIDIA = APIKeyStore.keychainService(providerID: "nvidia")
+        let firstClassNVIDIA = LLMProvider.nvidia.keychainService
+        if itemExists(service: dynamicNVIDIA), !itemExists(service: firstClassNVIDIA) {
+            _ = copyGenericPasswords(from: dynamicNVIDIA, to: firstClassNVIDIA)
+        }
+        if itemExists(service: firstClassNVIDIA) {
+            APIKeyStore.markConfiguredHint(for: .nvidia)
+            // Drop the leftover so Remove cannot be undone by the next launch.
+            Keychain.delete(service: dynamicNVIDIA, account: "api-key")
         }
     }
 

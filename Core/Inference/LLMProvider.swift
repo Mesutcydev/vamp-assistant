@@ -38,33 +38,6 @@ struct ReasoningEffort: Identifiable, Sendable, Equatable, Hashable {
         }
     }
 
-    var glyph: String {
-        switch rawValue.lowercased() {
-        case "none": "circle.slash"
-        case "minimal": "sparkles"
-        case "low": "wind"
-        case "medium": "scope"
-        case "high": "brain.head.profile"
-        case "xhigh": "orbit"
-        case "max": "flame.fill"
-        default: "wand.and.stars"
-        }
-    }
-
-    /// Used by the reactor control to make more effort feel visually denser.
-    var energy: Double {
-        switch rawValue.lowercased() {
-        case "none": 0.12
-        case "minimal": 0.22
-        case "low": 0.38
-        case "medium": 0.56
-        case "high": 0.74
-        case "xhigh": 0.9
-        case "max": 1.0
-        default: 0.56
-        }
-    }
-
     init?(_ rawValue: String) {
         let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !value.isEmpty, value != "default", value != "automatic" else { return nil }
@@ -105,6 +78,7 @@ enum LLMProvider: String, CaseIterable, Codable, Sendable, Identifiable {
     case openCode
     case openCodeGo
     case anthropic
+    case nvidia
     case custom
 
     var id: String { rawValue }
@@ -121,6 +95,7 @@ enum LLMProvider: String, CaseIterable, Codable, Sendable, Identifiable {
         case .openCode: "OpenCode Zen"
         case .openCodeGo: "OpenCode Go"
         case .anthropic: "Anthropic"
+        case .nvidia: "NVIDIA API"
         case .custom: "Custom (OpenAI-compatible)"
         }
     }
@@ -140,6 +115,7 @@ enum LLMProvider: String, CaseIterable, Codable, Sendable, Identifiable {
         case .openRouter: URL(string: "https://openrouter.ai/api/v1")
         case .openCode: URL(string: "https://opencode.ai/zen/v1")
         case .openCodeGo: URL(string: "https://opencode.ai/zen/go/v1")
+        case .nvidia: URL(string: "https://integrate.api.nvidia.com/v1")
         case .custom: Self.configuredCustomBaseURL()
         case .gemini, .anthropic: nil
         }
@@ -187,14 +163,14 @@ enum LLMProvider: String, CaseIterable, Codable, Sendable, Identifiable {
     var supportsVision: Bool {
         switch self {
         case .openAI, .gemini, .openRouter: true
-        case .deepSeek, .longCat, .alibaba, .alibabaTokenPlan, .openCode, .openCodeGo, .anthropic, .custom: false
+        case .deepSeek, .longCat, .alibaba, .alibabaTokenPlan, .openCode, .openCodeGo, .anthropic, .nvidia, .custom: false
         }
     }
 
     /// Sensible default model IDs for each provider.
     var defaultModel: String {
         switch self {
-        case .openAI: "gpt-4o-mini"
+        case .openAI: "gpt-5.6-terra"
         case .deepSeek: "deepseek-chat"
         case .longCat: "LongCat-2.0"
         case .alibaba: "qwen-plus"
@@ -204,6 +180,7 @@ enum LLMProvider: String, CaseIterable, Codable, Sendable, Identifiable {
         case .openCode: "gpt-5.6-luna"
         case .openCodeGo: "kimi-k3"
         case .anthropic: "claude-sonnet-4-5"
+        case .nvidia: "nvidia/llama-3.3-nemotron-super-49b-v1.5"
         case .custom: ""  // user must type the model id served by their endpoint
         }
     }
@@ -230,6 +207,7 @@ enum LLMProvider: String, CaseIterable, Codable, Sendable, Identifiable {
     var suggestedModels: [String] {
         switch self {
         case .openAI: [
+            "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.4", "gpt-5.4-pro",
             "gpt-5.2", "gpt-5.2-pro", "gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-5-nano",
             "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o", "gpt-4o-mini",
             "o3", "o4-mini", "gpt-oss-120b", "gpt-oss-20b",
@@ -265,6 +243,19 @@ enum LLMProvider: String, CaseIterable, Codable, Sendable, Identifiable {
             "claude-opus-5", "claude-opus-4-8", "claude-opus-4-6",
             "claude-sonnet-4-6", "claude-sonnet-4-5", "claude-haiku-4-5",
         ]
+        case .nvidia: [
+            "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+            "nvidia/nemotron-3-super-120b-a12b",
+            "nvidia/nemotron-3-ultra-550b-a55b",
+            "nvidia/nemotron-3.5-lightning-30b-a3b",
+            "nvidia/nemotron-3-nano-30b-a3b",
+            "moonshotai/kimi-k2-instruct",
+            "moonshotai/kimi-k3",
+            "deepseek-ai/deepseek-v4-pro",
+            "qwen/qwen3-next-80b-a3b-instruct",
+            "openai/gpt-oss-120b",
+            "meta/llama-3.3-70b-instruct",
+        ]
         case .custom: []
         }
     }
@@ -284,6 +275,8 @@ enum LLMProvider: String, CaseIterable, Codable, Sendable, Identifiable {
             "Use a Google AI Studio Gemini API key here. A key issued by another gateway or service will be rejected by Google's endpoint."
         case .openCode, .openCodeGo:
             "Use the API key issued for this OpenCode service. Zen and Go keys are separate from keys issued by the underlying model provider."
+        case .nvidia:
+            "Use an NVIDIA API key from build.nvidia.com or the NVIDIA API catalog. Keys usually start with nvapi-."
         default:
             nil
         }
@@ -304,6 +297,7 @@ enum LLMProvider: String, CaseIterable, Codable, Sendable, Identifiable {
         case "opencode", "open-code", "open-code-zen": .openCode
         case "opencode-go", "opencode_go", "opencodego": .openCodeGo
         case "anthropic", "claude": .anthropic
+        case "nvidia", "nim", "nvidia-nim", "nvidia_nim", "build.nvidia": .nvidia
         case "ollama", "lmstudio", "lm-studio", "vllm", "llamacpp": .custom
         default: nil
         }
@@ -347,6 +341,9 @@ enum RemoteModelCatalog {
         if key == "tabitoken" {
             return modelID.contains("claude") ? claudeEfforts : modelLooksReasoning(modelID) ? standardEfforts : []
         }
+        if CodexAccountCatalog.isLatest(modelID: model) {
+            return options(CodexAccountCatalog.astraReasoningEfforts)
+        }
 
         switch provider {
         case .openAI:
@@ -369,6 +366,8 @@ enum RemoteModelCatalog {
         case .anthropic:
             if modelID.contains("opus-5") { return claudeEfforts }
             return modelID.contains("claude") ? standardEfforts : []
+        case .nvidia:
+            return modelLooksReasoning(modelID) ? standardEfforts : []
         case .openRouter, .openCode, .openCodeGo, .custom:
             if modelID.contains("claude-opus-5") { return claudeEfforts }
             return modelLooksReasoning(modelID) ? standardEfforts : []
@@ -381,6 +380,7 @@ enum RemoteModelCatalog {
         model: String
     ) -> String? {
         let efforts = reasoningEfforts(provider: provider, providerKey: providerKey, model: model)
+        if let astra = CodexAccountCatalog.defaultReasoningEffort(for: model) { return astra }
         if efforts.contains(where: { $0.rawValue == "high" }) {
             let key = (providerKey ?? provider.rawValue).lowercased()
             return key == "tabitoken" || model.lowercased().contains("claude-opus-5") ? "high" : "medium"
@@ -401,6 +401,8 @@ enum RemoteModelCatalog {
             || model.contains("deepseek-v4") || model.contains("qwen3") || model.contains("magistral")
             || model.contains("gpt-5") || model.hasPrefix("o1") || model.hasPrefix("o3") || model.hasPrefix("o4")
             || model.contains("gemini-2.5") || model.contains("gemini-3")
+            || model.contains("nemotron") || model.contains("kimi-k2-thinking")
+            || model.contains("qwq") || model.contains("gpt-6") || model.contains("astra")
     }
 }
 
@@ -539,10 +541,11 @@ struct RemoteModelProfile: Codable, Sendable, Equatable, Identifiable {
     }
 
     func selectedReasoningEffort(using override: RemoteModelOverride?) -> String? {
-        guard let selected = override?.reasoningEffort?.lowercased(),
-              effectiveReasoningEfforts.contains(where: { $0.rawValue == selected })
-        else { return nil }
-        return selected
+        if let selected = override?.reasoningEffort?.lowercased(),
+           effectiveReasoningEfforts.contains(where: { $0.rawValue == selected }) {
+            return selected
+        }
+        return effectiveDefaultReasoningEffort
     }
 
     init(
@@ -755,22 +758,28 @@ final class APIKeyStore: ObservableObject {
 
     /// Thread-safe key read for background engines; caches after first read.
     nonisolated static func key(provider: LLMProvider) -> String? {
+        let value: String?
         keyReadLock.lock()
-        defer { keyReadLock.unlock() }
         cacheLock.lock()
         if loadedProviders.contains(provider) {
-            let cached = keyCache[provider] ?? nil
+            value = keyCache[provider] ?? nil
             cacheLock.unlock()
-            return cached
+            keyReadLock.unlock()
+        } else {
+            cacheLock.unlock()
+            let read = Keychain.read(service: provider.keychainService, account: "api-key")
+            cacheLock.lock()
+            keyCache[provider] = read
+            loadedProviders.insert(provider)
+            cacheLock.unlock()
+            keyReadLock.unlock()
+            value = read
         }
-        cacheLock.unlock()
-
-        let value = Keychain.read(service: provider.keychainService, account: "api-key")
-        cacheLock.lock()
-        keyCache[provider] = value
-        loadedProviders.insert(provider)
-        cacheLock.unlock()
-        return value
+        if let value { return value }
+        // NVIDIA was first a compatible-gateway preset. Existing keys stay
+        // under the dynamic service name until they are copied to the
+        // first-class card.
+        return provider == .nvidia ? key(providerID: "nvidia") : nil
     }
 
     /// Keychain access for providers imported from OpenCode. The provider id
@@ -853,7 +862,8 @@ final class APIKeyStore: ObservableObject {
     }
 
     func hasKey(for provider: LLMProvider) -> Bool {
-        Self.hasConfiguredHint(for: provider)
+        if Self.hasConfiguredHint(for: provider) { return true }
+        return provider == .nvidia && Self.key(providerID: "nvidia") != nil
     }
 
     func hasKey(forProviderID providerID: String) -> Bool {
@@ -866,6 +876,9 @@ final class APIKeyStore: ObservableObject {
         // soon as a base URL is configured.
         if LLMProvider.custom.openAICompatibleBaseURL != nil {
             providers.insert(.custom)
+        }
+        if hasKey(for: .nvidia) {
+            providers.insert(.nvidia)
         }
         return providers
     }
@@ -911,6 +924,9 @@ final class APIKeyStore: ObservableObject {
         Self.loadedProviders.insert(provider)
         Self.cacheLock.unlock()
         Self.clearConfiguredHint(for: provider)
+        if provider == .nvidia {
+            deleteKey(forProviderID: "nvidia")
+        }
         objectWillChange.send()
     }
 

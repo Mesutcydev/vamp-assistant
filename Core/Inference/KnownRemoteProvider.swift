@@ -127,17 +127,6 @@ struct KnownRemoteProvider: Identifiable, Sendable, Equatable {
             ],
             apiProtocol: .openAIChatCompletions),
         .init(
-            id: "nvidia",
-            displayName: "NVIDIA NIM",
-            baseURL: URL(string: "https://integrate.api.nvidia.com/v1")!,
-            defaultModel: "meta/llama-3.1-70b-instruct",
-            suggestedModels: [
-                "meta/llama-3.1-405b-instruct", "meta/llama-3.1-70b-instruct",
-                "qwen/qwen2.5-coder-32b-instruct", "deepseek-ai/deepseek-r1",
-                "moonshotai/kimi-k2-instruct", "mistralai/mistral-large-2-instruct",
-            ],
-            apiProtocol: .openAIChatCompletions),
-        .init(
             id: "deepinfra",
             displayName: "DeepInfra",
             baseURL: URL(string: "https://api.deepinfra.com/v1/openai")!,
@@ -165,5 +154,16 @@ struct KnownRemoteProvider: Identifiable, Sendable, Equatable {
 
     static func find(_ id: String) -> KnownRemoteProvider? {
         all.first { $0.id.caseInsensitiveCompare(id) == .orderedSame }
+    }
+
+    /// Compatible-services rows. IDs that already have a built-in provider
+    /// card are omitted so NVIDIA is not configured in two places.
+    static var compatiblePresets: [KnownRemoteProvider] {
+        all.filter { provider in
+            guard let builtIn = LLMProvider.fromOpenCodeIdentifier(provider.id) else {
+                return true
+            }
+            return builtIn == .custom
+        }
     }
 }

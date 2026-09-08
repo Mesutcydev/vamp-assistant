@@ -17,6 +17,11 @@ final class AppState: ObservableObject {
             if case .failed(let message) = self { return message }
             return nil
         }
+
+        var isReady: Bool {
+            if case .ready = self { return true }
+            return false
+        }
     }
 
     let settings = SettingsStore.shared
@@ -346,6 +351,12 @@ final class AppState: ObservableObject {
         // Forward child-object changes so views observing AppState re-render
         // when downloads or the installed-model registry change.
         downloadManager.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+        botRuns.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+        botComputers.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
         modelStore.objectWillChange
@@ -996,11 +1007,8 @@ final class AppState: ObservableObject {
         // complete, chat-role, MemoryAdvisor admission) and no-ops cleanly
         // when any of it fails. Never under the test host: an auto-load
         // would page real weights mid-suite.
-        if !Self.isTestHost,
-           let modelID = preferences.lastModelID,
-           let catalog = ModelCatalog.model(id: modelID) {
-            Task { await self.activate(model: catalog) }
-            Log.app.info("Auto-reloading last model \(modelID, privacy: .public)")
+        if !Self.isTestHost {
+            restoreLastEngine(preferences)
         }
 
         // Downloads: manifest scan already populated paused states; resume
@@ -1170,7 +1178,7 @@ final class AppState: ObservableObject {
             effectiveContextWindow = await engine.effectiveContextWindow ?? model.contextWindow
             enginePhase = .ready(model.displayName)
             // Persist the selection only after a successful load.
-            persistActiveModel(model.id)
+            persistActiveLocal(model.id)
             drainTaskQueue()
         } catch {
             enginePhase = .failed(error.localizedDescription)
@@ -1196,9 +1204,6 @@ final class AppState: ObservableObject {
             await engine.unload()
             activeModelID = nil
             effectiveContextWindow = nil
-            // Switching to BYOK is a deliberate leave: don't auto-reload the
-            // local model on the next launch.
-            clearPersistedModel()
         }
         guard engine.useRemote(endpoint) else {
             enginePhase = .failed("No API key configured for \(endpoint.effectiveDisplayName).")
@@ -1221,6 +1226,7 @@ final class AppState: ObservableObject {
             preferences.remoteModelOverride(endpoint: endpoint))
         effectiveContextWindow = activeRemoteProfile?.contextWindow
         enginePhase = .ready("\(endpoint.effectiveDisplayName) · \(endpoint.model)")
+        persistActiveRemote(endpoint)
         drainTaskQueue()
         return true
     }
@@ -1272,7 +1278,7 @@ final class AppState: ObservableObject {
         activeRemoteProfile = nil
         effectiveContextWindow = nil
         activeCodexModelID = model.id
-        clearPersistedModel()
+        persistActiveCodex(model.id)
         enginePhase = .ready("OpenAI account · \(model.displayName)")
         drainTaskQueue()
         return true
@@ -1475,18 +1481,104 @@ final class AppState: ObservableObject {
         if remoteNetworkKind != networkKind { remoteNetworkKind = networkKind }
     }
 
-    private func persistActiveModel(_ modelID: String) {
+    private func restoreLastEngine(_ preferences: AppPreferences) {
+        switch preferences.lastEngineKind {
+        case "chatgpt":
+            if let modelID = preferences.lastCodexModelID, !modelID.isEmpty {
+                Task { await self.restoreCodex(modelID: modelID) }
+                Log.app.info("Auto-reloading ChatGPT account model \(modelID, privacy: .public)")
+                return
+            }
+        case "remote":
+            if let endpoint = preferences.lastRemoteEndpoint {
+                Task { await self.activateRemote(endpoint: endpoint) }
+                Log.app.info("Auto-reloading remote \(endpoint.effectiveDisplayName, privacy: .public)")
+                return
+            }
+        default:
+            break
+        }
+        if let modelID = preferences.lastModelID,
+           let catalog = ModelCatalog.model(id: modelID) {
+            Task { await self.activate(model: catalog) }
+            Log.app.info("Auto-reloading last model \(modelID, privacy: .public)")
+        }
+    }
+
+    private func restoreCodex(modelID: String) async {
+        await codexAccount.refresh()
+        let model = codexAccount.models.first { $0.id == modelID }
+            ?? CodexAccountCatalog.presets.first { $0.id == modelID }
+            ?? CodexModelProfile(
+                id: modelID,
+                displayName: modelID,
+                description: "",
+                defaultReasoningEffort: nil,
+                supportedReasoningEfforts: [],
+                inputModalities: ["text"],
+                isDefault: false,
+                hidden: false)
+        _ = await activateCodex(model: model)
+    }
+
+    var statusModelLabel: String {
+        switch enginePhase {
+        case .ready(let name):
+            // Never render an empty chip: an unnamed ready engine still has
+            // to say something truthful.
+            return name.isEmpty ? "Model ready" : name
+        case .loading(let name):
+            return name.isEmpty ? "Loading model…" : name
+        case .failed, .idle:
+            if isCodexActive, let id = activeCodexModelID {
+                return id
+            }
+            if isRemoteActive, let endpoint = engine.activeRemoteEndpoint {
+                return "\(endpoint.effectiveDisplayName) · \(endpoint.model)"
+            }
+            let name = activeModel?.displayName ?? ""
+            return name.isEmpty ? "No model" : name
+        }
+    }
+
+    var statusModelHelp: String {
+        if isCodexActive { return "Active ChatGPT account model" }
+        if isRemoteActive { return "Active remote (BYOK) engine" }
+        if activeModelID != nil { return "Active local MLX model" }
+        return "No model loaded"
+    }
+
+    private func persistActiveLocal(_ modelID: String) {
         var preferences = preferences.current
+        preferences.lastEngineKind = "local"
         preferences.lastModelID = modelID
+        self.preferences.save(preferences)
+    }
+
+    private func persistActiveCodex(_ modelID: String) {
+        var preferences = preferences.current
+        preferences.lastEngineKind = "chatgpt"
+        preferences.lastCodexModelID = modelID
+        preferences.lastModelID = nil
+        self.preferences.save(preferences)
+    }
+
+    private func persistActiveRemote(_ endpoint: RemoteEndpoint) {
+        var preferences = preferences.current
+        preferences.lastEngineKind = "remote"
+        preferences.lastRemoteEndpoint = endpoint
+        preferences.lastModelID = nil
         self.preferences.save(preferences)
     }
 
     private func clearPersistedModel() {
         var preferences = preferences.current
-        if preferences.lastModelID != nil {
-            preferences.lastModelID = nil
-            self.preferences.save(preferences)
-        }
+        var changed = false
+        if preferences.lastModelID != nil { preferences.lastModelID = nil; changed = true }
+        if preferences.lastEngineKind != nil { preferences.lastEngineKind = nil; changed = true }
+        if preferences.lastCodexModelID != nil { preferences.lastCodexModelID = nil; changed = true }
+        if preferences.lastRemoteEndpoint != nil { preferences.lastRemoteEndpoint = nil; changed = true }
+        if changed { self.preferences.save(preferences) }
     }
 
     // MARK: Download lifecycle (Phase 3.3)

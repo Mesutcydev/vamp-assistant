@@ -151,7 +151,8 @@ actor EnginePool {
                     experimentalNGramEnabled:
                         ExperimentalInferencePreferences.ngramEnabledForNewEngine)
             case .coreAI:
-                return CoreAIEngine()
+                return UnsupportedFormatEngine(
+                    reason: "Apple Core AI packs are recognized but not runnable yet. Use an MLX or GGUF model.")
             }
         }
     }
@@ -458,5 +459,34 @@ actor EnginePool {
     /// True when at least one model is resident.
     var hasResidentModels: Bool {
         !residents.isEmpty
+    }
+}
+
+/// Detected Core AI packs must not go to MLX or llama.cpp. No OS 27 runner
+/// ships in this product yet, so load fails with a clear message.
+fileprivate final class UnsupportedFormatEngine: LLMEngine, @unchecked Sendable {
+    private let reason: String
+
+    init(reason: String) {
+        self.reason = reason
+    }
+
+    var loadedModelID: String? { get async { nil } }
+    var stats: EngineStats { get async { EngineStats() } }
+
+    func load(directory: URL, modelID: String, diskBytes: Int64) async throws {
+        throw EngineError.loadFailed(reason)
+    }
+
+    func unload() async {}
+    func reset() async {}
+    func cancelGeneration() async {}
+
+    func stream(
+        adding turns: [ChatTurn],
+        maxTokens: Int?,
+        temperature: Double?
+    ) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { $0.finish(throwing: EngineError.notLoaded) }
     }
 }

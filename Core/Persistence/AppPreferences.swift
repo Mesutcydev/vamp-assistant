@@ -13,6 +13,12 @@ struct AppPreferences: Codable, Sendable, Equatable {
     var workspaceBookmarkData: Data?
     /// Last successfully loaded model (only restored when still installed).
     var lastModelID: String?
+    /// Which engine to restore: `local`, `chatgpt`, or `remote`.
+    var lastEngineKind: String?
+    /// Last ChatGPT-account model id (Codex).
+    var lastCodexModelID: String?
+    /// Last BYOK endpoint. Credentials stay in the Keychain, never here.
+    var lastRemoteEndpoint: RemoteEndpoint?
     /// Session that was active when the app quit.
     var lastSessionID: UUID?
     /// Whether incomplete downloads should resume automatically at launch.
@@ -41,6 +47,7 @@ struct AppPreferences: Codable, Sendable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, hasCompletedWelcome, lastWorkspacePath, workspaceBookmarkData, lastModelID,
+             lastEngineKind, lastCodexModelID, lastRemoteEndpoint,
              lastSessionID, autoResumeDownloads, remoteModel, customBaseURL,
              remoteModelOverrides, remoteModelProfiles, codexReasoningEffort, pinnedSessionIDs,
              trustedWorkspacePaths, externalResourcePaths
@@ -55,6 +62,9 @@ struct AppPreferences: Codable, Sendable, Equatable {
         lastWorkspacePath = try container.decodeIfPresent(String.self, forKey: .lastWorkspacePath)
         workspaceBookmarkData = try container.decodeIfPresent(Data.self, forKey: .workspaceBookmarkData)
         lastModelID = try container.decodeIfPresent(String.self, forKey: .lastModelID)
+        lastEngineKind = try container.decodeIfPresent(String.self, forKey: .lastEngineKind)
+        lastCodexModelID = try container.decodeIfPresent(String.self, forKey: .lastCodexModelID)
+        lastRemoteEndpoint = try container.decodeIfPresent(RemoteEndpoint.self, forKey: .lastRemoteEndpoint)
         lastSessionID = try container.decodeIfPresent(UUID.self, forKey: .lastSessionID)
         autoResumeDownloads = try container.decodeIfPresent(Bool.self, forKey: .autoResumeDownloads) ?? false
         remoteModel = try container.decodeIfPresent([String: String].self, forKey: .remoteModel) ?? [:]

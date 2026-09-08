@@ -6,7 +6,6 @@ struct ChatView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var controller: AgentSessionController
     @ObservedObject private var settings = SettingsStore.shared
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(controller: AgentSessionController) {
         self.controller = controller
@@ -17,10 +16,6 @@ struct ChatView: View {
     /// to the live controller/AppState in `.task`.
     @State private var composerStore = ComposerStore()
     @State private var sessionTitle = "New chat"
-    @State private var homeVisible = false
-    /// Width of the main content region, measured by the hero's background
-    /// probe and used only to size the composer.
-    @State private var heroRegionWidth: CGFloat = 900
 
     private var isEmptyConversation: Bool {
         controller.transcript.isEmpty
@@ -30,29 +25,28 @@ struct ChatView: View {
     }
 
     var body: some View {
+        GeometryReader { geometry in
         VStack(spacing: 0) {
+            if controller.workspaceTrustNeeded {
+                workspaceTrustBanner
+            }
             if isEmptyConversation {
-                emptyState
+                WelcomeIdentityView(status: homeStatus, statusTint: homeStatusTint,
+                                    remoteAvailable: appState.remoteSessionRunning)
             } else {
-                ChatHeaderView(
-                    title: sessionTitle,
-                    phaseLabel: phaseLabel,
-                    phaseTint: phaseTint,
-                    canReview: controller.workspaceURL != nil,
-                    onHome: controller.newSession,
-                    onNewChat: controller.newSession)
-                if controller.workspaceTrustNeeded {
-                    workspaceTrustBanner
-                }
                 transcript
                 if hasPendingGate {
                     pendingGate
                 }
-                ComposerView(store: composerStore)
-                    .environmentObject(controller)
+                StatusBarView()
             }
+            bottomDock(workspaceWidth: geometry.size.width)
         }
-        .background { AtmosphereBackground(intensity: isEmptyConversation ? .home : .conversation) }
+        .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+        // The window root owns the base surface; chat keeps a clear fill so
+        // the single canvas shows through.
+        .background(Color.clear)
         .task {
             composerStore.attach(controller: controller, appState: appState)
         }
@@ -76,6 +70,25 @@ struct ChatView: View {
         .onPasteCommand(of: [.png, .tiff, .jpeg, .fileURL]) { providers in
             handlePaste(providers)
         }
+    }
+
+    /// The parent supplies the actual workspace proposal, not the dock's
+    /// previous measured size. The chassis fills that width and ends flush
+    /// with the usable bottom edge; suggestions own a separate compact row.
+    private func bottomDock(workspaceWidth: CGFloat) -> some View {
+        VStack(spacing: Chrome.dockGap) {
+            if isEmptyConversation && settings.showHomeSuggestions {
+                SuggestionRow(store: composerStore, availableWidth: workspaceWidth)
+                    .frame(width: max(0, workspaceWidth - 2 * Chrome.composerGutter))
+            }
+            InstrumentComposer(
+                store: composerStore,
+                placement: isEmptyConversation ? .welcome : .conversation,
+                embeddedInRail: true)
+                .frame(width: workspaceWidth)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.bottom, Chrome.composerBottomGap)
     }
 
     private var workspaceTrustBanner: some View {
@@ -131,12 +144,18 @@ struct ChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 22) {
-                    if controller.transcript.isEmpty && controller.streamingText.isEmpty {
-                        emptyState
+                    if controller.transcript.isEmpty && controller.streamingText.isEmpty && !hasPendingGate {
+                        Text("Waiting for the first message")
+                            .font(.callout)
+                            .foregroundStyle(Theme.textTertiary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     ForEach(cachedRows) { row in
                         rowView(row)
                             .id(row.id)
+                    }
+                    if !controller.livePlan.isEmpty {
+                        LivePlanCard(tasks: controller.livePlan)
                     }
                     if controller.isRunning, !controller.liveReasoningText.isEmpty {
                         LiveReasoningCard(
@@ -164,8 +183,10 @@ struct ChatView: View {
                 .frame(maxWidth: ContentColumn.maxWidth, alignment: .leading)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 20)
-                .padding(.vertical, 20)
+                .padding(.top, 30)
+                .padding(.bottom, 20)
             }
+            .background(Theme.readingSurface)
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 // Pinned means the viewport bottom is within ~40 pt of the
                 // content bottom — the user is following the output.
@@ -246,87 +267,6 @@ struct ChatView: View {
         }
     }
 
-    private var emptyState: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: Spacing.xl)
-
-            VStack(spacing: Spacing.lg) {
-                VStack(spacing: Spacing.sm) {
-                    Image(systemName: "building.columns")
-                        .font(.system(size: 30, weight: .regular))
-                        .foregroundStyle(Theme.textSecondary)
-                        .padding(.bottom, 2)
-                        .accessibilityHidden(true)
-                    // Sentence case, system weight, ordinary title scale — the
-                    // 80pt tracked all-caps masthead was the editorial look the
-                    // app dropped.
-                    Text("Vamp Assistant")
-                        .font(AppFont.homeWordmark)
-                        .foregroundStyle(Theme.textPrimary)
-                        .minimumScaleFactor(0.7)
-                        .lineLimit(1)
-                        .accessibilityAddTraits(.isHeader)
-                }
-
-                Text("Ask anything, browse the web, create and save documents, control your Mac with permission, or open a project when you want Code.")
-                    .font(AppFont.homeInvitation)
-                    .foregroundStyle(Theme.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(4)
-                    .frame(maxWidth: 460)
-
-                if let status = homeStatus {
-                    Text(status)
-                        .font(.app(size: 13, design: .serif))
-                        .foregroundStyle(homeStatusTint)
-                        .padding(.top, 2)
-                }
-            }
-
-            // Hero rhythm: 16 title → subtitle, 32 subtitle → composer.
-            // One gap, twice the other, instead of two unrelated numbers.
-            Spacer().frame(height: 32)
-
-            ComposerView(store: composerStore, placement: .home,
-                         homeMaxWidth: ComposerMetrics.homeWidth(for: heroRegionWidth))
-                .environmentObject(controller)
-
-            Spacer(minLength: Spacing.xl)
-        }
-        .padding(.horizontal, 48)
-        // Both spacers flex, so the hero group is mathematically centred in
-        // the canvas. This reserved strip is the one optical correction:
-        // half of it (32pt, ~4% of the canvas) lifts the group above true
-        // centre, which a wordmark this heavy needs to look centred.
-        .padding(.bottom, 64)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Measure the MAIN CONTENT region the hero occupies, so the composer
-        // proportion is a share of that region and never of the whole window.
-        // Read from a background probe: the width it reports cannot depend on
-        // anything the width feeds, so this settles in one pass.
-        .background {
-            GeometryReader { geo in
-                Color.clear
-                    .onChange(of: geo.size.width, initial: true) { _, width in
-                        heroRegionWidth = width
-                    }
-            }
-        }
-        .opacity(homeVisible ? 1 : 0)
-        .onAppear {
-            if reduceMotion {
-                homeVisible = true
-            } else {
-                withAnimation(.easeOut(duration: 0.28)) { homeVisible = true }
-            }
-        }
-        .overlay(alignment: .bottomTrailing) {
-            remoteSessionsCornerButton
-                .padding(.trailing, 18)
-                .padding(.bottom, 16)
-        }
-    }
-
     private var homeStatus: String? {
         if case .failed = appState.enginePhase {
             return "The last model failed to load. Choose another in the composer."
@@ -340,38 +280,6 @@ struct ChatView: View {
     private var homeStatusTint: Color {
         if case .failed = appState.enginePhase { return Theme.danger }
         return Theme.textTertiary
-    }
-
-    private var remoteSessionsCornerButton: some View {
-        Button {
-            NotificationCenter.default.post(name: .openRemoteAccess, object: nil)
-        } label: {
-            ZStack(alignment: .topTrailing) {
-                Image(systemName: "antenna.radiowaves.left.and.right")
-                    .accessibilityHidden(true)
-                    .font(.app(size: 13, weight: .semibold, design: .serif))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(width: 36, height: 36)
-                    .background(Theme.surface.opacity(0.92),
-                                in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                        .strokeBorder(Theme.hairline, lineWidth: 0.75))
-
-                Circle()
-                    .fill(appState.remoteSessionRunning ? Theme.success : Theme.textTertiary)
-                    .frame(width: 8, height: 8)
-                    .overlay(Circle().stroke(Theme.bg, lineWidth: 2))
-                    .padding(5)
-            }
-            .contentShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-        }
-        .buttonStyle(LFPlainPressButtonStyle())
-        .lfHoverLift()
-        .help(appState.remoteSessionRunning
-              ? "Remote Sessions — a session is running"
-              : "Remote Sessions")
-        .accessibilityLabel("Open Remote Sessions")
-        .accessibilityValue(appState.remoteSessionRunning ? "A session is running" : "No session running")
     }
 
     private var hasPendingGate: Bool {
@@ -459,6 +367,91 @@ struct ChatView: View {
     }
 
 }
+
+/// Quiet, unboxed identity drawn directly on the workspace canvas.
+private struct WelcomeIdentityView: View {
+    let status: String?
+    let statusTint: Color
+    let remoteAvailable: Bool
+
+    var body: some View {
+        GeometryReader { geometry in
+        VStack(spacing: 0) {
+            // Position the complete identity/subtitle composition relative to
+            // the remaining welcome space, not the full window or sidebar.
+            Spacer(minLength: 0)
+                .frame(height: max(24, min(112, geometry.size.height * 0.24)))
+            WelcomeWordmark(compact: geometry.size.width < 600,
+                            showsEyebrow: geometry.size.width >= 350)
+                .frame(width: min(420, max(0, geometry.size.width - 32)))
+
+            Text("Ask, browse, create, and control your Mac—with permission at every step.")
+                .font(.appUI(size: 14))
+                .foregroundStyle(Instrument.inkSecondary)
+                .multilineTextAlignment(.center)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 520)
+                .padding(.horizontal, 20)
+                .padding(.top, 14)
+
+            Button {
+                NotificationCenter.default.post(name: .openRemoteAccess, object: nil)
+            } label: {
+                HStack(spacing: 8) {
+                    Label("Pair device", systemImage: "qrcode")
+                    InstrumentLiveSignal(active: remoteAvailable, bars: true)
+                }
+            }
+            .buttonStyle(LFCapsuleButtonStyle())
+            .help("Pair a device for remote access")
+            .padding(.top, 14)
+
+            if let status {
+                Text(status)
+                    .font(.appUI(size: 12.5))
+                    .foregroundStyle(statusTint)
+                    .padding(.top, 7)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+    }
+}
+
+private struct WelcomeWordmark: View {
+    let compact: Bool
+    let showsEyebrow: Bool
+
+    var body: some View {
+        VStack(spacing: 10) {
+            if showsEyebrow {
+                HStack(spacing: 8) {
+                    Rectangle()
+                        .fill(Instrument.accentOrange)
+                        .frame(width: 2, height: 10)
+                        .accessibilityHidden(true)
+                    Text("PRIVATE DESKTOP INTELLIGENCE")
+                        .font(.brandMicroLabel(compact: compact))
+                        .tracking(1.8)
+                        .foregroundStyle(Instrument.inkSecondary)
+                        .lineLimit(1)
+                }
+            }
+            Text("VAMP ASSISTANT")
+                .font(.brandWordmark(compact: compact))
+                .tracking(1.5)
+                .foregroundStyle(Instrument.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .accessibilityIdentifier("welcome-wordmark")
+                .accessibilityAddTraits(.isHeader)
+        }
+    }
+}
+
 // MARK: - Rows
 
 /// One rendered transcript row. The agent's private work stream (reasoning,

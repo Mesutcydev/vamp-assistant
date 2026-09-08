@@ -57,19 +57,7 @@ private struct BrowserPanelChrome: View {
                 .help(controller.isLoading ? "Stop" : "Reload")
                 .accessibilityLabel(controller.isLoading ? "Stop loading" : "Reload page")
 
-                Menu {
-                    Button("Vamp Assistant", systemImage: "sparkles") {
-                        BrowserController.shared.reveal(openPanel: false)
-                    }
-                    if !computers.isEmpty { Divider() }
-                    ForEach(computers) { computer in
-                        Button(computer.name, systemImage: "person.crop.circle") {
-                            BrowserController.controller(
-                                for: BrowserSession(id: computer.id, name: computer.name))
-                                .reveal(openPanel: false)
-                        }
-                    }
-                } label: {
+                InstrumentMenu(menuWidth: 240) {
                     Label(controller.ownerLabel.isEmpty ? "Assistant" : controller.ownerLabel,
                           systemImage: "person.crop.circle.badge.checkmark")
                         .font(.caption.weight(.semibold))
@@ -77,13 +65,23 @@ private struct BrowserPanelChrome: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(Theme.surfaceInset, in: Capsule())
+                } options: {
+                    InstrumentMenuRow(title: "Vamp Assistant", systemImage: "sparkles") {
+                        BrowserController.shared.reveal(openPanel: false)
+                    }
+                    ForEach(computers) { computer in
+                        InstrumentMenuRow(title: computer.name, systemImage: "person.crop.circle") {
+                            BrowserController.controller(
+                                for: BrowserSession(id: computer.id, name: computer.name))
+                                .reveal(openPanel: false)
+                        }
+                    }
                 }
-                .menuStyle(.borderlessButton)
                 .fixedSize()
                 .help("Choose the Assistant or a bot's private browser")
 
                 TextField("Enter a URL or let the agent open one…", text: $urlDraft)
-                    .textFieldStyle(.roundedBorder)
+                    .vampField()
                     .font(.callout.monospaced())
                     .autocorrectionDisabled()
                     .focused($urlFocused)
@@ -167,7 +165,7 @@ private struct BrowserPanelChrome: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
         }
-        .lfCard()
+        .lfGlass()
         .onAppear { syncURLDraft() }
         .onChange(of: controller.currentURL) { _, newValue in
             if !urlFocused, let newValue {

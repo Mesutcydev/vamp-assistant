@@ -59,8 +59,7 @@ struct DiagnosticsPanelView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(Theme.surface)
-        .overlay(alignment: .bottom) { Rectangle().fill(Theme.hairline).frame(height: 1) }
+        .background(.thinMaterial)
     }
 
     // MARK: System snapshot

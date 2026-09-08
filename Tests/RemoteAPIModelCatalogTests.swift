@@ -81,6 +81,18 @@ final class RemoteAPIModelCatalogTests: XCTestCase {
             "https://gateway.example/v1")
     }
 
+    func testFirstClassNVIDIADoesNotDuplicateTheCompatiblePreset() {
+        let profiles = RemoteAPIModelCatalog.profiles(
+            configuredProviders: [.nvidia],
+            selectedModelByProvider: [:],
+            savedProfiles: [],
+            hasKeyForProviderID: { $0 == "nvidia" })
+
+        let nvidia = profiles.filter { $0.provider == .nvidia }
+        XCTAssertTrue(nvidia.contains { $0.model == LLMProvider.nvidia.defaultModel })
+        XCTAssertTrue(profiles.filter { $0.providerKey == "nvidia" }.isEmpty)
+    }
+
     func testUnconfiguredProviderProfilesAreHidden() {
         let stale = RemoteModelProfile(provider: .anthropic, model: "claude-sonnet-4-5")
         let profiles = RemoteAPIModelCatalog.profiles(

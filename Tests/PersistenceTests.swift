@@ -155,6 +155,38 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.pendingSaveCount, 0)
         XCTAssertEqual(store.load(id: record.id)?.messages.first?.content, "do not lose this")
     }
+
+    func testDeleteCancelsPendingSave() throws {
+        let store = SessionStore()
+        let temp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lf-session-delete-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temp) }
+
+        let invalidDirectory = temp.appendingPathComponent("not-a-directory")
+        try Data("occupied".utf8).write(to: invalidDirectory)
+        store.overrideSessionsDir = invalidDirectory
+
+        let record = SessionRecord(
+            id: UUID(),
+            title: "delete me",
+            createdAt: Date(),
+            updatedAt: Date(),
+            workspacePath: "/tmp",
+            modelID: "m",
+            messages: [SessionMessage(
+                role: .user, content: "gone", toolName: nil, timestamp: Date())],
+            checkpoints: [])
+        _ = store.save(record)
+        XCTAssertEqual(store.pendingSaveCount, 1)
+        store.delete(record)
+        XCTAssertEqual(store.pendingSaveCount, 0)
+
+        let validDirectory = temp.appendingPathComponent("sessions", isDirectory: true)
+        store.overrideSessionsDir = validDirectory
+        _ = store.retryPendingSaves()
+        XCTAssertNil(store.load(id: record.id))
+    }
 }
 
 @MainActor
@@ -166,6 +198,18 @@ final class SettingsStoreTests: XCTestCase {
         defaults.removeVolatileDomain(forName: UserDefaults.registrationDomain)
         defaults.removePersistentDomain(forName: suite)
         return (defaults, suite)
+    }
+
+    func testHomeSuggestionsVisibilityPersistsAndCanBeRestored() {
+        let (defaults, suite) = isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SettingsStore(defaults: defaults)
+        XCTAssertTrue(store.showHomeSuggestions)
+        store.showHomeSuggestions = false
+        let reopened = SettingsStore(defaults: defaults)
+        XCTAssertFalse(reopened.showHomeSuggestions)
+        reopened.showHomeSuggestions = true
+        XCTAssertTrue(SettingsStore(defaults: defaults).showHomeSuggestions)
     }
 
     func testNewStoreDefaultsToDark() {
@@ -261,15 +305,15 @@ final class SettingsStoreTests: XCTestCase {
     func testLegacyBeetAppearanceMigratesToDarkOnce() {
         let (defaults, suite) = isolatedDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }
-        defaults.set(AppAppearance.beet.rawValue, forKey: "appearance")
+        defaults.set("beet", forKey: "appearance")
 
         let migrated = SettingsStore(defaults: defaults)
         XCTAssertEqual(migrated.appearance, .dark)
 
-        migrated.appearance = .beet
+        defaults.set("beet", forKey: "appearance")
         let reopened = SettingsStore(defaults: defaults)
         XCTAssertEqual(reopened.appearance, .dark)
-        XCTAssertFalse(AppAppearance.allCases.contains(.beet))
+        XCTAssertEqual(AppAppearance.allCases, [.system, .light, .dark])
     }
 
     func testExperimentalDFlashPreferencePersistsWithoutChangingItsDefault() {
@@ -329,6 +373,8 @@ final class AppPreferencesTests: XCTestCase {
         var preferences = AppPreferences()
         preferences.lastWorkspacePath = temp.path
         preferences.lastModelID = "qwen-3-4b"
+        preferences.lastEngineKind = "chatgpt"
+        preferences.lastCodexModelID = "gpt-6-astra"
         preferences.autoResumeDownloads = true
         preferences.hasCompletedWelcome = true
 
@@ -336,6 +382,8 @@ final class AppPreferencesTests: XCTestCase {
         let reloaded = store.current
         XCTAssertEqual(reloaded.lastWorkspacePath, temp.path)
         XCTAssertEqual(reloaded.lastModelID, "qwen-3-4b")
+        XCTAssertEqual(reloaded.lastEngineKind, "chatgpt")
+        XCTAssertEqual(reloaded.lastCodexModelID, "gpt-6-astra")
         XCTAssertTrue(reloaded.autoResumeDownloads)
         XCTAssertTrue(reloaded.hasCompletedWelcome)
 

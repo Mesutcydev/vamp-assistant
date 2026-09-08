@@ -37,6 +37,8 @@ enum ChildProcessRegistry {
 
     /// Best-effort SIGTERM to every registered child still running.
     /// Synchronous and signal-safe enough for applicationWillTerminate.
+    /// Waits until each Process has actually exited so NSTask dealloc does
+    /// not abort during quit.
     static func terminateAll() {
         let running = lock.withLock { Array(processes.values) }
         for process in running where process.isRunning {
@@ -46,10 +48,27 @@ enum ChildProcessRegistry {
         for pid in extra {
             kill(-pid, SIGTERM)
         }
+        let deadline = Date().addingTimeInterval(0.4)
+        for process in running {
+            while process.isRunning && Date() < deadline {
+                usleep(20_000)
+            }
+            if process.isRunning {
+                kill(process.processIdentifier, SIGKILL)
+                process.waitUntilExit()
+            }
+        }
     }
 
     /// Test hook: how many children are currently tracked.
     static var trackedCount: Int {
         lock.withLock { processes.count }
+    }
+}
+
+extension Process {
+    /// `terminationStatus` raises if the task is still running. Nil while alive.
+    var finishedTerminationStatus: Int32? {
+        isRunning ? nil : terminationStatus
     }
 }

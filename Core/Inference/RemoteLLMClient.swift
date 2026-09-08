@@ -406,8 +406,10 @@ enum RemoteLLMClient {
     /// o-series and gpt-5-era models reject `max_tokens`.
     static func usesMaxCompletionTokens(_ model: String) -> Bool {
         let m = model.lowercased()
-        return m.hasPrefix("o1") || m.hasPrefix("o3") || m.hasPrefix("o4")
-            || m.hasPrefix("gpt-5") || m.hasPrefix("codex-")
+        let leaf = m.split(separator: "/").last.map(String.init) ?? m
+        return leaf.hasPrefix("o1") || leaf.hasPrefix("o3") || leaf.hasPrefix("o4")
+            || leaf.hasPrefix("gpt-5") || leaf.hasPrefix("gpt-6") || m.contains("astra")
+            || leaf.hasPrefix("codex-")
     }
 
     /// Models that reject an explicit `temperature` (o-series wants the

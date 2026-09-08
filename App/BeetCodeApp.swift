@@ -43,14 +43,18 @@ final class BeetCodeAppDelegate: NSObject, NSApplicationDelegate {
 }
 
 /// Maps the persisted appearance setting onto SwiftUI. `nil` means "follow
-/// the OS"; `.light`/`.dark` force it; `.beet` forces dark chrome (its
-/// beet-tinted neutrals come from Theme, not the system scheme).
+/// the OS"; `.light`/`.dark` force it.
 extension AppAppearance {
+    /// Resolve the request before translating System into a nil color scheme.
+    static func resolved(saved: Self, override: Self?) -> Self {
+        override ?? saved
+    }
+
     var colorScheme: ColorScheme? {
         switch self {
         case .system: nil
         case .light: .light
-        case .dark, .beet: .dark
+        case .dark: .dark
         }
     }
 }
@@ -67,30 +71,27 @@ struct BeetCodeApp: App {
     // user changes Appearance in Settings.
     @ObservedObject private var settings = SettingsStore.shared
 
-    init() {
-        // CLI early-exit (Phase 22): `beetcode intel <command>` runs the
-        // intelligence CLI and terminates before any UI or app state boots.
-        let arguments = CommandLine.arguments
-        if arguments.count > 1, arguments[1] == "intel" {
-            let code = IntelligenceCLIRunner.run(Array(arguments.dropFirst(2)))
-            Foundation.exit(code)
-        }
-    }
+    init() {}
 
     var body: some Scene {
         WindowGroup {
             MainWindowView()
-                // Root face for text that never went through AppFont/.app().
-                .fontDesign(Font.resolvedDesign(.serif))
+                // Un-migrated text defaults to engineered system sans; prose
+                // call sites opt into the user's Typeface via `.appProse`.
                 .tint(Theme.accent)
                 .environmentObject(appState)
                 .environmentObject(appState.sessions)
                 // A real working minimum: sidebar + chat + docked panel need room.
                 .frame(minWidth: 520, minHeight: 640)
-                .preferredColorScheme(settings.appearance.colorScheme)
+                .preferredColorScheme(AppAppearance.resolved(saved: settings.appearance,
+                    override: DesignPreview.appearanceOverride).colorScheme)
                 // Keep AppKit's appearance in sync so Theme's dynamic NSColors
                 // resolve to the forced scheme, not just the OS one.
-                .task(id: settings.appearance) { Theme.applyAppearance(settings.appearance) }
+                .onChange(of: AppAppearance.resolved(saved: settings.appearance,
+                                                    override: DesignPreview.appearanceOverride),
+                          initial: true) { _, appearance in
+                    Theme.applyAppearance(appearance)
+                }
                 // Palette / typeface / text size live in Theme globals that
                 // SwiftUI cannot observe, so mirroring them from a `.task`
                 // would land a frame late and never force a redraw.

@@ -47,20 +47,35 @@ struct ModelManagerView: View {
                 recommendedName: CatalogLibrary.recommendedChat(device: device)?.displayName,
                 importing: importInProgress,
                 showsImport: embedded,
+                embedded: embedded,
                 onImport: importModel
             )
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: Spacing.lg) {
+            if embedded {
+                // Inside Settings the shared column owns width and the shell
+                // owns scrolling — a nested scroll view here would double-
+                // scroll and a second centering rule would fight the column.
+                VStack(alignment: .leading, spacing: Spacing.lg) {
                     LocalModelsSection(query: searchText)
                     RemoteSection()
                         .environmentObject(appState)
                 }
-                .padding(Spacing.lg)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: Spacing.lg) {
+                        LocalModelsSection(query: searchText)
+                        RemoteSection()
+                            .environmentObject(appState)
+                    }
+                    .vampPageColumn()
+                }
             }
         }
-        .background { AtmosphereBackground(intensity: .conversation) }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Embedded in Settings the window root already owns the single
+        // continuous atmosphere; only the standalone variant needs its own.
+        .background { if !embedded { Theme.workspaceCanvas } }
+        .frame(maxWidth: .infinity)
         .tint(Theme.accent)
         // Re-sync with reality every open: models imported/copied/deleted
         // outside the registry (or left unregistered by an interrupted
@@ -79,6 +94,7 @@ struct ModelManagerView: View {
         let recommendedName: String?
         let importing: Bool
         let showsImport: Bool
+        var embedded: Bool = false
         let onImport: () -> Void
 
         private var usedFraction: Double {
@@ -89,24 +105,11 @@ struct ModelManagerView: View {
         var body: some View {
             VStack(alignment: .leading, spacing: Spacing.md) {
                 HStack(alignment: .center, spacing: Spacing.md) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Label("Model library", systemImage: "square.stack.3d.up")
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(Theme.textPrimary)
-                        HStack(spacing: Spacing.sm) {
-                            Text("\(localCount) available")
-                            Text("•")
-                            Text(device.summary)
-                            if let recommendedName {
-                                Text("• Daily pick: \(recommendedName)")
-                            }
-                        }
-                        .font(.caption)
-                        .foregroundStyle(Theme.textTertiary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    }
+                    VampSearchField(placeholder: "Filter models", text: $searchText)
+                        .frame(maxWidth: .infinity)
+
                     Spacer(minLength: Spacing.md)
+
                     if showsImport {
                         if importing {
                             ProgressView()
@@ -114,7 +117,7 @@ struct ModelManagerView: View {
                                 .help("Importing model…")
                         } else {
                             Button("Import…", action: onImport)
-                                .buttonStyle(LFCapsuleButtonStyle())
+                                .buttonStyle(LFCapsuleButtonStyle(height: 34))
                                 .help("Import a local MLX, GGUF, or Apple Core AI model pack")
                         }
                     }
@@ -122,7 +125,7 @@ struct ModelManagerView: View {
 
                 HStack(alignment: .center, spacing: Spacing.md) {
                     Label("RAM", systemImage: "memorychip")
-                        .font(.caption.weight(.medium))
+                        .font(.app(size: 11.5, weight: .medium ))
                         .foregroundStyle(Theme.textSecondary)
                     GeometryReader { proxy in
                         ZStack(alignment: .leading) {
@@ -132,44 +135,47 @@ struct ModelManagerView: View {
                                 .frame(width: max(4, proxy.size.width * usedFraction))
                         }
                     }
-                    .frame(height: 5)
+                    .frame(height: 4)
                     Text("\(ByteFormatter.bytes(freeBytes)) free")
-                        .font(.caption.monospacedDigit())
+                        .font(.app(size: 11 ))
+                        .monospacedDigit()
                         .foregroundStyle(Theme.textTertiary)
                         .fixedSize()
                 }
 
-                HStack(spacing: Spacing.xs) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Theme.textTertiary)
-                        .accessibilityHidden(true)
-                    TextField("Filter models", text: $searchText)
-                        .textFieldStyle(.plain)
-                        .font(.callout)
-                        .frame(minWidth: 150, idealWidth: 190, maxWidth: 230)
-                    if !searchText.isEmpty {
-                        Button {
-                            searchText = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(Theme.textTertiary)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Clear model search")
+                HStack(spacing: 0) {
+                    rackReadout(label: "AVAILABLE", value: "\(localCount)")
+                    rackDivider
+                    rackReadout(label: "MACHINE", value: device.summary)
+                    if let recommendedName {
+                        rackDivider
+                        rackReadout(label: "DAILY PICK", value: recommendedName)
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(Theme.surfaceInset.opacity(0.72), in: Capsule())
-                .overlay(Capsule().strokeBorder(Theme.hairline.opacity(0.72), lineWidth: 0.75))
             }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 18)
-            .background(Theme.surface.opacity(0.78))
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(Theme.hairline.opacity(0.72)).frame(height: 0.75)
+            .padding(.horizontal, embedded ? 12 : Chrome.pageHPadding)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .instrumentFaceplate(radius: 10, shadow: false)
+        }
+
+        private func rackReadout(label: String, value: String) -> some View {
+            VStack(alignment: .leading, spacing: 2) {
+                Instrument.microLabel(label)
+                Text(value)
+                    .font(.appMono(size: 10.5, weight: .medium))
+                    .foregroundStyle(Instrument.ink)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+
+        private var rackDivider: some View {
+            Rectangle()
+                .fill(Instrument.seam.opacity(0.55))
+                .frame(width: 0.75, height: 28)
         }
     }
 
@@ -356,7 +362,7 @@ struct ModelManagerView: View {
             minRAMGB: max(6, Int(Double(size) / 1_000_000_000 * 1.5)),
             recommendedRAMGB: max(8, Int(Double(size) / 1_000_000_000 * 2)),
             notes: format == .coreAI
-                ? "Imported Apple Core AI resource pack from \(url.path)"
+                ? "Imported Apple Core AI pack from \(url.path). Not runnable yet — use MLX or GGUF."
                 : mlxMetadata?.isVisionLanguage == true
                 ? "Imported multimodal MLX model (text + vision weights) from \(url.path)"
                 : "Imported from \(url.path)",
@@ -421,7 +427,8 @@ private struct ManagerHeaderView: View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Models")
-                    .font(.title2.bold())
+                    .font(.app(size: 17, weight: .semibold ))
+                    .foregroundStyle(Theme.textPrimary)
                 Spacer()
                 if importing {
                     ProgressView()
@@ -429,38 +436,38 @@ private struct ManagerHeaderView: View {
                         .help("Importing model…")
                 } else {
                     Button("Import…", action: onImport)
-                        .buttonStyle(LFCapsuleButtonStyle())
+                        .buttonStyle(LFCapsuleButtonStyle(height: 34))
                         .help("Import a local MLX, GGUF, or Apple Core AI model pack")
                 }
                 Button("Done", action: onDone)
                     .keyboardShortcut(.defaultAction)
-                    .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
+                    .buttonStyle(LFCapsuleButtonStyle(tone: .primary, height: 34))
             }
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 HStack(alignment: .firstTextBaseline) {
                     Label(device.summary, systemImage: "cpu")
-                        .font(.caption.weight(.medium))
+                        .font(.app(size: 11.5, weight: .medium ))
                         .foregroundStyle(Theme.textSecondary)
                     Spacer()
                     Text(device.catalogCaption)
-                        .font(.caption)
+                        .font(.app(size: 11.5 ))
                         .foregroundStyle(Theme.textTertiary)
                         .lineLimit(1)
                 }
                 if let recommendedName {
                     Text("Daily pick: \(recommendedName)")
-                        .font(.caption)
+                        .font(.app(size: 11.5 ))
                         .foregroundStyle(Theme.textTertiary)
                         .lineLimit(1)
                 }
                 HStack {
                     Label("RAM budget", systemImage: "memorychip")
-                        .font(.caption.weight(.medium))
+                        .font(.app(size: 11.5, weight: .medium ))
                         .foregroundStyle(Theme.textSecondary)
                     Spacer()
                     Text("\(ByteFormatter.bytes(freeBytes)) free of \(ByteFormatter.bytes(totalBytes))")
-                        .font(.caption)
+                        .font(.app(size: 11.5 ))
                         .monospacedDigit()
                         .foregroundStyle(Theme.textTertiary)
                 }
@@ -472,13 +479,14 @@ private struct ManagerHeaderView: View {
                             .frame(width: max(4, proxy.size.width * usedFraction))
                     }
                 }
-                .frame(height: 5)
+                .frame(height: 4)
             }
         }
-        .padding(Spacing.lg)
-        .background(Theme.surface)
+        .padding(.horizontal, Chrome.pageHPadding)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Theme.hairline).frame(height: 1)
+            Rectangle().fill(Theme.hairline).frame(height: 0.75)
         }
     }
 }
@@ -505,12 +513,12 @@ private struct LocalModelsSection: View {
             guard !models.isEmpty else { return nil }
             return CatalogLibrary.Section(id: section.id, models: models)
         }
-        VStack(alignment: .leading, spacing: Spacing.lg) {
+        LazyVStack(alignment: .leading, spacing: Spacing.lg) {
             if sections.isEmpty, !normalizedQuery.isEmpty {
                 ModelManagerEmptySearch(query: query)
             } else {
                 ForEach(sections) { section in
-                    VStack(alignment: .leading, spacing: Spacing.sm) {
+                    LazyVStack(alignment: .leading, spacing: 10) {
                         SectionHeader(title: section.title, systemImage: section.systemImage)
                         ForEach(section.models) { model in
                             ModelCard(model: model, isRecommended: recommended.contains(model.id))
@@ -528,21 +536,19 @@ private struct ModelManagerEmptySearch: View {
     var body: some View {
         HStack(spacing: Spacing.md) {
             Image(systemName: "magnifyingglass")
-                .font(.title3.weight(.semibold))
+                .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(Theme.textTertiary)
             VStack(alignment: .leading, spacing: 3) {
                 Text("No models found")
-                    .font(.callout.weight(.semibold))
+                    .font(.app(size: 13, weight: .semibold ))
+                    .foregroundStyle(Theme.textPrimary)
                 Text("Try a different search than \"\(query)\".")
-                    .font(.caption)
+                    .font(.app(size: 11.5 ))
                     .foregroundStyle(Theme.textSecondary)
             }
             Spacer(minLength: 0)
         }
-        .padding(Spacing.lg)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .lfCard()
-        .overlay(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
+        .vampOutlineCard()
     }
 }
 
@@ -552,11 +558,18 @@ private struct SectionHeader: View {
     let systemImage: String
 
     var body: some View {
-        Label(title, systemImage: systemImage)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(Theme.textTertiary)
-            .textCase(.uppercase)
-            .padding(.leading, Spacing.xs)
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 10, weight: .semibold))
+            Text(title.uppercased())
+                .font(.appUI(size: 10, weight: .semibold))
+                .tracking(1)
+            Rectangle()
+                .fill(Instrument.seam.opacity(0.45))
+                .frame(height: 0.75)
+        }
+        .foregroundStyle(Instrument.engraved)
+        .padding(.horizontal, 4)
     }
 }
 
@@ -566,6 +579,7 @@ private struct ModelCard: View {
     @EnvironmentObject private var appState: AppState
     let model: CatalogModel
     var isRecommended: Bool = false
+    @State private var compact = false
 
     private var downloadState: ModelDownloadManager.State {
         appState.downloadManager.state(for: model.id)
@@ -576,16 +590,27 @@ private struct ModelCard: View {
     private var isActive: Bool { appState.activeModelID == model.id }
 
     var body: some View {
+        let layout = compact
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.md))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: Spacing.md))
+        layout {
         HStack(alignment: .top, spacing: Spacing.md) {
             ModelGlyph(format: model.format, isActive: isActive)
+                .padding(.trailing, Spacing.md)
+                .overlay(alignment: .trailing) {
+                    Rectangle()
+                        .fill(Instrument.seam.opacity(0.45))
+                        .frame(width: 0.75)
+                        .padding(.vertical, 2)
+                }
 
-            VStack(alignment: .leading, spacing: Spacing.xs) {
+            VStack(alignment: .leading, spacing: 5) {
                 titleRow
                 sizeLine
-                specChips
+                specReadout
                 if !model.notes.isEmpty {
                     Text(model.notes)
-                        .font(.caption)
+                        .font(.appUI(size: 11.5))
                         .foregroundStyle(Theme.textSecondary)
                         .lineLimit(2)
                 }
@@ -597,55 +622,62 @@ private struct ModelCard: View {
                 }
                 DownloadStatusView(state: downloadState)
             }
-
-            Spacer(minLength: Spacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
 
             ModelActions(model: model, isActive: isActive, downloadState: downloadState, budget: budget)
+                .padding(.leading, Spacing.md)
+                .frame(width: 124, alignment: .trailing)
+                .overlay(alignment: .leading) {
+                    Rectangle()
+                        .fill(Instrument.seam.opacity(0.45))
+                        .frame(width: 0.75)
+                        .padding(.vertical, 2)
+                }
         }
-        .padding(Spacing.md)
-        .lfCard()
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .strokeBorder(isActive ? Theme.washBorder(Theme.accent) : Theme.hairline,
-                              lineWidth: isActive ? 1.5 : 1))
+        .padding(.vertical, 12)
+        .padding(.horizontal, Chrome.cardHPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .instrumentFaceplate(radius: Radius.card, shadow: false)
+        .onGeometryChange(for: Bool.self) { $0.size.width < 620 } action: { compact = $0 }
+        .overlay(alignment: .leading) {
+            if isActive {
+                Capsule()
+                    .fill(Theme.positive)
+                    .frame(width: 3, height: 36)
+                    .padding(.leading, 4)
+            }
+        }
     }
 
     private var titleRow: some View {
-        HStack(spacing: Spacing.sm) {
+        VStack(alignment: .leading, spacing: 5) {
             Text(model.displayName)
-                .font(.headline)
-            Text(model.family)
-                .font(.caption)
-                .foregroundStyle(Theme.accentText)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Theme.wash(Theme.accent), in: Capsule())
+                .font(.app(size: 13.5, weight: .semibold ))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(2)
+            HStack(spacing: Spacing.sm) {
+            if !compact {
+            VampTag(text: model.family)
             if model.kind == .coding {
-                Text("Coding")
-                    .font(.caption)
-                    .foregroundStyle(Theme.textSecondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Theme.surfaceInset, in: Capsule())
+                VampTag(text: "Coding")
             } else if model.kind == .vision {
-                Text("Vision")
-                    .font(.caption)
-                    .foregroundStyle(Theme.textSecondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Theme.surfaceInset, in: Capsule())
+                VampTag(text: "Vision")
+            }
             }
             VerdictBadge(verdict: isActive ? .fits : budget.verdict,
                          projectedFootprint: budget.projectedFootprint)
             if isRecommended, !isActive {
                 Label("Daily pick", systemImage: "star.fill")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(Theme.accentText)
+                    .font(.app(size: 11, weight: .medium ))
+                    .foregroundStyle(Theme.textSecondary)
             }
             if isActive {
                 Label("Active", systemImage: "checkmark.circle.fill")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(Theme.accentText)
+                    .font(.app(size: 11, weight: .medium ))
+                    .foregroundStyle(Theme.positive)
+            }
             }
         }
     }
@@ -657,20 +689,32 @@ private struct ModelCard: View {
         if let installed = appState.modelStore.installedModel(id: model.id),
            appState.modelStore.isInstalled(catalogModel: model) {
             Text("\(model.parameters) · \(model.quantization) · \(ByteFormatter.bytes(installed.sizeBytes))")
-                .font(.callout)
+                .font(.app(size: 11.5 ))
                 .foregroundStyle(Theme.textSecondary)
         } else {
             Text(model.subtitle)
-                .font(.callout)
+                .font(.app(size: 11.5 ))
                 .foregroundStyle(Theme.textSecondary)
         }
     }
 
-    private var specChips: some View {
-        HStack(spacing: Spacing.xs) {
-            SpecChip(text: "\(model.contextWindow / 1024)K context")
-            SpecChip(text: "min \(model.minRAMGB) GB")
-            SpecChip(text: "rec \(model.recommendedRAMGB) GB")
+    private var specReadout: some View {
+        HStack(spacing: 12) {
+            technicalValue("CONTEXT", "\(model.contextWindow / 1024)K")
+            technicalValue("MIN", "\(model.minRAMGB) GB")
+            technicalValue("REC", "\(model.recommendedRAMGB) GB")
+        }
+    }
+
+    private func technicalValue(_ label: String, _ value: String) -> some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(.appUI(size: 9, weight: .semibold))
+                .tracking(0.7)
+                .foregroundStyle(Instrument.inkSecondary)
+            Text(value)
+                .font(.appMono(size: 10.5, weight: .medium))
+                .foregroundStyle(Instrument.ink)
         }
     }
 }
@@ -682,48 +726,44 @@ private struct ModelGlyph: View {
 
     var body: some View {
         Image(systemName: format == .gguf ? "shippingbox" : (format == .coreAI ? "apple.intelligence" : "cpu"))
-            .font(.app(size: 16, weight: .semibold, design: .serif))
-            .foregroundStyle(isActive ? Theme.accentText : Theme.textSecondary)
-            .frame(width: 38, height: 38)
-            .background(isActive ? Theme.accentSoft : Theme.surfaceInset,
-                        in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+            .font(.system(size: 14, weight: .medium))
+            .foregroundStyle(isActive ? Theme.textPrimary : Theme.textSecondary)
+            .frame(width: 32, height: 32)
+            .instrumentRecess(radius: Chrome.buttonRadius)
     }
 }
 
-/// Tiny capsule for one spec (context window, RAM floors).
+/// Tiny capsule for one spec (context window, RAM floors). Kept as an alias
+/// so older call sites keep compiling; VampTag is the shared implementation.
 private struct SpecChip: View {
     let text: String
 
     var body: some View {
-        Text(text)
-            .font(.caption2)
-            .monospacedDigit()
-            .foregroundStyle(Theme.textTertiary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Theme.surfaceInset, in: Capsule())
+        VampTag(text: text, monospaced: true)
     }
 }
 
-/// Fit verdict as a tinted capsule so it scans like a status light.
+/// Fit verdict as a quiet tag so it scans like a status light without
+/// introducing a tinted capsule family of its own.
 private struct VerdictBadge: View {
     let verdict: MemoryAdvisor.Verdict
     let projectedFootprint: UInt64
 
     var body: some View {
-        let (label, icon, tint): (String, String, Color) = {
+        let (label, tint): (String, Color) = {
             switch verdict {
-            case .fits:     return ("Fits", "checkmark.circle.fill", Theme.success)
-            case .marginal: return ("Marginal", "exclamationmark.triangle.fill", Theme.warning)
-            case .wontFit:  return ("Won't fit", "xmark.octagon.fill", Theme.danger)
+            case .fits:     return ("Fits", Theme.positive)
+            case .marginal: return ("Marginal", Theme.warning)
+            case .wontFit:  return ("Won't fit", Theme.negative)
             }
         }()
-        return Label(label, systemImage: icon)
-            .font(.caption.weight(.medium))
-            .foregroundStyle(tint)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Theme.wash(tint), in: Capsule())
+        return HStack(spacing: 5) {
+            Circle().fill(tint).frame(width: 5, height: 5)
+            Text(label.uppercased())
+                .font(.appUI(size: 9.5, weight: .semibold))
+                .tracking(0.5)
+                .foregroundStyle(Instrument.inkSecondary)
+        }
             .help("Projected peak: \(ByteFormatter.bytes(projectedFootprint))")
     }
 }
@@ -791,8 +831,8 @@ private struct ModelActions: View {
             primaryAction
             overflowMenu
         }
-        // One button voice across every card: caption, medium weight.
-        .font(.caption.weight(.medium))
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .font(.appUI(size: 12.5, weight: .medium))
     }
 
     @ViewBuilder
@@ -801,8 +841,7 @@ private struct ModelActions: View {
             if model.role == .vision {
                 // Vision sidecars are never loaded by hand — the app runs
                 // them automatically when an image needs describing.
-                Label("Vision — runs automatically", systemImage: "eye")
-                    .foregroundStyle(Theme.textSecondary)
+                InstrumentSignal(label: "Auto vision", on: true)
                     .help("Downloaded. Vamp Assistant uses this model automatically to describe image attachments and screenshots.")
             } else if isActive {
                 Button("Unload") {
@@ -854,7 +893,7 @@ private struct ModelActions: View {
                 Button("Remove…", role: .destructive, action: removeInstalled)
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.app(size: 13, weight: .semibold, design: .serif))
+                    .font(.app(size: 13, weight: .semibold ))
                     .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
@@ -872,7 +911,7 @@ private struct ModelActions: View {
                     }
                 } label: {
                     Image(systemName: "ellipsis")
-                        .font(.app(size: 13, weight: .semibold, design: .serif))
+                        .font(.app(size: 13, weight: .semibold ))
                         .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
                 }
@@ -930,17 +969,17 @@ private struct RemoteSection: View {
                 if configured.isEmpty {
                     HStack(spacing: Spacing.md) {
                         Image(systemName: "key")
-                            .font(.app(size: 14, weight: .semibold, design: .serif))
+                            .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(Theme.textSecondary)
-                            .frame(width: 38, height: 38)
+                            .frame(width: 32, height: 32)
                             .background(Theme.surfaceInset,
-                                        in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                                        in: RoundedRectangle(cornerRadius: Chrome.buttonRadius, style: .continuous))
                         VStack(alignment: .leading, spacing: 2) {
                             Text("No providers configured")
-                                .font(.callout.weight(.medium))
+                                .font(.app(size: 13, weight: .medium ))
                                 .foregroundStyle(Theme.textPrimary)
                             Text("Add an API key in Settings → Providers to run the agent on a remote model.")
-                                .font(.caption)
+                                .font(.app(size: 11.5 ))
                                 .foregroundStyle(Theme.textSecondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -956,11 +995,7 @@ private struct RemoteSection: View {
                     .frame(maxHeight: 180)
                 }
             }
-            .padding(Spacing.md)
-            .lfCard()
-            .overlay(
-                RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                    .strokeBorder(Theme.hairline, lineWidth: 1))
+            .vampOutlineCard()
         }
     }
 
@@ -968,11 +1003,11 @@ private struct RemoteSection: View {
         HStack(spacing: Spacing.sm) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(provider.displayName)
-                    .font(.callout)
+                    .font(.app(size: 12.5, weight: .medium ))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                 Text(modelID(for: provider))
-                    .font(.caption.monospaced())
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -982,15 +1017,15 @@ private struct RemoteSection: View {
             if appState.isRemoteActive,
                appState.engine.activeRemoteEndpoint?.provider == provider {
                 Label("Active", systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(Theme.success)
+                    .font(.app(size: 11, weight: .medium ))
+                    .foregroundStyle(Theme.positive)
                 Button("Use local") {
                     appState.deactivateRemote()
                 }
                 .buttonStyle(LFCapsuleButtonStyle())
             } else {
                 // Same rule as the model cards: the forward action is the
-                // single prominent button, tinted with the accent.
+                // single prominent button.
                 Button("Use remote") {
                     let endpoint = RemoteEndpoint(
                         provider: provider,
@@ -1002,10 +1037,10 @@ private struct RemoteSection: View {
                 .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
             }
         }
-        .font(.caption.weight(.medium))
         .padding(.horizontal, Spacing.sm)
         .padding(.vertical, 6)
-        .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+        .background(Theme.surfaceInset.opacity(0.6),
+                    in: RoundedRectangle(cornerRadius: Chrome.buttonRadius, style: .continuous))
     }
 
     private func modelID(for provider: LLMProvider) -> String {

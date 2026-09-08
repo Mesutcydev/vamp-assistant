@@ -12,6 +12,22 @@ import Foundation
 /// execution is not.
 enum BrowserTools {
 
+    static var all: [any AgentTool] {
+        core + [EvalTool()]
+    }
+
+    static var core: [any AgentTool] {
+        [
+            ReadTool(),
+            ScreenshotTool(),
+            DownloadTool(),
+            NavigateTool(),
+            ClickTool(),
+            TypeTool(),
+            ScrollTool(),
+        ]
+    }
+
     @MainActor
     private static func controller(in context: ToolContext) -> BrowserController {
         BrowserController.controller(for: context.browserSession)

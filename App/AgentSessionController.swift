@@ -45,9 +45,27 @@ final class AgentSessionController: ObservableObject {
     private var pendingQuestionID: UUID?
     @Published private(set) var pendingPlan: String?
     private var pendingPlanID: UUID?
+    /// Live plan tasks from the current remote run. Replaced wholesale by
+    /// each `turn/plan/updated` snapshot so one card updates in place
+    /// instead of appending a transcript line per update.
+    @Published private(set) var livePlan: [PlanEntry] = []
     @Published private(set) var currentPhase: AgentPhase = .idle
     @Published private(set) var finishReason: AgentFinish?
     @Published private(set) var persistenceError: String?
+
+    /// One structured plan task. Identity follows the step text, which is
+    /// what the remote protocol guarantees per snapshot.
+    struct PlanEntry: Identifiable, Equatable {
+        let step: String
+        let status: String
+        var id: String { step }
+
+        var isComplete: Bool { status.lowercased() == "completed" }
+        var isInProgress: Bool {
+            let status = status.lowercased()
+            return status == "in_progress" || status == "inprogress" || status == "running"
+        }
+    }
     /// Follow-up used when a Codex (or other non-loop) run is interrupted so
     /// the next turn can start immediately instead of waiting in the queue.
     private var pendingSteerMessage: String?
@@ -282,6 +300,7 @@ final class AgentSessionController: ObservableObject {
         pendingQuestionChoices = []
         pendingPlan = nil
         pendingPlanID = nil
+        livePlan = []
         finishReason = nil
         exactAnswerOverride = activeCodexModelIDHandler() == nil
             ? PromptBuilder.exactRequestedAnswer(in: message)
@@ -722,21 +741,25 @@ final class AgentSessionController: ObservableObject {
 
         case "turn/plan/updated":
             if let plan = params["plan"]?.arrayValue {
-                let lines = plan.compactMap { entry -> String? in
+                let entries = plan.compactMap { entry -> PlanEntry? in
                     guard let object = entry.objectValue,
                           let step = object["step"]?.stringValue
                     else { return nil }
                     let status = object["status"]?.stringValue ?? "pending"
-                    return status.capitalized + ": " + step
+                    return PlanEntry(step: step, status: status)
                 }
-                if !lines.isEmpty {
-                    transcript.append(TranscriptItem(
-                        id: UUID(),
-                        kind: .notice("Codex plan\n" + lines.joined(separator: "\n"))))
+                if !entries.isEmpty {
+                    livePlan = entries
                 }
             }
 
         case "turn/completed":
+            if !livePlan.isEmpty {
+                transcript.append(TranscriptItem(
+                    id: UUID(),
+                    kind: .notice(Self.planSnapshotText(livePlan))))
+                livePlan = []
+            }
             let turn = params["turn"]?.objectValue
             let status = turn?["status"]?.stringValue?.lowercased() ?? "completed"
             let reason: AgentFinish
@@ -1199,6 +1222,15 @@ final class AgentSessionController: ObservableObject {
         return summary.isEmpty ? "Codex turn completed." : String(summary.prefix(240))
     }
 
+    /// Persisted form of the final plan snapshot. MetaRow parses this back
+    /// into a compact card, so restored sessions reconstruct the plan the
+    /// run finished with instead of dropping it.
+    private static func planSnapshotText(_ plan: [PlanEntry]) -> String {
+        "Codex plan\n" + plan.map { entry in
+            "\(entry.status): \(entry.step)"
+        }.joined(separator: "\n")
+    }
+
     func stop() {
         startTask?.cancel()
         startTask = nil
@@ -1286,8 +1318,10 @@ final class AgentSessionController: ObservableObject {
         // Background intelligence index: incremental when a baseline exists,
         // full on first open. Silent on failure — the agent loop degrades to
         // no injected context, never to a blocked session.
-        Task.detached(priority: .utility) {
-            _ = try? await WorkspaceIntelligence(workspaceRoot: url).update()
+        if SettingsStore.shared.intelligenceInspectorEnabled {
+            Task.detached(priority: .utility) {
+                _ = try? await WorkspaceIntelligence(workspaceRoot: url).update()
+            }
         }
         guard restoreLatest else { return }
         if let sessionID,
@@ -1421,6 +1455,32 @@ final class AgentSessionController: ObservableObject {
         finishReason = nil
     }
 
+    /// Design-preview fixture hook (`--design-preview`). Installs inert
+    /// transcript rows, a live plan snapshot, and a pending approval so the
+    /// real views render the reference conversation for visual capture.
+    /// Nothing is persisted and no tool or permission path is touched; the
+    /// preview approval clears like a resolved card without executing.
+    func installDesignPreview(
+        transcript items: [TranscriptItem],
+        plan: [PlanEntry],
+        approval: ApprovalRequest
+    ) {
+        transcript = items
+        livePlan = plan
+        pendingApproval = approval
+        currentPhase = .awaitingApproval
+    }
+
+    /// Resolves a preview approval without any executor side effects.
+    func resolveDesignPreviewApproval(approved: Bool) {
+        guard pendingApproval != nil else { return }
+        pendingApproval = nil
+        currentPhase = .idle
+        transcript.append(TranscriptItem(
+            id: UUID(),
+            kind: .notice(approved ? "Preview approval allowed" : "Preview approval rejected")))
+    }
+
     private func clearPending() {
         pendingApproval = nil
         pendingQuestion = nil
@@ -1428,6 +1488,7 @@ final class AgentSessionController: ObservableObject {
         pendingQuestionID = nil
         pendingPlan = nil
         pendingPlanID = nil
+        livePlan = []
         codexApprovalRequestID = nil
         codexApprovalInvocation = nil
         codexApprovalKind = nil
@@ -1534,6 +1595,7 @@ final class AgentSessionController: ObservableObject {
         pendingQuestionID = nil
         pendingPlan = nil
         pendingPlanID = nil
+        livePlan = []
         finishReason = nil
         dropTokenBuffer()
         streamingText = ""
@@ -1613,12 +1675,19 @@ final class AgentSessionController: ObservableObject {
         switch name {
         case "run_command":
             let value = TolerantJSON.value(from: content)?.objectValue?["command"]?.stringValue
-            return value ?? content
+            return value ?? "Run a command"
         case "read_file", "write_file", "apply_patch":
             let value = TolerantJSON.value(from: content)?.objectValue?["path"]?.stringValue
-            return value ?? content
+            return value ?? "Edit files"
+        case "search":
+            let value = TolerantJSON.value(from: content)?.objectValue?["pattern"]?.stringValue
+                ?? TolerantJSON.value(from: content)?.objectValue?["query"]?.stringValue
+            return value ?? "Search the workspace"
         default:
-            return content
+            // Never surface serialized arguments as the row summary; a
+            // neutral verb phrase keeps restored history readable.
+            let readable = name.replacingOccurrences(of: "_", with: " ")
+            return readable.prefix(1).uppercased() + readable.dropFirst()
         }
     }
 
@@ -2293,15 +2362,7 @@ final class AgentSessionController: ObservableObject {
         SimBuildRunTool(),
         // In-app browser: extraction is auto-approved; navigation/click/
         // type/eval go through the approval card like every other mutation.
-        BrowserTools.ReadTool(),
-        BrowserTools.ScreenshotTool(),
-        BrowserTools.DownloadTool(),
-        BrowserTools.NavigateTool(),
-        BrowserTools.ClickTool(),
-        BrowserTools.TypeTool(),
-        BrowserTools.ScrollTool(),
-        BrowserTools.EvalTool(),
-    ]
+    ] + BrowserTools.all
 
     /// Drive other Mac apps. Off the default coding path; Settings → Agent
     /// → Computer control must be on before these enter the registry.
@@ -2323,15 +2384,7 @@ final class AgentSessionController: ObservableObject {
     static let browserControlTools: [any AgentTool] = [
         TinyFishSearchTool(),
         SaveDocumentTool(),
-        BrowserTools.ReadTool(),
-        BrowserTools.ScreenshotTool(),
-        BrowserTools.DownloadTool(),
-        BrowserTools.NavigateTool(),
-        BrowserTools.ClickTool(),
-        BrowserTools.TypeTool(),
-        BrowserTools.ScrollTool(),
-        BrowserTools.EvalTool(),
-    ]
+    ] + BrowserTools.all
 
     static let botControlTools: [any AgentTool] = [
         BotRunsTool(),
@@ -2354,15 +2407,7 @@ final class AgentSessionController: ObservableObject {
         TinyFishSearchTool(),
         ApplyPatchTool(),
         RunCommandTool(),
-        BrowserTools.ReadTool(),
-        BrowserTools.ScreenshotTool(),
-        BrowserTools.DownloadTool(),
-        BrowserTools.NavigateTool(),
-        BrowserTools.ClickTool(),
-        BrowserTools.TypeTool(),
-        BrowserTools.ScrollTool(),
-        BrowserTools.EvalTool(),
-    ]
+    ] + BrowserTools.all
 
     static func sessionTools(
         computerControlEnabled: Bool,
@@ -2406,13 +2451,7 @@ final class AgentSessionController: ObservableObject {
         RunCommandTool(),
         BackgroundProcessTool(),
         BackgroundStatusTool(),
-        BrowserTools.NavigateTool(),
-        BrowserTools.ReadTool(),
-        BrowserTools.ScreenshotTool(),
-        BrowserTools.DownloadTool(),
-        BrowserTools.ClickTool(),
-        BrowserTools.TypeTool(),
-        BrowserTools.ScrollTool(),
+    ] + BrowserTools.core + [
         SimListDevicesTool(),
         SimBootDeviceTool(),
         SimLaunchAppTool(),

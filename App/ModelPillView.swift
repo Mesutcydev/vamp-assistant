@@ -23,14 +23,14 @@ struct ModelSelectionPill: View {
                     .fill(statusColor)
                     .frame(width: 6, height: 6)
                 Image(systemName: icon)
-                    .font(.app(size: 11, weight: .medium, design: .serif))
+                    .font(.app(size: 11, weight: .medium ))
                     .foregroundStyle(iconColor)
                 Text(label)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .layoutPriority(1)
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.app(size: 8, weight: .semibold, design: .serif))
+                    .font(.app(size: 8, weight: .semibold ))
                     .foregroundStyle(Theme.textTertiary)
             }
             // Model identity is a text control in the command line, not a
@@ -157,6 +157,7 @@ private struct ModelPickerPopover: View {
     @State private var query = ""
     @State private var allRemoteModels: [RemoteModelProfile] = []
     @State private var refreshingCatalog = false
+    @State private var showHiddenAccountModels = false
     @State private var refreshMessage: String?
     @FocusState private var searchFocused: Bool
 
@@ -211,7 +212,16 @@ private struct ModelPickerPopover: View {
     private var allAccountModels: [CodexModelProfile] { codexAccount.models }
 
     private var accountModels: [CodexModelProfile] {
-        allAccountModels.filter { matches($0.displayName, $0.id) }
+        allAccountModels.filter { model in
+            guard matches(model.displayName, model.id) else { return false }
+            if model.hidden,
+               !CodexAccountCatalog.isLatest(modelID: model.id),
+               !showHiddenAccountModels,
+               query.isEmpty {
+                return false
+            }
+            return true
+        }
     }
 
     /// Unfiltered totals, shown on the source picker so the size of each list
@@ -377,7 +387,7 @@ private struct ModelPickerPopover: View {
             Image(systemName: "cpu.fill")
                 .foregroundStyle(Theme.accentText)
             Text(activeModelLabel)
-                .font(.app(size: 13, weight: .semibold, design: .serif))
+                .font(.app(size: 13, weight: .semibold ))
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -409,7 +419,7 @@ private struct ModelPickerPopover: View {
 
     private func statusBadge(_ text: String, color: Color, icon: String) -> some View {
         Label(text, systemImage: icon)
-            .font(.app(size: 11, weight: .medium, design: .serif))
+            .font(.app(size: 11, weight: .medium ))
             .foregroundStyle(color)
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
@@ -497,12 +507,12 @@ private struct ModelPickerPopover: View {
             HStack(spacing: 8) {
                 Image(systemName: isActive ? "checkmark.circle.fill" : "cpu")
                     .accessibilityHidden(true)
-                    .font(.app(size: 13, design: .serif))
+                    .font(.app(size: 13 ))
                     .foregroundStyle(isActive ? Theme.success : Theme.textSecondary)
                     .frame(width: 16)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(model.displayName)
-                        .font(.app(size: 12.5, weight: isActive ? .semibold : .regular, design: .serif))
+                        .font(.app(size: 12.5, weight: isActive ? .semibold : .regular ))
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
                     Text("\(model.parameters) · \(model.quantization) · \(isActive ? "active" : budgetHint(budget))")
@@ -554,7 +564,7 @@ private struct ModelPickerPopover: View {
                     .foregroundStyle(Theme.textSecondary)
                 Button("Add provider…") {
                     dismiss()
-                    NotificationCenter.default.post(name: .openAppSettings, object: nil)
+                    NotificationCenter.default.post(name: .openProviderSettings, object: nil)
                 }
                 .font(.caption.weight(.medium))
                 .buttonStyle(.borderless)
@@ -570,41 +580,84 @@ private struct ModelPickerPopover: View {
 
     @ViewBuilder
     private var accountSection: some View {
-        sectionLabel("ChatGPT account models")
         if !codexAccount.isAvailable {
+            sectionLabel("ChatGPT account models")
             Text("Codex CLI is not available on this Mac. Install Codex, then reopen Vamp Assistant.")
                 .font(.caption)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         } else if !codexAccount.isSignedIn {
+            sectionLabel("ChatGPT account models")
             VStack(alignment: .leading, spacing: 8) {
-                Text("Use OpenAI models with your ChatGPT account. API keys are not required for this mode.")
+                Text("Use GPT-6 Astra and other OpenAI models with your ChatGPT account. No API key required.")
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("Sign in with ChatGPT…") {
                     Task { await codexAccount.signInWithBrowser() }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
                 .tint(Theme.accent)
                 .controlSize(.small)
+                .disabled(codexAccount.browserLogin != nil || codexAccount.deviceCodeLogin != nil)
+                if let deviceCode = codexAccount.deviceCodeLogin {
+                    Text("Enter \(deviceCode.userCode) at the opened page.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                        .textSelection(.enabled)
+                } else if codexAccount.browserLogin != nil {
+                    Text("Finish sign-in in your browser.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                if codexAccount.browserLogin != nil || codexAccount.deviceCodeLogin != nil {
+                    Button("Cancel") { Task { await codexAccount.cancelLogin() } }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                }
             }
-        } else if codexAccount.models.isEmpty {
+        } else if allAccountModels.isEmpty {
+            sectionLabel("ChatGPT account models")
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
                 Text("Loading account models…")
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
                 Spacer()
-                Button("Refresh") { Task { await codexAccount.refreshModels() } }
+                refreshAccountModelsButton
+            }
+        } else if accountModels.isEmpty {
+            sectionLabel("ChatGPT account models")
+            noMatches
+            refreshAccountModelsButton
+        } else {
+            let latest = accountModels.filter { CodexAccountCatalog.isLatest(modelID: $0.id) }
+            let rest = accountModels.filter { !CodexAccountCatalog.isLatest(modelID: $0.id) }
+            if !latest.isEmpty {
+                sectionLabel("Latest")
+                ForEach(latest) { model in
+                    codexModelRow(model)
+                }
+            }
+            if !rest.isEmpty {
+                sectionLabel(latest.isEmpty ? "ChatGPT account models" : "More account models")
+                ForEach(rest) { model in
+                    codexModelRow(model)
+                }
+            }
+            if !showHiddenAccountModels,
+               allAccountModels.contains(where: { $0.hidden && !CodexAccountCatalog.isLatest(modelID: $0.id) }) {
+                Button("Show older models") { showHiddenAccountModels = true }
+                    .font(.caption.weight(.medium))
                     .buttonStyle(.borderless)
                     .foregroundStyle(Theme.accentText)
             }
-        } else if accountModels.isEmpty {
-            noMatches
-        } else {
-            ForEach(accountModels) { model in
-                codexModelRow(model)
+            HStack {
+                Spacer()
+                if codexAccount.isRefreshing {
+                    ProgressView().controlSize(.small)
+                }
+                refreshAccountModelsButton
             }
         }
         if let error = codexAccount.errorMessage {
@@ -613,6 +666,14 @@ private struct ModelPickerPopover: View {
                 .foregroundStyle(Theme.danger)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private var refreshAccountModelsButton: some View {
+        Button("Refresh") { Task { await codexAccount.refreshModels() } }
+            .buttonStyle(.borderless)
+            .foregroundStyle(Theme.accentText)
+            .disabled(codexAccount.isRefreshing)
+            .accessibilityLabel("Refresh ChatGPT account models")
     }
 
     private func codexModelRow(_ model: CodexModelProfile) -> some View {
@@ -625,14 +686,19 @@ private struct ModelPickerPopover: View {
             HStack(spacing: 8) {
                 Image(systemName: isActive ? "checkmark.circle.fill" : "person.crop.circle")
                     .accessibilityHidden(true)
-                    .font(.app(size: 13, design: .serif))
+                    .font(.app(size: 13 ))
                     .foregroundStyle(isActive ? Theme.success : Theme.textSecondary)
                     .frame(width: 16)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(model.displayName)
-                        .font(.app(size: 12.5, weight: isActive ? .semibold : .regular, design: .serif))
-                        .foregroundStyle(Theme.textPrimary)
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(model.displayName)
+                            .font(.app(size: 12.5, weight: isActive ? .semibold : .regular ))
+                            .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(1)
+                        if CodexAccountCatalog.isLatest(modelID: model.id) {
+                            latestBadge
+                        }
+                    }
                     Text(model.id)
                         .font(.caption2.monospaced())
                         .foregroundStyle(Theme.textTertiary)
@@ -640,6 +706,11 @@ private struct ModelPickerPopover: View {
                         .truncationMode(.middle)
                     if !model.description.isEmpty {
                         Text(model.description)
+                            .font(.caption2)
+                            .foregroundStyle(Theme.textTertiary)
+                            .lineLimit(1)
+                    } else if model.hidden {
+                        Text("Older catalog entry")
                             .font(.caption2)
                             .foregroundStyle(Theme.textTertiary)
                             .lineLimit(1)
@@ -679,14 +750,19 @@ private struct ModelPickerPopover: View {
             HStack(spacing: 8) {
                 Image(systemName: isActive ? "checkmark.circle.fill" : "cloud")
                     .accessibilityHidden(true)
-                    .font(.app(size: 13, design: .serif))
+                    .font(.app(size: 13 ))
                     .foregroundStyle(isActive ? Theme.success : Theme.textSecondary)
                     .frame(width: 16)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(profile.displayName ?? profile.model)
-                        .font(.app(size: 12.5, weight: isActive ? .semibold : .regular, design: .serif))
-                        .foregroundStyle(Theme.textPrimary)
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(profile.displayName ?? profile.model)
+                            .font(.app(size: 12.5, weight: isActive ? .semibold : .regular ))
+                            .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(1)
+                        if source == .account, CodexAccountCatalog.isLatest(modelID: profile.model) {
+                            latestBadge
+                        }
+                    }
                     Text("\(profile.displayProviderName) · \(profile.model)")
                         .font(.caption2.monospaced())
                         .foregroundStyle(Theme.textTertiary)
@@ -736,7 +812,7 @@ private struct ModelPickerPopover: View {
                     Task { await appState.deactivate() }
                 } label: {
                     Label("Unload", systemImage: "eject")
-                        .font(.app(size: 12, design: .serif))
+                        .font(.app(size: 12 ))
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(Theme.textSecondary)
@@ -748,7 +824,7 @@ private struct ModelPickerPopover: View {
                 } else {
                     Button(action: refreshRemoteCatalog) {
                         Label("Refresh", systemImage: "arrow.clockwise")
-                            .font(.app(size: 12, design: .serif))
+                            .font(.app(size: 12 ))
                     }
                     .buttonStyle(.borderless)
                     .foregroundStyle(Theme.textSecondary)
@@ -768,18 +844,15 @@ private struct ModelPickerPopover: View {
             Spacer(minLength: 8)
             Button {
                 dismiss()
-                if source == .account {
-                    NotificationCenter.default.post(name: .openAppSettings, object: nil)
-                    DispatchQueue.main.async {
-                        NotificationCenter.default.post(name: .openProviderSettings, object: nil)
-                    }
-                } else {
+                if source == .local {
                     NotificationCenter.default.post(name: .openModelManager, object: nil)
+                } else {
+                    NotificationCenter.default.post(name: .openProviderSettings, object: nil)
                 }
             } label: {
                     Label(source == .local ? "Model Manager…" : source == .api ? "Manage API models…" : "Manage account…",
                           systemImage: source == .local ? "square.and.arrow.down.on.square" : source == .api ? "key" : "person.crop.circle")
-                    .font(.app(size: 12, design: .serif))
+                    .font(.app(size: 12 ))
             }
             .buttonStyle(.borderless)
             .foregroundStyle(Theme.accentText)
@@ -812,7 +885,7 @@ private struct ModelPickerPopover: View {
                     failures += 1
                 }
             }
-            for known in KnownRemoteProvider.all {
+            for known in KnownRemoteProvider.compatiblePresets {
                 guard let key = keyStore.key(forProviderID: known.id), !key.isEmpty else { continue }
                 do {
                     let profiles = try await RemoteLLMClient.fetchModelProfiles(
@@ -837,12 +910,19 @@ private struct ModelPickerPopover: View {
             .foregroundStyle(Theme.textTertiary)
             .padding(.bottom, 4)
     }
+
+    private var latestBadge: some View {
+        Text("Latest")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(Theme.accentText)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(Theme.wash(Theme.accent), in: Capsule())
+            .accessibilityLabel("Latest model")
+    }
 }
 
-/// Compact, model-aware reasoning selector shown beside the model list. The
-/// control is deliberately visible (rather than buried in Settings) because
-/// reasoning effort changes latency, token use, and answer depth for the very
-/// next turn.
+/// Compact reasoning selector beside the model list.
 private struct ReasoningModelControl: View {
     let modelName: String
     let options: [String]
@@ -851,67 +931,31 @@ private struct ReasoningModelControl: View {
     let onSelect: (String?) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 6) {
-                Image(systemName: "brain.head.profile")
-                    .accessibilityHidden(true)
-                    .foregroundStyle(Theme.accentText)
-                Text("Reasoning")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                Spacer()
-                Text(selection?.capitalized ?? "Auto")
-                    .font(.caption2.weight(.semibold).monospaced())
-                    .foregroundStyle(Theme.accentText)
-            }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 5) {
-                    effortButton(title: "Auto", value: nil)
-                    ForEach(normalizedOptions, id: \.self) { effort in
-                        effortButton(title: effort.capitalized, value: effort)
-                    }
+        HStack {
+            Text("Reasoning")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.textPrimary)
+            Spacer()
+            Picker("Reasoning", selection: $selection) {
+                Text("Auto").tag(Optional<String>.none)
+                ForEach(normalizedOptions, id: \.self) { effort in
+                    Text(effort.capitalized).tag(Optional(effort))
                 }
             }
-
-            Text("For \(modelName) · Auto uses \((defaultEffort ?? "the model default").lowercased())")
-                .font(.caption2)
-                .foregroundStyle(Theme.textTertiary)
-                .lineLimit(1)
-                .truncationMode(.middle)
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .controlSize(.small)
+            .onChange(of: selection) { _, value in
+                onSelect(value)
+            }
+            .help("For \(modelName). Auto uses \((defaultEffort ?? "the model default").lowercased()).")
         }
-        .padding(9)
-        .background(Theme.surfaceInset.opacity(0.62), in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .strokeBorder(Theme.hairline, lineWidth: 1)
-        }
-        .padding(.vertical, 2)
+        .accessibilityLabel("Reasoning effort")
     }
 
     private var normalizedOptions: [String] {
         var seen = Set<String>()
         return options.map { $0.lowercased() }.filter { !$0.isEmpty && seen.insert($0).inserted }
-    }
-
-    private func effortButton(title: String, value: String?) -> some View {
-        let selected = selection == value
-        return Button {
-            selection = value
-            onSelect(value)
-        } label: {
-            Text(title)
-                .font(.caption2.weight(selected ? .semibold : .medium))
-                .foregroundStyle(selected ? Theme.accentText : Theme.textSecondary)
-                .padding(.horizontal, 9)
-                .frame(minHeight: 25)
-                .background(selected ? Theme.washStrong(Theme.accent) : Color.clear, in: Capsule())
-                .overlay(Capsule().strokeBorder(selected ? Theme.washBorder(Theme.accent) : Theme.hairline, lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-        .help(value == nil ? "Use the model's default reasoning effort" : "Use \(title) reasoning for the next turn")
-        .accessibilityLabel("Reasoning effort \(title)")
-        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 

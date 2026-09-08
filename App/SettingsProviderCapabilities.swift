@@ -25,186 +25,42 @@ enum CapabilityMode: String, CaseIterable, Identifiable {
     }
 }
 
-/// A model-aware effort control with a small "reactor" metaphor. It keeps the
-/// familiar one-choice semantics of a picker, but exposes the supported modes
-/// as a visible energy ladder so the user can understand the latency/quality
-/// trade-off without opening a generic menu.
+/// Native effort picker. Selection is `nil` for the provider default.
 struct ReasoningEffortPicker: View {
     let profile: RemoteModelProfile
     @Binding var selection: String?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Namespace private var selectionNamespace
 
     private var options: [ReasoningEffort] { profile.effectiveReasoningEfforts }
 
-    private var selectedOption: ReasoningEffort? {
-        guard let selection else { return nil }
-        return options.first { $0.rawValue == selection.lowercased() }
-    }
-
     var body: some View {
         if !options.isEmpty {
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                    Label("Reasoning reactor", systemImage: "atom")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Theme.textSecondary)
-                    Spacer()
-                    Text(selectionLabel)
-                        .font(.caption2.weight(.semibold).monospaced())
-                        .foregroundStyle(reactorTint)
-                }
-
-                HStack(spacing: 4) {
-                    reactorButton(
-                        id: "automatic",
-                        title: "Auto",
-                        subtitle: "provider default",
-                        glyph: "wand.and.stars",
-                        tint: Theme.accent,
-                        isSelected: selection == nil) {
-                            choose(nil)
-                        }
-
+            HStack {
+                Text("Reasoning")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                Spacer()
+                Picker("Reasoning", selection: $selection) {
+                    Text("Auto").tag(Optional<String>.none)
                     ForEach(options) { option in
-                        reactorButton(
-                            id: option.id,
-                            title: option.label,
-                            subtitle: option.rawValue,
-                            glyph: option.glyph,
-                            tint: tint(for: option),
-                            isSelected: selectedOption == option) {
-                                choose(option.rawValue)
-                            }
+                        Text(option.label).tag(Optional(option.rawValue))
                     }
                 }
-                .padding(4)
-                .background(
-                    LinearGradient(
-                        colors: [Theme.surfaceInset, Theme.bg],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing),
-                    in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                        .strokeBorder(Theme.hairline, lineWidth: 1))
-
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(reactorTint)
-                        .frame(width: 6, height: 6)
-                        .shadow(color: reactorTint.opacity(0.7), radius: 4)
-                    Text(selectionDetail)
-                        .font(.caption2)
-                        .foregroundStyle(Theme.textTertiary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Spacer()
-                    Text("\(options.count) modes")
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(Theme.textTertiary)
-                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .controlSize(.small)
+                .help(selectionDetail)
             }
-            .accessibilityElement(children: .contain)
         }
     }
 
-    private var selectionLabel: String {
-        selectedOption?.label ?? "Auto"
-    }
-
     private var selectionDetail: String {
-        if let selectedOption { return "\(selectedOption.detail) · wire: \(selectedOption.rawValue)" }
+        if let selected = options.first(where: { $0.rawValue == selection?.lowercased() }) {
+            return selected.detail
+        }
         if let defaultEffort = profile.effectiveDefaultReasoningEffort {
             return "The provider chooses its default · currently \(defaultEffort)"
         }
         return "The provider chooses the balance automatically"
-    }
-
-    private var reactorTint: Color {
-        if let selectedOption { return tint(for: selectedOption) }
-        return Theme.accent
-    }
-
-    private func tint(for option: ReasoningEffort) -> Color {
-        switch option.rawValue {
-        case "none", "minimal": Theme.info
-        case "low", "medium": Theme.accent
-        case "high", "xhigh": Theme.warning
-        case "max": Theme.danger
-        default: Theme.accent
-        }
-    }
-
-    private func reactorButton(
-        id: String,
-        title: String,
-        subtitle: String,
-        glyph: String,
-        tint: Color,
-        isSelected: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            VStack(spacing: 3) {
-                ZStack {
-                    if isSelected {
-                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .fill(Theme.washStrong(tint))
-                            .matchedGeometryEffect(id: "reactor-selection", in: selectionNamespace)
-                    }
-                    Image(systemName: glyph)
-                        .accessibilityHidden(true)
-                        .font(.app(size: 11, weight: .semibold, design: .serif))
-                        .foregroundStyle(isSelected ? tint : Theme.textTertiary)
-                }
-                .frame(height: 22)
-                Text(title)
-                    .font(.caption2.weight(isSelected ? .semibold : .medium))
-                    .foregroundStyle(isSelected ? Theme.textPrimary : Theme.textSecondary)
-                    .lineLimit(1)
-                Text(subtitle)
-                    .font(.caption2.monospaced().weight(.medium))
-                    .foregroundStyle(isSelected ? tint : Theme.textTertiary)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, minHeight: 48)
-            .padding(.horizontal, 4)
-            .contentShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-        }
-        .buttonStyle(ReactorNodeButtonStyle(isSelected: isSelected, reduceMotion: reduceMotion))
-        .help(isSelected ? "Selected: \(title) (\(subtitle))" : "Use \(title) reasoning (\(subtitle))")
-        .accessibilityLabel("\(title), \(subtitle)")
-        .accessibilityHint(isSelected ? "Selected" : "\(selectionDetail)")
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-        .id(id)
-    }
-
-    private func choose(_ effort: String?) {
-        if reduceMotion {
-            selection = effort
-        } else {
-            withAnimation(.snappy(duration: 0.22)) {
-                selection = effort
-            }
-        }
-    }
-}
-
-struct ReactorNodeButtonStyle: ButtonStyle {
-    let isSelected: Bool
-    let reduceMotion: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(isSelected ? Theme.wash(Theme.accent) : Color.clear))
-            .overlay(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .strokeBorder(isSelected ? Theme.washBorder(Theme.accent) : Color.clear, lineWidth: 1))
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.965 : 1)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
@@ -249,10 +105,10 @@ struct RemoteModelCapabilityEditor: View {
 
                 HStack(spacing: Spacing.sm) {
                     TextField("Context window", text: $contextWindow)
-                        .textFieldStyle(.roundedBorder)
+                        .vampField()
                         .font(.caption.monospaced())
                     TextField("Max output", text: $outputTokens)
-                        .textFieldStyle(.roundedBorder)
+                        .vampField()
                         .font(.caption.monospaced())
                 }
 
@@ -269,10 +125,10 @@ struct RemoteModelCapabilityEditor: View {
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: Spacing.sm)
                     Button("Reset") { reset() }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(LFCapsuleButtonStyle())
                         .controlSize(.small)
                     Button("Save") { save() }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
                         .tint(Theme.accent)
                         .controlSize(.small)
                 }

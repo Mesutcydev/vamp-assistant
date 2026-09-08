@@ -474,6 +474,9 @@ final class ComposerStore {
     static var overrideDraftsDir: URL?
 
     private var draftFileURL: URL? {
+        // Visual fixtures and UI smoke tests must neither restore nor overwrite
+        // a person's draft. Each preview starts from an in-memory composer.
+        guard !ProcessInfo.processInfo.arguments.contains("--design-preview") else { return nil }
         guard let key = workspaceKey else { return nil }
         let dir: URL
         if let base = Self.overrideDraftsDir {

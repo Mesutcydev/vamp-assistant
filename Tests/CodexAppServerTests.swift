@@ -55,6 +55,69 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertFalse(String(decoding: data, as: UTF8.self).contains("access_token"))
     }
 
+    func testModelListPageFollowsCursorAndKeepsHiddenLatestModels() throws {
+        let first = try LFJSONValue.decode("""
+            {"data":[{"id":"gpt-5.2-codex","displayName":"GPT-5.2 Codex","isDefault":true,"hidden":false}],"nextCursor":"page-2"}
+            """)
+        let second = try LFJSONValue.decode("""
+            {"data":[{"id":"gpt-5.6-terra","displayName":"GPT-5.6 Terra","hidden":false},{"id":"gpt-5.4","displayName":"GPT-5.4","hidden":true,"supportedReasoningEfforts":[{"reasoningEffort":"high"}]}],"next_cursor":null}
+            """)
+
+        let page1 = CodexAppServerClient.modelListPage(first)
+        XCTAssertEqual(page1.models.map(\.id), ["gpt-5.2-codex"])
+        XCTAssertEqual(page1.nextCursor, "page-2")
+
+        let page2 = CodexAppServerClient.modelListPage(second)
+        XCTAssertEqual(page2.nextCursor, nil)
+        XCTAssertEqual(Set(page2.models.map(\.id)), ["gpt-5.6-terra", "gpt-5.4"])
+        XCTAssertTrue(page2.models.contains { $0.id == "gpt-5.4" && $0.hidden })
+        XCTAssertEqual(
+            page2.models.first { $0.id == "gpt-5.4" }?.supportedReasoningEfforts,
+            ["high"])
+
+        let sorted = CodexAppServerClient.sortedAccountModels(page1.models + page2.models)
+        XCTAssertEqual(sorted.map(\.id), ["gpt-5.2-codex", "gpt-5.6-terra", "gpt-5.4"])
+    }
+
+    func testAccountCatalogSurfacesAstraFirstEvenWhenCodexOmitsIt() {
+        let live = [
+            CodexModelProfile(
+                id: "gpt-5.2-codex",
+                displayName: "GPT-5.2 Codex",
+                description: "",
+                defaultReasoningEffort: "medium",
+                supportedReasoningEfforts: ["low", "medium", "high"],
+                inputModalities: ["text"],
+                isDefault: true,
+                hidden: false),
+        ]
+        let merged = CodexAccountCatalog.merging(live: live)
+        XCTAssertEqual(merged.first?.id, "gpt-6-astra")
+        XCTAssertTrue(merged.contains { $0.id == "gpt-6-astra-pro" })
+        XCTAssertTrue(merged.contains { $0.id == "gpt-5.2-codex" })
+        XCTAssertTrue(CodexAccountCatalog.isLatest(modelID: "chatgpt|gpt-6-astra"))
+        XCTAssertFalse(merged.contains { $0.id == "gpt-6-astra" && $0.hidden })
+    }
+
+    func testAccountCatalogKeepsLiveAstraMetadataAndUnhidesIt() {
+        let live = CodexModelProfile(
+            id: "gpt-6-astra",
+            displayName: "Astra",
+            description: "From Codex",
+            defaultReasoningEffort: "max",
+            supportedReasoningEfforts: ["low", "max"],
+            inputModalities: ["text", "image"],
+            isDefault: false,
+            hidden: true)
+        let merged = CodexAccountCatalog.merging(live: [live])
+        let astra = merged.first { $0.id == "gpt-6-astra" }
+        XCTAssertEqual(astra?.displayName, "Astra")
+        XCTAssertEqual(astra?.description, "From Codex")
+        XCTAssertEqual(astra?.defaultReasoningEffort, "max")
+        XCTAssertEqual(astra?.supportedReasoningEfforts, ["low", "max"])
+        XCTAssertEqual(astra?.hidden, false)
+    }
+
     func testErrorsExplainWhichAppServerOperationFailed() {
         XCTAssertEqual(
             CodexAppServerError.timedOut("model/list").errorDescription,
@@ -81,5 +144,20 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(objects.allSatisfy { $0["inputSchema"]?.objectValue != nil })
         XCTAssertFalse(names.contains("read_file"))
         XCTAssertFalse(names.contains("run_command"))
+    }
+
+    func testFinishedTerminationStatusIsNilWhileTheProcessIsAlive() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        process.arguments = ["8"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        XCTAssertTrue(process.isRunning)
+        XCTAssertNil(process.finishedTerminationStatus)
+        process.terminate()
+        process.waitUntilExit()
+        XCTAssertFalse(process.isRunning)
+        XCTAssertNotNil(process.finishedTerminationStatus)
     }
 }

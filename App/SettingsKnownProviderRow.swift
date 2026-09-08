@@ -3,6 +3,7 @@ import SwiftUI
 
 struct KnownProviderRow: View {
     let provider: KnownRemoteProvider
+    var showsIdentity: Bool = true
     @ObservedObject private var keyStore = APIKeyStore.shared
     @State private var keyDraft = ""
     @State private var modelDraft = ""
@@ -54,22 +55,24 @@ struct KnownProviderRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            HStack(spacing: Spacing.sm) {
-                Image(systemName: "shippingbox.fill")
-                    .foregroundStyle(Theme.accentText)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(provider.displayName)
-                        .font(.callout.weight(.semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                    Text("OpenAI-compatible · \(provider.id)")
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(Theme.textTertiary)
-                }
-                Spacer()
-                if configured {
-                    Label("Configured", systemImage: "checkmark.seal.fill")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(Theme.success)
+            if showsIdentity {
+                HStack(spacing: Spacing.sm) {
+                    Image(systemName: "shippingbox.fill")
+                        .foregroundStyle(Theme.accentText)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(provider.displayName)
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text("OpenAI-compatible · \(provider.id)")
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(Theme.textTertiary)
+                    }
+                    Spacer()
+                    if configured {
+                        Label("Configured", systemImage: "checkmark.seal.fill")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(Theme.positive)
+                    }
                 }
             }
 
@@ -81,40 +84,46 @@ struct KnownProviderRow: View {
 
             HStack(spacing: Spacing.sm) {
                 SecureField(configured ? "API key (replace)" : "API key", text: $keyDraft)
-                    .textFieldStyle(.roundedBorder)
+                    .vampField()
                     .autocorrectionDisabled()
                 Button("Save") { save() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
                     .tint(Theme.accent)
                     .disabled(keyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 Button("Test") { test() }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(LFCapsuleButtonStyle())
                     .disabled(resolvedKey.isEmpty || isRunning)
                 Button("Refresh") { refreshModels() }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(LFCapsuleButtonStyle())
                     .disabled(resolvedKey.isEmpty || isRunning)
             }
 
             HStack(spacing: Spacing.sm) {
                 TextField("Model id", text: $modelDraft)
-                    .textFieldStyle(.roundedBorder)
+                    .vampField()
                     .font(.callout.monospaced())
                     .onSubmit { persistModel() }
                 if !modelChoices.isEmpty {
-                    Menu {
+                    InstrumentMenu(menuWidth: 280) {
+                        Label("Models", systemImage: "list.bullet")
+                            .font(.appUI(size: 12.5, weight: .medium))
+                            .foregroundStyle(Instrument.ink)
+                            .padding(.horizontal, Chrome.buttonHPadding)
+                            .frame(minHeight: Chrome.buttonHeight)
+                            .background(
+                                LinearGradient(colors: [Instrument.silverTop, Instrument.silverLow],
+                                               startPoint: .top, endPoint: .bottom),
+                                in: RoundedRectangle(cornerRadius: Chrome.buttonRadius, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: Chrome.buttonRadius, style: .continuous)
+                                .strokeBorder(Instrument.seam, lineWidth: 0.75))
+                    } options: {
                         ForEach(modelChoices, id: \.self) { model in
-                            Button {
+                            InstrumentMenuRow(title: model, isSelected: modelDraft == model) {
                                 modelDraft = model
                                 persistModel()
-                            } label: {
-                                Text(model)
                             }
                         }
-                    } label: {
-                        Label("Models", systemImage: "list.bullet")
                     }
-                    .menuStyle(.borderlessButton)
-                    .buttonStyle(.bordered)
                 }
             }
 
@@ -131,11 +140,11 @@ struct KnownProviderRow: View {
             case .success(let message):
                 Label(message, systemImage: "checkmark.circle.fill")
                     .font(.caption)
-                    .foregroundStyle(Theme.success)
+                    .foregroundStyle(Theme.positive)
             case .failure(let message):
                 Label(message, systemImage: "xmark.octagon.fill")
                     .font(.caption)
-                    .foregroundStyle(Theme.danger)
+                    .foregroundStyle(Theme.negative)
             }
         }
         .padding(.vertical, Spacing.sm)

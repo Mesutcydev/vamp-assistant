@@ -172,6 +172,9 @@ final class ProviderAuditTests: XCTestCase {
     func testReasoningModelHeuristics() {
         XCTAssertTrue(RemoteLLMClient.usesMaxCompletionTokens("o3-mini"))
         XCTAssertTrue(RemoteLLMClient.usesMaxCompletionTokens("gpt-5-chat"))
+        XCTAssertTrue(RemoteLLMClient.usesMaxCompletionTokens("gpt-6-astra"))
+        XCTAssertTrue(RemoteLLMClient.usesMaxCompletionTokens("openai/gpt-5.2"))
+        XCTAssertTrue(RemoteLLMClient.usesMaxCompletionTokens("openai/gpt-6-astra"))
         XCTAssertFalse(RemoteLLMClient.usesMaxCompletionTokens("gpt-4o"))
         XCTAssertTrue(RemoteLLMClient.omitsTemperature("deepseek-reasoner"))
         XCTAssertTrue(RemoteLLMClient.omitsTemperature("o4-mini"))
@@ -181,7 +184,7 @@ final class ProviderAuditTests: XCTestCase {
     // MARK: P4/P5 — provider registry additions
 
     func testProviderRegistryExtensions() {
-        XCTAssertEqual(LLMProvider.allCases.count, 11)
+        XCTAssertEqual(LLMProvider.allCases.count, 12)
         XCTAssertNotNil(LLMProvider.anthropic.anthropicBaseURL)
         XCTAssertEqual(LLMProvider.anthropic.anthropicBaseURL?.host, "api.anthropic.com")
         XCTAssertNil(LLMProvider.anthropic.openAICompatibleBaseURL)
@@ -206,6 +209,31 @@ final class ProviderAuditTests: XCTestCase {
                        "https://opencode.ai/zen/v1")
         XCTAssertEqual(LLMProvider.openCode.modelsURL?.absoluteString,
                        "https://opencode.ai/zen/v1/models")
+        XCTAssertEqual(LLMProvider.nvidia.displayName, "NVIDIA API")
+        XCTAssertEqual(LLMProvider.nvidia.defaultModel, "nvidia/llama-3.3-nemotron-super-49b-v1.5")
+        XCTAssertEqual(LLMProvider.nvidia.openAICompatibleBaseURL?.absoluteString,
+                       "https://integrate.api.nvidia.com/v1")
+        XCTAssertEqual(LLMProvider.nvidia.modelsURL?.absoluteString,
+                       "https://integrate.api.nvidia.com/v1/models")
+        XCTAssertEqual(LLMProvider.fromOpenCodeIdentifier("nvidia"), .nvidia)
+        XCTAssertEqual(LLMProvider.fromOpenCodeIdentifier("nim"), .nvidia)
+        XCTAssertFalse(KnownRemoteProvider.compatiblePresets.contains { $0.id == "nvidia" })
+        XCTAssertEqual(LLMProvider.openAI.defaultModel, "gpt-5.6-terra")
+        XCTAssertEqual(LLMProvider.openAI.suggestedModels.first, "gpt-5.6-terra")
+        XCTAssertFalse(LLMProvider.openAI.suggestedModels.contains("gpt-6-astra"))
+        XCTAssertFalse(LLMProvider.openRouter.suggestedModels.contains("openai/gpt-6-astra"))
+        XCTAssertFalse(KnownRemoteProvider.all.contains { $0.id == "nvidia" })
+        XCTAssertTrue(LLMProvider.openAI.suggestedModels.contains("gpt-5.6-terra"))
+        XCTAssertTrue(LLMProvider.openAI.suggestedModels.contains("gpt-5.6-luna"))
+        XCTAssertEqual(
+            RemoteModelCatalog.reasoningEfforts(provider: .openAI, model: "gpt-6-astra").map(\.rawValue),
+            CodexAccountCatalog.astraReasoningEfforts)
+        XCTAssertEqual(
+            RemoteModelCatalog.defaultReasoningEffort(provider: .openAI, model: "gpt-6-astra"),
+            CodexAccountCatalog.defaultReasoningEffort(for: "gpt-6-astra"))
+        XCTAssertEqual(
+            RemoteModelCatalog.defaultReasoningEffort(provider: .openAI, model: "gpt-6-astra-pro"),
+            CodexAccountCatalog.defaultReasoningEffort(for: "gpt-6-astra-pro"))
     }
 
     func testCuratedModelCatalogsAndReasoningEfforts() throws {
@@ -227,6 +255,11 @@ final class ProviderAuditTests: XCTestCase {
         XCTAssertEqual(
             RemoteModelCatalog.reasoningEfforts(provider: .gemini, model: "gemini-3.5-flash").map(\.rawValue),
             ["minimal", "low", "medium", "high"])
+        XCTAssertEqual(
+            RemoteModelCatalog.reasoningEfforts(
+                provider: .nvidia,
+                model: "nvidia/nemotron-3-super-120b-a12b").map(\.rawValue),
+            ["low", "medium", "high"])
     }
 
     func testReasoningEffortOverrideIsValidatedAndHonorsExplicitOff() {
@@ -237,8 +270,9 @@ final class ProviderAuditTests: XCTestCase {
         XCTAssertEqual(
             profile.selectedReasoningEffort(using: RemoteModelOverride(reasoningEffort: "XHIGH")),
             "xhigh")
-        XCTAssertNil(
-            profile.selectedReasoningEffort(using: RemoteModelOverride(reasoningEffort: "not-a-mode")))
+        XCTAssertEqual(
+            profile.selectedReasoningEffort(using: RemoteModelOverride(reasoningEffort: "not-a-mode")),
+            profile.effectiveDefaultReasoningEffort)
 
         let disabled = profile.applying(RemoteModelOverride(supportsReasoning: false))
         XCTAssertTrue(disabled.effectiveReasoningEfforts.isEmpty)

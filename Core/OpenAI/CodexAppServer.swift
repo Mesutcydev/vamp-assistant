@@ -26,6 +26,7 @@ struct CodexModelProfile: Identifiable, Sendable, Equatable {
     let supportedReasoningEfforts: [String]
     let inputModalities: [String]
     let isDefault: Bool
+    let hidden: Bool
 
     var supportsVision: Bool { inputModalities.contains("image") }
 }
@@ -76,7 +77,7 @@ enum CodexAppServerError: Error, LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .executableNotFound:
-            return "Codex CLI was not found. Install Codex or choose its executable in Settings."
+            return "Codex CLI was not found. Install Codex, then reopen Vamp Assistant."
         case .spawnFailed(let detail):
             return "Could not start Codex app-server: \(detail)"
         case .processExited(let status):
@@ -207,7 +208,7 @@ actor CodexAppServerClient {
         ChildProcessRegistry.register(child)
 
         child.terminationHandler = { [weak self] terminated in
-            Task { await self?.markDead(status: terminated.terminationStatus) }
+            Task { await self?.markDead(status: terminated.finishedTerminationStatus ?? -1) }
         }
 
         let reader = outputPipe.fileHandleForReading
@@ -216,7 +217,10 @@ actor CodexAppServerClient {
             while let self, await self.isAlive {
                 let chunk = reader.availableData
                 if chunk.isEmpty {
-                    await self.markDead(status: child.terminationStatus)
+                    // Stdout EOF is not the same as process exit. Reading
+                    // terminationStatus while still running raises and aborts
+                    // the app on quit.
+                    await self.markDead(status: child.finishedTerminationStatus ?? -1)
                     return
                 }
                 buffer.append(chunk)
@@ -252,8 +256,20 @@ actor CodexAppServerClient {
         // dropping the process reference.
         process?.terminationHandler = nil
         if let process, process.isRunning {
+            let pid = process.processIdentifier
             process.terminate()
-            process.waitUntilExit()
+            await Task.detached {
+                let deadline = Date().addingTimeInterval(2)
+                while kill(pid, 0) == 0 && Date() < deadline {
+                    usleep(50_000)
+                }
+                if kill(pid, 0) == 0 {
+                    kill(pid, SIGKILL)
+                }
+            }.value
+            if process.isRunning {
+                process.waitUntilExit()
+            }
         }
         stdin?.closeFile()
         stdin = nil
@@ -276,7 +292,16 @@ actor CodexAppServerClient {
         readerTask = nil
         stdin?.closeFile()
         stdin = nil
-        if let process { ChildProcessRegistry.unregister(process) }
+        if let process {
+            process.terminationHandler = nil
+            ChildProcessRegistry.unregister(process)
+            // NSConcreteTask aborts if Process is released while still running.
+            if process.isRunning {
+                process.terminate()
+                let leftover = process
+                Task.detached { leftover.waitUntilExit() }
+            }
+        }
         process = nil
         isAlive = false
         isInitialized = false
@@ -394,13 +419,34 @@ actor CodexAppServerClient {
     }
 
     func listModels() async throws -> [CodexModelProfile] {
-        let response = try await request(
-            "model/list",
-            params: .object([
+        var models: [CodexModelProfile] = []
+        var seen = Set<String>()
+        var cursor: String?
+        // Codex pages this catalog. A single `limit: 100` call is the same
+        // Desktop-app trap: later ChatGPT models never appear in the picker.
+        for _ in 0..<20 {
+            var params: [String: LFJSONValue] = [
                 "limit": .number(100),
-                "includeHidden": .bool(false)
-            ]))
-        return (response.objectValue?["data"]?.arrayValue ?? []).compactMap(Self.modelProfile)
+                "includeHidden": .bool(true)
+            ]
+            if let cursor, !cursor.isEmpty {
+                params["cursor"] = .string(cursor)
+            }
+            let page: (models: [CodexModelProfile], nextCursor: String?)
+            do {
+                page = Self.modelListPage(
+                    try await request("model/list", params: .object(params)))
+            } catch {
+                if models.isEmpty { throw error }
+                break
+            }
+            for model in page.models where seen.insert(model.id).inserted {
+                models.append(model)
+            }
+            guard let next = page.nextCursor else { break }
+            cursor = next
+        }
+        return CodexAccountCatalog.merging(live: models)
     }
 
     func startBrowserLogin() async throws -> CodexBrowserLogin {
@@ -647,22 +693,53 @@ actor CodexAppServerClient {
 
     // MARK: Parsing helpers
 
-    private static func modelProfile(_ value: LFJSONValue) -> CodexModelProfile? {
+    /// One `model/list` page. Codex uses camelCase; older builds used snake_case.
+    nonisolated static func modelListPage(
+        _ response: LFJSONValue
+    ) -> (models: [CodexModelProfile], nextCursor: String?) {
+        let object = response.objectValue ?? [:]
+        let models = (object["data"]?.arrayValue ?? []).compactMap(modelProfile)
+        let next = object["nextCursor"]?.stringValue ?? object["next_cursor"]?.stringValue
+        return (models, next.flatMap { $0.isEmpty ? nil : $0 })
+    }
+
+    nonisolated static func sortedAccountModels(
+        _ models: [CodexModelProfile]
+    ) -> [CodexModelProfile] {
+        models.sorted { lhs, rhs in
+            if lhs.isDefault != rhs.isDefault { return lhs.isDefault }
+            if lhs.hidden != rhs.hidden { return !lhs.hidden }
+            return lhs.displayName.localizedStandardCompare(rhs.displayName) == .orderedAscending
+        }
+    }
+
+    nonisolated static func modelProfile(_ value: LFJSONValue) -> CodexModelProfile? {
         guard let object = value.objectValue,
               let id = object["id"]?.stringValue ?? object["model"]?.stringValue
         else { return nil }
-        let effortValues = object["supportedReasoningEfforts"]?.arrayValue ?? []
+        let effortValues = object["supportedReasoningEfforts"]?.arrayValue
+            ?? object["supported_reasoning_efforts"]?.arrayValue
+            ?? []
         return CodexModelProfile(
             id: id,
-            displayName: object["displayName"]?.stringValue ?? id,
+            displayName: object["displayName"]?.stringValue
+                ?? object["display_name"]?.stringValue
+                ?? id,
             description: object["description"]?.stringValue ?? "",
-            defaultReasoningEffort: object["defaultReasoningEffort"]?.stringValue,
+            defaultReasoningEffort: object["defaultReasoningEffort"]?.stringValue
+                ?? object["default_reasoning_effort"]?.stringValue,
             supportedReasoningEfforts: effortValues.compactMap {
-                $0.objectValue?["reasoningEffort"]?.stringValue ?? $0.stringValue
+                $0.objectValue?["reasoningEffort"]?.stringValue
+                    ?? $0.objectValue?["reasoning_effort"]?.stringValue
+                    ?? $0.stringValue
             },
             inputModalities: object["inputModalities"]?.arrayValue?.compactMap(\.stringValue)
+                ?? object["input_modalities"]?.arrayValue?.compactMap(\.stringValue)
                 ?? ["text", "image"],
-            isDefault: object["isDefault"]?.boolValue ?? false)
+            isDefault: object["isDefault"]?.boolValue
+                ?? object["is_default"]?.boolValue
+                ?? false,
+            hidden: object["hidden"]?.boolValue ?? false)
     }
 }
 
@@ -685,14 +762,31 @@ final class CodexAccountStore: ObservableObject {
     @Published private(set) var deviceCodeLogin: CodexDeviceCodeLogin?
 
     private var observationTask: Task<Void, Never>?
+    private var refreshTask: Task<Void, Never>?
 
     init(client: CodexAppServerClient = CodexAppServerClient()) {
         self.client = client
     }
 
-    deinit { observationTask?.cancel() }
+    deinit {
+        observationTask?.cancel()
+        refreshTask?.cancel()
+    }
 
     func refresh() async {
+        if let refreshTask {
+            await refreshTask.value
+            return
+        }
+        let task = Task { @MainActor in
+            await self.performRefresh()
+        }
+        refreshTask = task
+        await task.value
+        refreshTask = nil
+    }
+
+    private func performRefresh() async {
         guard !isRefreshing else { return }
         isRefreshing = true
         errorMessage = nil
@@ -708,9 +802,9 @@ final class CodexAccountStore: ObservableObject {
                     models = try await client.listModels()
                 } catch {
                     // A temporary model-catalog failure must not make a
-                    // valid ChatGPT session look signed out. Keep account
-                    // state and let the user retry the catalog independently.
-                    models = []
+                    // valid ChatGPT session look signed out. Keep the latest
+                    // curated models (Astra) visible so the picker is usable.
+                    models = CodexAccountCatalog.merging(live: [])
                     errorMessage = "Signed in, but the OpenAI model list could not be loaded: \(error.localizedDescription)"
                 }
             } else {
@@ -780,6 +874,9 @@ final class CodexAccountStore: ObservableObject {
             try await client.start()
             beginObservationIfNeeded()
             models = try await client.listModels()
+            if models.isEmpty {
+                models = CodexAccountCatalog.merging(live: [])
+            }
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
