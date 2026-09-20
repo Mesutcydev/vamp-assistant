@@ -198,6 +198,10 @@ struct SaveDocumentTool: AgentTool {
         guard let savedURL = try await saveHandler(suggestedName, data) else {
             return "cancelled: no document was saved"
         }
+        // The user chose this path in a native Save panel, so the in-app
+        // browser may preview it with browser_navigate even when it is
+        // outside the project workspace (project-free Assistant mode).
+        SavedDocumentRegistry.allow(savedURL)
         return "saved \(savedURL.path) (\(ByteFormatter.bytes(Int64(data.count))))"
     }
 
@@ -221,6 +225,7 @@ struct MoveFileTool: AgentTool {
     let name = "move_file"
     let summary = "Move or rename a file inside the workspace"
     let risk = ToolRisk.write
+    let treatsErrorPrefixAsFailure = true
 
     let schemaText = """
         {"type":"object","properties":{
@@ -263,6 +268,7 @@ struct ListDirectoryTool: AgentTool {
     let name = "list_directory"
     let summary = "List files in a workspace directory"
     let risk = ToolRisk.read
+    let treatsErrorPrefixAsFailure = true
 
     // Directory contents change too fast for content addressing to be cheap;
     // a 2-second coalescing window absorbs repeat listings in one turn.

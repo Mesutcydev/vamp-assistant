@@ -12,6 +12,25 @@ enum AgentPhase: String, Sendable, Equatable {
     case verifying
     case finished
 }
+/// A TypeSafe (System One) guardrail verdict the loop acted on. Emitted so
+/// the transcript can show WHY an observation was labeled or why an action
+/// asked for approval — the guard never acts silently.
+struct GuardrailNotice: Sendable, Equatable {
+    enum Kind: String, Sendable, Equatable {
+        /// TypeSafe screened content from outside the workspace.
+        case contentScreening
+        /// TypeSafe was configured but had no verdict; the local heuristic
+        /// scan labeled the content instead.
+        case contentHeuristic
+        /// A would-be auto-approved action was escalated to an approval card.
+        case commandEscalation
+    }
+
+    let kind: Kind
+    let summary: String
+    let detail: String
+}
+
 /// Events the agent loop emits to the UI. The UI reacts; it never drives the
 /// loop's internals.
 enum AgentEvent: Sendable, Equatable {
@@ -38,6 +57,8 @@ enum AgentEvent: Sendable, Equatable {
     /// The model violated the tool protocol (e.g. multiple calls per reply);
     /// the observation was fed back and the loop continues.
     case protocolError(String)
+    /// A TypeSafe guardrail verdict (content screening / command escalation).
+    case guardrail(GuardrailNotice)
     /// Chain-of-thought extracted from the raw generation (shown only when
     /// the user enables reasoning).
     case reasoning(String)
@@ -84,11 +105,18 @@ struct ToolInvocation: Sendable, Identifiable, Equatable {
     let argumentsJSON: String
     let summary: String
 
-    init(call: ParsedToolCall, summary: String) {
-        self.id = UUID()
-        self.name = call.name
-        self.argumentsJSON = call.argumentsJSON
+    init(id: UUID = UUID(), name: String, argumentsJSON: String, summary: String) {
+        self.id = id
+        self.name = name
+        self.argumentsJSON = argumentsJSON
         self.summary = summary
+    }
+
+    init(call: ParsedToolCall, summary: String) {
+        self.init(
+            name: call.name,
+            argumentsJSON: call.argumentsJSON,
+            summary: summary)
     }
 }
 

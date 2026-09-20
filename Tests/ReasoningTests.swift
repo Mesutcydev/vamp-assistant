@@ -148,14 +148,4 @@ final class ReasoningTests: XCTestCase {
         XCTAssertTrue(summary.contains("Booted"), summary)
         XCTAssertEqual(Summarize.argentOutput("", tool: "x"), "(x returned no output)")
     }
-
-    func testComposerFlowPresets() {
-        XCTAssertEqual(ComposerFlow.allCases.count, 4)
-        XCTAssertEqual(Set(ComposerFlow.allCases.map(\.label)).count, 4)
-        for flow in ComposerFlow.allCases {
-            XCTAssertFalse(flow.label.isEmpty)
-            XCTAssertFalse(flow.help.isEmpty)
-            XCTAssertGreaterThan(flow.cycleSeconds, 0)
-        }
-    }
 }

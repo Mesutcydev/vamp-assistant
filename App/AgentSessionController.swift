@@ -45,9 +45,27 @@ final class AgentSessionController: ObservableObject {
     private var pendingQuestionID: UUID?
     @Published private(set) var pendingPlan: String?
     private var pendingPlanID: UUID?
+    /// Live plan tasks from the current remote run. Replaced wholesale by
+    /// each `turn/plan/updated` snapshot so one card updates in place
+    /// instead of appending a transcript line per update.
+    @Published private(set) var livePlan: [PlanEntry] = []
     @Published private(set) var currentPhase: AgentPhase = .idle
     @Published private(set) var finishReason: AgentFinish?
     @Published private(set) var persistenceError: String?
+
+    /// One structured plan task. Identity follows the step text, which is
+    /// what the remote protocol guarantees per snapshot.
+    struct PlanEntry: Identifiable, Equatable {
+        let step: String
+        let status: String
+        var id: String { step }
+
+        var isComplete: Bool { status.lowercased() == "completed" }
+        var isInProgress: Bool {
+            let status = status.lowercased()
+            return status == "in_progress" || status == "inprogress" || status == "running"
+        }
+    }
     /// Follow-up used when a Codex (or other non-loop) run is interrupted so
     /// the next turn can start immediately instead of waiting in the queue.
     private var pendingSteerMessage: String?
@@ -175,7 +193,7 @@ final class AgentSessionController: ObservableObject {
         }
     }
 
-    /// Effective permissions for the currently selected remote run. Remote
+    /// Effective agent mode for the currently selected remote run. Remote
     /// clients use this metadata to keep their controls in sync with the run
     /// that is actually executing instead of falling back to the Mac's global
     /// settings (which may intentionally be in Goal mode).
@@ -184,11 +202,14 @@ final class AgentSessionController: ObservableObject {
         return remoteAutoMode ? "auto" : "goal"
     }
 
-    var remoteRunHasFullAccess: Bool? {
+    /// The raw Full Access choice for the active remote run, reported to
+    /// clients separately from `remoteRunAgentMode`. Auto mode is its own
+    /// modality — folding it into this flag made the phone render every AUTO
+    /// run as FULL. Effective permission logic still treats Auto as
+    /// uninterrupted (`effectiveFullAccess`).
+    var remoteRunFullAccess: Bool? {
         guard remoteRunActive else { return nil }
-        // Auto mode is the uninterrupted assistant path and therefore carries
-        // the same routine-action authority as an explicit Full Access choice.
-        return remoteFullAccess || remoteAutoMode
+        return remoteFullAccess
     }
 
     func applyRemoteIsolation(
@@ -282,6 +303,7 @@ final class AgentSessionController: ObservableObject {
         pendingQuestionChoices = []
         pendingPlan = nil
         pendingPlanID = nil
+        livePlan = []
         finishReason = nil
         exactAnswerOverride = activeCodexModelIDHandler() == nil
             ? PromptBuilder.exactRequestedAnswer(in: message)
@@ -310,8 +332,17 @@ final class AgentSessionController: ObservableObject {
             isRunning = false
             return
         }
+        let qwenTextOnly = activeModelIDHandler() == QwenStreamArtifact.modelID
+        if qwenTextOnly && !attachments.isEmpty {
+            isRunning = false
+            currentPhase = .finished
+            let failure = "Qwen streaming currently supports text only. Remove attachments or select another model."
+            finishReason = .engineError(failure)
+            publishFailure(failure)
+            return
+        }
         let projectWorkspace = workspaceURL
-        let chatOnly = projectWorkspace == nil
+        let chatOnly = projectWorkspace == nil || qwenTextOnly
         let workspace: URL
         do {
             workspace = try projectWorkspace ?? Self.chatRuntimeDirectory()
@@ -328,12 +359,27 @@ final class AgentSessionController: ObservableObject {
 
         // Prepared turn: the transcript shows the user's clean message; the
         // MODEL receives bounded attachment context. The two never mix.
-        let expandedMessage = await Self.expand(attachments: attachments, message: message)
+        // A GGUF model served with a multimodal projector sees the pixels itself;
+        // every other engine keeps the described-image path.
+        let engineSeesImages = await engine.supportsImageInput
+        let nativeImageInput = !attachments.isEmpty && engineSeesImages
+        let prepared = await Self.expand(
+            attachments: attachments,
+            message: message,
+            nativeImageInput: nativeImageInput)
+        let expandedMessage = prepared.text
         let modelText = modelInstruction.map {
             "Specialist instruction: \($0)\n\nUser request:\n\(expandedMessage)"
         } ?? expandedMessage
         let displayText = attachments.isEmpty ? message : message + "  ·  " + Self.attachmentSummary(attachments)
         transcript.append(TranscriptItem(id: UUID(), kind: .user(displayText)))
+        if !prepared.images.isEmpty {
+            // Visible proof of HOW the image reached the model: sent as
+            // pixels to a projector, not paraphrased by a sidecar.
+            let count = prepared.images.count
+            transcript.append(TranscriptItem(id: UUID(), kind: .notice(
+                "\(count == 1 ? "Image" : "\(count) images") sent to \(activeModelIDHandler()) as image input (vision projector loaded).")))
+        }
 
         // Continuation seed: an explicit seed wins; otherwise the persisted
         // record for the ACTIVE session is resumed so restored and continued
@@ -391,7 +437,7 @@ final class AgentSessionController: ObservableObject {
             }
             mcpTools = mcpResult.tools
         }
-        let tools: [any AgentTool] = chatOnly
+        let tools: [any AgentTool] = qwenTextOnly ? [] : chatOnly
             ? Self.sessionTools(
                 computerControlEnabled: effectiveComputerControl,
                 chatOnly: true)
@@ -421,7 +467,7 @@ final class AgentSessionController: ObservableObject {
         let configuredMaxTokensPerTurn = min(
             settings.maxTokensPerTurn,
             maxTokensHandler() ?? settings.maxTokensPerTurn)
-        let maxTokensPerTurn = constrainedLocalModel
+        let maxTokensPerTurn = qwenTextOnly ? min(settings.maxTokensPerTurn, 512) : constrainedLocalModel
             ? Self.constrainedLocalTokenBudget(configuredMaxTokensPerTurn)
             : configuredMaxTokensPerTurn
         let configuredContextWindow = contextWindowHandler() ?? 32_768
@@ -467,6 +513,19 @@ final class AgentSessionController: ObservableObject {
         permissions.openCodePermissions = compatibilityPermissions
         approvalOverrides = runOverrides
 
+        // TypeSafe guardrails (opt-in): built only when one of the two
+        // settings is on AND a key is stored. No key → nil → every guardrail
+        // path in the loop no-ops and behavior is exactly what it was.
+        let typeSafeEnabled = !chatOnly
+            && (settings.typeSafeContentScreening || settings.typeSafeCommandEscalation)
+        let typeSafeGuard = typeSafeEnabled
+            ? TypeSafeGuard.live(
+                model: settings.typeSafeModel,
+                policy: TypeSafePolicy(
+                    screeningThreshold: settings.typeSafeScreeningThreshold,
+                    escalationThreshold: settings.typeSafeEscalationThreshold))
+            : nil
+
         // Long-term memory is per-workspace; built when the setting is on.
 
         // The session ID is decided HERE so undo/restore can find the
@@ -502,7 +561,9 @@ final class AgentSessionController: ObservableObject {
                 allowSubagents: !chatOnly && !constrainedLocalModel,
                 allowAskUser: !chatOnly,
                 leanPrompt: constrainedLocalModel,
-                chatOnly: chatOnly),
+                chatOnly: chatOnly,
+                typeSafeContentScreening: !chatOnly && settings.typeSafeContentScreening,
+                typeSafeCommandEscalation: !chatOnly && settings.typeSafeCommandEscalation),
             modelID: activeModelIDHandler(),
             sessionID: sessionID,
             seedRecord: continuationSeed,
@@ -514,12 +575,13 @@ final class AgentSessionController: ObservableObject {
                 : AgentMemory(workspacePath: workspace.path),
             taskHint: modelText,
             linuxContainer: remoteLinuxContainer,
-            browserSession: remoteBrowserSession)
+            browserSession: remoteBrowserSession,
+            typeSafe: typeSafeGuard)
         loop = agentLoop
         let runToken = runID
 
         eventTask = Task { [weak self] in
-            let stream = await agentLoop.run(userMessage: modelText)
+            let stream = await agentLoop.run(userMessage: modelText, images: prepared.images)
             for await event in stream {
                 guard let self else { return }
                 self.handle(event, runID: runToken)
@@ -722,21 +784,25 @@ final class AgentSessionController: ObservableObject {
 
         case "turn/plan/updated":
             if let plan = params["plan"]?.arrayValue {
-                let lines = plan.compactMap { entry -> String? in
+                let entries = plan.compactMap { entry -> PlanEntry? in
                     guard let object = entry.objectValue,
                           let step = object["step"]?.stringValue
                     else { return nil }
                     let status = object["status"]?.stringValue ?? "pending"
-                    return status.capitalized + ": " + step
+                    return PlanEntry(step: step, status: status)
                 }
-                if !lines.isEmpty {
-                    transcript.append(TranscriptItem(
-                        id: UUID(),
-                        kind: .notice("Codex plan\n" + lines.joined(separator: "\n"))))
+                if !entries.isEmpty {
+                    livePlan = entries
                 }
             }
 
         case "turn/completed":
+            if !livePlan.isEmpty {
+                transcript.append(TranscriptItem(
+                    id: UUID(),
+                    kind: .notice(Self.planSnapshotText(livePlan))))
+                livePlan = []
+            }
             let turn = params["turn"]?.objectValue
             let status = turn?["status"]?.stringValue?.lowercased() ?? "completed"
             let reason: AgentFinish
@@ -1199,6 +1265,15 @@ final class AgentSessionController: ObservableObject {
         return summary.isEmpty ? "Codex turn completed." : String(summary.prefix(240))
     }
 
+    /// Persisted form of the final plan snapshot. MetaRow parses this back
+    /// into a compact card, so restored sessions reconstruct the plan the
+    /// run finished with instead of dropping it.
+    private static func planSnapshotText(_ plan: [PlanEntry]) -> String {
+        "Codex plan\n" + plan.map { entry in
+            "\(entry.status): \(entry.step)"
+        }.joined(separator: "\n")
+    }
+
     func stop() {
         startTask?.cancel()
         startTask = nil
@@ -1286,8 +1361,10 @@ final class AgentSessionController: ObservableObject {
         // Background intelligence index: incremental when a baseline exists,
         // full on first open. Silent on failure — the agent loop degrades to
         // no injected context, never to a blocked session.
-        Task.detached(priority: .utility) {
-            _ = try? await WorkspaceIntelligence(workspaceRoot: url).update()
+        if SettingsStore.shared.intelligenceInspectorEnabled {
+            Task.detached(priority: .utility) {
+                _ = try? await WorkspaceIntelligence(workspaceRoot: url).update()
+            }
         }
         guard restoreLatest else { return }
         if let sessionID,
@@ -1349,6 +1426,7 @@ final class AgentSessionController: ObservableObject {
         transcript = []
         SessionStore.shared.currentSessionID = nil
         onSessionReset?()
+        NotificationCenter.default.post(name: .sessionTitleChanged, object: nil)
     }
 
     /// Stops the active run and WAITS for the loop to reach its terminal
@@ -1421,6 +1499,35 @@ final class AgentSessionController: ObservableObject {
         finishReason = nil
     }
 
+    /// Design-preview fixture hook (`--design-preview`). Installs inert
+    /// transcript rows, a live plan snapshot, and a pending approval so the
+    /// real views render the reference conversation for visual capture.
+    /// Nothing is persisted and no tool or permission path is touched; the
+    /// preview approval clears like a resolved card without executing.
+    func installDesignPreview(
+        transcript items: [TranscriptItem],
+        plan: [PlanEntry],
+        approval: ApprovalRequest
+    ) {
+        transcript = items
+        livePlan = plan
+        pendingApproval = approval
+        currentPhase = .awaitingApproval
+        // A real chat screen always has its tab in the strip; without an id
+        // the preview would capture a window the app never actually shows.
+        if activeSessionID == nil { activeSessionID = UUID() }
+    }
+
+    /// Resolves a preview approval without any executor side effects.
+    func resolveDesignPreviewApproval(approved: Bool) {
+        guard pendingApproval != nil else { return }
+        pendingApproval = nil
+        currentPhase = .idle
+        transcript.append(TranscriptItem(
+            id: UUID(),
+            kind: .notice(approved ? "Preview approval allowed" : "Preview approval rejected")))
+    }
+
     private func clearPending() {
         pendingApproval = nil
         pendingQuestion = nil
@@ -1428,6 +1535,7 @@ final class AgentSessionController: ObservableObject {
         pendingQuestionID = nil
         pendingPlan = nil
         pendingPlanID = nil
+        livePlan = []
         codexApprovalRequestID = nil
         codexApprovalInvocation = nil
         codexApprovalKind = nil
@@ -1534,6 +1642,7 @@ final class AgentSessionController: ObservableObject {
         pendingQuestionID = nil
         pendingPlan = nil
         pendingPlanID = nil
+        livePlan = []
         finishReason = nil
         dropTokenBuffer()
         streamingText = ""
@@ -1613,12 +1722,19 @@ final class AgentSessionController: ObservableObject {
         switch name {
         case "run_command":
             let value = TolerantJSON.value(from: content)?.objectValue?["command"]?.stringValue
-            return value ?? content
+            return value ?? "Run a command"
         case "read_file", "write_file", "apply_patch":
             let value = TolerantJSON.value(from: content)?.objectValue?["path"]?.stringValue
-            return value ?? content
+            return value ?? "Edit files"
+        case "search":
+            let value = TolerantJSON.value(from: content)?.objectValue?["pattern"]?.stringValue
+                ?? TolerantJSON.value(from: content)?.objectValue?["query"]?.stringValue
+            return value ?? "Search the workspace"
         default:
-            return content
+            // Never surface serialized arguments as the row summary; a
+            // neutral verb phrase keeps restored history readable.
+            let readable = name.replacingOccurrences(of: "_", with: " ")
+            return readable.prefix(1).uppercased() + readable.dropFirst()
         }
     }
 
@@ -2098,7 +2214,7 @@ final class AgentSessionController: ObservableObject {
                     kind: .toolResult(id: invocation.id, output: output, failed: failed, toolName: invocation.name)))
             diagnostics.record(
                 .tool, "\(invocation.name) \(failed ? "failed" : "finished")",
-                detail: ByteFormatter.bytes(Int64(output.utf8.count)),
+                detail: Self.diagnosticToolDetail(output: output, failed: failed),
                 level: failed ? .error : .info)
 
         case .askUser(let requestID, let question, let choices):
@@ -2144,11 +2260,45 @@ final class AgentSessionController: ObservableObject {
             diagnostics.record(.session, "Conversation save failed", detail: reason, level: .error)
 
         case .protocolError(let message):
+            let rendered = "Tool protocol error: \(message)"
+            // Protocol repair observations are internal control flow. A model
+            // can emit the same malformed turn more than once while it
+            // recovers; repeating identical rows makes the transcript look
+            // like the answer itself is failing and pushes the useful output
+            // below the fold.
+            if let last = transcript.last,
+               case .notice(let previous) = last.kind,
+               previous == rendered {
+                diagnostics.record(.tool, "Protocol error repeated", detail: message, level: .warning)
+                return
+            }
             transcript.append(
                 TranscriptItem(
                     id: UUID(),
-                    kind: .notice("Tool protocol error: \(message)")))
+                    kind: .notice(rendered)))
             diagnostics.record(.tool, "Protocol error", detail: message, level: .warning)
+
+        case .guardrail(let notice):
+            let rendered: String
+            let category: DiagnosticsCenter.Breadcrumb.Category
+            let level: DiagnosticsCenter.Breadcrumb.Level
+            switch notice.kind {
+            case .contentScreening:
+                rendered = "TypeSafe screened untrusted content: \(notice.summary)"
+                category = .tool
+                level = .warning
+            case .contentHeuristic:
+                rendered = "Content scan: \(notice.summary)"
+                category = .tool
+                level = .info
+            case .commandEscalation:
+                rendered = "TypeSafe escalated an action to approval: \(notice.summary)"
+                category = .approval
+                level = .warning
+            }
+            transcript.append(
+                TranscriptItem(id: UUID(), kind: .notice(rendered)))
+            diagnostics.record(category, rendered, detail: notice.detail, level: level)
 
         case .reasoning(let text):
             liveReasoningText = text
@@ -2260,6 +2410,21 @@ final class AgentSessionController: ObservableObject {
 
     // MARK: Tool registry
 
+    /// Diagnostics detail for a tool result. Successful results record only
+    /// their size; failures include a bounded single-line preview so an
+    /// exported diagnostics log explains what went wrong without dumping full
+    /// file contents.
+    private static func diagnosticToolDetail(output: String, failed: Bool) -> String {
+        let size = ByteFormatter.bytes(Int64(output.utf8.count))
+        guard failed else { return size }
+        let preview = output
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !preview.isEmpty else { return size }
+        let bounded = preview.count > 180 ? String(preview.prefix(180)) + "…" : preview
+        return "\(size) · \(bounded)"
+    }
+
     /// Coding, browser, simulator, and Apple-delivery tools. Computer-use is
     /// opt-in via `sessionTools(computerControlEnabled:)`.
     static let defaultTools: [any AgentTool] = [
@@ -2293,15 +2458,7 @@ final class AgentSessionController: ObservableObject {
         SimBuildRunTool(),
         // In-app browser: extraction is auto-approved; navigation/click/
         // type/eval go through the approval card like every other mutation.
-        BrowserTools.ReadTool(),
-        BrowserTools.ScreenshotTool(),
-        BrowserTools.DownloadTool(),
-        BrowserTools.NavigateTool(),
-        BrowserTools.ClickTool(),
-        BrowserTools.TypeTool(),
-        BrowserTools.ScrollTool(),
-        BrowserTools.EvalTool(),
-    ]
+    ] + BrowserTools.all
 
     /// Drive other Mac apps. Off the default coding path; Settings → Agent
     /// → Computer control must be on before these enter the registry.
@@ -2323,15 +2480,7 @@ final class AgentSessionController: ObservableObject {
     static let browserControlTools: [any AgentTool] = [
         TinyFishSearchTool(),
         SaveDocumentTool(),
-        BrowserTools.ReadTool(),
-        BrowserTools.ScreenshotTool(),
-        BrowserTools.DownloadTool(),
-        BrowserTools.NavigateTool(),
-        BrowserTools.ClickTool(),
-        BrowserTools.TypeTool(),
-        BrowserTools.ScrollTool(),
-        BrowserTools.EvalTool(),
-    ]
+    ] + BrowserTools.all
 
     static let botControlTools: [any AgentTool] = [
         BotRunsTool(),
@@ -2354,15 +2503,7 @@ final class AgentSessionController: ObservableObject {
         TinyFishSearchTool(),
         ApplyPatchTool(),
         RunCommandTool(),
-        BrowserTools.ReadTool(),
-        BrowserTools.ScreenshotTool(),
-        BrowserTools.DownloadTool(),
-        BrowserTools.NavigateTool(),
-        BrowserTools.ClickTool(),
-        BrowserTools.TypeTool(),
-        BrowserTools.ScrollTool(),
-        BrowserTools.EvalTool(),
-    ]
+    ] + BrowserTools.all
 
     static func sessionTools(
         computerControlEnabled: Bool,
@@ -2406,13 +2547,7 @@ final class AgentSessionController: ObservableObject {
         RunCommandTool(),
         BackgroundProcessTool(),
         BackgroundStatusTool(),
-        BrowserTools.NavigateTool(),
-        BrowserTools.ReadTool(),
-        BrowserTools.ScreenshotTool(),
-        BrowserTools.DownloadTool(),
-        BrowserTools.ClickTool(),
-        BrowserTools.TypeTool(),
-        BrowserTools.ScrollTool(),
+    ] + BrowserTools.core + [
         SimListDevicesTool(),
         SimBootDeviceTool(),
         SimLaunchAppTool(),
@@ -2471,12 +2606,34 @@ final class AgentSessionController: ObservableObject {
     /// Async: local VLM first load can take seconds (weights page-in), and a
     /// BYOK describe is a network call — a synchronous bridge with a fixed
     /// timeout here used to misreport slow-but-working vision as missing.
-    private static func expand(attachments: [ComposerAttachment], message: String) async -> String {
-        guard !attachments.isEmpty else { return message }
+    /// Prepared turn: the model-facing text plus any images that go to the
+    /// model as real pixels rather than as a description.
+    struct PreparedTurn: Sendable {
+        var text: String
+        var images: [ChatImage]
+    }
+
+    /// Native image input wins when the resident model actually has a
+    /// projector loaded: sending the bytes lets the model see the image
+    /// instead of reading someone else's summary of it. Every other case —
+    /// no projector, an unsupported container (HEIC), an oversized file, a
+    /// BYOK model — keeps the described-image fallback unchanged.
+    private static func expand(
+        attachments: [ComposerAttachment],
+        message: String,
+        nativeImageInput: Bool
+    ) async -> PreparedTurn {
+        guard !attachments.isEmpty else { return PreparedTurn(text: message, images: []) }
         var blocks: [String] = []
+        var images: [ChatImage] = []
         for attachment in attachments {
             if attachment.isImage {
-                if let description = try? await VisionProvider.describe(
+                if nativeImageInput, let image = ChatImage.fromFile(at: attachment.url) {
+                    images.append(image)
+                    blocks.append(
+                        "Image attached: \(attachment.name) — the image itself is part of this request; "
+                        + "read it directly instead of asking for a description.")
+                } else if let description = try? await VisionProvider.describe(
                     imageAt: attachment.url,
                     prompt: "Describe this image concisely for a coding agent.") {
                     blocks.append("Image \(attachment.name): \(description)")
@@ -2491,7 +2648,9 @@ final class AgentSessionController: ObservableObject {
                 blocks.append("Attachment: \(attachment.name) (\(attachment.url.path)) — too large to inline; use read_file to inspect it.")
             }
         }
-        return blocks.joined(separator: "\n\n") + "\n\n" + message
+        return PreparedTurn(
+            text: blocks.joined(separator: "\n\n") + "\n\n" + message,
+            images: images)
     }
 
     /// Compact human-readable attachment note for the visible transcript

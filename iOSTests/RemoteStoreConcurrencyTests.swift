@@ -227,6 +227,11 @@ final class RemoteStoreConcurrencyTests: XCTestCase {
         defer { session.invalidateAndCancel() }
         await store.select(sessionID: id)
         XCTAssertTrue(store.fullAccess)
+        XCTAssertTrue(store.autoMode)
+        // Auto mode carries full-access authority, but the key bank must still
+        // render AUTO: deriving the selection from `fullAccess` alone made
+        // every AUTO run show as FULL.
+        XCTAssertFalse(store.isFullAccessSelected)
         XCTAssertEqual(writes.withLock { $0 }, 0)
         disconnect(store)
     }
@@ -259,4 +264,79 @@ final class RemoteStoreConcurrencyTests: XCTestCase {
         disconnect(store)
     }
 
+}
+
+@MainActor
+extension RemoteStoreConcurrencyTests {
+    func testFileDownloadEncodesNamesExactlyOnce() async throws {
+        let payload = Data("download payload".utf8)
+        for name in ["notes.txt", "my notes.txt", "résumé.txt", "report #1+100%.txt"] {
+            let (store, _, session) = makeStore { request in
+                let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+                XCTAssertEqual(components.percentEncodedPath.removingPercentEncoding, "/api/files/" + name)
+                XCTAssertNil(components.query)
+                XCTAssertNil(components.fragment)
+                return (200, payload)
+            }
+            let client = RemoteAPIClient(baseURL: URL(string: "http://192.168.1.1:9575")!, token: "test-token", session: session)
+            let data = try await client.downloadFile(named: name)
+            XCTAssertEqual(data, payload)
+            session.invalidateAndCancel()
+            disconnect(store)
+        }
+    }
+
+    func testFileDownloadRejectsPathTraversal() async {
+        let client = RemoteAPIClient(baseURL: URL(string: "http://127.0.0.1:1")!, token: "test-token")
+        for name in ["", ".", "..", "../secret.txt", "folder/file.txt"] {
+            do { _ = try await client.downloadFile(named: name); XCTFail("Accepted invalid filename") }
+            catch { XCTAssertTrue(error is RemoteClientError) }
+        }
+    }
+
+    func testOldMacMutationFailuresDoNotAlertOnNewMac() async {
+        for mutation in ["stop", "queue", "undo"] {
+            await verifyOldMacMutation(mutation, statusCode: 500)
+        }
+    }
+
+    func testOldMacUndoSuccessDoesNotRefreshNewMac() async {
+        await verifyOldMacMutation("undo", statusCode: 200)
+    }
+
+    private func verifyOldMacMutation(_ mutation: String, statusCode: Int) async {
+        let started = expectation(description: "old mutation started")
+        let id = UUID()
+        let newStatusCalls = Mutex(0)
+        let (store, storage, session) = makeStore { request in
+            let path = request.url!.path
+            if request.httpMethod == "POST" || request.httpMethod == "DELETE" {
+                started.fulfill()
+                try await Task.sleep(for: .milliseconds(250))
+                return (statusCode, Data((statusCode == 200 ? "{\"accepted\":true}" : "{\"error\":\"Old Mac failed\"}").utf8))
+            }
+            if path == "/api/status" {
+                if request.url?.host == "192.168.1.2" { newStatusCalls.withLock { $0 += 1 } }
+                return (200, Self.status(2_100_000_000))
+            }
+            if path == "/api/sessions" { return (200, Data("{\"sessions\":[]}".utf8)) }
+            if path.hasSuffix(id.uuidString) { return (200, Self.detail(id)) }
+            return (200, Data("{\"runs\":[]}".utf8))
+        }
+        defer { session.invalidateAndCancel(); disconnect(store) }
+        await store.select(sessionID: id)
+        let operation = Task {
+            switch mutation {
+            case "stop": await store.stop()
+            case "queue": await store.cancelQueuedTask(UUID())
+            default: await store.undoCheckpoint()
+            }
+        }
+        await fulfillment(of: [started], timeout: 2)
+        await store.switchComputer(to: storage.computers[1].id)
+        let callsAfterSwitch = newStatusCalls.withLock { $0 }
+        await operation.value
+        XCTAssertNil(store.errorMessage, mutation)
+        XCTAssertEqual(newStatusCalls.withLock { $0 }, callsAfterSwitch, "Old completion refreshed the new Mac")
+    }
 }

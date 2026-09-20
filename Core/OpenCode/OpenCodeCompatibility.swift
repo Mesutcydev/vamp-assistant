@@ -378,7 +378,7 @@ enum OpenCodeCompatibility {
                 ?? object["baseURL"]?.stringValue
             let baseURL = baseRaw.flatMap(URL.init(string:))
                 ?? KnownRemoteProvider.find(id)?.baseURL
-            let headers = stringDictionary(
+            let headers = referenceDictionary(
                 object["headers"]?.objectValue ?? options["headers"]?.objectValue,
                 relativeTo: configDirectory)
             let apiKey = resolvedString(
@@ -407,7 +407,7 @@ enum OpenCodeCompatibility {
                 let output = limit["output"]?.intValue
                 let modelBase = modelObject["options"]?.objectValue?["baseURL"]?.stringValue
                     .flatMap(URL.init(string:)) ?? baseURL
-                let modelHeaders = stringDictionary(
+                let modelHeaders = referenceDictionary(
                     modelObject["headers"]?.objectValue,
                     relativeTo: configDirectory)
                 let mergedHeaders = headers.merging(modelHeaders) { _, next in next }
@@ -855,6 +855,67 @@ enum OpenCodeCompatibility {
     ) -> [String: String] {
         guard let object else { return [:] }
         return object.compactMapValues { resolvedString($0, relativeTo: directory) }
+    }
+
+    /// Like `stringDictionary`, but never resolves credential references.
+    /// `{env:NAME}` is kept verbatim and `{file:relative}` is normalized to an
+    /// absolute `{file:/abs/path}`. Headers built this way are safe to persist
+    /// in preferences.json; the secret is read only when a request is built.
+    private static func referenceDictionary(
+        _ object: [String: LFJSONValue]?,
+        relativeTo directory: URL
+    ) -> [String: String] {
+        guard let object else { return [:] }
+        return object.compactMapValues { normalizedReference($0, relativeTo: directory) }
+    }
+
+    static func normalizedReference(_ value: LFJSONValue?, relativeTo directory: URL) -> String? {
+        guard let value else { return nil }
+        switch value {
+        case .string(let raw):
+            return normalizedReference(raw, relativeTo: directory)
+        case .object(let object):
+            if let env = object["env"]?.stringValue {
+                return "{env:\(env)}"
+            }
+            if let file = object["file"]?.stringValue {
+                return normalizedReference("{file:\(file)}", relativeTo: directory)
+            }
+            return nil
+        default:
+            return nil
+        }
+    }
+
+    static func normalizedReference(_ raw: String?, relativeTo directory: URL) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.hasPrefix("{env:"), trimmed.hasSuffix("}") {
+            return trimmed
+        }
+        if trimmed.hasPrefix("{file:"), trimmed.hasSuffix("}") {
+            let rawPath = String(trimmed.dropFirst(6).dropLast())
+            let path: String
+            if rawPath.hasPrefix("~/") {
+                path = FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent(String(rawPath.dropFirst(2))).path
+            } else if rawPath.hasPrefix("/") {
+                path = rawPath
+            } else {
+                path = directory.appendingPathComponent(rawPath).path
+            }
+            return "{file:\(path)}"
+        }
+        // A literal header value authored directly in the config.
+        return trimmed
+    }
+
+    /// Resolves a persisted header reference at request time. Literal values
+    /// pass through unchanged.
+    static func resolvedHeaderValue(_ raw: String) -> String {
+        guard raw.hasPrefix("{env:") || raw.hasPrefix("{file:") else { return raw }
+        return resolvedString(raw, relativeTo: URL(fileURLWithPath: "/")) ?? ""
     }
 
     /// Resolves either OpenCode's string shorthand (`{env:NAME}`) or its

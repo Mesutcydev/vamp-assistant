@@ -1,6 +1,104 @@
 import AppKit
 import SwiftUI
 
+// MARK: - Transcript materials
+//
+// The conversation is part of the instrument deck, so its rows are built from
+// the same three primitives as the hardware below them: a raised MODULE (light
+// faceplate — assistant answers, plan cards), a recessed WELL (activity, raw
+// output, code), and a dark SCREEN insert (what the user typed, live readouts).
+// One radius scale keeps every row on the same silhouette; `TranscriptLegend`
+// is the engraved bezel marking that names each module.
+
+enum TranscriptMaterial {
+    static let radius: CGFloat = 8
+
+    /// A card in the transcript: the system's content surface, not a moulded
+    /// faceplate. Both stops are the same colour so the old gradient reads
+    /// flat until the gradients themselves are removed.
+    static let moduleTop = Color(nsColor: .controlBackgroundColor)
+    static let moduleLow = Color(nsColor: .controlBackgroundColor)
+
+    /// The user's own message: an accent-tinted card, the way a Mac app marks
+    /// "yours" — it was a dark hardware screen with fixed off-white ink.
+    static let screenTop = Color(nsColor: .controlAccentColor).opacity(0.14)
+    static let screenLow = Color(nsColor: .controlAccentColor).opacity(0.14)
+    static let screenInk = Color(nsColor: .labelColor)
+    static let screenLegend = Color(nsColor: .secondaryLabelColor)
+}
+
+/// Engraved panel legend: tiny spaced monospace caps, the instrument's one
+/// way of naming a control or a module.
+struct TranscriptLegend: View {
+    let text: String
+    var tint: Color = Instrument.engraved
+
+    var body: some View {
+        Text(text.uppercased())
+            .font(.system(size: 8, weight: .bold, design: .monospaced))
+            .tracking(1.5)
+            .foregroundStyle(tint)
+            .lineLimit(1)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityHidden(true)
+    }
+}
+
+extension View {
+    /// An assistant card: system content surface, one hairline, no bevel.
+    func transcriptModule(radius: CGFloat = TranscriptMaterial.radius) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        return self
+            .background(shape.fill(TranscriptMaterial.moduleTop))
+            .overlay(shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1))
+    }
+
+    /// Activity logs, raw output, code blocks: the system's text surface.
+    func transcriptWell(radius: CGFloat = TranscriptMaterial.radius) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        return self
+            .background(shape.fill(Color(nsColor: .textBackgroundColor)))
+            .overlay(shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1))
+    }
+
+    /// The user's own message: a tinted card, readable in both appearances.
+    func transcriptScreen(radius: CGFloat = TranscriptMaterial.radius) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        return self
+            .background(shape.fill(TranscriptMaterial.screenTop))
+            .overlay(shape.strokeBorder(Color(nsColor: .controlAccentColor).opacity(0.35),
+                                        lineWidth: 1))
+    }
+}
+
+/// Centred engraved marker: a quiet label between two machined rules — the
+/// register for checkpoints, notices, and empty states.
+struct TranscriptRuleLabel: View {
+    let text: String
+    var tint: Color = Instrument.engraved
+
+    var body: some View {
+        HStack(spacing: 10) {
+            rule
+            Text(text.uppercased())
+                .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                .tracking(1.3)
+                .foregroundStyle(tint)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+            rule
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var rule: some View {
+        Rectangle()
+            .fill(Instrument.seam.opacity(0.45))
+            .frame(height: 0.75)
+    }
+}
+
 /// Compact document bar for the active conversation. It is a separate view so
 /// streaming transcript updates do not rebuild toolbar/menu structure.
 struct ChatHeaderView: View {
@@ -98,46 +196,31 @@ struct ChatHeaderActions: View {
             .accessibilityLabel("Review changed files")
             .disabled(!canReview)
 
-            Menu {
-                menuButton("Browser", "safari", .toggleBrowserPanel)
-                menuButton("Simulator", "iphone", .toggleSimulatorPanel)
-                menuButton("Diagnostics", "stethoscope", .toggleDiagnosticsPanel)
-                Divider()
-                Group {
-                    menuButton("Git status", "circle.dashed", .gitStatus)
-                    menuButton("Review changes", "doc.text.magnifyingglass", .gitDiff)
-                    menuButton("Undo last checkpoint", "arrow.uturn.backward", .undoCheckpoint)
-                }
-                .disabled(!canReview)
-                Divider()
-                menuButton("Export as Markdown…", "doc.text", .exportChatMarkdown)
-                menuButton("Export as JSON…", "curlybraces.square", .exportChatJSON)
-                menuButton("Export task bundle…", "shippingbox", .exportTaskBundle)
-            } label: {
+            InstrumentMenu(menuWidth: 260) {
                 Image(systemName: "ellipsis")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(Theme.textSecondary)
                     .frame(width: 28, height: 28)
                     .background(Theme.surfaceInset, in: Circle())
                     .overlay(Circle().strokeBorder(Theme.hairline, lineWidth: 1))
+            } options: {
+                InstrumentMenuRow(title: "Browser", systemImage: "safari", action: { post(.toggleBrowserPanel) })
+                InstrumentMenuRow(title: "Simulator", systemImage: "iphone", action: { post(.toggleSimulatorPanel) })
+                InstrumentMenuRow(title: "Diagnostics", systemImage: "stethoscope", action: { post(.toggleDiagnosticsPanel) })
+                InstrumentMenuRow(title: "Git status", systemImage: "circle.dashed",
+                                  isDisabled: !canReview, action: { post(.gitStatus) })
+                InstrumentMenuRow(title: "Review changes", systemImage: "doc.text.magnifyingglass",
+                                  isDisabled: !canReview, action: { post(.gitDiff) })
+                InstrumentMenuRow(title: "Undo last checkpoint", systemImage: "arrow.uturn.backward",
+                                  isDisabled: !canReview, action: { post(.undoCheckpoint) })
+                InstrumentMenuRow(title: "Export as Markdown…", systemImage: "doc.text", action: { post(.exportChatMarkdown) })
+                InstrumentMenuRow(title: "Export as JSON…", systemImage: "curlybraces.square", action: { post(.exportChatJSON) })
+                InstrumentMenuRow(title: "Export task bundle…", systemImage: "shippingbox", action: { post(.exportTaskBundle) })
             }
-            .menuStyle(.borderlessButton)
             .fixedSize()
             .lfHoverLift()
             .help("More workspace actions")
             .accessibilityLabel("More workspace actions")
-        }
-    }
-
-    private func menuButton(
-        _ title: LocalizedStringKey,
-        _ icon: String,
-        _ notification: Notification.Name
-    ) -> some View {
-        Button {
-            post(notification)
-        } label: {
-            Label(title, systemImage: icon)
         }
     }
 
@@ -168,109 +251,163 @@ struct ChatPhaseBadge: View {
     }
 }
 
-/// User message: short prompts are a right-aligned pill (ChatGPT pattern);
-/// long or multiline messages (pasted logs, imported Claude/Codex/Cursor
-/// history) become a full-width left-aligned card — a narrow right pill
-/// wastes the column and mangles preformatted text. The fill is the elevated
-/// surface, not an accent wash: the 10 % wash read as pale pink on both
-/// light and beet backgrounds.
+/// User message: the ChatGPT/Cursor shape — a quiet warm bubble, right
+/// aligned, with the draft set in ink. No dark screen, no legend: the message
+/// is the message.
 struct UserBubble: View {
     let item: AgentSessionController.TranscriptItem
 
-    private static func isLongForm(_ text: String) -> Bool {
-        text.contains("\n") || text.count > 280
-    }
-
     var body: some View {
         if case .user(let text) = item.kind {
-            if Self.isLongForm(text) {
-                HStack {
-                    Text(text)
-                        .font(AppFont.chatBody)
-                        .lineSpacing(3)
-                        .foregroundStyle(Theme.textPrimary)
-                        .multilineTextAlignment(.leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                            .strokeBorder(Theme.washBorder(Theme.accent), lineWidth: 1))
-                        .frame(maxWidth: 760, alignment: .leading)
-                        .textSelection(.enabled)
-                    Spacer(minLength: 0)
-                }
-            } else {
-                HStack {
-                    Spacer()
-                    Text(text)
-                        .font(AppFont.chatBody)
-                        .lineSpacing(3)
-                        .foregroundStyle(Theme.textPrimary)
-                        .multilineTextAlignment(.leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                            .strokeBorder(Theme.washBorder(Theme.accent), lineWidth: 1))
-                        .frame(maxWidth: 520, alignment: .trailing)
-                        .textSelection(.enabled)
-                }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("You")
+                    .font(.appUI(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.textSecondary)
+                Text(text)
+                    .font(AppFont.chatUserBody)
+                    .lineSpacing(3)
+                    .foregroundStyle(Instrument.ink)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
         }
     }
+
 }
 
-/// Assistant output: avatar-led, no bubble, full column width, block-aware
-/// markdown — lists, headings, and code blocks should read like an answer,
-/// not like one flattened line of text.
+/// Assistant output: the machine's printed answer on the deck. A machined
+/// bezel line names the module, reports its real generation metrics, and
+/// carries the copy key; the prose below stays bare like print on the panel.
 struct AssistantMessage: View {
     let item: AgentSessionController.TranscriptItem
 
     var body: some View {
         if case .assistant(let text) = item.kind {
-            HStack(alignment: .top, spacing: 12) {
-                AssistantAvatar()
-                VStack(alignment: .leading, spacing: 12) {
-                    MarkdownText(text: text)
-                    AnswerFooterRow(text: text, metrics: item.answerMetrics)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
+            VStack(alignment: .leading, spacing: 6) {
+                AnswerBezelRow(text: text, metrics: item.answerMetrics)
+                // Only the live row's text changes during a stream, but this
+                // row is re-evaluated whenever ChatView's body runs (every
+                // token). Equatable + equatable() lets SwiftUI skip the
+                // re-parse for every unchanged bubble.
+                MarkdownText(text: text)
+                    .equatable()
+                AnswerCopyRow(text: text)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
         }
     }
 }
 
-/// Quiet, standard answer actions. The useful generation details stay close
-/// to the response, while copy feedback is visible without a toast or modal.
-struct AnswerFooterRow: View {
+/// The answer's bezel line: a moulded marker cap, engraved legend, live
+/// metrics, and the copy key over a machined rule.
+struct AnswerBezelRow: View {
     let text: String
     let metrics: AnswerMetrics?
     @State private var didCopy = false
 
     var body: some View {
-        HStack(spacing: 9) {
+        HStack(spacing: 8) {
+            Text("Vamp")
+                .font(.appUI(size: 11, weight: .semibold))
+                .foregroundStyle(Theme.textSecondary)
             if let metrics {
-                AnswerMetadataRow(metrics: metrics)
+                Text(metadataSummary(metrics))
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Instrument.inkSecondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .accessibilityLabel(accessibilitySummary(metrics))
             }
-            if metrics != nil {
-                Text("·")
-                    .foregroundStyle(Theme.hairline)
-                    .accessibilityHidden(true)
-            }
-            Button(action: copyAnswer) {
-                Label(didCopy ? "Copied" : "Copy", systemImage: didCopy ? "checkmark" : "doc.on.doc")
-                    .font(.caption2)
-                    .foregroundStyle(didCopy ? Theme.success : Theme.textTertiary)
-            }
-            .buttonStyle(.plain)
-            .help("Copy answer")
-            .accessibilityLabel(didCopy ? "Answer copied" : "Copy answer")
+            Spacer(minLength: 8)
         }
-        .frame(minHeight: 18)
+        .padding(.bottom, 6)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Instrument.seam.opacity(0.45))
+                .frame(height: 0.75)
+        }
+    }
+
+    /// A tiny dark cap, viewed from above: the reference's module marker.
+    private var markerCap: some View {
+        Circle()
+            .fill(LinearGradient(
+                colors: [Instrument.darkKeyTop, Instrument.darkKeyBottom],
+                startPoint: .top, endPoint: .bottom))
+            .overlay(Circle().inset(by: 0.4).strokeBorder(
+                LinearGradient(
+                    colors: [Color.white.opacity(0.45), Color.black.opacity(0.8)],
+                    startPoint: .top, endPoint: .bottom),
+                lineWidth: 0.75))
+            .frame(width: 9, height: 9)
+            .accessibilityHidden(true)
+    }
+
+    private func metadataSummary(_ metrics: AnswerMetrics) -> String {
+        var parts = [
+            (metrics.tokenCountIsEstimated ? "≈" : "")
+                + metrics.outputTokens.formatted() + " tok"
+        ]
+        if let speed = metrics.tokensPerSecond {
+            parts.append(String(format: "%.1f tok/s", speed))
+        }
+        parts.append(durationLabel(metrics.elapsedSeconds))
+        return parts.joined(separator: " · ")
+    }
+
+    private func durationLabel(_ seconds: Double) -> String {
+        if seconds < 60 { return String(format: "%.1fs", seconds) }
+        let minutes = Int(seconds) / 60
+        let remainder = Int(seconds) % 60
+        return "\(minutes)m \(remainder)s"
+    }
+
+    private func accessibilitySummary(_ metrics: AnswerMetrics) -> String {
+        var parts = ["\(metrics.outputTokens.formatted()) tokens"]
+        if let speed = metrics.tokensPerSecond {
+            parts.append(String(format: "%.1f tokens per second", speed))
+        }
+        parts.append(durationLabel(metrics.elapsedSeconds) + " elapsed")
+        return parts.joined(separator: ", ")
     }
 
     private func copyAnswer() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        didCopy = true
+        Task {
+            try? await Task.sleep(for: .seconds(1.4))
+            guard !Task.isCancelled else { return }
+            didCopy = false
+        }
+    }
+}
+
+/// ChatGPT-style answer action: one small copy mark directly under the text,
+/// no label, no frame.
+struct AnswerCopyRow: View {
+    let text: String
+    @State private var didCopy = false
+
+    var body: some View {
+        Button(action: copy) {
+            Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(didCopy ? Theme.success : Instrument.engraved)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .lfHoverLift()
+        .help(didCopy ? "Copied" : "Copy answer")
+        .accessibilityLabel(didCopy ? "Answer copied" : "Copy answer")
+    }
+
+    private func copy() {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
@@ -298,16 +435,55 @@ struct AssistantAvatar: View {
     }
 }
 
+/// Parsing markdown is pure over its input, and a transcript re-evaluates its
+/// stable bubbles whenever the parent body runs (a streamed token, a status
+/// change, a model switch). Keep a small ring of recent parses so an unchanged
+/// answer costs a dictionary lookup instead of a full markdown pass.
+private enum MarkdownParseCache {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var storage: [String: [MarkdownBlock]] = [:]
+    nonisolated(unsafe) private static var order: [String] = []
+    /// Bounded twice — by entry count and by key size — so one huge answer is
+    /// parsed as before but never allowed to dominate the budget.
+    private static let limit = 24
+    private static let maxKeyBytes = 32 * 1024
+
+    static func blocks(for displayText: String) -> [MarkdownBlock] {
+        guard displayText.utf8.count <= maxKeyBytes else {
+            return MarkdownDocumentParser.blocks(from: displayText)
+        }
+        lock.lock()
+        if let hit = storage[displayText] {
+            lock.unlock()
+            return hit
+        }
+        lock.unlock()
+
+        let parsed = MarkdownDocumentParser.blocks(from: displayText)
+
+        lock.lock()
+        if storage[displayText] == nil {
+            storage[displayText] = parsed
+            order.append(displayText)
+            while order.count > limit, !order.isEmpty {
+                storage.removeValue(forKey: order.removeFirst())
+            }
+        }
+        lock.unlock()
+        return parsed
+    }
+}
+
 /// Codex-style block markdown. SwiftUI's single `Text(AttributedString)`
 /// flattens paragraph presentation intent, so every semantic block gets its
 /// own layout row: real paragraph rhythm, properly indented lists, distinct
 /// headings, quotes, and horizontally scrollable code.
-struct MarkdownText: View {
+struct MarkdownText: View, Equatable {
     let text: String
 
     var body: some View {
         let displayText = AssistantAnswerFormatter.formattedForDisplay(text)
-        let blocks = MarkdownDocumentParser.blocks(from: displayText)
+        let blocks = MarkdownParseCache.blocks(for: displayText)
 
         VStack(alignment: .leading, spacing: 16) {
             ForEach(blocks) { block in
@@ -315,57 +491,6 @@ struct MarkdownText: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-struct AnswerMetadataRow: View {
-    let metrics: AnswerMetrics
-
-    var body: some View {
-        HStack(spacing: 7) {
-            Label(tokenLabel, systemImage: "text.word.spacing")
-            if let speed = metrics.tokensPerSecond {
-                separator
-                Label(String(format: "%.1f tok/s", speed), systemImage: "speedometer")
-            }
-            separator
-            Label(durationLabel, systemImage: "clock")
-        }
-        .font(.caption2)
-        .foregroundStyle(Theme.textTertiary)
-        .monospacedDigit()
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilitySummary)
-    }
-
-    private var tokenLabel: String {
-        (metrics.tokenCountIsEstimated ? "≈" : "")
-            + metrics.outputTokens.formatted()
-            + " tokens"
-    }
-
-    private var durationLabel: String {
-        if metrics.elapsedSeconds < 60 {
-            return String(format: "%.1fs", metrics.elapsedSeconds)
-        }
-        let minutes = Int(metrics.elapsedSeconds) / 60
-        let seconds = Int(metrics.elapsedSeconds) % 60
-        return "\(minutes)m \(seconds)s"
-    }
-
-    private var accessibilitySummary: String {
-        var parts = [tokenLabel]
-        if let speed = metrics.tokensPerSecond {
-            parts.append(String(format: "%.1f tokens per second", speed))
-        }
-        parts.append("\(durationLabel) elapsed")
-        return parts.joined(separator: ", ")
-    }
-
-    private var separator: some View {
-        Text("·")
-            .foregroundStyle(Theme.hairline)
-            .accessibilityHidden(true)
     }
 }
 
@@ -553,7 +678,8 @@ struct MarkdownBlockView: View {
         case .paragraph(let text):
             inline(text)
                 .font(AppFont.chatBody)
-                .lineSpacing(5)
+                .lineSpacing(4)
+                .tracking(-0.1)
                 .fixedSize(horizontal: false, vertical: true)
 
         case .heading(let level, let text):
@@ -581,10 +707,8 @@ struct MarkdownBlockView: View {
 
         case .code(let language, let text):
             VStack(alignment: .leading, spacing: 6) {
-                if let language {
-                    Text(language)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(Theme.textTertiary)
+                if let language, !language.isEmpty {
+                    TranscriptLegend(text: language)
                 }
                 ScrollView(.horizontal, showsIndicators: false) {
                     Text(verbatim: text)
@@ -595,9 +719,7 @@ struct MarkdownBlockView: View {
             }
             .padding(Spacing.md)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .strokeBorder(Theme.hairline, lineWidth: 1))
+            .transcriptWell(radius: 5)
 
         case .table(let headers, let rows):
             ScrollView(.horizontal, showsIndicators: true) {
@@ -616,10 +738,9 @@ struct MarkdownBlockView: View {
                         }
                     }
                 }
-                .background(Theme.surface)
-                .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                    .strokeBorder(Theme.hairline, lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .strokeBorder(Instrument.seam.opacity(0.65), lineWidth: 1))
             }
 
         case .divider:
@@ -631,8 +752,8 @@ struct MarkdownBlockView: View {
 
     private func tableCell(_ source: String, emphasized: Bool) -> some View {
         inline(source)
-            .font(.app(size: 13.5 * CGFloat(Theme.currentTextSize.scale),
-                          weight: emphasized ? .semibold : .regular, design: .serif))
+            .font(.appProse(size: 13.5 * CGFloat(Theme.currentTextSize.scale),
+                          weight: emphasized ? .semibold : .regular))
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
             .frame(minWidth: 120, alignment: .leading)
@@ -653,9 +774,9 @@ struct MarkdownBlockView: View {
 
     private func headingFont(_ level: Int) -> Font {
         switch level {
-        case 1: .app(size: 22 * CGFloat(Theme.currentTextSize.scale), weight: .bold, design: .serif)
+        case 1: .appProse(size: 22 * CGFloat(Theme.currentTextSize.scale), weight: .bold)
         case 2: AppFont.chatHeading
-        default: .app(size: 16 * CGFloat(Theme.currentTextSize.scale), weight: .semibold, design: .serif)
+        default: .appProse(size: 16 * CGFloat(Theme.currentTextSize.scale), weight: .semibold)
         }
     }
 
@@ -664,8 +785,8 @@ struct MarkdownBlockView: View {
             ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                 HStack(alignment: .firstTextBaseline, spacing: 9) {
                     Text(numbered ? "\(index + 1)." : "•")
-                        .font(.app(size: 16 * CGFloat(Theme.currentTextSize.scale),
-                                      weight: numbered ? .regular : .semibold, design: .serif))
+                        .font(.appProse(size: 16 * CGFloat(Theme.currentTextSize.scale),
+                                      weight: numbered ? .regular : .semibold))
                         .foregroundStyle(Theme.textSecondary)
                         .frame(width: 20, alignment: .trailing)
                     inline(item)
@@ -678,22 +799,21 @@ struct MarkdownBlockView: View {
     }
 }
 
-/// Checkpoint + notice lines: quiet, centered, never shouting.
+/// Checkpoint + notice lines: engraved markers on the deck, never shouting.
 struct MetaRow: View {
     let item: AgentSessionController.TranscriptItem
 
     var body: some View {
         switch item.kind {
         case .checkpoint(let checkpoint):
-            Label("Checkpoint saved — \(checkpoint.summary)", systemImage: "camera.fill")
-                .font(.caption)
-                .foregroundStyle(Theme.textTertiary)
-                .frame(maxWidth: .infinity, alignment: .center)
+            TranscriptRuleLabel(text: "Checkpoint saved — \(checkpoint.summary)")
         case .notice(let text):
-            Text(text)
-                .font(.caption)
-                .foregroundStyle(Theme.textTertiary)
-                .frame(maxWidth: .infinity, alignment: .center)
+            if text.hasPrefix("Codex plan\n") {
+                PlanSnapshotCard(text: text)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                TranscriptRuleLabel(text: text)
+            }
         default:
             EmptyView()
         }
@@ -708,60 +828,181 @@ struct AgentActivityCard: View {
     @State private var expanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var callCount: Int {
-        items.filter { if case .toolCall = $0.kind { return true }; return false }.count
-    }
     private var hasFailure: Bool {
         items.contains { if case .toolResult(_, _, let failed, _) = $0.kind { return failed }; return false }
     }
-    private var reasoningCount: Int {
-        items.filter { if case .reasoning = $0.kind { return true }; return false }.count
-    }
-    private var toolNames: [String] {
-        var names: [String] = []
-        for item in items {
-            if case .toolCall(let invocation) = item.kind, !names.contains(invocation.name) {
-                names.append(invocation.name)
-            }
-        }
-        return names
-    }
-    private var title: String {
-        if callCount == 0 { return "Thought through the task" }
-        return "\(callCount) action\(callCount == 1 ? "" : "s")"
-    }
-    private var summary: String {
-        if !toolNames.isEmpty {
-            return toolNames.map(Self.friendlyToolName).joined(separator: " · ")
-        }
-        return reasoningCount == 1 ? "Reasoning summary" : "Reasoning summaries"
+
+    /// Result status keyed by invocation id, so each call row carries its
+    /// own outcome without duplicating the result row beneath it.
+    private var failedResultIDs: Set<UUID> {
+        Set(items.compactMap { item in
+            if case .toolResult(let id, _, let failed, _) = item.kind, failed { return id }
+            return nil
+        })
     }
 
-    private static func friendlyToolName(_ name: String) -> String {
+    /// One compact presentation row per event. Raw arguments, results, and
+    /// reasoning stay behind the Details disclosure (ActivityRow below).
+    private struct ActivityEntry: Identifiable {
+        let id: UUID
+        let icon: String
+        let verb: String
+        let summary: String
+        let failed: Bool
+    }
+
+    private var compactEntries: [ActivityEntry] {
+        var entries: [ActivityEntry] = []
+        for item in items {
+            switch item.kind {
+            case .toolCall(let invocation):
+                entries.append(ActivityEntry(
+                    id: item.id,
+                    icon: Self.icon(for: invocation.name),
+                    verb: Self.verb(for: invocation.name),
+                    summary: invocation.summary,
+                    failed: failedResultIDs.contains(invocation.id)))
+            case .reasoning(let text):
+                // Consecutive reasoning events are one reading unit: merge
+                // them into a single row instead of stacking repeated
+                // fragments. The stored transcript is never mutated.
+                if let last = entries.last, last.verb == "think" {
+                    continue
+                }
+                entries.append(ActivityEntry(
+                    id: item.id,
+                    icon: "brain.head.profile",
+                    verb: "think",
+                    summary: Self.reasoningPreview(text),
+                    failed: false))
+            case .toolResult(_, _, let failed, _):
+                // The call row already carries the outcome; a failed result
+                // with no visible call still deserves its own row.
+                if failed {
+                    entries.append(ActivityEntry(
+                        id: item.id,
+                        icon: "exclamationmark.triangle",
+                        verb: "result",
+                        summary: "Failed",
+                        failed: true))
+                }
+            default:
+                break
+            }
+        }
+        return entries
+    }
+
+    /// Plain-language preview for the compact reasoning row: markdown
+    /// emphasis markers, backticks, and heading hashes never belong in a
+    /// one-line summary. Collapses whitespace and keeps the first sentence.
+    static func reasoningPreview(_ raw: String) -> String {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Fenced blocks collapse to a pointer — never dump code into a row.
+        if let range = text.range(of: "```") {
+            text = String(text[..<range.lowerBound])
+            if text.trimmingCharacters(in: .whitespaces).isEmpty {
+                text = "Worked through code"
+            }
+        }
+        text = text
+            .replacingOccurrences(of: "**", with: "")
+            .replacingOccurrences(of: "__", with: "")
+            .replacingOccurrences(of: "`", with: "")
+        // Strip heading hashes at line starts, then flatten newlines so the
+        // one-line row shows a single flowing sentence.
+        text = text
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " #*")) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        if let firstSentence = text.range(of: ". ") {
+            text = String(text[..<firstSentence.lowerBound]) + "."
+        }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Reasoning summary" : trimmed
+    }
+
+    private static func verb(for name: String) -> String {
         switch name {
         case "read_file", "list_directory", "search", "find_files", "glob":
-            "Explored code"
+            name == "search" ? "grep" : "read"
         case "write_file", "move_file", "apply_patch":
-            "Edited files"
+            "edit"
         case "run_command":
-            "Ran command"
+            "run"
         case "build_diagnostics":
-            "Checked build"
+            "build"
         case "sim_build_run":
-            "Verified in Simulator"
+            "build"
         case "macos_build_run":
-            "Built and launched"
+            "build"
         case "apple_ship":
-            "Prepared release"
+            "ship"
         case "task":
-            "Specialist agent"
+            "delegate"
         default:
-            name.replacingOccurrences(of: "_", with: " ").capitalized
+            name.replacingOccurrences(of: "_", with: " ")
+        }
+    }
+
+    private static func icon(for name: String) -> String {
+        switch name {
+        case "search": "magnifyingglass"
+        case "read_file", "list_directory", "find_files", "glob": "doc.text"
+        case "write_file", "move_file", "apply_patch": "pencil"
+        case "run_command": "terminal"
+        case "build_diagnostics", "sim_build_run", "macos_build_run": "hammer"
+        case "apple_ship": "shippingbox"
+        case "task": "person.crop.circle"
+        default: "wrench.and.screwdriver"
         }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            activityBezel
+            Rectangle()
+                .fill(Instrument.seam.opacity(0.35))
+                .frame(height: 0.75)
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(compactEntries) { entry in
+                    compactRow(entry)
+                }
+
+                if expanded {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(items) { item in
+                            ActivityRow(item: item)
+                        }
+                    }
+                    .padding(.leading, 14)
+                    .padding(.trailing, 12)
+                    .padding(.top, 8)
+                    .padding(.bottom, 10)
+                }
+            }
+            .padding(.vertical, 2)
+        }
+        .transcriptWell()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Agent activity")
+    }
+
+    /// The well's bezel: outcome lamp, engraved legend, step count, and the
+    /// details key — one readout line instead of a floating disclosure link.
+    private var activityBezel: some View {
+        HStack(spacing: 8) {
+            InstrumentLamp(color: hasFailure ? Theme.negative : Instrument.signalIdle,
+                           bore: 8,
+                           live: hasFailure)
+            TranscriptLegend(text: "Activity")
+            Text(stepCountLabel)
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundStyle(Instrument.inkSecondary)
+                .monospacedDigit()
+                .lineLimit(1)
+            Spacer(minLength: 8)
             Button {
                 if reduceMotion {
                     expanded.toggle()
@@ -769,52 +1010,53 @@ struct AgentActivityCard: View {
                     withAnimation(.easeInOut(duration: 0.16)) { expanded.toggle() }
                 }
             } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: hasFailure ? "exclamationmark.circle.fill" : "sparkles")
-                        .accessibilityHidden(true)
-                        .font(.app(size: 11, weight: .semibold, design: .serif))
-                        .foregroundStyle(hasFailure ? Theme.danger : Theme.accentText)
-                        .frame(width: 22, height: 22)
-                        .background(
-                            Theme.washStrong(hasFailure ? Theme.danger : Theme.accent),
-                            in: Circle())
-                    Text(title)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                    Text(summary)
-                        .font(.caption2)
-                        .foregroundStyle(Theme.textTertiary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer()
-                    Text(expanded ? "Hide" : "Details")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(Theme.textTertiary)
+                HStack(spacing: 5) {
                     Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(Theme.textTertiary)
+                        .font(.system(size: 8, weight: .bold))
                         .rotationEffect(.degrees(expanded ? 90 : 0))
+                    Text(expanded ? "Hide" : "Details")
+                        .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                        .tracking(0.9)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .foregroundStyle(Instrument.inkSecondary)
+                .padding(.horizontal, 7)
+                .frame(height: 18)
+                .environment(\.instrumentPressed, false)
+                .instrumentKey(RoundedRectangle(cornerRadius: 4, style: .continuous), elevation: 0.6)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .help(expanded ? "Hide agent activity" : "Show reasoning and tool activity")
-
-            if expanded {
-                Divider().padding(.horizontal, 12)
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(items) { item in
-                        ActivityRow(item: item)
-                    }
-                }
-                .padding(12)
-            }
+            .buttonStyle(InstrumentPressStyle())
+            .help(expanded ? "Hide reasoning and tool output" : "Show reasoning and tool output")
         }
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-            .strokeBorder(Theme.hairline, lineWidth: 1))
+        .padding(.horizontal, 10)
+        .frame(height: 28)
+    }
+
+    private var stepCountLabel: String {
+        let count = compactEntries.count
+        return "\(count) STEP\(count == 1 ? "" : "S")"
+    }
+
+    private func compactRow(_ entry: ActivityEntry) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: entry.failed ? "exclamationmark.circle.fill" : entry.icon)
+                .accessibilityHidden(true)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(entry.failed ? Theme.negative : Instrument.engraved)
+                .frame(width: 16, height: 16)
+            Text(entry.verb)
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(Instrument.ink)
+            Text(entry.summary)
+                .font(.app(size: 11.5))
+                .foregroundStyle(Instrument.inkSecondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 0)
+        }
+        .frame(minHeight: 25)
+        .padding(.leading, 12)
+        .contentShape(Rectangle())
     }
 }
 
@@ -885,7 +1127,15 @@ struct ActivityRow: View {
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(Theme.accentText)
                     .frame(width: 14, height: 18)
-                Text(text)
+                Group {
+                    if let attributed = try? AttributedString(
+                        markdown: text,
+                        options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
+                        Text(attributed)
+                    } else {
+                        Text(text)
+                    }
+                }
                     .font(.callout)
                     .foregroundStyle(Theme.textSecondary)
                     .lineSpacing(2)
@@ -1086,26 +1336,29 @@ struct DiagnosticsCard: View {
 }
 
 /// Shared chrome for the transcript's interactive cards (approval, question,
-/// plan): a tinted icon tile + semibold title + optional monospaced detail
-/// chip — the same header language as Settings and the Model Manager.
+/// plan): the same raised module material as an answer, plus a 3-pt leading
+/// bar in the card's semantic tint — quieter than a full tint wash, and every
+/// interactive card shares the exact same silhouette.
 private extension View {
-    /// Raised surface + hairline + a 3-pt leading bar in the card's semantic
-    /// tint. Quieter and more native than a full tint wash, and every
-    /// interactive card shares the exact same silhouette.
-    func lfTranscriptCard(_ tint: Color, radius: CGFloat = Radius.md) -> some View {
+    func lfTranscriptCard(_ tint: Color, radius: CGFloat = TranscriptMaterial.radius) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         return self
-            .background(Theme.surface, in: shape)
+            .background(shape.fill(LinearGradient(
+                colors: [TranscriptMaterial.moduleTop, TranscriptMaterial.moduleLow],
+                startPoint: .top, endPoint: .bottom)))
             .overlay(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
                     .fill(tint)
                     .frame(width: 3)
                     .padding(.vertical, 10)
                     .padding(.leading, 6)
                     .allowsHitTesting(false)
             }
-            .overlay(shape.strokeBorder(Theme.hairline, lineWidth: 1))
-            .shadow(color: Theme.cardShadow, radius: 4, y: 1)
+            .overlay(shape.strokeBorder(LinearGradient(
+                colors: [Color.white.opacity(0.85), Instrument.seam.opacity(0.8)],
+                startPoint: .top, endPoint: .bottom), lineWidth: 1))
+            .compositingGroup()
+            .shadow(color: Instrument.keySocket.opacity(0.40), radius: 2, y: 1)
     }
 }
 
@@ -1118,7 +1371,7 @@ struct TranscriptCardHeader: View {
     var body: some View {
         HStack(spacing: Spacing.sm) {
             Image(systemName: systemImage)
-                .font(.app(size: 13, weight: .semibold, design: .serif))
+                .font(.app(size: 13, weight: .semibold))
                 .foregroundStyle(tint)
                 .frame(width: 30, height: 30)
                 .background(Theme.washStrong(tint),
@@ -1141,6 +1394,59 @@ struct TranscriptCardHeader: View {
     }
 }
 
+/// Reference-export card header: one small glyph, one 13.5pt semibold title,
+/// no icon chip. Used by the plan, approval, and question cards.
+struct TranscriptCardTitle: View {
+    let title: String
+    let systemImage: String
+    var detail: String? = nil
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.textTertiary)
+            Text(title)
+                .font(.app(size: 13.5, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if let detail {
+                Text(detail)
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+/// 28pt-high, 8pt-radius card action. The filled tone is the deliberate
+/// choice (Allow); the default tone is the quiet outline beside it.
+struct CompactActionButtonStyle: ButtonStyle {
+    var filled: Bool = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+        return configuration.label
+            .font(.system(size: 13, weight: filled ? .semibold : .regular))
+            .foregroundStyle(filled ? Color.white : Color(nsColor: .labelColor))
+            .padding(.horizontal, 12)
+            .frame(minHeight: 24)
+            .background(shape.fill(filled
+                                   ? Color(nsColor: .controlAccentColor)
+                                   : Color(nsColor: .controlColor)))
+            .overlay(shape.strokeBorder(filled ? .clear : Color(nsColor: .separatorColor),
+                                        lineWidth: 1))
+            .contentShape(shape)
+            .brightness(configuration.isPressed ? -0.06 : 0)
+            .opacity(isEnabled ? 1 : 0.45)
+    }
+}
+
 struct ApprovalCard: View {
     let request: ApprovalRequest
     let onDecision: (Bool, Bool) -> Void
@@ -1154,77 +1460,94 @@ struct ApprovalCard: View {
             || request.invocation.name == "apple_ship"
     }
 
+    /// Reference-client header: file edits read as "Edit <path>" with a
+    /// pencil; everything else keeps the approval title.
+    private var isDiffPreview: Bool {
+        if case .diff = request.preview { return true }
+        return false
+    }
+
+    private var approvalTitle: String {
+        if case .diff(_, let path) = request.preview { return "Edit \(path)" }
+        return "Approval required"
+    }
+
+    private var approvalIcon: String {
+        isDiffPreview ? "pencil" : "hand.raised.fill"
+    }
+
     private var isComputer: Bool {
         request.invocation.name.hasPrefix("computer_")
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            TranscriptCardHeader(
-                title: "Approval required",
-                systemImage: "hand.raised.fill",
-                tint: Theme.warning,
-                detail: request.invocation.name)
+            TranscriptCardTitle(
+                title: approvalTitle,
+                systemImage: approvalIcon,
+                detail: isDiffPreview ? nil : request.invocation.name)
+
+            Rectangle()
+                .fill(Instrument.seam.opacity(0.45))
+                .frame(height: 0.75)
 
             switch request.preview {
             case .command(let command):
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     Text("Command preview")
-                        .font(.callout.weight(.semibold))
+                        .font(.app(size: 11.5, weight: .semibold))
                         .foregroundStyle(Theme.textSecondary)
                     Text(command)
-                        .font(.callout.monospaced())
+                        .font(.system(size: 12, design: .monospaced))
                         .foregroundStyle(Theme.textPrimary)
-                        .lineSpacing(1)
+                        .lineSpacing(3)
                         .padding(Spacing.sm)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                            .strokeBorder(Theme.hairline.opacity(0.8), lineWidth: 1))
+                        .background(Theme.surfaceInset.opacity(0.6), in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
+                            .strokeBorder(Theme.hairline.opacity(0.8), lineWidth: 0.75))
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
-            case .diff(let diff, let path):
+            case .diff(let diff, _):
                 VStack(alignment: .leading, spacing: Spacing.xs) {
-                    Text("Edit \(path)")
-                        .font(.caption)
-                        .foregroundStyle(Theme.textSecondary)
                     DiffPreview(diff: diff)
                 }
             case .none:
                 Text(request.invocation.summary)
-                    .font(.caption.monospaced())
+                    .font(.system(size: 12, design: .monospaced))
                     .padding(Spacing.sm)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+                    .background(Theme.surfaceInset.opacity(0.6), in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
                     .textSelection(.enabled)
             }
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
+                Rectangle()
+                    .fill(Instrument.seam.opacity(0.45))
+                    .frame(height: 0.75)
                 ViewThatFits(in: .horizontal) {
                     approvalButtonRow
                     approvalButtonColumn
                 }
                 if request.invocation.name == "run_command" {
                     Text("This command runs in the workspace only after you approve it.")
-                        .font(.callout)
+                        .font(.app(size: 11.5))
                         .foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
-        .padding(Spacing.lg)
-        .background(
-            Theme.surface.opacity(0.96),
-            in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
-        .shadow(color: Theme.cardShadow, radius: 18, y: 7)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        // Raised module with an attached action strip.
+        .transcriptModule()
     }
 
     private var approvalButtonRow: some View {
         HStack(spacing: Spacing.sm) {
             approveButton
             alwaysAllowButton
-            Spacer(minLength: 0)
             declineButton
         }
     }
@@ -1244,35 +1567,31 @@ struct ApprovalCard: View {
         Button {
             onDecision(true, false)
         } label: {
-            Label("Approve", systemImage: "checkmark")
+            Text("Allow")
         }
         .keyboardShortcut(KeyEquivalent.return, modifiers: .command)
-        .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
+        .buttonStyle(CompactActionButtonStyle(filled: true))
     }
 
     private var alwaysAllowButton: some View {
         Button {
             onDecision(true, true)
         } label: {
-            Label(isComputer ? "Allow computer actions this run"
-                    : (isCommand ? "Always allow safe commands" : "Always allow edits"),
-                  systemImage: "checkmark.seal")
+            Text(isComputer ? "Allow computer actions this run"
+                    : (isCommand ? "Always allow safe commands" : "Allow for this chat"),
+                  )
         }
-        .buttonStyle(LFCapsuleButtonStyle())
+        .buttonStyle(CompactActionButtonStyle())
         .help(isComputer
             ? "Approve this and later computer actions for this run; target restoration and verification remain active"
             : (isCommand
                 ? "Approve this and auto-approve policy-safe commands for this run and future runs"
-                : "Approve this and auto-approve file edits for this run and future runs"))
+                : "Approve this and auto-approve file edits for this chat"))
     }
 
     private var declineButton: some View {
-        Button("Decline", role: .destructive) { onDecision(false, false) }
-            .buttonStyle(.plain)
-            .font(.callout.weight(.semibold))
-            .foregroundStyle(Theme.danger)
-            .padding(.horizontal, Spacing.sm)
-            .frame(minHeight: 34)
+        Button("Reject") { onDecision(false, false) }
+            .buttonStyle(CompactActionButtonStyle())
     }
 }
 
@@ -1284,20 +1603,17 @@ struct DiffPreview: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: Spacing.xs) {
                 Text("+\(diff.addedCount)")
-                    .foregroundStyle(Theme.success)
+                    .foregroundStyle(Theme.positive)
                 Text("−\(diff.removedCount)")
-                    .foregroundStyle(Theme.danger)
+                    .foregroundStyle(Theme.negative)
                 Spacer()
-                Picker("Diff layout", selection: $split) {
-                    Text("Split").tag(true)
-                    Text("Unified").tag(false)
-                }
-                .pickerStyle(.segmented)
+                InstrumentSegmentedControl(
+                    selection: $split,
+                    options: [("Split", true), ("Unified", false)])
                 .frame(width: 150)
-                .controlSize(.mini)
-                .labelsHidden()
+                .accessibilityLabel("Diff layout")
             }
-            .font(.caption2.monospaced().bold())
+            .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
             .padding(.horizontal, Spacing.sm)
             .padding(.vertical, 5)
             Divider().overlay(Theme.hairline)
@@ -1306,7 +1622,8 @@ struct DiffPreview: View {
                     sideBySide
                 } else {
                     Text(diff.unified)
-                        .font(.caption.monospaced())
+                        .font(.system(size: 12, design: .monospaced))
+                        .lineSpacing(3)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                         .padding(Spacing.sm)
@@ -1333,7 +1650,8 @@ struct DiffPreview: View {
 
     private func diffCell(_ text: String?, kind: DiffEngine.LineKind?) -> some View {
         Text(text ?? " ")
-            .font(.caption.monospaced())
+            .font(.system(size: 12, design: .monospaced))
+            .lineSpacing(3)
             .foregroundStyle(diffColor(kind))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, Spacing.sm)
@@ -1344,16 +1662,16 @@ struct DiffPreview: View {
 
     private func diffColor(_ kind: DiffEngine.LineKind?) -> Color {
         switch kind {
-        case .added: Theme.success
-        case .removed: Theme.danger
+        case .added: Theme.positive
+        case .removed: Theme.negative
         default: Theme.textPrimary
         }
     }
 
     private func diffFill(_ kind: DiffEngine.LineKind?) -> Color {
         switch kind {
-        case .added: Theme.success.opacity(0.08)
-        case .removed: Theme.danger.opacity(0.08)
+        case .added: Theme.positive.opacity(0.10)
+        case .removed: Theme.negative.opacity(0.10)
         default: Color.clear
         }
     }
@@ -1368,25 +1686,25 @@ struct QuestionCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            TranscriptCardHeader(
+            TranscriptCardTitle(
                 title: "The agent has a question",
-                systemImage: "questionmark.circle.fill",
-                tint: Theme.info)
+                systemImage: "questionmark.circle")
             Text(question)
-                .font(.callout)
+                .font(AppFont.chatBody)
+                .lineSpacing(4)
                 .foregroundStyle(Theme.textPrimary)
                 .textSelection(.enabled)
             if !choices.isEmpty {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     ForEach(choices, id: \.self) { choice in
                         Button(choice) { onAnswer(choice) }
-                            .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
+                            .buttonStyle(CompactActionButtonStyle(filled: true))
                     }
                 }
             }
             HStack(spacing: Spacing.sm) {
                 TextField("Your answer…", text: $answer)
-                    .textFieldStyle(.roundedBorder)
+                    .vampField()
                     .onSubmit {
                         guard !answer.isEmpty else { return }
                         onAnswer(answer)
@@ -1397,13 +1715,125 @@ struct QuestionCard: View {
                     onAnswer(answer)
                     answer = ""
                 }
-                .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
+                .buttonStyle(CompactActionButtonStyle(filled: true))
                 .disabled(answer.isEmpty)
             }
         }
-        .padding(Spacing.lg)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
         .padding(.leading, Spacing.sm)
-        .lfTranscriptCard(Theme.info)
+        .lfTranscriptCard(Theme.info, radius: Radius.card)
+    }
+}
+
+/// The live plan card: one card per run, replaced in place by every plan
+/// snapshot. Counts derive from the actual task statuses.
+struct LivePlanCard: View {
+    let tasks: [AgentSessionController.PlanEntry]
+
+    var body: some View {
+        PlanCardBody(
+            total: tasks.count,
+            completed: tasks.filter(\.isComplete).count,
+            rows: tasks.map { task in
+                PlanCardBody.Row(
+                    text: task.step,
+                    complete: task.isComplete,
+                    inProgress: task.isInProgress)
+            })
+    }
+}
+
+/// A finished run's persisted plan, reconstructed from the transcript
+/// notice ("Codex plan\n<status>: <step>\n…") so restored sessions keep the
+/// plan the run ended with.
+struct PlanSnapshotCard: View {
+    let text: String
+
+    private struct ParsedRow {
+        let text: String
+        let complete: Bool
+        let inProgress: Bool
+    }
+
+    private var rows: [ParsedRow] {
+        guard let payload = text.split(separator: "\n", maxSplits: 1).last else { return [] }
+        return payload.split(separator: "\n").compactMap { line in
+            let parts = line.split(separator: ":", maxSplits: 1)
+            guard parts.count == 2 else { return nil }
+            let status = parts[0].trimmingCharacters(in: .whitespaces).lowercased()
+            return ParsedRow(
+                text: String(parts[1].trimmingCharacters(in: .whitespaces)),
+                complete: status == "completed",
+                inProgress: status == "in_progress" || status == "inprogress" || status == "running")
+        }
+    }
+
+    var body: some View {
+        PlanCardBody(
+            total: rows.count,
+            completed: rows.filter(\.complete).count,
+            rows: rows.map { PlanCardBody.Row(text: $0.text, complete: $0.complete, inProgress: $0.inProgress) })
+    }
+}
+
+/// Shared plan-card presentation: 14pt radius, hairline outline, compact
+/// PLAN · n OF total header, 29pt task rows.
+struct PlanCardBody: View {
+    struct Row: Identifiable {
+        var id: String { text }
+        let text: String
+        let complete: Bool
+        let inProgress: Bool
+    }
+
+    let total: Int
+    let completed: Int
+    let rows: [Row]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("PLAN · \(completed) OF \(total)")
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(0.9)
+                .foregroundStyle(Theme.textSecondary)
+
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(rows) { row in
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        planIcon(row)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(row.inProgress ? Theme.accentText : Theme.textTertiary)
+                            .frame(width: 14)
+                        Text(row.text)
+                            .font(.app(size: 13.5))
+                            .foregroundStyle(row.complete ? Theme.textTertiary : Theme.textPrimary)
+                            .strikethrough(row.complete)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                    .frame(minHeight: 29, alignment: .top)
+                }
+            }
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // Raised module: engraved seam, machined face.
+        .transcriptModule()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Plan: \(completed) of \(total) tasks complete")
+    }
+
+    @ViewBuilder
+    private func planIcon(_ row: Row) -> some View {
+        if row.complete {
+            Image(systemName: "checkmark")
+        } else if row.inProgress {
+            Image(systemName: "circle.dotted")
+        } else {
+            Image(systemName: "square")
+        }
     }
 }
 
@@ -1495,105 +1925,115 @@ struct FinishBanner: View {
         }
     }
 
-    /// Simple outcomes render as a tinted status pill; an engine error gets
-    /// a rounded wash card so its detail message stays legible.
+    /// Simple outcomes render as a machined readout strip; an engine error and
+    /// the completion summary carry the same faceplate module as an answer so
+    /// the run's end reads as one more instrument state.
     @ViewBuilder
     private var content: some View {
         switch reason {
         case .completed:
             completionCard
         case .maxTurnsReached:
-            pill("Reached the turn limit", systemImage: "exclamationmark.triangle.fill", tint: Theme.warning)
+            strip("Reached the turn limit", tint: Theme.warning)
         case .declined:
-            pill("Stopped — action declined", systemImage: "hand.raised.fill", tint: Theme.warning)
+            strip("Stopped — action declined", tint: Theme.warning)
         case .cancelled:
-            pill("Stopped", systemImage: "stop.fill", tint: Theme.textSecondary)
+            strip("Stopped", tint: Instrument.signalIdle)
         case .engineError(let message):
-            HStack(alignment: .top, spacing: Spacing.sm) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .accessibilityHidden(true)
-                    .foregroundStyle(Theme.danger)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Error")
-                        .font(.callout.weight(.semibold))
-                        .foregroundStyle(Theme.danger)
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(Theme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 8)
-                if let onDismiss {
-                    Button("Dismiss", action: onDismiss)
-                        .buttonStyle(.plain)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Theme.textSecondary)
-                        .accessibilityHint("Hides this error. You can change models or send another message.")
-                }
-            }
-            .padding(.horizontal, Spacing.md)
-            .padding(.vertical, Spacing.sm)
-            .frame(maxWidth: 520, alignment: .leading)
-            .background(Theme.wash(Theme.danger), in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .strokeBorder(Theme.washBorder(Theme.danger), lineWidth: 1))
+            errorCard(message)
         }
     }
 
+    private func errorCard(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                InstrumentLamp(color: Theme.negative, bore: 8, live: true)
+                TranscriptLegend(text: "Error", tint: Theme.negative)
+                Spacer(minLength: 8)
+                if let onDismiss {
+                    Button(action: onDismiss) {
+                        Text("Dismiss")
+                            .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                            .tracking(0.9)
+                            .foregroundStyle(Instrument.inkSecondary)
+                            .padding(.horizontal, 8)
+                            .frame(height: 18)
+                            .environment(\.instrumentPressed, false)
+                            .instrumentKey(RoundedRectangle(cornerRadius: 4, style: .continuous),
+                                           elevation: 0.6)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(InstrumentPressStyle())
+                    .accessibilityHint("Hides this error. You can change models or send another message.")
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 28)
+            Rectangle()
+                .fill(Instrument.seam.opacity(0.4))
+                .frame(height: 0.75)
+            Text(message)
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(Instrument.ink)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+        }
+        .frame(maxWidth: 520, alignment: .leading)
+        .transcriptModule()
+    }
+
+    /// The run's end as a quiet page line — lamp, outcome, metrics — not a
+    /// card. It blends with the deck and never repeats its own legend.
     private var completionCard: some View {
-        HStack(alignment: .center, spacing: Spacing.sm) {
-            Image(systemName: summary.artifact == nil ? "checkmark.seal.fill" : "shippingbox.fill")
-                .font(.app(size: 13, weight: .semibold, design: .serif))
-                .foregroundStyle(Theme.success)
-                .frame(width: 30, height: 30)
-                .background(Theme.wash(Theme.success), in: Circle())
-
-            VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                InstrumentLamp(color: Instrument.signalGreen, bore: 8)
                 Text(completionTitle)
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(Theme.textPrimary)
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .tracking(0.8)
+                    .foregroundStyle(Instrument.inkSecondary)
+                Spacer(minLength: 8)
+            }
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(Instrument.seam.opacity(0.35)).frame(height: 0.75)
+                    .offset(y: 4)
+            }
 
+            if summary.actionCount > 0 || summary.changedFileCount > 0
+                || summary.checksPassed > 0 || summary.checksFailed > 0
+                || summary.artifact != nil {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: Spacing.md) { completionMetrics }
                     VStack(alignment: .leading, spacing: Spacing.xs) { completionMetrics }
                 }
+                .padding(.top, 4)
+            }
 
-                if summary.artifact != nil || summary.report != nil {
-                    HStack(spacing: Spacing.sm) {
-                        if let artifact = summary.artifact {
-                            Button {
-                                NSWorkspace.shared.activateFileViewerSelecting([
-                                    URL(fileURLWithPath: artifact),
-                                ])
-                            } label: {
-                                Label("Reveal artifact", systemImage: "folder")
-                            }
-                            .buttonStyle(LFCapsuleButtonStyle())
+            if summary.artifact != nil || summary.report != nil {
+                HStack(spacing: Spacing.sm) {
+                    if let artifact = summary.artifact {
+                        Button {
+                            NSWorkspace.shared.activateFileViewerSelecting([
+                                URL(fileURLWithPath: artifact),
+                            ])
+                        } label: {
+                            Label("Reveal artifact", systemImage: "folder")
                         }
-                        if let report = summary.report {
-                            Button {
-                                NSWorkspace.shared.open(URL(fileURLWithPath: report))
-                            } label: {
-                                Label("Open Ship Report", systemImage: "doc.text")
-                            }
-                            .buttonStyle(LFCapsuleButtonStyle())
+                        .buttonStyle(LFCapsuleButtonStyle())
+                    }
+                    if let report = summary.report {
+                        Button {
+                            NSWorkspace.shared.open(URL(fileURLWithPath: report))
+                        } label: {
+                            Label("Open Ship Report", systemImage: "doc.text")
                         }
+                        .buttonStyle(LFCapsuleButtonStyle())
                     }
                 }
+                .padding(.top, 2)
             }
-            Spacer(minLength: 0)
-            Button(action: onNewChat) {
-                Label("New chat", systemImage: "square.and.pencil")
-            }
-            .buttonStyle(.plain)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(Theme.textSecondary)
-            .padding(.horizontal, Spacing.xs)
-            .frame(height: 28)
-            .accessibilityHint("Clears this conversation and starts a new chat")
         }
-        .padding(.horizontal, Spacing.xs)
-        .padding(.vertical, 4)
         .frame(maxWidth: 560, alignment: .leading)
     }
 
@@ -1601,66 +2041,53 @@ struct FinishBanner: View {
     private var completionMetrics: some View {
         if summary.actionCount > 0 {
             metric(
-                "\(summary.actionCount) action\(summary.actionCount == 1 ? "" : "s")",
-                icon: "bolt")
+                "\(summary.actionCount) action\(summary.actionCount == 1 ? "" : "s")")
         }
         if summary.changedFileCount > 0 {
             metric(
-                "\(summary.changedFileCount) file\(summary.changedFileCount == 1 ? "" : "s") changed",
-                icon: "doc.badge.ellipsis")
+                "\(summary.changedFileCount) file\(summary.changedFileCount == 1 ? "" : "s") changed")
         }
         if summary.checksPassed > 0 {
             metric(
                 "\(summary.checksPassed) check\(summary.checksPassed == 1 ? "" : "s") passed",
-                icon: "checkmark.circle",
                 tint: Theme.success)
         }
         if summary.checksFailed > 0 {
             metric(
                 "\(summary.checksFailed) check\(summary.checksFailed == 1 ? "" : "s") failed",
-                icon: "xmark.circle",
                 tint: Theme.danger)
         }
         if summary.artifact != nil {
-            metric("Release packaged", icon: "shippingbox", tint: Theme.success)
-        }
-        if summary.actionCount == 0,
-           summary.changedFileCount == 0,
-           summary.checksPassed == 0,
-           summary.checksFailed == 0,
-           summary.artifact == nil {
-            metric("Completed", icon: "checkmark")
+            metric("Release packaged")
         }
     }
 
-    private var completionTitle: LocalizedStringKey {
-        if summary.artifact != nil { return "Release ready" }
-        if summary.changedFileCount > 0 { return "Changes ready for review" }
-        return "Task complete"
+    private var completionTitle: String {
+        if summary.artifact != nil { return "RELEASE READY" }
+        if summary.changedFileCount > 0 { return "CHANGES READY FOR REVIEW" }
+        return "TASK COMPLETE"
     }
 
-    private func metric(
-        _ title: LocalizedStringKey,
-        icon: String,
-        tint: Color = Theme.textSecondary
-    ) -> some View {
-        Label(title, systemImage: icon)
-            .font(.caption)
+    private func metric(_ title: String, tint: Color = Instrument.inkSecondary) -> some View {
+        Text(title.uppercased())
+            .font(.system(size: 9, weight: .medium, design: .monospaced))
+            .tracking(0.8)
             .foregroundStyle(tint)
+            .monospacedDigit()
     }
 
-    private func pill(_ title: String, systemImage: String, tint: Color) -> some View {
-        Label(title, systemImage: systemImage)
-            .font(.callout.weight(.semibold))
-            .foregroundStyle(tint)
-            .padding(.horizontal, Spacing.md)
-            .padding(.vertical, 6)
-            .background(Theme.wash(tint), in: Capsule())
-            .overlay(Capsule().strokeBorder(Theme.washBorder(tint), lineWidth: 1))
+    private func strip(_ title: String, tint: Color) -> some View {
+        HStack(spacing: 8) {
+            InstrumentLamp(color: tint, bore: 8, live: tint != Instrument.signalIdle)
+            TranscriptLegend(text: title, tint: Instrument.inkSecondary)
+        }
+        .padding(.horizontal, 11)
+        .frame(height: 28)
+        .transcriptWell()
     }
 }
-/// Live streaming assistant output: avatar-led (same identity as finished
-/// messages), inline markdown, and a pulsing accent caret while generating.
+/// Live streaming assistant output: the same faceplate module as a finished
+/// answer, with a live lamp in the bezel and a pulsing accent caret.
 /// Reduce Motion: the caret renders solid instead of pulsing.
 ///
 /// The model/controller may publish around twenty text updates per second.
@@ -1674,20 +2101,34 @@ struct StreamingCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            AssistantAvatar()
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 8) {
+                InstrumentLiveSignal(active: true, tint: Instrument.accentOrange)
+                    .frame(width: 9, height: 9)
+                Text("Vamp")
+                    .font(.appUI(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.textSecondary)
+                Spacer(minLength: 8)
+            }
+            .padding(.bottom, 6)
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(Instrument.seam.opacity(0.45))
+                    .frame(height: 0.75)
+            }
             VStack(alignment: .leading, spacing: 4) {
                 StreamingMarkdownText(text: text)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                // Caret: a brand-gradient bar, pulsing while generating
-                // (solid under Reduce Motion).
-                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                    .fill(Theme.accentGradient)
-                    .frame(width: 3, height: 16)
+                // Caret: the instrument's one functional accent, pulsing while
+                // generating (solid under Reduce Motion).
+                RoundedRectangle(cornerRadius: 1, style: .continuous)
+                    .fill(TERail.accent)
+                    .frame(width: 3, height: 15)
                     .opacity(caretVisible ? 1 : 0.25)
             }
-            .textSelection(.enabled)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .textSelection(.enabled)
         .task {
             guard !reduceMotion else { return }
             while !Task.isCancelled {
@@ -1730,60 +2171,43 @@ private struct StreamingMarkdownText: View {
 }
 
 /// Shown while the model works but has produced no visible prose yet
-/// (reasoning blocks, tool-call wire format): a proper animated indicator
+/// (reasoning blocks, tool-call wire format): an engraved readout + spinner
 /// instead of raw filler ("thinking thinking…") or half-streamed JSON.
 /// Reduce Motion: static text, no pulse.
 struct ReasoningIndicator: View {
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            AssistantAvatar()
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.mini)
-                Text("Working…")
-                    .font(.callout)
-            }
-            .foregroundStyle(Theme.textSecondary)
+        HStack(spacing: 8) {
+            InstrumentLiveSignal(active: true, tint: Instrument.accentOrange)
+                .frame(width: 7, height: 7)
+            TranscriptLegend(text: "Working")
+            ProgressView().controlSize(.mini)
         }
         .accessibilityLabel("The model is working")
     }
 }
 
-/// Live activity is a slim native status capsule, not a second answer card.
+/// Live activity is a slim machined readout strip, not a second answer card.
 /// The complete trace remains available in the finished activity disclosure.
 struct LiveReasoningCard: View {
     let text: String
     let phase: AgentPhase
 
-    @State private var pulse = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Circle()
-                .fill(Theme.accent)
-                .frame(width: 6, height: 6)
-                .opacity(pulse ? 0.45 : 1)
-            Text(phaseLabel)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Theme.textPrimary)
+        HStack(spacing: 9) {
+            InstrumentLamp(color: Theme.info, bore: 8, live: true)
+            TranscriptLegend(text: phaseLabel)
             Text(progressExcerpt)
-                .font(.caption)
-                .foregroundStyle(Theme.textSecondary)
+                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                .foregroundStyle(Instrument.inkSecondary)
                 .lineLimit(1)
             Spacer(minLength: 4)
         }
-        .padding(.horizontal, 12)
-        .frame(minHeight: 30)
-        .background(Theme.surface.opacity(0.82), in: Capsule())
-        .overlay(Capsule().strokeBorder(Theme.hairline.opacity(0.75), lineWidth: 1))
+        .padding(.horizontal, 11)
+        .frame(minHeight: 28)
+        .transcriptWell()
         .frame(maxWidth: 620, alignment: .leading)
-        .task {
-            guard !reduceMotion else { return }
-            while !Task.isCancelled {
-                withAnimation(.easeInOut(duration: 0.7)) { pulse.toggle() }
-                try? await Task.sleep(for: .milliseconds(700))
-            }
-        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(phaseLabel): \(progressExcerpt)")
     }
@@ -1816,25 +2240,25 @@ struct PlanCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            TranscriptCardHeader(
+            TranscriptCardTitle(
                 title: "Plan — approve before any tool runs",
-                systemImage: "list.bullet.clipboard.fill",
-                tint: Theme.accent)
+                systemImage: "list.bullet.clipboard")
             Text(plan)
-                .font(.callout)
+                .font(AppFont.chatBody)
                 .foregroundStyle(Theme.textPrimary)
                 .padding(Spacing.md)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                .lineSpacing(4)
+                .background(Theme.surfaceInset.opacity(0.6), in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
                 .textSelection(.enabled)
             HStack(spacing: Spacing.sm) {
                 // Command-Return only: Return must submit revision feedback,
                 // never accidentally approve and execute.
                 Button("Approve & Execute ⌘↩") { onDecision(nil) }
                     .keyboardShortcut(KeyEquivalent.return, modifiers: .command)
-                    .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
+                    .buttonStyle(CompactActionButtonStyle(filled: true))
                 TextField("Revise: feedback…", text: $feedback)
-                    .textFieldStyle(.roundedBorder)
+                    .vampField()
                     .onSubmit {
                         guard !feedback.isEmpty else { return }
                         onDecision(feedback)
@@ -1843,12 +2267,13 @@ struct PlanCard: View {
                     guard !feedback.isEmpty else { return }
                     onDecision(feedback)
                 }
-                .buttonStyle(LFCapsuleButtonStyle())
+                .buttonStyle(CompactActionButtonStyle())
                 .disabled(feedback.isEmpty)
             }
         }
-        .padding(Spacing.lg)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
         .padding(.leading, Spacing.sm)
-        .lfTranscriptCard(Theme.accent)
+        .lfTranscriptCard(Theme.accent, radius: Radius.card)
     }
 }

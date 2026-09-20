@@ -30,6 +30,24 @@ final class ToolParserTests: XCTestCase {
         XCTAssertEqual(calls.map(\.name), ["list_files", "search"])
     }
 
+    /// A write_file payload whose JSON string content itself contains a ```
+    /// fence used to truncate the fenced-block capture, and the truncated
+    /// candidate then suppressed the real balanced object in the fallback.
+    /// Writing any document with fenced code was impossible.
+    func testFencedCallWithEmbeddedCodeFenceContent() {
+        let text = #"""
+        ```tool
+        {"name":"write_file","arguments":{"path":"README.md","content":"Ex:\n```\ncode\n```\ndone"}}
+        ```
+        """#
+        let calls = ToolParser.parse(text)
+        XCTAssertEqual(calls.map(\.name), ["write_file"])
+        guard let call = calls.first else { return }
+        XCTAssertEqual(call.string("path"), "README.md")
+        XCTAssertTrue(call.string("content")?.contains("code") == true)
+        XCTAssertTrue(call.string("content")?.contains("done") == true)
+    }
+
     func testQwenToolCallTags() {
         let text = #"""
         I'll check the build.
@@ -41,6 +59,42 @@ final class ToolParserTests: XCTestCase {
         XCTAssertEqual(calls.count, 1)
         guard let call = calls.first else { return }
         XCTAssertEqual(call.name, "run_command")
+        XCTAssertEqual(call.string("command"), "swift build")
+    }
+
+    /// MiniCPM emits the Hermes-style name line with XML `<![CDATA[…]]>`
+    /// values. Without unwrapping, `run_command` executed the literal CDATA
+    /// text and every shell call failed.
+    func testHermesStyleCDATAArgumentsAreUnwrapped() {
+        let text = """
+        <tool_call>
+        run
+        {"command": "<![CDATA[pwd && ls -la]]>"}
+        </tool_call>
+        """
+        let calls = ToolParser.parse(text)
+        XCTAssertEqual(calls.count, 1)
+        XCTAssertEqual(calls.first?.name, "run_command")
+        XCTAssertEqual(calls.first?.string("command"), "pwd && ls -la")
+    }
+
+    func testAbbreviatedToolNamesMapToCanonical() {
+        let text = """
+        <tool_call>
+        read
+        {"path": "<![CDATA[Sources/App.swift]]>"}
+        </tool_call>
+        """
+        let calls = ToolParser.parse(text)
+        XCTAssertEqual(calls.first?.name, "read_file")
+        XCTAssertEqual(calls.first?.string("path"), "Sources/App.swift")
+    }
+
+    func testCanonicalNamesAreLeftUntouched() {
+        XCTAssertEqual(ToolParser.canonicalName("read_file"), "read_file")
+        XCTAssertEqual(ToolParser.canonicalName("write_file"), "write_file")
+        XCTAssertEqual(ToolParser.canonicalName("mcp__server__tool"), "mcp__server__tool")
+        XCTAssertEqual(ToolParser.canonicalName("nonsense"), "nonsense")
     }
 
     func testStrippingToolCallsRemovesTheWholeWrapper() {
@@ -198,6 +252,24 @@ final class ToolCallTextTests: XCTestCase {
         let calls = ToolParser.parse(text)
         XCTAssertEqual(calls.map(\.name), ["ask_user"])
         XCTAssertEqual(calls.first?.askUserQuestion(), "Which port?")
+    }
+
+    func testFunctionNameAttributeWrapperWithParamArguments() {
+        let text = #"<function name="list_directory"><param name="path">/Users/m/Desktop/project</param></function>"#
+        let calls = ToolParser.parse(text)
+        XCTAssertEqual(calls.map(\.name), ["list_directory"])
+        XCTAssertEqual(calls.first?.string("path"), "/Users/m/Desktop/project")
+    }
+
+    func testFunctionNameAttributeWrapperStripsFromDisplay() {
+        let text = #"I'll inspect it. <function name="web_search"><param name="query">SwiftUI ScrollView</param></function> Done."#
+        XCTAssertEqual(ToolParser.strippingCalls(from: text), "I'll inspect it.  Done.")
+    }
+
+    func testMultipleFunctionNameAttributeWrappersAreParsedInOrder() {
+        let text = #"<function name="list_directory"><param name="path">.</param></function><function name="web_search"><param name="query">SwiftUI</param></function>"#
+        let calls = ToolParser.parse(text)
+        XCTAssertEqual(calls.map(\.name), ["list_directory", "web_search"])
     }
 
     func testInvokeParameterWrapper() {

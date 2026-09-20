@@ -153,7 +153,7 @@ final class AgentLoopTests: XCTestCase {
         XCTAssertFalse(finished[0].2, finished[0].1)
         XCTAssertTrue(finished[0].1.contains("hello from readme"), finished[0].1)
         XCTAssertEqual(collector.finish, .completed("Subagent finished. Task complete."))
-        // Parent engine still holds the scripted FIFO — child used streamReplay,
+        // Parent engine still holds the scripted FIFO — child used IsolatedReplayEngine,
         // so the third response belongs to the parent, not a stolen turn.
         XCTAssertGreaterThanOrEqual(engine.streamCallCount, 3)
     }
@@ -544,6 +544,85 @@ final class AgentLoopTests: XCTestCase {
         XCTAssertTrue(message.contains("three identical attempts"), message)
     }
 
+    /// Chat-only/Assistant sessions run with Reliability V2 disabled. The
+    /// repeated-failure interlock must stay off there so one weak retry never
+    /// kills the whole task — the failing observation is still returned and
+    /// the model can recover or the run ends at the normal turn limit.
+    func testIdenticalFailuresDoNotStopRunWithoutReliabilityV2() async throws {
+        let missing = toolCall("read_file", "{\"path\": \"missing.txt\"}")
+        engine.enqueue(texts: [missing, missing, missing, "I could not find missing.txt."])
+        let loop = makeLoop()
+        let collector = await runToCompletion(loop)
+
+        XCTAssertEqual(
+            collector.toolCalls().map(\.name),
+            ["read_file", "read_file", "read_file"])
+        let loopErrors = collector.events { event in
+            if case .protocolError(let message) = event { return message }
+            return nil
+        }
+        XCTAssertFalse(loopErrors.contains { $0.contains("Reliability V2") })
+        guard case .completed? = collector.finish else {
+            return XCTFail("expected the run to continue to a normal completion")
+        }
+    }
+
+    func testVerificationCommandClassificationIgnoresSubstrings() {
+        for command in [
+            "swift test", "swift build", "xcodebuild -scheme Demo build",
+            "npm test", "npm run build", "pnpm lint", "cargo test", "go test ./...",
+            "pytest -q", "make test", "git diff --check",
+        ] {
+            XCTAssertTrue(AgentLoop.looksLikeVerificationCommand(command), command)
+        }
+        for command in [
+            "mkdir -p build", "node builder.js", "rm -rf build",
+            "grep 'test ' logs.txt", "cat build.log", "npm install",
+            "git log --grep=build", "swift run server",
+        ] {
+            XCTAssertFalse(AgentLoop.looksLikeVerificationCommand(command), command)
+        }
+    }
+
+    /// Compact local / guest tool registries omit `build_diagnostics`. The
+    /// verification pass must fall back to `run_command` (or an honest
+    /// no-check observation) instead of failing on an unknown tool forever.
+    func testVerificationFallsBackToRunCommandWhenDiagnosticsIsUnregistered() async throws {
+        let gitInit = Process()
+        gitInit.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        gitInit.arguments = ["init", "-q"]
+        gitInit.currentDirectoryURL = workspace.url
+        try gitInit.run()
+        gitInit.waitUntilExit()
+        XCTAssertEqual(gitInit.terminationStatus, 0)
+
+        var config = AgentLoop.Configuration()
+        config.reliabilityV2 = true
+        let loop = AgentLoop(
+            engine: engine,
+            workspace: workspace.workspace,
+            tools: [WriteFileTool(), RunCommandTool()],
+            permissions: PermissionGate(
+                autoApproveEdits: true,
+                autoApproveCommands: true,
+                workspace: workspace.workspace),
+            configuration: config,
+            taskHint: "Create value.swift and verify it")
+        engine.enqueue(texts: [
+            toolCall("write_file", "{\"path\": \"value.swift\", \"content\": \"GOOD\"}"),
+            toolCall("attempt_completion", "{\"result\": \"Done.\"}"),
+        ])
+        let collector = await runToCompletion(loop, timeout: 20)
+
+        let verification = collector.toolCalls().filter { $0.name == "run_command" }
+        XCTAssertTrue(
+            verification.first?.argumentsJSON.contains("git diff --check") == true,
+            verification.first?.argumentsJSON ?? "no run_command call")
+        guard case .completed? = collector.finish else {
+            return XCTFail("verification must not block completion when build_diagnostics is absent")
+        }
+    }
+
     func testReliabilityV2DoesNotRepeatAnIdenticalSuccessfulMutation() async throws {
         workspace.write("// test package marker", to: "Package.swift")
         let write = toolCall("write_file", "{\"path\": \"value.swift\", \"content\": \"GOOD\"}")
@@ -624,6 +703,24 @@ final class AgentLoopTests: XCTestCase {
         XCTAssertEqual(collector.toolCalls().count, 1)
         XCTAssertEqual(collector.toolCalls()[0].name, "read_file")
         XCTAssertEqual(collector.finish, .completed("Done."))
+    }
+
+    func testFunctionXMLBatchExecutesFirstCallAndReturnsToModel() async throws {
+        workspace!.write("a", to: "a.txt")
+        workspace!.write("b", to: "b.txt")
+        let xmlA = #"<function name="read_file"><param name="path">a.txt</param></function>"#
+        let xmlB = #"<function name="read_file"><param name="path">b.txt</param></function>"#
+        engine.enqueue(texts: [xmlA + xmlB, "Done after inspecting the first file."])
+        let loop = makeLoop()
+        let collector = await runToCompletion(loop)
+
+        XCTAssertEqual(collector.toolCalls().map(\.name), ["read_file"])
+        XCTAssertEqual(collector.finish, .completed("Done after inspecting the first file."))
+        let protocolErrors = collector.events { event in
+            if case .protocolError = event { return event }
+            return nil
+        }
+        XCTAssertTrue(protocolErrors.isEmpty, protocolErrors.map { String(describing: $0) }.joined(separator: "\n"))
     }
 
     func testTaskRoutingAdvertisesCompactNativeAndPromptCatalogs() async throws {

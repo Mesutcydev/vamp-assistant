@@ -57,19 +57,7 @@ private struct BrowserPanelChrome: View {
                 .help(controller.isLoading ? "Stop" : "Reload")
                 .accessibilityLabel(controller.isLoading ? "Stop loading" : "Reload page")
 
-                Menu {
-                    Button("Vamp Assistant", systemImage: "sparkles") {
-                        BrowserController.shared.reveal(openPanel: false)
-                    }
-                    if !computers.isEmpty { Divider() }
-                    ForEach(computers) { computer in
-                        Button(computer.name, systemImage: "person.crop.circle") {
-                            BrowserController.controller(
-                                for: BrowserSession(id: computer.id, name: computer.name))
-                                .reveal(openPanel: false)
-                        }
-                    }
-                } label: {
+                InstrumentMenu(menuWidth: 240) {
                     Label(controller.ownerLabel.isEmpty ? "Assistant" : controller.ownerLabel,
                           systemImage: "person.crop.circle.badge.checkmark")
                         .font(.caption.weight(.semibold))
@@ -77,13 +65,23 @@ private struct BrowserPanelChrome: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(Theme.surfaceInset, in: Capsule())
+                } options: {
+                    InstrumentMenuRow(title: "Vamp Assistant", systemImage: "sparkles") {
+                        BrowserController.shared.reveal(openPanel: false)
+                    }
+                    ForEach(computers) { computer in
+                        InstrumentMenuRow(title: computer.name, systemImage: "person.crop.circle") {
+                            BrowserController.controller(
+                                for: BrowserSession(id: computer.id, name: computer.name))
+                                .reveal(openPanel: false)
+                        }
+                    }
                 }
-                .menuStyle(.borderlessButton)
                 .fixedSize()
                 .help("Choose the Assistant or a bot's private browser")
 
                 TextField("Enter a URL or let the agent open one…", text: $urlDraft)
-                    .textFieldStyle(.roundedBorder)
+                    .vampField()
                     .font(.callout.monospaced())
                     .autocorrectionDisabled()
                     .focused($urlFocused)
@@ -222,15 +220,48 @@ private struct BrowserWebViewHost: NSViewRepresentable {
         }
         if webView.superview !== container {
             webView.removeFromSuperview()
-            webView.frame = container.bounds
-            webView.autoresizingMask = [.width, .height]
             container.addSubview(webView)
+        }
+        // Always re-assert the frame: SwiftUI can move the web view between
+        // hosts (docked panel ↔ compact sheet) and resize the panel without an
+        // updateNSView pass. Relying on autoresizing alone left the web view
+        // at its old, wider size, so the page laid out for a wide viewport and
+        // was visibly clipped inside the narrow panel.
+        if let webContainer = container as? WebViewContainer {
+            webContainer.webView = webView
+        }
+        webView.autoresizingMask = [.width, .height]
+        webView.frame = container.bounds
+        container.needsLayout = true
+    }
+
+    /// Container that keeps the hosted web view exactly its own size on every
+    /// layout pass, and clips it so a transient mismatch can never bleed over
+    /// the chat column.
+    final class WebViewContainer: NSView {
+        weak var webView: WKWebView?
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            clipsToBounds = true
+        }
+
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        override func layout() {
+            super.layout()
+            guard let webView, webView.superview === self else { return }
+            if webView.frame != bounds {
+                webView.frame = bounds
+            }
         }
     }
 
     @MainActor
     final class Coordinator: NSObject, WKUIDelegate {
-        let container = NSView()
+        let container = WebViewContainer()
         var controller: BrowserController?
 
         /// Keep navigation inside the panel; new-window requests become

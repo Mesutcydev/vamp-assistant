@@ -54,6 +54,77 @@ private final class ProviderFixtureURLProtocol: URLProtocol {
 /// they exercise the pure preparation/parsing layers, never the network.
 final class ProviderAuditTests: XCTestCase {
 
+    func testLiveOpenCodeMuseConnectionWhenRequested() async throws {
+        guard ProcessInfo.processInfo.environment["VAMP_LIVE_OPENCODE"] == "1" else {
+            throw XCTSkip("Live provider probe is opt-in")
+        }
+        guard let key = APIKeyStore.key(provider: .openCodeGo) else {
+            throw XCTSkip("No OpenCode Go key available to the isolated test host")
+        }
+        let endpoint = RemoteEndpoint(provider: .openCodeGo, model: "muse-spark-1.3-contributor",
+                                      headers: ["x-opencode-session": UUID().uuidString])
+        let response = try await RemoteLLMClient.testConnection(endpoint: endpoint, apiKey: key)
+        XCTAssertFalse(response.isEmpty)
+    }
+
+    func testOpenCodeDiscoveryResolvesEachModelProtocol() async throws {
+        providerFixtureStore.setResponder { _ in
+            (200, Data(#"{"data":[{"id":"muse-spark-1.3-contributor"},{"id":"deepseek-v4-flash"},{"id":"minimax-m3"}]}"#.utf8))
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ProviderFixtureURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let profiles = try await RemoteLLMClient.fetchModelProfiles(
+            endpoint: RemoteEndpoint(provider: .openCodeGo, model: "deepseek-v4-flash"),
+            apiKey: "fixture", session: session)
+        XCTAssertEqual(profiles.first { $0.model.contains("muse") }?.apiProtocol, .openAIResponses)
+        XCTAssertEqual(profiles.first { $0.model.contains("deepseek") }?.apiProtocol, .openAIChatCompletions)
+        XCTAssertEqual(profiles.first { $0.model.contains("minimax") }?.apiProtocol, .anthropicMessages)
+    }
+
+    /// The Zen/Go model-to-protocol table is mixed and per model. These
+    /// expectations mirror opencode.ai/docs/zen and /docs/go (models.dev is
+    /// the runtime source OpenCode itself uses).
+    func testOpenCodeZenAndGoModelProtocolMapping() {
+        func protocolFor(_ provider: String, _ model: String) -> RemoteAPIProtocol {
+            RemoteAPIProtocol.inferred(providerID: provider, model: model)
+        }
+
+        // Zen: Gemini models use the native Google protocol.
+        XCTAssertEqual(protocolFor("opencode", "gemini-3.7-flash"), .gemini)
+        XCTAssertEqual(protocolFor("opencode", "gemini-3.5-flash"), .gemini)
+        // Zen: Claude/Qwen speak Messages.
+        XCTAssertEqual(protocolFor("opencode", "claude-opus-4-6"), .anthropicMessages)
+        XCTAssertEqual(protocolFor("opencode", "qwen3.6-plus"), .anthropicMessages)
+        // Zen: paid MiniMax is chat completions; the free variants are Messages.
+        XCTAssertEqual(protocolFor("opencode", "minimax-m3"), .openAIChatCompletions)
+        XCTAssertEqual(protocolFor("opencode", "minimax-m3-free"), .anthropicMessages)
+        // Zen: GPT, Grok 4.x, and Muse Spark speak Responses; grok-code does not.
+        XCTAssertEqual(protocolFor("opencode", "gpt-5.6-terra"), .openAIResponses)
+        XCTAssertEqual(protocolFor("opencode", "gpt-5.3-codex-spark"), .openAIResponses)
+        XCTAssertEqual(protocolFor("opencode", "grok-4.6"), .openAIResponses)
+        XCTAssertEqual(protocolFor("opencode", "grok-build-0.1"), .openAIResponses)
+        XCTAssertEqual(protocolFor("opencode", "muse-spark-1.3"), .openAIResponses)
+        XCTAssertEqual(protocolFor("opencode", "grok-code"), .openAIChatCompletions)
+        // Zen: the open-model families stay OpenAI-compatible.
+        XCTAssertEqual(protocolFor("opencode", "glm-5.2"), .openAIChatCompletions)
+        XCTAssertEqual(protocolFor("opencode", "kimi-k3"), .openAIChatCompletions)
+        XCTAssertEqual(protocolFor("opencode", "deepseek-v4-pro"), .openAIChatCompletions)
+
+        // Go: MiniMax and Qwen speak Messages...
+        XCTAssertEqual(protocolFor("opencode-go", "minimax-m3"), .anthropicMessages)
+        XCTAssertEqual(protocolFor("opencode-go", "qwen3.8-flash"), .anthropicMessages)
+        // ...Responses for GPT/Grok/Muse...
+        XCTAssertEqual(protocolFor("opencode-go", "gpt-5.6-luna"), .openAIResponses)
+        XCTAssertEqual(protocolFor("opencode-go", "grok-4.6"), .openAIResponses)
+        XCTAssertEqual(protocolFor("opencode-go", "muse-spark-1.3-contributor"), .openAIResponses)
+        // ...and chat completions for the remaining open-model families.
+        XCTAssertEqual(protocolFor("opencode-go", "longcat-2.0"), .openAIChatCompletions)
+        XCTAssertEqual(protocolFor("opencode-go", "kimi-k3"), .openAIChatCompletions)
+        XCTAssertEqual(protocolFor("opencode-go", "mimo-v2.5"), .openAIChatCompletions)
+        XCTAssertEqual(protocolFor("opencode-go", "hy3"), .openAIChatCompletions)
+    }
+
     // MARK: P1 — UTF-8-safe SSE parsing
 
     func testSSEMultibyteCharacterSplitAcrossChunks() async throws {
@@ -82,6 +153,33 @@ final class ProviderAuditTests: XCTestCase {
         } onUsage: { _ in }
         collected = box.text
         XCTAssertEqual(collected, "中文", "multi-byte chars must survive chunk splits")
+    }
+
+    /// In-band errors inside a 200 SSE stream must fail the call instead of
+    /// ending it as a successful, truncated answer.
+    func testSSEInBandErrorsFailTheStream() async throws {
+        let frames = [
+            #"data: {"error":{"message":"rate limited"}}"#,
+            #"data: {"error":"quota exceeded"}"#,
+            #"data: {"type":"error","error":{"message":"overloaded"}}"#,
+            #"data: {"type":"response.failed","response":{"error":{"message":"boom"}}}"#,
+        ]
+        for frame in frames {
+            var bytes = Array(Data((frame + "\n").utf8))
+            bytes.append(0x0A)
+            let stream = AsyncThrowingStream<UInt8, Error> { continuation in
+                for byte in bytes { continuation.yield(byte) }
+                continuation.finish()
+            }
+            do {
+                try await RemoteLLMClient.consumeSSE(bytes: stream, onText: { _ in })
+                XCTFail("expected a provider error for \(frame)")
+            } catch let error as RemoteLLMError {
+                guard case .providerError = error else {
+                    return XCTFail("wrong error for \(frame): \(error)")
+                }
+            }
+        }
     }
 
     func testSSEDoneAndKeepaliveIgnored() async throws {
@@ -172,6 +270,9 @@ final class ProviderAuditTests: XCTestCase {
     func testReasoningModelHeuristics() {
         XCTAssertTrue(RemoteLLMClient.usesMaxCompletionTokens("o3-mini"))
         XCTAssertTrue(RemoteLLMClient.usesMaxCompletionTokens("gpt-5-chat"))
+        XCTAssertTrue(RemoteLLMClient.usesMaxCompletionTokens("gpt-6-astra"))
+        XCTAssertTrue(RemoteLLMClient.usesMaxCompletionTokens("openai/gpt-5.2"))
+        XCTAssertTrue(RemoteLLMClient.usesMaxCompletionTokens("openai/gpt-6-astra"))
         XCTAssertFalse(RemoteLLMClient.usesMaxCompletionTokens("gpt-4o"))
         XCTAssertTrue(RemoteLLMClient.omitsTemperature("deepseek-reasoner"))
         XCTAssertTrue(RemoteLLMClient.omitsTemperature("o4-mini"))
@@ -181,7 +282,7 @@ final class ProviderAuditTests: XCTestCase {
     // MARK: P4/P5 — provider registry additions
 
     func testProviderRegistryExtensions() {
-        XCTAssertEqual(LLMProvider.allCases.count, 11)
+        XCTAssertEqual(LLMProvider.allCases.count, 12)
         XCTAssertNotNil(LLMProvider.anthropic.anthropicBaseURL)
         XCTAssertEqual(LLMProvider.anthropic.anthropicBaseURL?.host, "api.anthropic.com")
         XCTAssertNil(LLMProvider.anthropic.openAICompatibleBaseURL)
@@ -206,6 +307,31 @@ final class ProviderAuditTests: XCTestCase {
                        "https://opencode.ai/zen/v1")
         XCTAssertEqual(LLMProvider.openCode.modelsURL?.absoluteString,
                        "https://opencode.ai/zen/v1/models")
+        XCTAssertEqual(LLMProvider.nvidia.displayName, "NVIDIA API")
+        XCTAssertEqual(LLMProvider.nvidia.defaultModel, "nvidia/llama-3.3-nemotron-super-49b-v1.5")
+        XCTAssertEqual(LLMProvider.nvidia.openAICompatibleBaseURL?.absoluteString,
+                       "https://integrate.api.nvidia.com/v1")
+        XCTAssertEqual(LLMProvider.nvidia.modelsURL?.absoluteString,
+                       "https://integrate.api.nvidia.com/v1/models")
+        XCTAssertEqual(LLMProvider.fromOpenCodeIdentifier("nvidia"), .nvidia)
+        XCTAssertEqual(LLMProvider.fromOpenCodeIdentifier("nim"), .nvidia)
+        XCTAssertFalse(KnownRemoteProvider.compatiblePresets.contains { $0.id == "nvidia" })
+        XCTAssertEqual(LLMProvider.openAI.defaultModel, "gpt-5.6-terra")
+        XCTAssertEqual(LLMProvider.openAI.suggestedModels.first, "gpt-5.6-terra")
+        XCTAssertFalse(LLMProvider.openAI.suggestedModels.contains("gpt-6-astra"))
+        XCTAssertFalse(LLMProvider.openRouter.suggestedModels.contains("openai/gpt-6-astra"))
+        XCTAssertFalse(KnownRemoteProvider.all.contains { $0.id == "nvidia" })
+        XCTAssertTrue(LLMProvider.openAI.suggestedModels.contains("gpt-5.6-terra"))
+        XCTAssertTrue(LLMProvider.openAI.suggestedModels.contains("gpt-5.6-luna"))
+        XCTAssertEqual(
+            RemoteModelCatalog.reasoningEfforts(provider: .openAI, model: "gpt-6-astra").map(\.rawValue),
+            CodexAccountCatalog.astraReasoningEfforts)
+        XCTAssertEqual(
+            RemoteModelCatalog.defaultReasoningEffort(provider: .openAI, model: "gpt-6-astra"),
+            CodexAccountCatalog.defaultReasoningEffort(for: "gpt-6-astra"))
+        XCTAssertEqual(
+            RemoteModelCatalog.defaultReasoningEffort(provider: .openAI, model: "gpt-6-astra-pro"),
+            CodexAccountCatalog.defaultReasoningEffort(for: "gpt-6-astra-pro"))
     }
 
     func testCuratedModelCatalogsAndReasoningEfforts() throws {
@@ -227,6 +353,11 @@ final class ProviderAuditTests: XCTestCase {
         XCTAssertEqual(
             RemoteModelCatalog.reasoningEfforts(provider: .gemini, model: "gemini-3.5-flash").map(\.rawValue),
             ["minimal", "low", "medium", "high"])
+        XCTAssertEqual(
+            RemoteModelCatalog.reasoningEfforts(
+                provider: .nvidia,
+                model: "nvidia/nemotron-3-super-120b-a12b").map(\.rawValue),
+            ["low", "medium", "high"])
     }
 
     func testReasoningEffortOverrideIsValidatedAndHonorsExplicitOff() {
@@ -237,8 +368,9 @@ final class ProviderAuditTests: XCTestCase {
         XCTAssertEqual(
             profile.selectedReasoningEffort(using: RemoteModelOverride(reasoningEffort: "XHIGH")),
             "xhigh")
-        XCTAssertNil(
-            profile.selectedReasoningEffort(using: RemoteModelOverride(reasoningEffort: "not-a-mode")))
+        XCTAssertEqual(
+            profile.selectedReasoningEffort(using: RemoteModelOverride(reasoningEffort: "not-a-mode")),
+            profile.effectiveDefaultReasoningEffort)
 
         let disabled = profile.applying(RemoteModelOverride(supportsReasoning: false))
         XCTAssertTrue(disabled.effectiveReasoningEfforts.isEmpty)
@@ -715,6 +847,50 @@ final class ProviderAuditTests: XCTestCase {
         XCTAssertTrue(rendered.contains("at (120,50)"))
     }
 
+    /// `sim_swipe` must send argent's canonical gesture-swipe argument names;
+    /// the old startX/endX names were rejected by argent's schema, so the tool
+    /// could never work.
+    func testSimSwipeUsesArgentGestureArgumentNames() throws {
+        let modern = ParsedToolCall(name: "sim_swipe", arguments: .object([
+            "udid": .string("ABC"),
+            "fromX": .number(0.1), "fromY": .number(0.2),
+            "toX": .number(0.3), "toY": .number(0.4),
+        ]), index: 0)
+        let legacy = ParsedToolCall(name: "sim_swipe", arguments: .object([
+            "udid": .string("ABC"),
+            "startX": .number(0.1), "startY": .number(0.2),
+            "endX": .number(0.3), "endY": .number(0.4),
+        ]), index: 0)
+        for call in [modern, legacy] {
+            let args = try SimSwipeTool.swipeArguments(call)
+            XCTAssertEqual(args["fromX"] as? Double, 0.1)
+            XCTAssertEqual(args["fromY"] as? Double, 0.2)
+            XCTAssertEqual(args["toX"] as? Double, 0.3)
+            XCTAssertEqual(args["toY"] as? Double, 0.4)
+            XCTAssertNil(args["startX"])
+        }
+        let schema = SimSwipeTool().schemaText
+        XCTAssertTrue(schema.contains("\"fromX\""))
+        XCTAssertFalse(schema.contains("\"startX\""))
+    }
+
+    /// Gemini 3.7+ rejects the MINIMAL thinking level, so it is not offered
+    /// and any persisted selection is clamped to LOW.
+    func testGeminiMinimalThinkingIsSuppressedFor37AndNewer() {
+        XCTAssertTrue(RemoteModelCatalog.geminiSupportsMinimalThinking("gemini-2.5-pro"))
+        XCTAssertTrue(RemoteModelCatalog.geminiSupportsMinimalThinking("gemini-3.5-flash"))
+        XCTAssertFalse(RemoteModelCatalog.geminiSupportsMinimalThinking("gemini-3.7-flash"))
+        XCTAssertFalse(RemoteModelCatalog.geminiSupportsMinimalThinking("gemini-3.8-flash"))
+
+        let modern = RemoteModelCatalog.reasoningEfforts(
+            provider: .gemini, model: "gemini-3.7-flash").map(\.rawValue)
+        XCTAssertFalse(modern.contains("minimal"))
+        XCTAssertTrue(modern.contains("low"))
+        let legacy = RemoteModelCatalog.reasoningEfforts(
+            provider: .gemini, model: "gemini-3.5-flash").map(\.rawValue)
+        XCTAssertTrue(legacy.contains("minimal"))
+    }
+
     @MainActor
     func testBrowserControlSchemasExposeRefsAndPostActionCapture() throws {
         let tools: [any AgentTool] = [
@@ -766,6 +942,82 @@ final class ProviderAuditTests: XCTestCase {
             try BrowserURLValidator.validatedURL("file:///etc/passwd", filePolicy: .refuse))
     }
 
+    /// A generated website is normally referenced by its project-relative
+    /// path. Without this, `browser_navigate {"url": "index.html"}` silently
+    /// became `https://index.html` and the preview loop never worked.
+    func testBrowserResolvesWorkspaceRelativePagePath() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("beet-relative-\(UUID().uuidString)", isDirectory: true)
+        let site = root.appendingPathComponent("site", isDirectory: true)
+        try FileManager.default.createDirectory(at: site, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = site.appendingPathComponent("index.html")
+        try "<p>hi</p>".write(to: file, atomically: true, encoding: .utf8)
+        let workspace = Workspace(root: root)
+
+        let relative = try BrowserURLValidator.validatedURL(
+            "site/index.html", filePolicy: .confined(workspace))
+        XCTAssertTrue(relative.isFileURL)
+        XCTAssertEqual(relative.path, Workspace.resolvingSymlinks(file).path)
+
+        // A bare page name at the workspace root works too.
+        let bareFile = site.appendingPathComponent("index2.html")
+        try "<p>hi</p>".write(to: bareFile, atomically: true, encoding: .utf8)
+        let bare = try BrowserURLValidator.validatedURL(
+            "index2.html", filePolicy: .confined(Workspace(root: site)))
+        XCTAssertTrue(bare.isFileURL)
+        XCTAssertEqual(bare.path, Workspace.resolvingSymlinks(bareFile).path)
+    }
+
+    /// Explicit POSIX paths that escape the workspace fail with a message
+    /// that names the real workspace root so a model can correct itself
+    /// instead of repeating the same refused navigation.
+    func testBrowserRefusalNamesTheWorkspaceRoot() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("beet-refuse-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let workspace = Workspace(root: root)
+
+        XCTAssertThrowsError(
+            try BrowserURLValidator.validatedURL("/workspace/index.html", filePolicy: .confined(workspace))
+        ) { error in
+            let message = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+            XCTAssertTrue(message.contains(root.path), message)
+        }
+    }
+
+    /// The user picked this exact path in the native Save panel, so the
+    /// in-app browser may preview it even though it is outside the workspace.
+    func testBrowserAllowsDocumentSavedThroughSavePanel() throws {
+        let workspaceRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("beet-save-ws-\(UUID().uuidString)", isDirectory: true)
+        let saveRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("beet-save-out-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: saveRoot, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: workspaceRoot)
+            try? FileManager.default.removeItem(at: saveRoot)
+            SavedDocumentRegistry.reset()
+        }
+        let file = saveRoot.appendingPathComponent("background.html")
+        try "<p>animated</p>".write(to: file, atomically: true, encoding: .utf8)
+        let workspace = Workspace(root: workspaceRoot)
+
+        XCTAssertThrowsError(
+            try BrowserURLValidator.validatedURL(file.absoluteString, filePolicy: .confined(workspace)))
+        SavedDocumentRegistry.allow(file)
+        let allowed = try BrowserURLValidator.validatedURL(
+            file.absoluteString, filePolicy: .confined(workspace))
+        XCTAssertEqual(allowed.path, file.path)
+
+        // The allowlist is exact: a sibling path still fails closed.
+        let sibling = saveRoot.appendingPathComponent("other.html")
+        XCTAssertThrowsError(
+            try BrowserURLValidator.validatedURL(sibling.absoluteString, filePolicy: .confined(workspace)))
+    }
+
     func testWebFetchRejectsNonHTTPSchemes() {
         XCTAssertThrowsError(try WebFetchPolicy.validatedURL("file:///etc/passwd"))
         XCTAssertThrowsError(try WebFetchPolicy.validatedURL("javascript:alert(1)"))
@@ -777,6 +1029,26 @@ final class ProviderAuditTests: XCTestCase {
         XCTAssertThrowsError(try WebFetchPolicy.validatedURL("http://localhost/"))
         XCTAssertThrowsError(try WebFetchPolicy.validatedURL("http://192.168.1.1/"))
         XCTAssertThrowsError(try WebFetchPolicy.validatedURL("http://10.0.0.1/"))
+    }
+
+    /// Numeric/alternative IP encodings reach loopback or RFC1918 hosts while
+    /// looking like an ordinary hostname to a dotted-quad check.
+    func testWebFetchRejectsAlternativeLoopbackEncodings() {
+        for host in [
+            "2130706433", "0x7f000001", "127.1", "0177.0.0.1",
+            "0.0.0.0", "100.64.0.1", "172.20.0.1", "224.0.0.1",
+        ] {
+            XCTAssertTrue(WebFetchPolicy.isBlockedHost(host), host)
+            XCTAssertThrowsError(try WebFetchPolicy.validatedURL("http://\(host)/secret"), host)
+        }
+        for host in ["::ffff:127.0.0.1", "fe80::1", "fd00::1", "::"] {
+            XCTAssertTrue(WebFetchPolicy.isBlockedHost(host), host)
+        }
+        XCTAssertFalse(WebFetchPolicy.isBlockedHost("8.8.8.8"))
+        XCTAssertFalse(WebFetchPolicy.isBlockedHost("example.com"))
+        // Resolution closes the static malicious-DNS case. localhost resolves
+        // locally, so this stays deterministic and offline.
+        XCTAssertNotNil(WebFetchPolicy.blockedResolvedAddress(for: "localhost"))
     }
 
     func testWebFetchAllowsHTTPSAndBareHosts() throws {

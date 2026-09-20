@@ -35,6 +35,8 @@ enum ToolError: Error, LocalizedError, Equatable {
     case fileTooLarge(String, size: Int, limit: Int)
     case contentTooLarge(size: Int, limit: Int)
     case missingArgument(String)
+    case invalidArguments(String)
+    case scaffoldWouldOverwrite(String)
     case timeout(Int)
     case commandFailed(exitCode: Int)
 
@@ -56,6 +58,10 @@ enum ToolError: Error, LocalizedError, Equatable {
             return "The generated document is \(ByteFormatter.bytes(Int64(size))) — larger than the \(ByteFormatter.bytes(Int64(limit))) save limit."
         case .missingArgument(let name):
             return "Missing required argument '\(name)'."
+        case .invalidArguments(let detail):
+            return "Invalid arguments: \(detail)."
+        case .scaffoldWouldOverwrite(let detail):
+            return "Refused to scaffold: \(detail). Pass overwrite=true to replace them."
         case .timeout(let seconds):
             return "Command timed out after \(seconds)s."
         case .commandFailed(let code):
@@ -346,6 +352,20 @@ protocol AgentTool: Sendable {
     /// Bumped when the tool's behavior changes; part of the action fingerprint.
     var cacheVersion: String { get }
 
+    /// True when this tool's output comes from outside the workspace — web
+    /// pages, remote documents — and must be treated as untrusted data. The
+    /// loop screens such observations before the model reads them. Declared in
+    /// the protocol body (not only the extension) so the flag dispatches
+    /// dynamically through `any AgentTool`. Default: false.
+    var untrustedOutput: Bool { get }
+
+    /// Tools that report a failed operation by returning an `"error: …"`
+    /// string instead of throwing set this true, so the executor and the loop
+    /// classify the outcome as a failure. Tools that return raw content (file
+    /// bodies, page text) must leave it false: their output can legitimately
+    /// begin with "error:".
+    var treatsErrorPrefixAsFailure: Bool { get }
+
     /// Preview shown when approval is required. Default: nothing.
     func preview(_ call: ParsedToolCall, in context: ToolContext) -> ApprovalPreview
 
@@ -370,6 +390,8 @@ extension AgentTool {
 
     var cachePolicy: ToolCachePolicy { .never }
     var cacheVersion: String { "1" }
+    var untrustedOutput: Bool { false }
+    var treatsErrorPrefixAsFailure: Bool { false }
 
     /// Content hashes of the inputs this call's result depends on. Part of the
     /// action fingerprint; tools with stateful inputs return [] (they should

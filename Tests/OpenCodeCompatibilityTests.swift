@@ -99,6 +99,59 @@ final class OpenCodeCompatibilityTests: XCTestCase {
         XCTAssertEqual(catalog.permissions.effect(action: "edit", resource: "Tests/AppTests.swift"), .deny)
     }
 
+    /// Credential references in imported headers must survive in persisted
+    /// profiles as references — the secret is read only at request time.
+    func testImportedHeaderReferencesAreNotResolvedIntoPersistedProfiles() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("beetcode-opencode-headers-\(UUID().uuidString)", isDirectory: true)
+        let configDirectory = root.appendingPathComponent(".config/opencode", isDirectory: true)
+        try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "super-secret".write(
+            to: configDirectory.appendingPathComponent("secret.txt"),
+            atomically: true, encoding: .utf8)
+        let config = """
+        {
+          "provider": {
+            "acme": {
+              "options": { "baseURL": "https://example.invalid/v1" },
+              "headers": {
+                "Authorization": "{file:secret.txt}",
+                "X-Env": "{env:BEETCODE_HEADER_TEST}",
+                "X-Literal": "plain"
+              },
+              "models": { "acme-1": {} }
+            }
+          }
+        }
+        """
+        try config.write(
+            to: configDirectory.appendingPathComponent("opencode.json"),
+            atomically: true, encoding: .utf8)
+
+        let catalog = OpenCodeCompatibility.load(home: root)
+        let model = try XCTUnwrap(catalog.model(providerID: "acme", modelID: "acme-1"))
+        let profile = model.remoteProfile()
+
+        XCTAssertEqual(profile.headers["X-Literal"], "plain")
+        XCTAssertEqual(profile.headers["X-Env"], "{env:BEETCODE_HEADER_TEST}")
+        let authorization = try XCTUnwrap(profile.headers["Authorization"])
+        XCTAssertTrue(authorization.hasPrefix("{file:"), authorization)
+        XCTAssertTrue(authorization.hasSuffix("/.config/opencode/secret.txt}"), authorization)
+
+        // The persisted form contains no secret material.
+        let encoded = String(decoding: try JSONEncoder().encode(profile), as: UTF8.self)
+        XCTAssertFalse(encoded.contains("super-secret"), encoded)
+
+        // The request-time resolver produces the real value.
+        XCTAssertEqual(
+            OpenCodeCompatibility.resolvedHeaderValue(authorization),
+            "super-secret")
+        XCTAssertEqual(
+            OpenCodeCompatibility.resolvedHeaderValue("{env:HOME}").isEmpty,
+            false)
+    }
+
     func testOpenCodeWildcardRulesUseLastMatchingRule() {
         let permissions = OpenCodeCompatibility.OpenCodePermissionSet(rules: [
             .init(action: "edit", resource: "*", effect: .deny),

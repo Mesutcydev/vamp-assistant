@@ -9,26 +9,91 @@ import SwiftUI
 /// second rounded container, so the sidebar is clipped by AppKit's window
 /// mask instead of stacking its own radius inside it.
 enum SidebarMetrics {
-    /// The canonical sidebar width — one constant for the History drawer and
-    /// the Settings navigation column, so no screen shows a slightly
-    /// different sidebar. ~23% of the 1240pt default window.
-    static let width: CGFloat = 280
-    static let minWidth: CGFloat = 240
-    static let maxWidth: CGFloat = 360
+    /// Default expanded width for the conversation library. Users who
+    /// resized it keep their saved width; new installs start here.
+    static let width: CGFloat = 272
+    static let minWidth: CGFloat = 248
+    static let maxWidth: CGFloat = 320
+    /// The permanent left navigation rail. Narrow by design: it is the width
+    /// its controls need, so the drawer and the canvas keep everything else.
+    static let collapsedWidth: CGFloat = 46
+    /// Invisible pointer target. Visibly the rail is denser than this, but a
+    /// 28pt face alone would be an unkind click target.
+    static let railTarget: CGFloat = 38
+    /// Visible button surface.
+    static let railFace: CGFloat = InstrumentScale.mark
+    static let railIcon: CGFloat = InstrumentScale.markGlyph
+    /// A half-pixel optical step for glyphs that read long or short.
+    static let railIconOpticalStep: CGFloat = 0.5
+    static let railRadius: CGFloat = 5
+    static let railMarkerWidth: CGFloat = 2
+    static let railMarkerHeight: CGFloat = 14
+    static let railMarkerInset: CGFloat = 0
+    /// Vertical gap between adjacent navigation faces. Tight, but the 28pt
+    /// face in a 38pt target still leaves each control comfortably clickable.
+    static let railItemGap: CGFloat = 7
+    /// Distance from the window's top edge to the first navigation face —
+    /// tight, so New chat sits at the window's top-left corner.
+    static let railTopInset: CGFloat = 8
+    /// Spec for the hardware spine stacked under the rail: perforation grid,
+    /// circular controls, and their spacing all come from here.
+    static let grilleDot: CGFloat = 2.2
+    static let grilleDotGap: CGFloat = 2.5
+    /// Seven columns keep the etched grille at ~27pt — quieter and narrower
+    /// than the panel it replaced, without losing the pattern.
+    static let grilleColumnCount: Int = 7
+    static let grilleRowCount: Int = 5
+    static let grilleTopInset: CGFloat = 10
+    static let grilleBottomInset: CGFloat = 8
+    static let hardwareFace: CGFloat = 29
+    static let hardwareIcon: CGFloat = 11
+    static let hardwareGap: CGFloat = 6
+    /// Space between Settings and the hardware stack. Settings belongs to
+    /// navigation, so it sits close to the section it introduces.
+    static let hardwareSectionGap: CGFloat = 10
 
-    /// Axis A/B: the gap between the sidebar edge and every piece of content
-    /// inside it — cards, rows, list rows, separators, footer. One value, so
-    /// the repeated left and right edges actually repeat.
-    static let inset: CGFloat = Spacing.md
-    /// Row background edge → icon. The single horizontal anchor shared by the
-    /// back chevron, navigation icons, labels, and selected fills.
-    static let rowPadding: CGFloat = Spacing.sm
-    static let rowHeight: CGFloat = 32
+    /// Outer horizontal content inset for every sidebar region.
+    static let inset: CGFloat = 12
+    /// Row background edge → icon/title anchor.
+    static let rowPadding: CGFloat = 8
+    /// One conversation row. The drawer is information, not hardware: it is
+    /// dense so more history is visible without reading smaller type.
+    static let rowHeight: CGFloat = 30
     static let iconWidth: CGFloat = 18
     static let iconGap: CGFloat = Spacing.sm
     /// Selected rows stay deliberately tighter than the window/sidebar
     /// geometry above them — a card-sized radius reads as a nested panel.
-    static let selectionRadius: CGFloat = Radius.sm
+    static let selectionRadius: CGFloat = 5
+
+    // MARK: History drawer
+    //
+    // The drawer is information next to a hardware rail: one continuous
+    // material, quiet separators, and a single alignment grid. Every control
+    // below is intrinsically sized and shares the row's text axis.
+    /// Header title band.
+    static let headerHeight: CGFloat = 36
+    /// Workspace selector row.
+    static let workspaceRowHeight: CGFloat = 29
+    /// Search field.
+    static let searchHeight: CGFloat = 30
+    static let searchRadius: CGFloat = 7
+    static let searchPadding: CGFloat = 9
+    static let searchIcon: CGFloat = 12.5
+    static let searchText: CGFloat = 12.5
+    /// "New chat" command row and the collapsible project rows.
+    static let commandRowHeight: CGFloat = 28
+    /// Date headings: tiny organisational labels, not banners.
+    static let sectionHeaderHeight: CGFloat = 20
+    static let sectionHeaderText: CGFloat = 9
+    static let sectionHeaderTracking: CGFloat = 1.5
+    /// Trailing action slot. Reserved so titles never reflow when the actions
+    /// menu fades in on hover or selection.
+    static let rowActionSlot: CGFloat = 26
+    static let rowActionHit: CGFloat = 24
+    static let rowActionIcon: CGFloat = 12
+    /// Bottom connection rail.
+    static let connectionRailHeight: CGFloat = 30
+    static let statusDot: CGFloat = 6
 }
 
 extension View {
@@ -36,19 +101,20 @@ extension View {
     /// leading, and bottom container inset so the material runs underneath
     /// the titlebar and into the window's corner mask — no inner rounded
     /// rectangle, no second border parallel to the window edge.
+    /// The sidebar is a silver side module in the navigation-surface family.
     func sidebarSurface() -> some View {
         background {
-            Theme.surface
+            LinearGradient(colors: [Instrument.silverTop,
+                                    Theme.navigationSurface,
+                                    Instrument.silverLow.opacity(0.92)],
+                           startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea(.container, edges: [.top, .leading, .bottom])
         }
     }
 }
 
-/// The one vertical divider between a sidebar and the region beside it.
-///
-/// It is a sibling of both regions in the window's root row, not the edge of a
-/// nested panel, so it runs the full window height and meets the bottom edge
-/// squarely. `width` makes it the drag handle that resizes the sidebar.
+/// The one vertical divider between a sidebar and the region beside it:
+/// an engraved instrument seam.
 struct SidebarSplitDivider: View {
     var width: Binding<CGFloat>? = nil
     var range: ClosedRange<CGFloat> = 240...380
@@ -57,7 +123,7 @@ struct SidebarSplitDivider: View {
 
     var body: some View {
         Rectangle()
-            .fill(Theme.hairline)
+            .fill(Instrument.seam.opacity(0.7))
             .frame(width: 1)
             .frame(maxHeight: .infinity)
             .ignoresSafeArea(.container, edges: [.top, .bottom])
@@ -93,47 +159,8 @@ struct SidebarDivider: View {
 
     var body: some View {
         Rectangle()
-            .fill(Theme.hairline)
+            .fill(Instrument.seam.opacity(0.6))
             .frame(height: 1)
             .padding(.horizontal, inset)
-    }
-}
-
-/// One navigation row. The back action and the destination rows share it so
-/// their chevrons, icons, labels, and selected backgrounds land on the same
-/// anchors instead of drifting a few points apart.
-struct SidebarNavRow: View {
-    let title: String
-    let icon: String
-    var selected: Bool = false
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: SidebarMetrics.iconGap) {
-                Image(systemName: icon)
-                    .font(.app(size: 13, weight: .medium, design: .serif))
-                    .frame(width: SidebarMetrics.iconWidth)
-                Text(title)
-                    .font(.body.weight(.medium))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(selected ? Theme.textPrimary : Theme.textSecondary)
-            .padding(.horizontal, SidebarMetrics.rowPadding)
-            // One frame, leading-aligned. A separate `.frame(height:)` centers
-            // horizontally, so a title wider than the column pushed its own row
-            // left of every other row's anchor.
-            .frame(maxWidth: .infinity, minHeight: SidebarMetrics.rowHeight, alignment: .leading)
-            .background(selected ? Theme.surfaceInset : .clear,
-                        in: RoundedRectangle(cornerRadius: SidebarMetrics.selectionRadius,
-                                             style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: SidebarMetrics.selectionRadius,
-                                           style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

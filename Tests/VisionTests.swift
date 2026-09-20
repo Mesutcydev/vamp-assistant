@@ -298,3 +298,183 @@ final class VisionSessionTests: XCTestCase {
                        "the failure reason must reach the model")
     }
 }
+
+/// Native image input to a local GGUF model (llama.cpp multimodal projector):
+/// projector discovery, launch flags, OpenAI content parts, containers, and
+/// session persistence. Hermetic — no llama-server, no weights, no network.
+final class GGUFVisionInputTests: XCTestCase {
+
+    // MARK: Projector vs weights
+
+    func testSelectGGUFIgnoresProjectorFiles() {
+        let files = [
+            "Ternary-Bonsai-2-27B-PQ2_0.gguf",
+            "Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf",
+            "README.md",
+        ]
+        XCTAssertEqual(
+            GGUFEngine.Planner.selectGGUF(named: files),
+            "Ternary-Bonsai-2-27B-PQ2_0.gguf",
+            "the projector's longer name must not win the longest-name rule")
+    }
+
+    func testProjectorFilePrefersTheQ8PackForTheSameModel() {
+        let files = [
+            "Ternary-Bonsai-2-27B-PQ2_0.gguf",
+            "Ternary-Bonsai-2-27B-mmproj-BF16.gguf",
+            "Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf",
+        ]
+        XCTAssertEqual(
+            GGUFEngine.Planner.projectorFile(
+                named: files, modelID: "Ternary-Bonsai-2-27B-PQ2_0"),
+            "Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf")
+        XCTAssertNil(
+            GGUFEngine.Planner.projectorFile(named: ["model.gguf"]),
+            "a folder without a projector must stay text-only")
+    }
+
+    func testServerArgumentsCarryMmprojOnlyWhenPresent() throws {
+        let withProjector = GGUFEngine.Planner.serverArguments(
+            modelPath: "/m/model.gguf", port: 8901,
+            mmprojPath: "/m/model-mmproj.gguf")
+        let flagIndex = try XCTUnwrap(withProjector.firstIndex(of: "--mmproj"))
+        XCTAssertEqual(withProjector[flagIndex + 1], "/m/model-mmproj.gguf")
+
+        let textOnly = GGUFEngine.Planner.serverArguments(modelPath: "/m/model.gguf", port: 8901)
+        XCTAssertFalse(
+            textOnly.contains("--mmproj"),
+            "a text-only launch must never load a vision tower")
+    }
+
+    // MARK: OpenAI content parts
+
+    func testImageTurnSerializesAsContentParts() throws {
+        let image = ChatImage(
+            data: Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+            mimeType: "image/png",
+            name: "screen.png")
+        let messages = RemoteLLMClient.prepareOpenAIMessages([
+            ChatTurn(role: .user, content: "what is on this screen?", images: [image]),
+        ])
+        let encoded = try JSONEncoder().encode(messages)
+        let json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [[String: Any]])
+        let content = try XCTUnwrap(json.first?["content"] as? [[String: Any]])
+        XCTAssertEqual(content.first?["type"] as? String, "text")
+        XCTAssertEqual(content.last?["type"] as? String, "image_url")
+        let url = try XCTUnwrap(
+            (content.last?["image_url"] as? [String: Any])?["url"] as? String)
+        XCTAssertTrue(url.hasPrefix("data:image/png;base64,"))
+
+        // Round-trip: the local API server decodes what a client posted.
+        let decoded = try JSONDecoder().decode(
+            [RemoteLLMClient.OpenAIMessage].self, from: encoded)
+        XCTAssertEqual(decoded.first?.content, "what is on this screen?")
+        XCTAssertEqual(decoded.first?.images.first?.data, image.data)
+    }
+
+    func testTextOnlyTurnStillEncodesStringContent() throws {
+        let messages = RemoteLLMClient.prepareOpenAIMessages([
+            ChatTurn(role: .user, content: "hi"),
+        ])
+        let encoded = try JSONEncoder().encode(messages)
+        let json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [[String: Any]])
+        XCTAssertEqual(
+            json.first?["content"] as? String, "hi",
+            "providers that never see an image must get the unchanged payload")
+    }
+
+    // MARK: Containers
+
+    func testOnlyContainersLlamaCppDecodesAreSentNatively() {
+        XCTAssertTrue(ChatImage.canSendNatively(pathExtension: "PNG"))
+        XCTAssertTrue(ChatImage.canSendNatively(pathExtension: "jpeg"))
+        XCTAssertFalse(
+            ChatImage.canSendNatively(pathExtension: "heic"),
+            "HEIC must keep the CoreImage sidecar path, not reach the projector")
+        XCTAssertFalse(ChatImage.canSendNatively(pathExtension: "svg"))
+    }
+
+    func testMimeTypeIsSniffedFromMagicBytesNotTheExtension() {
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00])
+        XCTAssertEqual(ChatImage.sniffMimeType(png, pathExtension: "dat"), "image/png")
+        let jpeg = Data([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10])
+        XCTAssertEqual(ChatImage.sniffMimeType(jpeg, pathExtension: ""), "image/jpeg")
+    }
+
+    // MARK: Capability default
+
+    func testEnginesOptOutOfImageInputByDefault() async {
+        let engine = FakeLLMEngine()
+        let capable = await engine.supportsImageInput
+        XCTAssertFalse(
+            capable,
+            "only a GGUF server launched with a projector may claim image input")
+    }
+
+    // MARK: Persistence
+
+    func testSessionMessageRoundTripsImages() throws {
+        let image = ChatImage(data: Data([1, 2, 3, 4]), mimeType: "image/png", name: "a.png")
+        let message = SessionMessage(
+            role: .user, content: "look", toolName: nil, timestamp: Date(),
+            images: [SessionImage(image)])
+        let data = try JSONEncoder().encode(message)
+        let decoded = try JSONDecoder().decode(SessionMessage.self, from: data)
+        XCTAssertEqual(decoded.images?.first?.chatImage?.data, image.data)
+        XCTAssertEqual(decoded.images?.first?.mimeType, "image/png")
+        XCTAssertEqual(decoded.content, "look")
+    }
+
+    func testLegacySessionMessageWithoutImagesStillDecodes() throws {
+        let legacy = #"{"role":"user","content":"old","timestamp":0}"#
+        let decoded = try JSONDecoder().decode(
+            SessionMessage.self, from: Data(legacy.utf8))
+        XCTAssertNil(decoded.images)
+        XCTAssertEqual(decoded.content, "old")
+    }
+}
+
+/// LoRA adapters staged beside GGUF weights (runtime A/B of an ablation
+/// adapter): never served as the base model, applied only when switched on.
+final class GGUFLoraAdapterTests: XCTestCase {
+
+    func testAdapterIsNeverMistakenForWeights() throws {
+        let files = [
+            "Ternary-Bonsai-2-27B-PQ2_0.gguf",
+            "Ternary-Bonsai-2-27B-abliterate-lora.gguf",
+            "Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf",
+        ]
+        XCTAssertEqual(
+            GGUFEngine.Planner.selectGGUF(named: files),
+            "Ternary-Bonsai-2-27B-PQ2_0.gguf")
+        XCTAssertEqual(
+            GGUFEngine.Planner.loraFile(
+                named: files, modelID: "Ternary-Bonsai-2-27B-PQ2_0"),
+            "Ternary-Bonsai-2-27B-abliterate-lora.gguf")
+        XCTAssertNil(GGUFEngine.Planner.loraFile(named: ["model.gguf"]))
+        XCTAssertTrue(GGUFEngine.Planner.isLoraFile("model-abliterate.gguf"))
+        XCTAssertFalse(GGUFEngine.Planner.isLoraFile("model-mmproj-Q8_0.gguf"))
+    }
+
+    func testLoraScaledIsOnlyPassedWhenSwitchedOn() throws {
+        let applied = GGUFEngine.Planner.serverArguments(
+            modelPath: "/m/w.gguf", port: 8901,
+            loraPath: "/m/ablate-lora.gguf", loraScale: 2)
+        let flag = try XCTUnwrap(applied.firstIndex(of: "--lora-scaled"))
+        XCTAssertEqual(applied[flag + 1], "/m/ablate-lora.gguf:2")
+
+        let off = GGUFEngine.Planner.serverArguments(
+            modelPath: "/m/w.gguf", port: 8901,
+            loraPath: "/m/ablate-lora.gguf", loraScale: 0)
+        XCTAssertFalse(
+            off.contains("--lora-scaled"),
+            "scale 0 is the A/B switch: the adapter stays on disk, unloaded")
+
+        let absent = GGUFEngine.Planner.serverArguments(modelPath: "/m/w.gguf", port: 8901)
+        XCTAssertFalse(absent.contains("--lora-scaled"))
+        XCTAssertEqual(GGUFEngine.Planner.loraScaleArgument(1.0), "1")
+        XCTAssertEqual(GGUFEngine.Planner.loraScaleArgument(0.5), "0.5")
+    }
+}

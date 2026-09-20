@@ -37,7 +37,7 @@ struct RemoteAccessView: View {
         }
         .padding(24)
         .frame(minWidth: 560, minHeight: 560)
-        .background { AtmosphereBackground(intensity: .conversation) }
+        .background { Theme.workspaceCanvas }
         .task {
             while !Task.isCancelled {
                 appState.refreshRemoteSessionStatus()
@@ -54,10 +54,10 @@ struct RemoteAccessView: View {
                     .fill(Theme.wash(Theme.accent))
                     .frame(width: 44, height: 44)
                 Image(systemName: "iphone")
-                    .font(.app(size: 22, weight: .semibold, design: .serif))
+                    .font(.app(size: 22, weight: .semibold ))
                     .foregroundStyle(Theme.accentText)
                 Image(systemName: "qrcode")
-                    .font(.app(size: 9, weight: .bold, design: .serif))
+                    .font(.app(size: 9, weight: .bold ))
                     .foregroundStyle(Theme.textPrimary)
                     .padding(3)
                     .background(Theme.surface, in: Circle())
@@ -220,7 +220,7 @@ struct RemoteAccessView: View {
                 .buttonStyle(LFCapsuleButtonStyle())
                 Spacer()
                 Button("Revoke all browsers", role: .destructive) {
-                    appState.revokeRemoteClients()
+                    confirmRevokeAll()
                 }
                 .buttonStyle(LFCapsuleButtonStyle(tone: .destructive))
             }
@@ -264,8 +264,7 @@ struct RemoteAccessView: View {
                 .foregroundStyle(Theme.textSecondary)
                 .textSelection(.enabled)
             Button("Retry") { appState.retryRemoteSessionHost() }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.accent)
+                .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
         }
     }
 
@@ -340,6 +339,23 @@ struct RemoteAccessView: View {
         }
     }
 
+    /// Revoking every paired browser is as destructive as deleting a chat;
+    /// ask first.
+    private func confirmRevokeAll() {
+        let count = appState.remotePairedClientCount
+        guard count > 0 else { return }
+        let alert = NSAlert()
+        alert.messageText = count == 1
+            ? "Revoke this paired browser?"
+            : "Revoke all \(count) paired browsers?"
+        alert.informativeText = "Every paired device loses access immediately and must pair again with a new code. This cannot be undone."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Revoke")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        appState.revokeRemoteClients()
+    }
+
     private static func expiryText(_ date: Date) -> String {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
@@ -361,7 +377,7 @@ struct RemoteAccessConsentView: View {
         VStack(alignment: .leading, spacing: 22) {
             HStack(alignment: .top, spacing: 14) {
                 Image(systemName: "lock.shield.fill")
-                    .font(.app(size: 22, weight: .semibold, design: .serif))
+                    .font(.app(size: 22, weight: .semibold ))
                     .foregroundStyle(Theme.accentText)
                     .frame(width: 46, height: 46)
                     .background(Theme.wash(Theme.accent), in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
@@ -433,7 +449,7 @@ struct RemoteAccessConsentView: View {
     ) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
-                .font(.app(size: 15, weight: .semibold, design: .serif))
+                .font(.app(size: 15, weight: .semibold ))
                 .foregroundStyle(Theme.accentText)
                 .frame(width: 36, height: 36)
                 .background(Theme.wash(Theme.accent), in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))

@@ -24,8 +24,8 @@ struct ModelsAndProvidersTab: View {
 
         var summary: String {
             switch self {
-            case .library: "Local models on this Mac, plus every configured remote model"
-            case .providers: "Accounts, API keys, and compatible gateways"
+            case .library: "Download models for this Mac or choose a connected model"
+            case .providers: "Choose a provider to connect or manage"
             }
         }
     }
@@ -36,8 +36,10 @@ struct ModelsAndProvidersTab: View {
     @Binding var section: Section
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 12) {
             sectionBar
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
 
             switch section {
             case .library:
@@ -48,33 +50,27 @@ struct ModelsAndProvidersTab: View {
                     .environmentObject(appState)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .transaction { $0.animation = nil }
+
     }
 
     private var sectionBar: some View {
-        HStack(spacing: Spacing.md) {
-            Picker("Section", selection: $section) {
-                ForEach(Section.allCases) { option in
-                    Label(option.rawValue, systemImage: option.icon).tag(option)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+        VStack(alignment: .leading, spacing: 10) {
+            InstrumentSegmentedControl(
+                selection: $section,
+                options: Section.allCases.map { ($0.rawValue, $0) })
             .frame(width: 260)
 
             Text(section.summary)
-                .font(.caption)
+                .font(.app(size: 11.5 ))
                 .foregroundStyle(Theme.textTertiary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-
-            Spacer(minLength: 0)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 12)
-        .background(Theme.surface.opacity(0.62))
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Theme.hairline.opacity(0.72)).frame(height: 0.75)
+            Rectangle().fill(Theme.hairline).frame(height: 0.75)
         }
     }
 }

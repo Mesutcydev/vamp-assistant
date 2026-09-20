@@ -5,8 +5,22 @@ import Foundation
 enum ExperimentalInferencePreferences {
     static let dflashEnabledKey = "experimentalDFlashEnabled"
     static let ngramEnabledKey = "experimentalNGramEnabled"
+    static let qwenThinkingKey = "qwenStreamingThinking"
     static let mlxPromptCacheEnabledKey = "experimentalMLXPromptCacheEnabled"
     static let mlxQuantizedKVEnabledKey = "experimentalMLXQuantizedKVEnabled"
+    /// Strength of a LoRA adapter staged beside a GGUF's weights (1.0 = the
+    /// adapter exactly as authored). 0 disables it without deleting the file.
+    static let loraScaleKey = "localLoraScale"
+
+    /// LoRA strength for a new GGUF engine. Tests always read 1.0 so a
+    /// developer machine's preference can never change hermetic behavior.
+    static var loraScaleForNewEngine: Double {
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            return 1.0
+        }
+        guard UserDefaults.standard.object(forKey: loraScaleKey) != nil else { return 1.0 }
+        return UserDefaults.standard.double(forKey: loraScaleKey)
+    }
 
     static var dflashEnabledForNewEngine: Bool {
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
@@ -37,18 +51,14 @@ enum ExperimentalInferencePreferences {
     }
 }
 
-/// App color appearance. `system` follows macOS; `light`/`dark` force it;
-/// `beet` is retained only to decode settings written by legacy builds and is
-/// migrated to `dark` before it reaches the interface.
+/// App color appearance. `system` follows macOS; `light`/`dark` force it.
 /// Dark is the default. Kept Foundation-only (no SwiftUI) so the CLI target
 /// can compile this file; the SwiftUI `ColorScheme` mapping lives in the app.
 enum AppAppearance: String, CaseIterable, Codable, Identifiable, Sendable {
     case system
     case light
     case dark
-    case beet
-
-    static let allCases: [AppAppearance] = [.system, .light, .dark]
+    case oled
 
     var id: String { rawValue }
 
@@ -57,7 +67,7 @@ enum AppAppearance: String, CaseIterable, Codable, Identifiable, Sendable {
         case .system: "System"
         case .light: "Light"
         case .dark: "Dark"
-        case .beet: "Dark"
+        case .oled: "OLED Black"
         }
     }
 }
@@ -158,7 +168,6 @@ final class SettingsStore: ObservableObject {
             DefaultsKeys.verifyAfterEdits: false,
             DefaultsKeys.memoryMode: "off",
             DefaultsKeys.compressionLevel: "standard",
-            DefaultsKeys.composerFlow: "aurora",
             // Reasoning is a first-class, collapsed-by-default transcript
             // surface. New installs can see it immediately; users who have
             // explicitly switched it off keep that choice.
@@ -168,10 +177,18 @@ final class SettingsStore: ObservableObject {
             DefaultsKeys.appearance: AppAppearance.dark.rawValue,
             DefaultsKeys.accentPalette: AccentPalette.graphite.rawValue,
             DefaultsKeys.textSize: AppTextSize.comfortable.rawValue,
-            DefaultsKeys.typeface: AppTypeface.serif.rawValue,
-            DefaultsKeys.composerBorderAnimation: true,
+            // The registered default MUST match the getter's fallback: a
+            // registered default is returned by string(forKey:) as a VALUE
+            // (never nil), so a mismatch silently defeats the `?? .sans`
+            // path and every fresh install rendered serif chrome.
+            DefaultsKeys.typeface: AppTypeface.sans.rawValue,
             DefaultsKeys.apiServerEnabled: false,
             DefaultsKeys.apiServerPort: 1234,
+            DefaultsKeys.typeSafeContentScreening: false,
+            DefaultsKeys.typeSafeCommandEscalation: false,
+            DefaultsKeys.typeSafeModel: TypeSafeClient.defaultModel,
+            DefaultsKeys.typeSafeScreeningThreshold: 0.7,
+            DefaultsKeys.typeSafeEscalationThreshold: 0.7,
             DefaultsKeys.remoteSessionEnabled: false,
             DefaultsKeys.remoteSessionPort: RemoteSessionPorts.defaultPort,
             DefaultsKeys.remoteSessionAllowLAN: false,
@@ -183,12 +200,14 @@ final class SettingsStore: ObservableObject {
             DefaultsKeys.computerControlEnabled: false,
             DefaultsKeys.intelligenceInspectorEnabled: false,
             DefaultsKeys.enterSends: true,
+            DefaultsKeys.showHomeSuggestions: true,
             DefaultsKeys.outputStyle: ProjectPolicy.OutputStyle.normal.rawValue,
             DefaultsKeys.sendShortcut: "cmd+return",
             DefaultsKeys.stopShortcut: "cmd+.",
             DefaultsKeys.planShortcut: "cmd+shift+p",
             DefaultsKeys.experimentalDFlashEnabled: false,
             DefaultsKeys.experimentalNGramEnabled: false,
+            ExperimentalInferencePreferences.qwenThinkingKey: false,
             DefaultsKeys.experimentalMLXPromptCacheEnabled: false,
             DefaultsKeys.experimentalMLXQuantizedKVEnabled: false,
         ])
@@ -202,10 +221,9 @@ final class SettingsStore: ObservableObject {
         }
 
         // A previous build could leave Beet as the saved launch appearance.
-        // Move that legacy default to native Dark once; after this migration,
-        // later explicit selections—including Beet—are preserved.
+        // Move that legacy default to native Dark once.
         if !appearanceMigrationApplied {
-            if storedAppearance == AppAppearance.beet.rawValue {
+            if storedAppearance == "beet" {
                 defaults.set(AppAppearance.dark.rawValue, forKey: DefaultsKeys.appearance)
             }
             defaults.set(true, forKey: DefaultsKeys.appearanceDefaultMigration)
@@ -236,14 +254,13 @@ final class SettingsStore: ObservableObject {
     /// Color appearance. Defaults to native Dark; `system` follows macOS.
     var appearance: AppAppearance {
         get {
-            let value = AppAppearance(
-                rawValue: defaults.string(forKey: DefaultsKeys.appearance)
-                    ?? AppAppearance.dark.rawValue) ?? .dark
-            return value == .beet ? .dark : value
+            let raw = defaults.string(forKey: DefaultsKeys.appearance)
+                ?? AppAppearance.dark.rawValue
+            if raw == "beet" { return .dark }
+            return AppAppearance(rawValue: raw) ?? .light
         }
         set {
-            defaults.set((newValue == .beet ? AppAppearance.dark : newValue).rawValue,
-                         forKey: DefaultsKeys.appearance)
+            defaults.set(newValue.rawValue, forKey: DefaultsKeys.appearance)
             objectWillChange.send()
         }
     }
@@ -265,7 +282,7 @@ final class SettingsStore: ObservableObject {
     var typeface: AppTypeface {
         get {
             AppTypeface(rawValue: defaults.string(forKey: DefaultsKeys.typeface)
-                ?? AppTypeface.serif.rawValue) ?? .serif
+                ?? AppTypeface.sans.rawValue) ?? .sans
         }
         set {
             defaults.set(newValue.rawValue, forKey: DefaultsKeys.typeface)
@@ -387,24 +404,6 @@ final class SettingsStore: ObservableObject {
         }
     }
 
-    /// Composer signature: the animated gradient underline. Off = static
-    /// hairline (also friendlier for Reduce Motion sensibilities).
-    var composerBorderAnimation: Bool {
-        get { defaults.bool(forKey: DefaultsKeys.composerBorderAnimation) }
-        set {
-            defaults.set(newValue, forKey: DefaultsKeys.composerBorderAnimation)
-            objectWillChange.send()
-        }
-    }
-
-    var composerFlow: ComposerFlow {
-        get { ComposerFlow(rawValue: defaults.string(forKey: DefaultsKeys.composerFlow) ?? "aurora") ?? .aurora }
-        set {
-            defaults.set(newValue.rawValue, forKey: DefaultsKeys.composerFlow)
-            objectWillChange.send()
-        }
-    }
-
     var compressionLevel: CompressionLevel {
         get {
             CompressionLevel(rawValue: defaults.string(forKey: DefaultsKeys.compressionLevel) ?? "standard") ?? .standard
@@ -445,6 +444,67 @@ final class SettingsStore: ObservableObject {
             // Keep it in the unprivileged, collision-sane range.
             let clamped = min(max(newValue, 1024), 65_535)
             defaults.set(clamped, forKey: DefaultsKeys.apiServerPort)
+            objectWillChange.send()
+        }
+    }
+
+    // MARK: TypeSafe guardrails
+
+    /// Screen content that came from outside the workspace (web pages, fetched
+    /// documents) before the model reads it.
+    var typeSafeContentScreening: Bool {
+        get { defaults.bool(forKey: DefaultsKeys.typeSafeContentScreening) }
+        set {
+            defaults.set(newValue, forKey: DefaultsKeys.typeSafeContentScreening)
+            objectWillChange.send()
+        }
+    }
+
+    /// Let TypeSafe turn a would-be auto-approved action back into an approval
+    /// card when it reads as destructive or as acting outside the project.
+    /// Additive only — it can never approve anything.
+    var typeSafeCommandEscalation: Bool {
+        get { defaults.bool(forKey: DefaultsKeys.typeSafeCommandEscalation) }
+        set {
+            defaults.set(newValue, forKey: DefaultsKeys.typeSafeCommandEscalation)
+            objectWillChange.send()
+        }
+    }
+
+    /// Model id sent to TypeSafe. Pinned to a versioned id by default: the
+    /// `jev-latest` alias has served transient 503s while the versioned id
+    /// answered moments later.
+    var typeSafeModel: String {
+        get { defaults.string(forKey: DefaultsKeys.typeSafeModel) ?? TypeSafeClient.defaultModel }
+        set {
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            defaults.set(
+                trimmed.isEmpty ? TypeSafeClient.defaultModel : trimmed,
+                forKey: DefaultsKeys.typeSafeModel)
+            objectWillChange.send()
+        }
+    }
+
+    /// Probability above which a screening verdict counts as "flagged".
+    var typeSafeScreeningThreshold: Double {
+        get {
+            let value = defaults.double(forKey: DefaultsKeys.typeSafeScreeningThreshold)
+            return value == 0 ? 0.7 : value
+        }
+        set {
+            defaults.set(min(max(newValue, 0.1), 0.99), forKey: DefaultsKeys.typeSafeScreeningThreshold)
+            objectWillChange.send()
+        }
+    }
+
+    /// Probability above which an action verdict counts as "escalate".
+    var typeSafeEscalationThreshold: Double {
+        get {
+            let value = defaults.double(forKey: DefaultsKeys.typeSafeEscalationThreshold)
+            return value == 0 ? 0.7 : value
+        }
+        set {
+            defaults.set(min(max(newValue, 0.1), 0.99), forKey: DefaultsKeys.typeSafeEscalationThreshold)
             objectWillChange.send()
         }
     }
@@ -617,6 +677,14 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    var showHomeSuggestions: Bool {
+        get { defaults.bool(forKey: DefaultsKeys.showHomeSuggestions) }
+        set {
+            defaults.set(newValue, forKey: DefaultsKeys.showHomeSuggestions)
+            objectWillChange.send()
+        }
+    }
+
     /// When true, Enter sends and Shift+Enter inserts a newline.
     /// When false, Enter inserts a newline and only ⌘↩ sends.
     var enterSends: Bool {
@@ -679,8 +747,8 @@ final class SettingsStore: ObservableObject {
         }
     }
 
-    /// Opt-in model-free n-gram speculative decoding for GGUF targets that
-    /// do not already expose a stronger DFlash or MTP path.
+    /// Opt-in model-free n-gram speculative decoding for GGUF targets that do
+    /// not already expose a stronger DFlash or MTP path.
     var experimentalNGramEnabled: Bool {
         get { defaults.bool(forKey: DefaultsKeys.experimentalNGramEnabled) }
         set {
@@ -689,8 +757,32 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    /// Strength applied to a LoRA adapter staged beside a GGUF model's weights
+    /// (0.5 = half strength, 1.0 = the adapter exactly as authored, 0 = off).
+    /// New engines read this when the model is loaded; changing it never
+    /// mutates a running llama-server.
+    var localLoraScale: Double {
+        get {
+            defaults.object(forKey: ExperimentalInferencePreferences.loraScaleKey) == nil
+                ? 1.0
+                : defaults.double(forKey: ExperimentalInferencePreferences.loraScaleKey)
+        }
+        set {
+            defaults.set(min(max(newValue, 0), 4), forKey: ExperimentalInferencePreferences.loraScaleKey)
+            objectWillChange.send()
+        }
+    }
+
     /// Reuse an in-memory MLX prompt prefix only when Beet Code can prove the
     /// assistant echo matches the cached generation. Reload to apply.
+    var qwenStreamingThinking: Bool {
+        get { defaults.bool(forKey: ExperimentalInferencePreferences.qwenThinkingKey) }
+        set {
+            defaults.set(newValue, forKey: ExperimentalInferencePreferences.qwenThinkingKey)
+            objectWillChange.send()
+        }
+    }
+
     var experimentalMLXPromptCacheEnabled: Bool {
         get { defaults.bool(forKey: DefaultsKeys.experimentalMLXPromptCacheEnabled) }
         set {
@@ -720,7 +812,6 @@ final class SettingsStore: ObservableObject {
         static let verifyAfterEdits = "verifyAfterEdits"
         static let memoryMode = "memoryMode"
         static let compressionLevel = "compressionLevel"
-        static let composerFlow = "composerFlow"
         static let showReasoning = "showReasoning"
         static let reasoningVisibilityMigration = "reasoningVisibilityMigration.v1"
         static let planMode = "planMode"
@@ -730,9 +821,13 @@ final class SettingsStore: ObservableObject {
         static let accentPalette = "accentPalette"
         static let textSize = "textSize"
         static let typeface = "typeface"
-        static let composerBorderAnimation = "composerBorderAnimation"
         static let apiServerEnabled = "apiServerEnabled"
         static let apiServerPort = "apiServerPort"
+        static let typeSafeContentScreening = "typeSafeContentScreening"
+        static let typeSafeCommandEscalation = "typeSafeCommandEscalation"
+        static let typeSafeModel = "typeSafeModel"
+        static let typeSafeScreeningThreshold = "typeSafeScreeningThreshold"
+        static let typeSafeEscalationThreshold = "typeSafeEscalationThreshold"
         static let apiServerToken = "apiServerToken"
         static let remoteSessionEnabled = "remoteSessionEnabled"
         static let remoteSessionPort = "remoteSessionPort"
@@ -746,6 +841,7 @@ final class SettingsStore: ObservableObject {
         static let remoteMacUnlockEnabled = "remoteMacUnlockEnabled"
         static let computerControlEnabled = "computerControlEnabled"
         static let intelligenceInspectorEnabled = "intelligenceInspectorEnabled"
+        static let showHomeSuggestions = "showHomeSuggestions"
         static let enterSends = "enterSends"
         static let outputStyle = "outputStyle"
         static let sendShortcut = "sendShortcut"

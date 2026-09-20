@@ -8,19 +8,18 @@ struct ChatView: View {
     @ObservedObject private var settings = SettingsStore.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    init(controller: AgentSessionController) {
+    /// The composer store is owned by the window: the input well and the
+    /// bottom key bar are different frame regions but share one draft.
+    private let composerStore: ComposerStore
+    init(controller: AgentSessionController, store: ComposerStore) {
         self.controller = controller
+        self.composerStore = store
     }
 
-    /// Single source of truth for the composer (prompt, attachments, intent
-    /// selection). Owned by ChatView so it survives view rebuilds; attached
-    /// to the live controller/AppState in `.task`.
-    @State private var composerStore = ComposerStore()
     @State private var sessionTitle = "New chat"
-    @State private var homeVisible = false
-    /// Width of the main content region, measured by the hero's background
-    /// probe and used only to size the composer.
-    @State private var heroRegionWidth: CGFloat = 900
+    /// Width of the detail pane, recomputed when the sidebar or inspector
+    /// opens, closes, or resizes — the content column follows it.
+    @State private var paneWidth: CGFloat = 800
 
     private var isEmptyConversation: Bool {
         controller.transcript.isEmpty
@@ -30,29 +29,33 @@ struct ChatView: View {
     }
 
     var body: some View {
+        // Measured, not pinned: a GeometryReader that forced its child to the
+        // full proposed size also swallowed the window's top safe area, so the
+        // transcript drew up through the title band.
         VStack(spacing: 0) {
+            if controller.workspaceTrustNeeded {
+                workspaceTrustBanner
+            }
             if isEmptyConversation {
-                emptyState
+                WelcomeIdentityView(status: homeStatus,
+                                    statusTint: homeStatusTint,
+                                    statusIsLive: homeStatusIsLive,
+                                    remoteAvailable: appState.remoteSessionRunning)
             } else {
-                ChatHeaderView(
-                    title: sessionTitle,
-                    phaseLabel: phaseLabel,
-                    phaseTint: phaseTint,
-                    canReview: controller.workspaceURL != nil,
-                    onHome: controller.newSession,
-                    onNewChat: controller.newSession)
-                if controller.workspaceTrustNeeded {
-                    workspaceTrustBanner
-                }
                 transcript
                 if hasPendingGate {
                     pendingGate
                 }
-                ComposerView(store: composerStore)
-                    .environmentObject(controller)
             }
+            bottomDock(workspaceWidth: paneWidth)
         }
-        .background { AtmosphereBackground(intensity: isEmptyConversation ? .home : .conversation) }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { paneWidth = $0 }
+        // Keep an opaque themed backing at this boundary. During a streamed
+        // answer SwiftUI can briefly re-measure the ScrollView while the
+        // transcript grows; a transparent root exposes the native window's
+        // white backing for a frame and reads as a full-screen flash.
+        .background(Theme.workspaceCanvas)
         .task {
             composerStore.attach(controller: controller, appState: appState)
         }
@@ -76,6 +79,23 @@ struct ChatView: View {
         .onPasteCommand(of: [.png, .tiff, .jpeg, .fileURL]) { providers in
             handlePaste(providers)
         }
+    }
+
+    /// The middle of the device: transcript above, then the suggestion row
+    /// (welcome only) and the writing well, both running nearly edge to edge
+    /// so the middle reads as one continuous surface.
+    private func bottomDock(workspaceWidth: CGFloat) -> some View {
+        VStack(spacing: 10) {
+            if isEmptyConversation && settings.showHomeSuggestions {
+                SuggestionRow(store: composerStore, availableWidth: workspaceWidth)
+                    .frame(width: min(ContentColumn.maxWidth, max(0, workspaceWidth - 32)))
+            }
+            ChatInputWell(store: composerStore)
+                .frame(width: min(ContentColumn.maxWidth, max(0, workspaceWidth - 32)))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 8)
+        .padding(.bottom, 18)
     }
 
     private var workspaceTrustBanner: some View {
@@ -122,21 +142,39 @@ struct ChatView: View {
 
     // MARK: Transcript
 
-    @State private var isPinnedToBottom = true
+    /// Follow mode is separate from scroll geometry. Streaming changes the
+    /// content height, and that must not be mistaken for the user scrolling
+    /// away from the latest answer.
+    @State private var followsLatest = true
+    @State private var userIsInteracting = false
+    @State private var scrollRequestGeneration = 0
+    @State private var scrollWorkScheduled = false
+    @State private var scrollNeedsFollowUp = false
+    @State private var scrollAnimationRequested = false
     @State private var cachedRows: [TranscriptRowModel] = []
+
+    private struct ScrollMetrics: Equatable {
+        let offsetY: CGFloat
+        let bottomDistance: CGFloat
+    }
+
+    private static let followThreshold: CGFloat = 64
 
     /// Cursor/ChatGPT-style transcript: a centered content column (never
     /// edge-to-edge prose), grouped tool steps, avatar-led assistant output.
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 22) {
-                    if controller.transcript.isEmpty && controller.streamingText.isEmpty {
-                        emptyState
+                LazyVStack(alignment: .leading, spacing: 24) {
+                    if controller.transcript.isEmpty && controller.streamingText.isEmpty && !hasPendingGate {
+                        TranscriptRuleLabel(text: "Waiting for the first message")
                     }
                     ForEach(cachedRows) { row in
                         rowView(row)
                             .id(row.id)
+                    }
+                    if !controller.livePlan.isEmpty {
+                        LivePlanCard(tasks: controller.livePlan)
                     }
                     if controller.isRunning, !controller.liveReasoningText.isEmpty {
                         LiveReasoningCard(
@@ -164,207 +202,186 @@ struct ChatView: View {
                 .frame(maxWidth: ContentColumn.maxWidth, alignment: .leading)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 20)
-                .padding(.vertical, 20)
+                .padding(.top, 30)
+                .padding(.bottom, 20)
+                // A short conversation rests just above the writing well
+                // instead of stranding itself at the top of a tall page.
+                .containerRelativeFrame(.vertical, alignment: .bottom)
             }
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                // Pinned means the viewport bottom is within ~40 pt of the
-                // content bottom — the user is following the output.
-                let visibleMax = geometry.contentOffset.y + geometry.containerSize.height
-                let contentHeight = geometry.contentSize.height
-                return contentHeight - visibleMax < 40
-            } action: { _, pinned in
-                isPinnedToBottom = pinned
+            .background(Theme.workspaceCanvas)
+            .defaultScrollAnchor(.bottom)
+            .defaultScrollAnchor(.top, for: .alignment)
+            .onScrollGeometryChange(for: ScrollMetrics.self) { geometry in
+                ScrollMetrics(
+                    offsetY: geometry.contentOffset.y,
+                    bottomDistance: max(0, geometry.contentSize.height - geometry.visibleRect.maxY))
+            } action: { previous, current in
+                // Geometry changes caused by a streamed token are ignored.
+                // Only an active drag is allowed to turn follow mode off.
+                guard userIsInteracting else { return }
+                if current.bottomDistance <= Self.followThreshold {
+                    if !followsLatest { followsLatest = true }
+                } else if current.offsetY < previous.offsetY - 1 {
+                    followsLatest = false
+                }
+            }
+            .onScrollPhaseChange { _, phase, context in
+                let geometry = context.geometry
+                let bottomDistance = max(0, geometry.contentSize.height - geometry.visibleRect.maxY)
+                switch phase {
+                case .tracking, .interacting:
+                    userIsInteracting = true
+                    if bottomDistance <= Self.followThreshold, !followsLatest {
+                        followsLatest = true
+                    }
+                case .idle:
+                    userIsInteracting = false
+                    if bottomDistance <= Self.followThreshold, !followsLatest {
+                        followsLatest = true
+                    }
+                case .decelerating, .animating:
+                    break
+                @unknown default:
+                    break
+                }
             }
             .onAppear {
                 cachedRows = Self.makeDisplayRows(controller.transcript)
+                requestScroll(proxy)
             }
             .onChange(of: controller.transcript) { _, transcript in
                 cachedRows = Self.makeDisplayRows(transcript)
-                // Activity rows can arrive several times per second. Avoid
-                // animating the entire stack's height for every tool event.
-                scrollToLatest(proxy)
+                guard followsLatest else { return }
+                requestScroll(proxy, animated: true)
             }
             .onChange(of: controller.streamingText) { _, _ in
-                scrollToLatest(proxy)
+                guard followsLatest else { return }
+                requestScroll(proxy)
             }
             .onChange(of: controller.liveReasoningText) { _, _ in
-                scrollToLatest(proxy)
+                guard followsLatest else { return }
+                requestScroll(proxy)
             }
             .onChange(of: controller.isRunning) { _, running in
-                if running { scrollToLatest(proxy, animated: true) }
+                guard followsLatest else { return }
+                if running { requestScroll(proxy, animated: true) }
             }
             .onChange(of: controller.finishReason) { _, reason in
                 guard reason != nil else { return }
-                // The completion card is inserted after the last streamed
-                // token. Force one final follow pass so it is fully visible
-                // instead of landing just below the viewport.
-                isPinnedToBottom = true
-                scrollToLatest(proxy, animated: true)
+                followsLatest = true
+                userIsInteracting = false
+                requestScroll(proxy, animated: true)
+            }
+            .onChange(of: controller.activeSessionID) { _, _ in
+                // A reused ChatView can retain scroll state from the prior
+                // conversation. New sessions always open at their latest row.
+                scrollRequestGeneration &+= 1
+                scrollWorkScheduled = false
+                scrollNeedsFollowUp = false
+                scrollAnimationRequested = false
+                followsLatest = true
+                userIsInteracting = false
+                cachedRows = Self.makeDisplayRows(controller.transcript)
+                requestScroll(proxy)
             }
             .overlay(alignment: .bottomTrailing) {
-                if !isPinnedToBottom && (controller.isRunning || hasPendingGate) {
+                if !followsLatest && (controller.isRunning || hasPendingGate) {
                     Button {
-                        isPinnedToBottom = true
-                        withAnimation { proxy.scrollTo("bottom") }
+                        followsLatest = true
+                        userIsInteracting = false
+                        requestScroll(proxy, animated: !reduceMotion, delay: 0)
                     } label: {
-                        Label("Jump to latest", systemImage: "arrow.down.circle.fill")
-                            .font(.caption)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            // Opaque capsule + hairline, same voice as the
-                            // suggestion chips — no floating material.
-                            .background(Theme.surface, in: Capsule())
-                            .overlay(Capsule().strokeBorder(Theme.hairline, lineWidth: 1))
-                            .shadow(color: Theme.cardShadow, radius: 6, y: 2)
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.down")
+                                .font(.system(size: 9, weight: .semibold))
+                            Text("JUMP TO LATEST")
+                                .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                                .tracking(1.1)
+                        }
+                        .foregroundStyle(Instrument.inkSecondary)
+                        .padding(.horizontal, 10)
+                        .frame(height: 24)
+                        .environment(\.instrumentPressed, false)
+                        .instrumentKey(RoundedRectangle(cornerRadius: 5, style: .continuous),
+                                       elevation: 0.8)
+                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(InstrumentPressStyle())
                     .padding(12)
                 }
             }
+            .onDisappear {
+                scrollRequestGeneration &+= 1
+                scrollWorkScheduled = false
+                scrollNeedsFollowUp = false
+                scrollAnimationRequested = false
+            }
         }
     }
 
-    /// Token batches can update the LazyVStack before the new row has a
-    /// measured height. Deferring one main-queue turn makes the scroll target
-    /// real before asking the proxy to move, which keeps streamed answers
-    /// pinned without stealing the user's position when they scroll up.
-    private func scrollToLatest(_ proxy: ScrollViewProxy, animated: Bool = false) {
-        // During generation the content itself can briefly move the viewport
-        // outside the bottom threshold before this callback runs. Treat an
-        // active answer as follow mode so growing Markdown blocks cannot
-        // accidentally disable auto-scroll.
-        guard isPinnedToBottom || controller.isRunning else { return }
-        DispatchQueue.main.async {
-            guard self.isPinnedToBottom || self.controller.isRunning else { return }
-            if animated {
-                withAnimation(.easeOut(duration: 0.18)) {
+    /// Coalesces fast token updates and gives LazyVStack time to measure the
+    /// growing Markdown row before anchoring. A second pass catches delayed
+    /// layout, so the user never has to press Latest to resume a live stream.
+    private func requestScroll(
+        _ proxy: ScrollViewProxy,
+        animated: Bool = false,
+        delay: TimeInterval = 0.04
+    ) {
+        guard followsLatest, !userIsInteracting else { return }
+        scrollNeedsFollowUp = true
+        scrollAnimationRequested = scrollAnimationRequested || animated
+        guard !scrollWorkScheduled else { return }
+        scrollWorkScheduled = true
+        let generation = scrollRequestGeneration
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(delay))
+            while generation == scrollRequestGeneration, followsLatest, !userIsInteracting {
+                scrollNeedsFollowUp = false
+                let shouldAnimate = scrollAnimationRequested
+                scrollAnimationRequested = false
+                if shouldAnimate {
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
+                        proxy.scrollTo("bottom", anchor: .bottom)
+                    }
+                } else {
                     proxy.scrollTo("bottom", anchor: .bottom)
                 }
-            } else {
+                try? await Task.sleep(for: .milliseconds(55))
+                guard generation == scrollRequestGeneration,
+                      followsLatest,
+                      !userIsInteracting else { break }
                 proxy.scrollTo("bottom", anchor: .bottom)
+                if !scrollNeedsFollowUp { break }
+                try? await Task.sleep(for: .milliseconds(35))
+            }
+            if generation == scrollRequestGeneration {
+                scrollWorkScheduled = false
+                scrollAnimationRequested = false
             }
         }
     }
 
-    private var emptyState: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: Spacing.xl)
-
-            VStack(spacing: Spacing.lg) {
-                VStack(spacing: Spacing.md) {
-                    Text("VAMP ASSISTANT")
-                        .font(AppFont.homeWordmark)
-                        .tracking(2.4)
-                        .foregroundStyle(Theme.textPrimary)
-                        .minimumScaleFactor(0.55)
-                        .lineLimit(1)
-                        .accessibilityAddTraits(.isHeader)
-                }
-
-                Text("Ask anything, browse the web, create and save documents, control your Mac with permission, or open a project when you want Code.")
-                    .font(AppFont.homeInvitation)
-                    .foregroundStyle(Theme.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(4)
-                    .frame(maxWidth: 460)
-
-                if let status = homeStatus {
-                    Text(status)
-                        .font(.app(size: 13, design: .serif))
-                        .foregroundStyle(homeStatusTint)
-                        .padding(.top, 2)
-                }
-            }
-
-            // Hero rhythm: 16 title → subtitle, 32 subtitle → composer.
-            // One gap, twice the other, instead of two unrelated numbers.
-            Spacer().frame(height: 32)
-
-            ComposerView(store: composerStore, placement: .home,
-                         homeMaxWidth: ComposerMetrics.homeWidth(for: heroRegionWidth))
-                .environmentObject(controller)
-
-            Spacer(minLength: Spacing.xl)
-        }
-        .padding(.horizontal, 48)
-        // Both spacers flex, so the hero group is mathematically centred in
-        // the canvas. This reserved strip is the one optical correction:
-        // half of it (32pt, ~4% of the canvas) lifts the group above true
-        // centre, which a wordmark this heavy needs to look centred.
-        .padding(.bottom, 64)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Measure the MAIN CONTENT region the hero occupies, so the composer
-        // proportion is a share of that region and never of the whole window.
-        // Read from a background probe: the width it reports cannot depend on
-        // anything the width feeds, so this settles in one pass.
-        .background {
-            GeometryReader { geo in
-                Color.clear
-                    .onChange(of: geo.size.width, initial: true) { _, width in
-                        heroRegionWidth = width
-                    }
-            }
-        }
-        .opacity(homeVisible ? 1 : 0)
-        .onAppear {
-            if reduceMotion {
-                homeVisible = true
-            } else {
-                withAnimation(.easeOut(duration: 0.28)) { homeVisible = true }
-            }
-        }
-        .overlay(alignment: .bottomTrailing) {
-            remoteSessionsCornerButton
-                .padding(.trailing, 18)
-                .padding(.bottom, 16)
-        }
-    }
-
-    private var homeStatus: String? {
+    /// What the welcome screen's indicator actually reports. "Ready" is only
+    /// true when a model is loaded — the app being open is not readiness.
+    private var homeStatus: String {
         if case .failed = appState.enginePhase {
-            return "The last model failed to load. Choose another in the composer."
+            return "Last model failed to load"
         }
-        if case .loading = appState.enginePhase {
-            return "Loading model…"
+        if case .loading(let name) = appState.enginePhase {
+            return "Loading \(name)…"
         }
-        return nil
+        if controller.isRunning { return "Working" }
+        return appState.isModelReady ? "Ready" : "No model selected"
     }
 
     private var homeStatusTint: Color {
         if case .failed = appState.enginePhase { return Theme.danger }
-        return Theme.textTertiary
+        return Color(nsColor: .secondaryLabelColor)
     }
 
-    private var remoteSessionsCornerButton: some View {
-        Button {
-            NotificationCenter.default.post(name: .openRemoteAccess, object: nil)
-        } label: {
-            ZStack(alignment: .topTrailing) {
-                Image(systemName: "antenna.radiowaves.left.and.right")
-                    .accessibilityHidden(true)
-                    .font(.app(size: 13, weight: .semibold, design: .serif))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(width: 36, height: 36)
-                    .background(Theme.surface.opacity(0.92),
-                                in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                        .strokeBorder(Theme.hairline, lineWidth: 0.75))
-
-                Circle()
-                    .fill(appState.remoteSessionRunning ? Theme.success : Theme.textTertiary)
-                    .frame(width: 8, height: 8)
-                    .overlay(Circle().stroke(Theme.bg, lineWidth: 2))
-                    .padding(5)
-            }
-            .contentShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-        }
-        .buttonStyle(LFPlainPressButtonStyle())
-        .lfHoverLift()
-        .help(appState.remoteSessionRunning
-              ? "Remote Sessions — a session is running"
-              : "Remote Sessions")
-        .accessibilityLabel("Open Remote Sessions")
-        .accessibilityValue(appState.remoteSessionRunning ? "A session is running" : "No session running")
+    /// Green only when the assistant can actually answer.
+    private var homeStatusIsLive: Bool {
+        appState.isModelReady || controller.isRunning
     }
 
     private var hasPendingGate: Bool {
@@ -452,6 +469,109 @@ struct ChatView: View {
     }
 
 }
+
+/// Quiet, unboxed identity drawn directly on the workspace canvas.
+private struct WelcomeIdentityView: View {
+    let status: String
+    let statusTint: Color
+    let statusIsLive: Bool
+    let remoteAvailable: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulsing = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 24)
+
+            // One honest signal instead of two decorative meters: a live green
+            // dot with the state written beside it. It says the app is up, and
+            // it says it in words as well as colour.
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(statusIsLive ? Color.green : Color(nsColor: .tertiaryLabelColor))
+                    .frame(width: 7, height: 7)
+                    .overlay {
+                        // The halo only breathes when the state it reports is
+                        // actually live.
+                        if statusIsLive {
+                            Circle()
+                                .stroke(Color.green.opacity(0.45), lineWidth: 3)
+                                .scaleEffect(pulsing ? 2.1 : 1)
+                                .opacity(pulsing ? 0 : 0.9)
+                        }
+                    }
+                    .accessibilityHidden(true)
+                Text(status)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(statusTint)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(Color(nsColor: .controlBackgroundColor)))
+            .overlay(Capsule().strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Status: \(status)")
+            .padding(.bottom, 20)
+            .task(id: statusIsLive) {
+                guard statusIsLive, !reduceMotion else { return }
+                withAnimation(.easeOut(duration: 1.8).repeatForever(autoreverses: false)) {
+                    pulsing = true
+                }
+            }
+
+            WelcomeEyebrow(compact: paneIsCompact, showsEyebrow: true)
+
+            Text("Ask, browse, create, and control your Mac—with permission at every step.")
+                .font(.system(size: 14))
+                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 480)
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
+
+            Button {
+                NotificationCenter.default.post(name: .openRemoteAccess, object: nil)
+            } label: {
+                Label(remoteAvailable ? "Pair another device" : "Pair device",
+                      systemImage: "qrcode")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .help("Pair a device for remote access")
+            .padding(.top, 18)
+
+            Spacer(minLength: 24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+    }
+
+    @State private var width: CGFloat = 800
+    private var paneIsCompact: Bool { width < 600 }
+}
+
+private struct WelcomeEyebrow: View {
+    let compact: Bool
+    let showsEyebrow: Bool
+
+    var body: some View {
+        if showsEyebrow {
+            HStack(spacing: 8) {
+                Text("What would you like to work on?")
+                    // A heading is primary text. Secondary ink plus the old
+                    // 38% watermark is what made this screen read as disabled.
+                    .font(.appUI(size: compact ? 20 : 24, weight: .semibold))
+                    .foregroundStyle(Color(nsColor: .labelColor))
+                    .lineLimit(1)
+            }
+            .accessibilityIdentifier("welcome-wordmark")
+            .accessibilityAddTraits(.isHeader)
+        }
+    }
+}
+
 // MARK: - Rows
 
 /// One rendered transcript row. The agent's private work stream (reasoning,

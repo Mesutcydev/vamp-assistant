@@ -17,6 +17,11 @@ final class AppState: ObservableObject {
             if case .failed(let message) = self { return message }
             return nil
         }
+
+        var isReady: Bool {
+            if case .ready = self { return true }
+            return false
+        }
     }
 
     let settings = SettingsStore.shared
@@ -190,8 +195,11 @@ final class AppState: ObservableObject {
             case .failure(let error): return (nil, error.localizedDescription)
             }
         }
+        // Remote bot commands await runtime delivery so the phone only clears
+        // its input after the run actually accepted the command.
         remoteSessionHost.steerBotRunHandler = { [weak self] id, message in
-            self?.botRuns.steer(runID: id, message: message) ?? false
+            guard let self else { return false }
+            return await self.botRuns.deliverCommand(runID: id, kind: .steer, payload: message)
         }
         remoteSessionHost.stopBotRunHandler = { [weak self] id in
             self?.botRuns.stop(runID: id) ?? false
@@ -208,10 +216,13 @@ final class AppState: ObservableObject {
             }
         }
         remoteSessionHost.approveBotRunHandler = { [weak self] id, approved in
-            self?.botRuns.approve(runID: id, approved: approved) ?? false
+            guard let self else { return false }
+            return await self.botRuns.deliverCommand(
+                runID: id, kind: approved ? .approve : .decline)
         }
         remoteSessionHost.answerBotRunHandler = { [weak self] id, answer in
-            self?.botRuns.answer(runID: id, text: answer) ?? false
+            guard let self else { return false }
+            return await self.botRuns.deliverCommand(runID: id, kind: .answer, payload: answer)
         }
         remoteSessionHost.resumeBotRunHandler = { [weak self] id in
             self?.botRuns.resume(runID: id) ?? false
@@ -348,6 +359,12 @@ final class AppState: ObservableObject {
         downloadManager.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
+        botRuns.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+        botComputers.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
         modelStore.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
@@ -393,6 +410,7 @@ final class AppState: ObservableObject {
         // Honor a persisted "server enabled" across launches.
         syncServers()
         startRemoteNetworkMonitoring()
+        sweepOrphanedCheckpointRefs()
     }
 
     private func remoteStartModels() -> [RemoteStartModel] {
@@ -607,6 +625,11 @@ final class AppState: ObservableObject {
     }
 
     private func applyRemoteReasoningEffort(_ effort: String?) {
+        // A request that does not carry an effort (approvals, follow-ups,
+        // auto/full access toggles) must leave the saved choice alone. Treating
+        // nil as "clear" wiped the user's per-model reasoning selection on
+        // every remote approval.
+        guard let effort else { return }
         if let modelID = activeCodexModelID {
             preferences.saveCodexReasoningEffort(effort, modelID: modelID)
         } else if let endpoint = engine.activeRemoteEndpoint {
@@ -973,6 +996,42 @@ final class AppState: ObservableObject {
 
     // MARK: Launch restore (Phase 3.1)
 
+    /// One-time sweep of checkpoint pin refs left behind by deleted sessions
+    /// or by a crash between snapshot and session save. Deferred until no run
+    /// is active: a freshly created pin whose checkpoint has not been
+    /// persisted yet must never be mistaken for an orphan. Runs off the main
+    /// thread; matching is by pinned tree, so legacy refs whose session still
+    /// exists survive even though their names were never recorded.
+    private func sweepOrphanedCheckpointRefs() {
+        guard !Self.isTestHost else { return }
+        Task { @MainActor [weak self] in
+            while let self, self.sessions.isRunning {
+                try? await Task.sleep(for: .seconds(5))
+                if Task.isCancelled { return }
+            }
+            guard let self else { return }
+            let preferencePath = self.preferences.validatedWorkspaceURL()?.path
+            let activePath = self.sessions.workspaceURL?.path
+            Task.detached(priority: .utility) {
+                let store = SessionStore.shared
+                var records = store.loadAll()
+                // A failed (retryable) save still owns its pins.
+                records.append(contentsOf: store.pendingRecords)
+                let grouped = Dictionary(grouping: records, by: \.workspacePath)
+                var paths = Set(grouped.keys)
+                if let preferencePath { paths.insert(preferencePath) }
+                if let activePath { paths.insert(activePath) }
+                for path in paths where !path.isEmpty {
+                    let referenced = Set(
+                        (grouped[path] ?? []).flatMap { $0.checkpoints.map(\.treeSHA) })
+                    _ = GitCheckpointer.sweepOrphanedPins(
+                        workspacePath: path,
+                        referencedTreeSHAs: referenced)
+                }
+            }
+        }
+    }
+
     /// Restores workspace, session, and interrupted downloads after
     /// validating each piece. Failed restores fall back safely and never
     /// delete stored state.
@@ -980,12 +1039,14 @@ final class AppState: ObservableObject {
         let preferences = preferences.current
         let isTestHost = Self.isTestHost
 
-        // Vamp Assistant always cold-launches into a fresh, project-free chat.
-        // chat. The validated bookmark, last session id, and encrypted history
-        // remain untouched for explicit Code/history restoration.
+        // A returning user should land where they stopped. Restore the saved
+        // project and chat, then continue safely into a chat-only draft when
+        // the folder has been moved/deleted or the selection was cleared.
         if !isTestHost {
+            Task { await restorePersistedWorkspace() }
+            Log.app.info("Restoring persisted workspace and chat")
+        } else {
             sessions.newSession()
-            Log.app.info("Started a fresh Vamp Assistant chat")
         }
 
         // Model: reload the last-used local model so the composer is ready
@@ -996,11 +1057,8 @@ final class AppState: ObservableObject {
         // complete, chat-role, MemoryAdvisor admission) and no-ops cleanly
         // when any of it fails. Never under the test host: an auto-load
         // would page real weights mid-suite.
-        if !Self.isTestHost,
-           let modelID = preferences.lastModelID,
-           let catalog = ModelCatalog.model(id: modelID) {
-            Task { await self.activate(model: catalog) }
-            Log.app.info("Auto-reloading last model \(modelID, privacy: .public)")
+        if !Self.isTestHost {
+            restoreLastEngine(preferences)
         }
 
         // Downloads: manifest scan already populated paused states; resume
@@ -1015,6 +1073,40 @@ final class AppState: ObservableObject {
                 Log.app.info("Auto-resuming download \(modelID, privacy: .public)")
             }
         }
+    }
+
+    /// Restores the last selected project and its active chat. This keeps a
+    /// project selected even when the user left it on an unsaved draft.
+    private func restorePersistedWorkspace() async {
+        guard let workspace = preferences.validatedWorkspaceURL() else {
+            sessions.newSession()
+            return
+        }
+
+        let preferences = self.preferences.current
+        await sessions.switchWorkspace(to: workspace, restoreLatest: false)
+        if let id = preferences.lastSessionID,
+           let record = SessionStore.shared.load(id: id),
+           record.workspacePath == workspace.path,
+           SessionStore.shared.validateWorkspaceBinding(record) {
+            _ = sessions.restore(record)
+        } else if let latest = await Self.latestSession(in: workspace.path),
+                  SessionStore.shared.validateWorkspaceBinding(latest) {
+            _ = sessions.restore(latest)
+        }
+    }
+
+    /// The most recent app session bound to `workspacePath`, scanned OFF the
+    /// main actor. loadAll() opens and decrypts every session file, and this
+    /// path runs right after launch (only when the persisted id is missing or
+    /// stale), so a main-thread pass here beachballs a window that is already
+    /// on screen. Semantics are unchanged: the scan still covers the whole
+    /// library, it just no longer blocks drawing.
+    private nonisolated static func latestSession(in workspacePath: String) async -> SessionRecord? {
+        await Task.detached(priority: .utility) {
+            SessionStore.shared.loadAll()
+                .first { $0.workspacePath == workspacePath && $0.source == .app }
+        }.value
     }
 
     // MARK: System wiring
@@ -1060,14 +1152,21 @@ final class AppState: ObservableObject {
         statsTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                self.currentFootprint = MemoryAdvisor.processFootprint
-                self.availableBudget = MemoryAdvisor.availableBudget
+                // @Published emits in willSet, so writing an unchanged sample
+                // still invalidates every observer — and this loop runs
+                // forever at 2 Hz, idle or hidden. Compare before writing: on a
+                // stable machine the readout now publishes nothing until a
+                // value actually changes.
+                let footprint = MemoryAdvisor.processFootprint
+                if footprint != self.currentFootprint { self.currentFootprint = footprint }
+                let budget = MemoryAdvisor.availableBudget
+                if budget != self.availableBudget { self.availableBudget = budget }
                 let stats = await self.engine.stats
                 if stats.usageSerial > self.lastUsageSerial {
                     self.lastUsageSerial = stats.usageSerial
                     self.sessionUsage.add(prompt: stats.promptTokens, completion: stats.generatedTokens)
                 }
-                self.lastEngineStats = stats
+                if stats != self.lastEngineStats { self.lastEngineStats = stats }
                 try? await Task.sleep(for: .seconds(2))
             }
         }
@@ -1089,7 +1188,7 @@ final class AppState: ObservableObject {
     // MARK: Model lifecycle (Phase 3.4)
 
     func budget(for model: CatalogModel) -> MemoryAdvisor.Budget {
-        MemoryAdvisor.budget(diskBytes: model.diskBytes)
+        MemoryAdvisor.budget(diskBytes: model.diskBytes, format: model.format)
     }
 
     var activeModel: CatalogModel? {
@@ -1117,13 +1216,16 @@ final class AppState: ObservableObject {
             enginePhase = .failed("\(model.displayName) is incomplete (missing weight files). Remove it and download again.")
             return
         }
+        let format = modelStore.detectedFormat(installed)
         // Reject a model that cannot fit even on a clean machine before
         // stopping the currently working model. This is especially important
         // when a large MLX checkpoint is selected while a GGUF helper is
         // already resident.
         if model.id != activeModelID {
             do {
-                try MemoryAdvisor.admitFreshLoad(diskBytes: installed.sizeBytes)
+                try MemoryAdvisor.admitFreshLoad(
+                    diskBytes: installed.sizeBytes,
+                    format: format)
             } catch {
                 enginePhase = .failed(error.localizedDescription)
                 return
@@ -1162,7 +1264,6 @@ final class AppState: ObservableObject {
             // The format is detected from what's actually on disk (a GGUF
             // download has no config.json), so user-imported models route
             // correctly too.
-            let format = modelStore.detectedFormat(installed)
             try await engine.load(directory: directory, modelID: model.id, diskBytes: installed.sizeBytes, format: format, contextSize: model.contextWindow)
             activeModelID = model.id
             // The engine's REAL window (GGUF fits ctx to RAM) wins over the
@@ -1170,7 +1271,7 @@ final class AppState: ObservableObject {
             effectiveContextWindow = await engine.effectiveContextWindow ?? model.contextWindow
             enginePhase = .ready(model.displayName)
             // Persist the selection only after a successful load.
-            persistActiveModel(model.id)
+            persistActiveLocal(model.id)
             drainTaskQueue()
         } catch {
             enginePhase = .failed(error.localizedDescription)
@@ -1196,9 +1297,6 @@ final class AppState: ObservableObject {
             await engine.unload()
             activeModelID = nil
             effectiveContextWindow = nil
-            // Switching to BYOK is a deliberate leave: don't auto-reload the
-            // local model on the next launch.
-            clearPersistedModel()
         }
         guard engine.useRemote(endpoint) else {
             enginePhase = .failed("No API key configured for \(endpoint.effectiveDisplayName).")
@@ -1221,6 +1319,7 @@ final class AppState: ObservableObject {
             preferences.remoteModelOverride(endpoint: endpoint))
         effectiveContextWindow = activeRemoteProfile?.contextWindow
         enginePhase = .ready("\(endpoint.effectiveDisplayName) · \(endpoint.model)")
+        persistActiveRemote(endpoint)
         drainTaskQueue()
         return true
     }
@@ -1272,7 +1371,7 @@ final class AppState: ObservableObject {
         activeRemoteProfile = nil
         effectiveContextWindow = nil
         activeCodexModelID = model.id
-        clearPersistedModel()
+        persistActiveCodex(model.id)
         enginePhase = .ready("OpenAI account · \(model.displayName)")
         drainTaskQueue()
         return true
@@ -1475,18 +1574,104 @@ final class AppState: ObservableObject {
         if remoteNetworkKind != networkKind { remoteNetworkKind = networkKind }
     }
 
-    private func persistActiveModel(_ modelID: String) {
+    private func restoreLastEngine(_ preferences: AppPreferences) {
+        switch preferences.lastEngineKind {
+        case "chatgpt":
+            if let modelID = preferences.lastCodexModelID, !modelID.isEmpty {
+                Task { await self.restoreCodex(modelID: modelID) }
+                Log.app.info("Auto-reloading ChatGPT account model \(modelID, privacy: .public)")
+                return
+            }
+        case "remote":
+            if let endpoint = preferences.lastRemoteEndpoint {
+                Task { await self.activateRemote(endpoint: endpoint) }
+                Log.app.info("Auto-reloading remote \(endpoint.effectiveDisplayName, privacy: .public)")
+                return
+            }
+        default:
+            break
+        }
+        if let modelID = preferences.lastModelID,
+           let catalog = ModelCatalog.model(id: modelID) {
+            Task { await self.activate(model: catalog) }
+            Log.app.info("Auto-reloading last model \(modelID, privacy: .public)")
+        }
+    }
+
+    private func restoreCodex(modelID: String) async {
+        await codexAccount.refresh()
+        let model = codexAccount.models.first { $0.id == modelID }
+            ?? CodexAccountCatalog.presets.first { $0.id == modelID }
+            ?? CodexModelProfile(
+                id: modelID,
+                displayName: modelID,
+                description: "",
+                defaultReasoningEffort: nil,
+                supportedReasoningEfforts: [],
+                inputModalities: ["text"],
+                isDefault: false,
+                hidden: false)
+        _ = await activateCodex(model: model)
+    }
+
+    var statusModelLabel: String {
+        switch enginePhase {
+        case .ready(let name):
+            // Never render an empty chip: an unnamed ready engine still has
+            // to say something truthful.
+            return name.isEmpty ? "Model ready" : name
+        case .loading(let name):
+            return name.isEmpty ? "Loading model…" : name
+        case .failed, .idle:
+            if isCodexActive, let id = activeCodexModelID {
+                return id
+            }
+            if isRemoteActive, let endpoint = engine.activeRemoteEndpoint {
+                return "\(endpoint.effectiveDisplayName) · \(endpoint.model)"
+            }
+            let name = activeModel?.displayName ?? ""
+            return name.isEmpty ? "No model" : name
+        }
+    }
+
+    var statusModelHelp: String {
+        if isCodexActive { return "Active ChatGPT account model" }
+        if isRemoteActive { return "Active remote (BYOK) engine" }
+        if activeModelID != nil { return "Active local MLX model" }
+        return "No model loaded"
+    }
+
+    private func persistActiveLocal(_ modelID: String) {
         var preferences = preferences.current
+        preferences.lastEngineKind = "local"
         preferences.lastModelID = modelID
+        self.preferences.save(preferences)
+    }
+
+    private func persistActiveCodex(_ modelID: String) {
+        var preferences = preferences.current
+        preferences.lastEngineKind = "chatgpt"
+        preferences.lastCodexModelID = modelID
+        preferences.lastModelID = nil
+        self.preferences.save(preferences)
+    }
+
+    private func persistActiveRemote(_ endpoint: RemoteEndpoint) {
+        var preferences = preferences.current
+        preferences.lastEngineKind = "remote"
+        preferences.lastRemoteEndpoint = endpoint
+        preferences.lastModelID = nil
         self.preferences.save(preferences)
     }
 
     private func clearPersistedModel() {
         var preferences = preferences.current
-        if preferences.lastModelID != nil {
-            preferences.lastModelID = nil
-            self.preferences.save(preferences)
-        }
+        var changed = false
+        if preferences.lastModelID != nil { preferences.lastModelID = nil; changed = true }
+        if preferences.lastEngineKind != nil { preferences.lastEngineKind = nil; changed = true }
+        if preferences.lastCodexModelID != nil { preferences.lastCodexModelID = nil; changed = true }
+        if preferences.lastRemoteEndpoint != nil { preferences.lastRemoteEndpoint = nil; changed = true }
+        if changed { self.preferences.save(preferences) }
     }
 
     // MARK: Download lifecycle (Phase 3.3)

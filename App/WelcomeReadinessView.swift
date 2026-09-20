@@ -112,7 +112,7 @@ struct WelcomeReadinessView: View {
                 .shadow(color: Theme.accent.opacity(0.28), radius: 12, y: 4)
             VStack(alignment: .leading, spacing: 3) {
                 Text(isOnboarding ? "Welcome to Vamp Assistant" : "System Readiness")
-                    .font(.title2.weight(.semibold))
+                    .font(.app(size: 17, weight: .semibold ))
                     .foregroundStyle(Theme.textPrimary)
                 Text("Pick a model to chat. Open a project only when you want coding tools.")
                     .font(.callout)
@@ -176,7 +176,8 @@ struct WelcomeReadinessView: View {
                 title: "Mac and Xcode",
                 detail: toolchainDetail,
                 systemImage: "hammer.fill",
-                ready: toolchainReady)
+                ready: toolchainReady,
+                optional: true)
             Divider().padding(.leading, 46)
             readinessRow(
                 title: "Signing certificate",
@@ -200,8 +201,8 @@ struct WelcomeReadinessView: View {
 
     private func sectionTitle(_ title: LocalizedStringKey, subtitle: LocalizedStringKey) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(.headline).foregroundStyle(Theme.textPrimary)
-            Text(subtitle).font(.caption).foregroundStyle(Theme.textSecondary)
+            Text(title).font(.app(size: 13.5, weight: .semibold )).foregroundStyle(Theme.textPrimary)
+            Text(subtitle).font(.app(size: 11.5 )).foregroundStyle(Theme.textSecondary)
         }
         .padding(16)
     }
@@ -217,7 +218,7 @@ struct WelcomeReadinessView: View {
     ) -> some View {
         HStack(spacing: 12) {
             Image(systemName: systemImage)
-                .font(.app(size: 14, weight: .semibold, design: .serif))
+                .font(.app(size: 14, weight: .semibold ))
                 .foregroundStyle(ready ? Theme.success : optional ? Theme.textTertiary : Theme.warning)
                 .frame(width: 32, height: 32)
                 .background(Theme.wash(ready ? Theme.success : optional ? Theme.textTertiary : Theme.warning), in: Circle())

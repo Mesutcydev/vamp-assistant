@@ -61,10 +61,17 @@ enum MemoryAdvisor {
     /// admitting a checkpoint that fits only on paper and then stalls during
     /// its first prefill on a 16 GB Mac.
     nonisolated(unsafe) static var osReserveFraction: Double = 0.30
-    /// On-disk weights → peak working-set multiplier (page-in spike + KV cache slack).
+    /// On-disk weights → peak working-set multiplier for in-process MLX
+    /// checkpoints (page-in spike + allocator slack).
     nonisolated(unsafe) static var workingSetOverhead: Double = 1.3
     /// Fixed headroom kept free above the projected working set.
     nonisolated(unsafe) static var headroomReserveBytes: UInt64 = 500_000_000
+    /// GGUF weights are memory-mapped by the llama.cpp helper. Counting the
+    /// whole file once plus a small launch cushion is a better upper bound
+    /// than applying MLX's allocator multiplier a second time. KV cache
+    /// memory is fitted separately by `GGUFEngine.Planner`.
+    static let ggufWorkingSetOverhead: Double = 1.0
+    static let ggufHeadroomReserveBytes: UInt64 = 350_000_000
     /// Headroom below which a critical memory-pressure event dumps the resident model.
     nonisolated(unsafe) static var criticalDumpHeadroom: UInt64 = 700_000_000
     /// Loads are blocked for this long after an emergency dump (avoids racing the kernel's reclaim).
@@ -133,17 +140,38 @@ enum MemoryAdvisor {
     // MARK: Verdicts
 
     /// Projected peak footprint for a model with the given on-disk byte size.
-    static func projectedFootprint(diskBytes: Int64) -> UInt64 {
+    static func projectedFootprint(
+        diskBytes: Int64,
+        format: CatalogModel.Format = .mlx
+    ) -> UInt64 {
         guard diskBytes > 0 else { return 0 }
-        let projected = Double(diskBytes) * workingSetOverhead + Double(headroomReserveBytes)
+        let overhead: Double
+        let headroom: UInt64
+        switch format {
+        case .qwenStreaming:
+            return QwenStreamBudget.resolve(availableBytes: UInt64.max / 2)!.reservedBytes
+        case .gguf:
+            overhead = ggufWorkingSetOverhead
+            headroom = ggufHeadroomReserveBytes
+        case .mlx, .coreAI:
+            overhead = workingSetOverhead
+            headroom = headroomReserveBytes
+        }
+        let projected = Double(diskBytes) * overhead + Double(headroom)
         return UInt64(min(projected, Double(UInt64.max / 2)))
     }
 
-    static func budget(diskBytes: Int64) -> Budget {
+    static func budget(
+        diskBytes: Int64,
+        format: CatalogModel.Format = .mlx
+    ) -> Budget {
         let physical = physicalMemory
         let footprint = processFootprint
         let usable = usableBudgetMinusCurrentFootprint(physical: physical, footprint: footprint)
-        let projected = projectedFootprint(diskBytes: diskBytes)
+        let projected = format == .qwenStreaming
+            ? (QwenStreamBudget.resolve(availableBytes: UInt64(Double(usable) * 0.95))?.reservedBytes
+                ?? projectedFootprint(diskBytes: diskBytes, format: format))
+            : projectedFootprint(diskBytes: diskBytes, format: format)
         return Budget(
             physicalTotal: physical,
             usableBudget: usable,
@@ -156,10 +184,15 @@ enum MemoryAdvisor {
     /// Verdict for a model on a clean machine, before accounting for a model
     /// that may already be resident. This lets the UI reject an oversized
     /// replacement before unloading the model that is currently working.
-    static func freshLoadVerdict(diskBytes: Int64) -> Verdict {
+    static func freshLoadVerdict(
+        diskBytes: Int64,
+        format: CatalogModel.Format = .mlx
+    ) -> Verdict {
         let physical = physicalMemory
         let usable = UInt64(Double(physical) * (1.0 - osReserveFraction))
-        return verdict(projected: projectedFootprint(diskBytes: diskBytes), budget: usable)
+        return verdict(
+            projected: projectedFootprint(diskBytes: diskBytes, format: format),
+            budget: usable)
     }
 
     static func verdict(projected: UInt64, budget: UInt64) -> Verdict {
@@ -176,9 +209,13 @@ enum MemoryAdvisor {
 
     /// The one gate every model load must pass. Thermal critical and the
     /// post-pressure cooldown are safety stops that cannot be bypassed.
-    static func admitLoad(diskBytes: Int64, thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState) throws {
+    static func admitLoad(
+        diskBytes: Int64,
+        format: CatalogModel.Format = .mlx,
+        thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
+    ) throws {
         try checkTransientLoadGuards(thermalState: thermalState)
-        let verdict = budget(diskBytes: diskBytes).verdict
+        let verdict = budget(diskBytes: diskBytes, format: format).verdict
         if case .wontFit(let reason) = verdict {
             throw AdmissionError.wontFit(reason)
         }
@@ -187,9 +224,13 @@ enum MemoryAdvisor {
     /// Admission for a replacement model before any existing resident is
     /// unloaded. It prevents a model that cannot fit on a clean machine from
     /// taking the currently usable model down with it.
-    static func admitFreshLoad(diskBytes: Int64, thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState) throws {
+    static func admitFreshLoad(
+        diskBytes: Int64,
+        format: CatalogModel.Format = .mlx,
+        thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
+    ) throws {
         try checkTransientLoadGuards(thermalState: thermalState)
-        if case .wontFit(let reason) = freshLoadVerdict(diskBytes: diskBytes) {
+        if case .wontFit(let reason) = freshLoadVerdict(diskBytes: diskBytes, format: format) {
             throw AdmissionError.wontFit(reason)
         }
     }

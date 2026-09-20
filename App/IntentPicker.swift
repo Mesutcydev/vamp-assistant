@@ -25,7 +25,7 @@ struct IntentPicker: View {
     private var header: some View {
         HStack {
             Text("Context for this turn")
-                .font(.app(size: 13, weight: .semibold, design: .serif))
+                .font(.app(size: 13, weight: .semibold ))
                 .foregroundStyle(Theme.textPrimary)
             Spacer()
             if !store.selection.isEmpty {
@@ -51,7 +51,7 @@ struct IntentPicker: View {
                         HStack(spacing: 6) {
                             Image(systemName: preset.glyph)
                                 .accessibilityHidden(true)
-                                .font(.app(size: 11, design: .serif))
+                                .font(.app(size: 11 ))
                                 .foregroundStyle(Theme.accentText)
                                 .frame(width: 16)
                             Text(preset.name)
@@ -147,7 +147,7 @@ struct IntentPicker: View {
     private func chipLabel(_ title: String, glyph: String, selected: Bool, tint: Color) -> some View {
         HStack(spacing: 6) {
             Image(systemName: glyph)
-                .font(.app(size: 11, design: .serif))
+                .font(.app(size: 11 ))
                 .frame(width: 16)
             Text(title)
                 .font(.caption.weight(.medium))
@@ -155,7 +155,7 @@ struct IntentPicker: View {
             Spacer(minLength: 0)
             if selected {
                 Image(systemName: "checkmark")
-                    .font(.app(size: 9, weight: .bold, design: .serif))
+                    .font(.app(size: 9, weight: .bold ))
             }
         }
         .foregroundStyle(selected ? tint : Theme.textSecondary)

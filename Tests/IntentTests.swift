@@ -336,6 +336,8 @@ final class ComposerStoreTests: XCTestCase {
 
         XCTAssertEqual(store.estimate.totalTokens, 0)
         store.prompt = String(repeating: "x", count: 400)
+        let didEstimate = await waitUntil { store.estimate.totalTokens == 100 }
+        XCTAssertTrue(didEstimate, "draft telemetry should settle after an edit")
         let draftOnly = store.estimate.totalTokens
         XCTAssertEqual(draftOnly, 100)
 
@@ -430,7 +432,17 @@ final class ComposerStoreTests: XCTestCase {
         XCTAssertNil(appState.sessions.workspaceURL)
 
         let systemPrompt = try XCTUnwrap(engine.turnHistory.first?.first?.content)
-        XCTAssertTrue(systemPrompt.contains("project-free assistant mode"))
+        // Chat-only framing is machine-aware: below 24 GB of physical RAM a
+        // local chat model gets the LEAN boundary prompt instead of the full
+        // "project-free assistant mode" paragraph (see
+        // AgentSessionController.isConstrainedLocalModel). Assert the variant
+        // this machine is actually entitled to, and keep the invariants both
+        // variants must hold.
+        let constrainedMachine = MemoryAdvisor.physicalMemory < 24 * 1024 * 1024 * 1024
+        XCTAssertEqual(
+            systemPrompt.contains("project-free assistant mode"),
+            !constrainedMachine,
+            "wrong chat-only boundary prompt for this machine: \(systemPrompt.prefix(400))")
         XCTAssertTrue(systemPrompt.contains("# Tool protocol"))
         XCTAssertFalse(systemPrompt.contains("ChatRuntime"))
         XCTAssertFalse(systemPrompt.contains("read_file"))

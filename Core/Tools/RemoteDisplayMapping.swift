@@ -112,4 +112,11 @@ enum RemoteDisplayMapping {
         let factor = 1.0 + min(speed / 50.0, 1.5)
         return (dx * factor, dy * factor)
     }
+
+    /// Vamp Control's Bluetooth hover path is direct relative pointer movement:
+    /// it never maps the delta through the video's fitted/zoomed content rect.
+    /// Assistant has no per-device sensitivity setting, so sensitivity is 1.
+    static func hoverDelta(dx: Double, dy: Double) -> (dx: Double, dy: Double) {
+        accelerated(dx: dx, dy: dy)
+    }
 }

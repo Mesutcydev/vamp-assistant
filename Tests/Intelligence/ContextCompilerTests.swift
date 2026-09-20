@@ -26,15 +26,12 @@ final class ContextCompilerTests: XCTestCase {
     ) throws -> (ContextCompiler, SymbolGraph) {
         let graph = try SymbolGraph(store: SQLiteStore(
             url: URL(fileURLWithPath: ":memory:"), inMemory: true))
-        let search = try SearchIndex(store: SQLiteStore(
-            url: URL(fileURLWithPath: ":memory:"), inMemory: true))
         for (source, path) in [(authFile, "Core/AuthService.swift"),
                                (callerFile, "App/LoginFlow.swift")] {
             let file = SourceFile(path: path, content: source,
                                   contentHash: ContentDigest.sha256Hex(source))
             let parsed = ParserRegistry.parse(file: file)!
             try graph.upsertFile(parsed)
-            try search.indexFile(parsed, content: source)
         }
         let snapshot = WorkspaceSnapshot(
             snapshotID: UUID(),
@@ -43,7 +40,7 @@ final class ContextCompilerTests: XCTestCase {
                 displayName: "FixtureApp", git: nil),
             git: nil, files: [:], createdAt: Date())
         let compiler = ContextCompiler(
-            graph: graph, search: search, knowledge: knowledge,
+            graph: graph, knowledge: knowledge,
             capsuleProvider: {
                 try CapsuleGenerator.generate(
                     identity: WorkspaceIdentity(

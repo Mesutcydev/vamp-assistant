@@ -7,10 +7,11 @@ import Foundation
 struct CatalogModel: Codable, Identifiable, Sendable, Hashable {
     enum Format: String, Codable, Sendable {
         case mlx
+        case qwenStreaming
         case gguf
         /// Apple Core AI resource pack (`metadata.json` + `.aimodel[c]`).
-        /// Execution is isolated in `CoreAIEngine`; these resources must
-        /// never be offered to MLX or llama.cpp.
+        /// Detected so MLX and llama.cpp never try to load it. Generation
+        /// is refused until a catalog pack and runner ship.
         case coreAI
     }
 
@@ -53,18 +54,20 @@ struct CatalogModel: Codable, Identifiable, Sendable, Hashable {
     var recommendedRAMGB: Int
     var notes: String
     /// Weights format — decides which engine runs it. MLX safetensors run
-    /// in-process, GGUF uses llama.cpp, and Core AI uses Apple's runner.
+    /// in-process; GGUF uses llama.cpp; Core AI is detected and refused.
     var format: Format = .mlx
     var role: Role = .chat
     var kind: Kind = .general
     /// Empty means "every Mac" (user imports). Bundled entries name the
     /// device lanes that should see this checkpoint.
+    var directoryBookmark: Data? = nil
     var lanes: [DeviceLane] = []
 
     /// Tolerant decoding: catalog files written by older builds lack
     /// `format`/`role`/`kind`/`lanes` — fill defaults instead of dropping the file.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        directoryBookmark = try c.decodeIfPresent(Data.self, forKey: .directoryBookmark)
         id = try c.decode(String.self, forKey: .id)
         repo = try c.decode(String.self, forKey: .repo)
         displayName = try c.decode(String.self, forKey: .displayName)
@@ -367,6 +370,11 @@ enum ModelCatalog {
               bytes: 20_412_000_000, ctx: 262_144, min: 32, rec: 36,
               notes: "MoE daily driver for 36 GB Pro/Max.",
               kind: .coding, lanes: [.pro36, .max]),
+        catalogEntry(id: QwenStreamArtifact.modelID, repo: QwenStreamArtifact.repo,
+              name: "Qwen3.5 35B A3B — SSD Streaming", family: "Qwen3.5", params: "35B (3B active)",
+              bytes: QwenStreamArtifact.downloadBytes, ctx: 4096, min: 16, rec: 16,
+              notes: "Official K=8 · text chat only. Validated against the pinned quantized Qwen3.5-35B-A3B K=8 MLX 0.31.1 Metal explicit-attention reference: 64/64 generated token IDs, 63 cached-decode calls, zero true K=8 router membership failures, plus cancellation, model-switch, and quit/relaunch lifecycle gates. Not official Qwen certification, not BF16 equivalence, not cross-version equality, and not universal hardware validation. No Edge0 adapters.",
+              format: .qwenStreaming, kind: .general, lanes: [.air16, .pro24, .pro36, .max]),
         catalogEntry(id: "qwen3.5-122b-a10b-4bit", repo: "mlx-community/Qwen3.5-122B-A10B-4bit",
               name: "Qwen3.5 122B A10B", family: "Qwen3.5", params: "122B (10B active)",
               bytes: 69_614_000_000, ctx: 262_144, min: 80, rec: 96,

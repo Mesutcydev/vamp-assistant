@@ -176,8 +176,8 @@ struct RemoteDiagnosticsSettingsView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 18).stroke(BeetTheme.line(appearance)) }
+        .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 8).stroke(BeetTheme.line(appearance)) }
     }
 
     private func errorCard(_ message: String) -> some View {
@@ -193,8 +193,8 @@ struct RemoteDiagnosticsSettingsView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 18).stroke(BeetTheme.line(appearance)) }
+        .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 8).stroke(BeetTheme.line(appearance)) }
     }
 
     private var breadcrumbsCard: some View {
@@ -227,8 +227,8 @@ struct RemoteDiagnosticsSettingsView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 18).stroke(BeetTheme.line(appearance)) }
+        .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 8).stroke(BeetTheme.line(appearance)) }
     }
 
     private var actions: some View {

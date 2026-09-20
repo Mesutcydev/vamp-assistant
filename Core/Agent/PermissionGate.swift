@@ -52,6 +52,13 @@ struct PermissionGate: Sendable {
     func decision(for call: ParsedToolCall, risk: ToolRisk?) -> Decision {
         let compatibility = compatibilityDecision(for: call, risk: risk)
         if case .denied = compatibility { return compatibility }
+        // An imported `ask` rule must actually prompt: previously only `deny`
+        // was honored here, so `edit: ask` was silently bypassed whenever the
+        // native flag (auto-approve edits) or risk classification said `.auto`.
+        // Full Access is the one documented way to run uninterrupted.
+        if case .needsApproval = compatibility, !fullAccess {
+            return .needsApproval
+        }
 
         // Full Access is an explicit user choice from Remote controls. It is
         // broader than the ordinary safe-command toggle, but never overrides

@@ -135,7 +135,7 @@ final class TaskQueueStore: @unchecked Sendable {
             attempts: 0,
             lastError: nil,
             resultSummary: nil)
-        save(task)
+        try save(task)
         return task
     }
 
@@ -169,7 +169,8 @@ final class TaskQueueStore: @unchecked Sendable {
         guard var task = load(id: id) else { return }
         mutate(&task)
         task.updatedAt = Date()
-        save(task)
+        // A failed phase update is advisory; the task stays queued on disk.
+        try? save(task)
     }
 
     func delete(id: UUID) {
@@ -200,17 +201,24 @@ final class TaskQueueStore: @unchecked Sendable {
         directory.appendingPathComponent("\(id.uuidString).task")
     }
 
-    private func save(_ task: QueuedAgentTask) {
+    /// Throws when the task could not be durably written. `enqueue` depends on
+    /// this: handing out an id for a task that never reached disk loses it on
+    /// the next launch with no error anywhere.
+    private func save(_ task: QueuedAgentTask) throws {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .millisecondsSince1970
-        guard let data = try? encoder.encode(task) else { return }
-        guard let payload = SessionCrypto.encrypt(data) else { return }
+        let data = try encoder.encode(task)
+        guard let payload = SessionCrypto.encrypt(data) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
         let target = url(for: task.id)
         lock.lock()
         defer { lock.unlock() }
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try? payload.write(to: target, options: .atomic)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true)
+        try payload.write(to: target, options: .atomic)
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: target.path)
     }
 
     private func decode(_ data: Data) -> QueuedAgentTask? {

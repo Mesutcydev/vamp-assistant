@@ -9,14 +9,24 @@ struct PairingView: View {
     @State private var showScanner = false
     @State private var showManual = false
     @State private var showComputers = false
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FocusState private var focusedField: PairingField?
     var body: some View {
         NavigationStack {
             ZStack {
                 RemoteBackdrop()
                 ScrollView {
-                    VStack(spacing: 22) {
+                    let wide = (horizontalSizeClass == .regular || verticalSizeClass == .compact)
+                        && !dynamicTypeSize.isAccessibilitySize
+                    let layout = wide
+                        ? AnyLayout(HStackLayout(alignment: .top, spacing: 28))
+                        : AnyLayout(VStackLayout(alignment: .leading, spacing: 24))
+                    VStack(spacing: 20) {
+                    layout {
                         PairingHero()
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         PairingActions(address: $address, code: $code, showManual: $showManual,
                             focusedField: $focusedField,
                             savedAddress: store.savedMacAddress,
@@ -33,11 +43,13 @@ struct PairingView: View {
                             },
                             onForget: { store.forgetSavedMac() },
                             onConnect: { Task { await store.connect(address: address, code: code) } })
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                         PairingAssurances()
                         RemoteAppVersionFooter(
                             version: RemoteAppVersion.current.version,
                             build: RemoteAppVersion.current.build)
-                    }.frame(maxWidth: 560).padding(.horizontal, 18).padding(.vertical, 28).frame(maxWidth: .infinity)
+                    }.frame(maxWidth: wide ? 900 : 560).padding(20).frame(maxWidth: .infinity)
                 }
             }
             .toolbar {
@@ -51,7 +63,12 @@ struct PairingView: View {
                     AppearanceMenuButton()
                 }
             }
-            .toolbarBackground(.hidden, for: .navigationBar)
+            // Matches the hero heading below it — two phrasings for one screen
+            // ("Connect to Mac" / "Connect your Mac") read as two destinations,
+            // and VoiceOver announced both.
+            .navigationTitle("Connect your Mac")
+            .navigationBarTitleDisplayMode(.inline)
+            .remoteNavigationChrome()
             .alert(store.errorTitle, isPresented: errorBinding) { Button("OK") { store.errorMessage = nil } }
                 message: { Text(store.errorMessage ?? "Unknown error") }
             .sheet(isPresented: $showScanner) {
@@ -74,37 +91,79 @@ struct PairingView: View {
 }
 
 struct PairingHero: View {
-    @Environment(\.remoteAppearance) private var appearance
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     var body: some View {
-        if dynamicTypeSize.isAccessibilitySize {
-            Text("Connect to your Mac")
-                .font(.title2.weight(.bold))
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityAddTraits(.isHeader)
-        } else {
-            VStack(spacing: 15) {
-                Color.clear.frame(width: 76, height: 76).accessibilityHidden(true)
-                VStack(spacing: 7) {
-                    Text("Vamp Assistant")
-                        .font(.largeTitle.weight(.bold))
-                        .fontDesign(.serif)
-                        .minimumScaleFactor(0.7)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.center)
-                        .accessibilityAddTraits(.isHeader)
-                    Text("Your Mac. In your pocket.").font(.headline.weight(.semibold)).foregroundStyle(BeetTheme.accentBright)
-                    Text("Continue Assistant, Code, and specialist bot sessions securely from iPhone or iPad.")
-                        .font(.body).foregroundStyle(BeetTheme.secondaryText(appearance)).multilineTextAlignment(.center).lineSpacing(2)
+        VStack(alignment: .leading, spacing: 16) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    pairingGlyph
+                    Text("VAMP ASSISTANT")
+                        .font(.caption.weight(.semibold))
+                        .tracking(1.35)
+                        .fixedSize(horizontal: true, vertical: false)
+                    Spacer(minLength: 8)
+                    remoteBadge
+                }
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        pairingGlyph
+                        Spacer(minLength: 12)
+                        remoteBadge
+                    }
+                    Text("VAMP\nASSISTANT")
+                        .font(.headline.weight(.semibold))
+                        .tracking(1.1)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            .padding(.bottom, 12)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(RemoteInstrument.seam).frame(height: 0.75)
+            }
+            Text("Connect your Mac")
+                .font(RemoteInstrument.TypeStyle.title)
+                .tracking(-0.5)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+            Text("Bring your conversations, approvals, and Mac controls to this device.")
+                .font(.body)
+                .foregroundStyle(RemoteInstrument.secondaryInk)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .top, spacing: 10) {
+                Text("01").font(RemoteInstrument.TypeStyle.metadata).foregroundStyle(RemoteInstrument.orange)
+                Text("Open Remote Sessions on your Mac").font(.subheadline)
+            }
+            HStack(alignment: .top, spacing: 10) {
+                Text("02").font(RemoteInstrument.TypeStyle.metadata).foregroundStyle(RemoteInstrument.orange)
+                Text("Scan the code with this device").font(.subheadline)
+            }
         }
+        .foregroundStyle(RemoteInstrument.ink)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var pairingGlyph: some View {
+        Image(systemName: "desktopcomputer")
+            .font(.system(size: 20, weight: .regular))
+            .foregroundStyle(.white)
+            .frame(width: 42, height: 42)
+            .background(RemoteInstrument.darkInsert, in: RoundedRectangle(cornerRadius: 8))
+            .accessibilityHidden(true)
+    }
+
+    private var remoteBadge: some View {
+        HStack(spacing: 4) {
+            Circle().fill(RemoteInstrument.orange).frame(width: 4, height: 4).accessibilityHidden(true)
+            Text("REMOTE").font(.caption2.monospaced())
+        }
+        .foregroundStyle(RemoteInstrument.secondaryInk)
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 
 struct PairingActions: View {
     @Environment(\.remoteAppearance) private var appearance
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var address: String
     @Binding var code: String
     @Binding var showManual: Bool
@@ -128,15 +187,25 @@ struct PairingActions: View {
                 )
                 HStack(spacing: 10) {
                     Capsule().fill(BeetTheme.line(appearance)).frame(height: 1)
-                    Text("or pair another Mac").font(.caption).foregroundStyle(BeetTheme.secondaryText(appearance))
+                    Text("or pair another Mac").font(.caption).foregroundStyle(RemoteInstrument.secondaryInk)
                     Capsule().fill(BeetTheme.line(appearance)).frame(height: 1)
                 }
                 .padding(.vertical, 2)
             }
-            Button(action: onScan) { Label("Scan Vamp Assistant QR", systemImage: "qrcode.viewfinder").font(.headline).frame(maxWidth: .infinity, minHeight: 52) }
+            VStack(alignment: .leading, spacing: 12) {
+                VampMicroLabel(title: "PAIR WITH YOUR MAC")
+            Button(action: onScan) {
+                HStack(spacing: 12) {
+                    Image(systemName: "qrcode.viewfinder").font(.title2)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Scan pairing code").font(.headline)
+                        Text("Use the code shown on your Mac").font(.caption)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "arrow.up.right").font(.caption.weight(.semibold))
+                }.padding(.vertical, 14)
+            }
                 .buttonStyle(RemotePrimaryButtonStyle())
-            Button { TailscaleLauncher.open() } label: { Label("Open Tailscale", systemImage: "network").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
-                .buttonStyle(RemoteSecondaryButtonStyle())
+            }
             DisclosureGroup(isExpanded: $showManual) {
                 VStack(spacing: 11) {
                     RemoteField(title: "Mac address", placeholder: "http://192.168.1.x:9575", text: $address, field: .address, focusedField: focusedField)
@@ -152,11 +221,24 @@ struct PairingActions: View {
                 }.padding(.top, 14)
             } label: {
                 Label("Enter connection manually", systemImage: "keyboard").font(.subheadline.weight(.semibold))
-                    .foregroundStyle(BeetTheme.secondaryText(appearance)).frame(minHeight: 44)
-            }.tint(BeetTheme.secondaryText(appearance))
+                    .foregroundStyle(RemoteInstrument.secondaryInk).frame(minHeight: 44)
+            }.tint(RemoteInstrument.secondaryInk)
+            // Sits after both pairing paths: Tailscale is a prerequisite you
+            // may need before either works, not a third way to pair. It used to
+            // split scan and manual entry with equal visual weight.
+            Button { TailscaleLauncher.open() } label: {
+                Label("Open Tailscale", systemImage: "network")
+                    .font(.subheadline.weight(.medium))
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(RemoteSecondaryButtonStyle())
+            .accessibilityHint("Opens the Tailscale app, or its App Store page if it is not installed.")
         }
-        .padding(16)
-        .remoteGlass(appearance, radius: 22, strong: true)
+        .padding(RemoteInstrument.Space.page)
+        .remoteFaceplate()
+        .animation(reduceMotion ? nil : RemoteInstrument.motion, value: showManual)
+        .foregroundStyle(RemoteInstrument.ink)
+
     }
 }
 
@@ -203,7 +285,11 @@ struct SavedMacReconnectCard: View {
             .disabled(isConnecting)
         }
         .padding(14)
-        .remoteGlass(appearance, radius: 17)
+        .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: RemoteInstrument.controlRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: RemoteInstrument.controlRadius, style: .continuous)
+                .stroke(BeetTheme.line(appearance), lineWidth: 0.75)
+        }
         .confirmationDialog(
             "Forget this Mac?",
             isPresented: $showForget,
@@ -228,8 +314,9 @@ struct RemoteField: View {
     var focusedField: FocusState<PairingField?>.Binding
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(title.uppercased()).font(.caption2.weight(.bold)).tracking(0.8).foregroundStyle(BeetTheme.secondaryText(appearance))
-            TextField(placeholder, text: $text)
+            Text(title.uppercased()).font(.system(.caption2, design: .monospaced, weight: .medium)).tracking(0.8).foregroundStyle(BeetTheme.secondaryText(appearance))
+            TextField(placeholder, text: $text,
+                      prompt: Text(placeholder).foregroundStyle(BeetTheme.secondaryText(appearance)))
                 .textContentType(field == .code ? .oneTimeCode : .URL)
                 .keyboardType(field == .code ? .numberPad : .URL)
                 .textInputAutocapitalization(.never)
@@ -237,40 +324,30 @@ struct RemoteField: View {
                 .focused(focusedField, equals: field)
                 .accessibilityLabel(title)
                 .onChange(of: text) { _, value in
-                    if field == .code {
-                        let digits = value.filter(\.isNumber)
-                        text = String(digits.prefix(6))
-                    }
+                    guard field == .code else { return }
+                    let digits = String(value.filter(\.isNumber).prefix(6))
+                    if digits != text { text = digits }
+                    // ponytail: a numberPad has no return key, so .submitLabel/
+                    // .onSubmit never fire on-device and the Connect button sits
+                    // behind the keyboard. Drop focus once the code is complete.
+                    if digits.count == 6 { focusedField.wrappedValue = nil }
                 }
                 .padding(.horizontal, 14).frame(minHeight: 50)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-                .overlay { RoundedRectangle(cornerRadius: 13).stroke(BeetTheme.line(appearance)) }
+                .background(BeetTheme.readingSurface(appearance), in: RoundedRectangle(cornerRadius: RemoteInstrument.controlRadius, style: .continuous))
+                .overlay { RoundedRectangle(cornerRadius: RemoteInstrument.controlRadius).stroke(BeetTheme.line(appearance)) }
         }
     }
 }
 
 struct PairingAssurances: View {
-    @Environment(\.remoteAppearance) private var appearance
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    let items = [("lock.shield.fill", "Private", "Direct to your Mac"), ("checkmark.shield.fill", "In control", "You choose access"), ("bolt.shield.fill", "No cloud relay", "LAN or Tailscale")]
     var body: some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(spacing: 18))
-            : AnyLayout(HStackLayout(alignment: .top, spacing: 10))
-        layout {
-            ForEach(items, id: \.1) { item in
-                VStack(spacing: 6) {
-                    // ponytail: fixed box. Glyph heights differ, and under .top a
-                    // short one pulled its whole column ~5pt above the others.
-                    Image(systemName: item.0)
-                        .font(.system(size: 15))
-                        .frame(height: 18)
-                        .foregroundStyle(BeetTheme.accentBright)
-                    Text(item.1).font(.caption.weight(.bold))
-                    Text(item.2).font(.caption2).foregroundStyle(BeetTheme.secondaryText(appearance)).multilineTextAlignment(.center)
-                }.frame(maxWidth: .infinity)
-            }
-        }.accessibilityElement(children: .combine)
+        Label("A direct, private connection over your local network or Tailscale.", systemImage: "lock.shield")
+            .font(.footnote)
+            .foregroundStyle(RemoteInstrument.secondaryInk)
+            .lineSpacing(3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 8)
+            .accessibilityElement(children: .combine)
     }
 }
 
@@ -283,24 +360,25 @@ private enum TailscaleLauncher {
 }
 
 struct RemotePrimaryButtonStyle: ButtonStyle {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var alignment: Alignment = .center
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.foregroundStyle(.white)
-            .background(BeetTheme.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .scaleEffect(configuration.isPressed ? 0.975 : 1).opacity(configuration.isPressed ? 0.9 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44, alignment: alignment)
+            .foregroundStyle(.white)
+            .modifier(RemoteKeySurface(isPressed: configuration.isPressed, prominent: true))
     }
 }
 
 struct RemoteSecondaryButtonStyle: ButtonStyle {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.remoteAppearance) private var appearance
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.foregroundStyle(BeetTheme.secondaryText(appearance))
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .background(BeetTheme.surfaceStrong(appearance).opacity(0.2), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay { RoundedRectangle(cornerRadius: 14).stroke(BeetTheme.line(appearance)) }
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.975 : 1).animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
+        configuration.label
+            .font(.subheadline.weight(.medium))
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
+            .foregroundStyle(configuration.role == .destructive ? RemoteInstrument.danger : RemoteInstrument.ink)
+            .modifier(RemoteKeySurface(isPressed: configuration.isPressed))
     }
 }
 
@@ -347,10 +425,11 @@ struct ComputerSwitcherSheet: View {
             }
             .navigationTitle("Your computers")
             .navigationBarTitleDisplayMode(.inline)
+            .remoteNavigationChrome()
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
-                }
+                }.vampUtilityAction()
             }
             .sheet(isPresented: $showDiagnostics) { RemoteDiagnosticsView(store: store) }
             .sheet(isPresented: $showPairing) { PairAnotherMacSheet(store: store) }
@@ -402,10 +481,11 @@ struct PairAnotherMacSheet: View {
             }
             .navigationTitle("Pair another Mac")
             .navigationBarTitleDisplayMode(.inline)
+            .remoteNavigationChrome()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
-                }
+                }.vampUtilityAction()
             }
             .sheet(isPresented: $showScanner) {
                 QRScannerSheet(onScan: { value in
@@ -426,40 +506,18 @@ struct PairAnotherMacSheet: View {
 
 struct RemoteReconnectBanner: View {
     let store: RemoteStore
-    @Environment(\.remoteAppearance) private var appearance
 
     var body: some View {
         Button {
             Task { await store.connectSaved() }
         } label: {
-            HStack(spacing: 10) {
-                if store.isConnecting {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Image(systemName: "wifi.exclamationmark")
-                        .foregroundStyle(BeetTheme.accentBright)
-                        .accessibilityHidden(true)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(store.connectionLabel == "Reconnecting…" ? "Reconnecting to Mac" : "Mac unreachable")
-                        .font(.subheadline.weight(.semibold))
-                    Text(store.connectionSubtitle)
-                        .font(.caption)
-                        .foregroundStyle(BeetTheme.secondaryText(appearance))
-                }
-                Spacer(minLength: 8)
-                Text("Retry")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(BeetTheme.accentBright)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(.thinMaterial)
-            .background(BeetTheme.surface(appearance).opacity(0.3))
+            RemoteNoticeLabel(title: store.isConnecting ? "Reconnecting to Mac" : "Mac unreachable",
+                detail: store.connectionSubtitle, actionTitle: store.isConnecting ? "Connecting…" : "Retry",
+                symbol: "wifi.exclamationmark", isWorking: store.isConnecting)
         }
         .buttonStyle(.plain)
         .disabled(store.isConnecting)
-        .accessibilityLabel("Mac unreachable. Retry connection.")
+        .accessibilityLabel(store.isConnecting ? "Reconnecting to Mac" : "Mac unreachable. Retry connection.")
     }
 }
 
@@ -472,7 +530,7 @@ struct ComputerSwitcherIntro: View {
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(BeetTheme.accentBright)
                 .frame(width: 48, height: 48)
-                .background(BeetTheme.surfaceStrong(appearance), in: RoundedRectangle(cornerRadius: 15))
+                .background(BeetTheme.surfaceStrong(appearance), in: RoundedRectangle(cornerRadius: RemoteInstrument.controlRadius))
             VStack(alignment: .leading, spacing: 3) {
                 Text("One remote, every Mac")
                     .font(.headline)
@@ -505,7 +563,7 @@ struct ComputerChoiceCard: View {
                         .foregroundStyle(isActive ? Color.white : BeetTheme.accentBright)
                         .frame(width: 44, height: 44)
                         .background(isActive ? BeetTheme.accent : BeetTheme.surfaceStrong(appearance),
-                                    in: RoundedRectangle(cornerRadius: 13))
+                                    in: RoundedRectangle(cornerRadius: RemoteInstrument.controlRadius))
                     VStack(alignment: .leading, spacing: 4) {
                         Text(computer.name)
                             .font(.headline)
@@ -538,14 +596,10 @@ struct ComputerChoiceCard: View {
             .foregroundStyle(BeetTheme.secondaryText(appearance))
             .accessibilityLabel("Options for \(computer.name)")
         }
-        .padding(14)
-        .remoteGlass(appearance, radius: 19)
-        .overlay {
-            if isActive {
-                RoundedRectangle(cornerRadius: 19)
-                    .stroke(BeetTheme.accentBright.opacity(0.75), lineWidth: 1.25)
-            }
-        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 4)
+        .background(isActive ? RemoteInstrument.recess : Color.clear)
+        .overlay(alignment: .bottom) { VampHairline() }
         .confirmationDialog(
             "Remove \(computer.name)?",
             isPresented: $showRemove,

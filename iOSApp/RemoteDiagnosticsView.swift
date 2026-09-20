@@ -2,10 +2,11 @@ import SwiftUI
 
 struct RemoteDiagnosticsView: View {
     let store: RemoteStore
+    @Environment(\.remoteAppearance) private var appearance
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         NavigationStack {
-            Form {
+            RemoteInstrumentForm {
                 Section("Connection") {
                     LabeledContent("Status", value: store.isConnected ? "Connected" : "Disconnected")
                     LabeledContent("Mac version", value: store.hostStatus?.appVersion ?? "Not reported")
@@ -25,9 +26,12 @@ struct RemoteDiagnosticsView: View {
                     Text("The report excludes addresses, access tokens, computer names, files, and conversation text.")
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background { RemoteBackdrop() }
             .navigationTitle("Connection details")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .remoteNavigationChrome()
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }.vampUtilityAction() }
         }
     }
 }

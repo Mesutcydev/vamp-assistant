@@ -26,7 +26,17 @@ final class RemoteSessionTests: XCTestCase {
         XCTAssertLessThanOrEqual(frame.maxX, 1_896)
         XCTAssertLessThanOrEqual(frame.maxY, 1_056)
         XCTAssertEqual(frame.width / frame.height, 9.0 / 19.5, accuracy: 0.003)
-        XCTAssertLessThanOrEqual(frame.height, 800, "resizing must not create an off-screen portrait window")
+        // The fit now scales the matched shape INTO the display rather than shrinking to the
+        // source window (the Sync host's `AdaptiveWindowSizing`). A 1280x800 landscape window
+        // becomes a full-height portrait one — 1004pt is the usable height — which is what
+        // removes the soft, upscaled picture. It is still entirely on screen, and still inside
+        // the decoder-friendly longest-edge cap.
+        XCTAssertEqual(frame.height, 1_004, accuracy: 1, "fills the usable height")
+        XCTAssertGreaterThan(frame.height, 800, "expanding the source is the point of the fit")
+        XCTAssertLessThanOrEqual(
+            max(frame.width, frame.height),
+            RemoteControlApplicationRegistry.maxEdgePoints,
+            "must stay inside the client's decoder envelope")
     }
 
     func testLandscapeViewportResizeFitsEntireMacDisplay() {
@@ -38,6 +48,38 @@ final class RemoteSessionTests: XCTestCase {
         XCTAssertLessThanOrEqual(frame.maxX, 1_416)
         XCTAssertLessThanOrEqual(frame.maxY, 876)
         XCTAssertEqual(frame.width / frame.height, 19.5 / 9.0, accuracy: 0.003)
+    }
+
+    /// The regression that made a streamed app refuse the phone's shape.
+    ///
+    /// The fit used to hold the *shorter* dimension. From a 640x480 landscape window and a
+    /// portrait viewport that requested a **220pt-wide** window. Safari's minimum window width
+    /// is 574pt, so it refused, stayed 574x480, and reported an aspect of 1.196 against the
+    /// phone's 0.461 — the client's "The Mac kept a different window shape" letterbox.
+    /// Holding the width requests ~627pt, which the app accepts.
+    func testPortraitFitHoldsWidthSoAnAppMinimumWidthIsSatisfied() {
+        let frame = RemoteControlApplicationRegistry.targetWindowFrame(
+            current: CGRect(x: 100, y: 100, width: 640, height: 480),
+            display: CGRect(x: 0, y: 0, width: 2_560, height: 1_440),
+            aspect: 1_320.0 / 2_868.0)
+
+        XCTAssertGreaterThanOrEqual(
+            frame.width, 574,
+            "a 220pt request is below Safari's 574pt minimum width and gets refused")
+        XCTAssertEqual(frame.width / frame.height, 1_320.0 / 2_868.0, accuracy: 0.003)
+    }
+
+    /// A 5K/6K display must not produce a capture taller than the client's decoder accepts.
+    func testFittedWindowNeverExceedsTheDecoderFriendlyLongestEdge() {
+        let frame = RemoteControlApplicationRegistry.targetWindowFrame(
+            current: CGRect(x: 0, y: 0, width: 3_000, height: 1_800),
+            display: CGRect(x: 0, y: 0, width: 6_016, height: 3_389),
+            aspect: 9.0 / 19.5)
+
+        XCTAssertLessThanOrEqual(
+            max(frame.width, frame.height),
+            RemoteControlApplicationRegistry.maxEdgePoints)
+        XCTAssertEqual(frame.width / frame.height, 9.0 / 19.5, accuracy: 0.003)
     }
 
     func testRemoteNetworkPrefersTailscaleAddressRange() {
@@ -241,6 +283,30 @@ final class RemoteSessionTests: XCTestCase {
         controller.clearRemoteRunOptions()
         XCTAssertEqual(settings.agentMode, .goal)
         XCTAssertFalse(settings.remoteFullAccessEnabled)
+    }
+
+    /// Remote clients must be able to tell AUTO from FULL: Auto mode implies
+    /// full-access authority for the run, but reporting the folded value made
+    /// the phone render every AUTO session as FULL.
+    func testRemoteRunFullAccessReportsTheRawFlagSeparateFromAgentMode() {
+        let controller = AgentSessionController(
+            engine: FakeLLMEngine(),
+            settings: SettingsStore.shared,
+            thermal: ThermalMonitor())
+        XCTAssertNil(controller.remoteRunFullAccess)
+        XCTAssertNil(controller.remoteRunAgentMode)
+
+        controller.applyRemoteRunOptions(autoMode: true, fullAccess: false)
+        XCTAssertEqual(controller.remoteRunAgentMode, "auto")
+        XCTAssertEqual(controller.remoteRunFullAccess, false)
+
+        controller.applyRemoteRunOptions(autoMode: false, fullAccess: true)
+        XCTAssertEqual(controller.remoteRunAgentMode, "goal")
+        XCTAssertEqual(controller.remoteRunFullAccess, true)
+
+        controller.clearRemoteRunOptions()
+        XCTAssertNil(controller.remoteRunFullAccess)
+        XCTAssertNil(controller.remoteRunAgentMode)
     }
 
     func testRemoteIsolationAttachesAPrivateBrowserForTheBot() {

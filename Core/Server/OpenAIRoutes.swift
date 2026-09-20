@@ -125,7 +125,10 @@ public enum OpenAIRoutes {
             case "tool": chatRole = .tool
             default: chatRole = .user
             }
-            turns.append(ChatTurn(role: chatRole, content: content))
+            turns.append(ChatTurn(
+                role: chatRole,
+                content: content,
+                images: chatRole == .user ? extractImages(m["content"]) : []))
         }
         guard !turns.isEmpty else {
             return .response(.json(
@@ -141,18 +144,15 @@ public enum OpenAIRoutes {
         let created = Int(Date().timeIntervalSince1970)
         let modelName = await Self.reportedModelID(engine: engine, requested: requestedModel)
 
-        let isolated = IsolatedReplayEngine(base: engine)
-        await isolated.reset()
-
         if stream {
             return .stream(
                 LocalAPIServer.Response(status: 200, contentType: "text/event-stream"),
                 lines: streamCompletion(
-                    engine: isolated, turns: turns, id: completionID, model: modelName,
+                    engine: engine, turns: turns, id: completionID, model: modelName,
                     created: created, maxTokens: maxTokens, temperature: temperature))
         } else {
             return .response(await nonStreamingCompletion(
-                engine: isolated, turns: turns, id: completionID, model: modelName,
+                engine: engine, turns: turns, id: completionID, model: modelName,
                     created: created, maxTokens: maxTokens, temperature: temperature))
         }
     }
@@ -188,6 +188,20 @@ public enum OpenAIRoutes {
         }
     }
 
+    /// Native image parts on a user message. A `data:` URL is decoded into
+    /// bytes for the model; a remote http(s) URL is ignored — the model never
+    /// fetches the network on a client's behalf.
+    static func extractImages(_ value: LFJSONValue?) -> [ChatImage] {
+        guard case .array(let parts)? = value else { return [] }
+        return parts.compactMap { part in
+            guard let object = part.objectValue,
+                  object["type"]?.stringValue == "image_url",
+                  let url = object["image_url"]?.objectValue?["url"]?.stringValue
+            else { return nil }
+            return ChatImage(dataURL: url)
+        }
+    }
+
     // MARK: Non-streaming
 
     private static func nonStreamingCompletion(
@@ -196,7 +210,7 @@ public enum OpenAIRoutes {
     ) async -> LocalAPIServer.Response {
         var collected = ""
         do {
-            let stream = engine.stream(adding: turns, maxTokens: maxTokens, temperature: temperature)
+            let stream = engine.streamReplay(turns, maxTokens: maxTokens, temperature: temperature)
             for try await chunk in stream {
                 collected += chunk
             }
@@ -242,7 +256,7 @@ public enum OpenAIRoutes {
 
                 var caughtError: String?
                 do {
-                    let stream = engine.stream(adding: turns, maxTokens: maxTokens, temperature: temperature)
+                    let stream = engine.streamReplay(turns, maxTokens: maxTokens, temperature: temperature)
                     for try await chunk in stream {
                         if Task.isCancelled { break }
                         if chunk.isEmpty { continue }
@@ -320,7 +334,10 @@ public enum OpenAIRoutes {
             case "user": chatRole = .user
             default: chatRole = .user
             }
-            turns.append(ChatTurn(role: chatRole, content: content))
+            turns.append(ChatTurn(
+                role: chatRole,
+                content: content,
+                images: chatRole == .user ? extractImages(m["content"]) : []))
         }
         guard !turns.isEmpty else {
             return .response(.json(anthropicError("No valid messages found.", type: "invalid_request_error"), status: 400))
@@ -332,17 +349,14 @@ public enum OpenAIRoutes {
         let messageID = "msg_\(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(24))"
         let modelName = await reportedModelID(engine: engine, requested: requestedModel)
 
-        let isolated = IsolatedReplayEngine(base: engine)
-        await isolated.reset()
-
         if stream {
             return .stream(
                 LocalAPIServer.Response(status: 200, contentType: "text/event-stream"),
                 lines: anthropicStream(
-                    engine: isolated, turns: turns, id: messageID, model: modelName, maxTokens: maxTokens))
+                    engine: engine, turns: turns, id: messageID, model: modelName, maxTokens: maxTokens))
         } else {
             return .response(await anthropicNonStreaming(
-                engine: isolated, turns: turns, id: messageID, model: modelName, maxTokens: maxTokens))
+                engine: engine, turns: turns, id: messageID, model: modelName, maxTokens: maxTokens))
         }
     }
 
@@ -351,7 +365,7 @@ public enum OpenAIRoutes {
     ) async -> LocalAPIServer.Response {
         var collected = ""
         do {
-            let stream = engine.stream(adding: turns, maxTokens: maxTokens, temperature: nil)
+            let stream = engine.streamReplay(turns, maxTokens: maxTokens, temperature: nil)
             for try await chunk in stream {
                 collected += chunk
             }
@@ -408,7 +422,7 @@ public enum OpenAIRoutes {
 
                 var caughtError: String?
                 do {
-                    let stream = engine.stream(adding: turns, maxTokens: maxTokens, temperature: nil)
+                    let stream = engine.streamReplay(turns, maxTokens: maxTokens, temperature: nil)
                     for try await chunk in stream {
                         if Task.isCancelled { break }
                         if chunk.isEmpty { continue }

@@ -19,25 +19,30 @@ struct RemoteKeyboardOverlay: View {
     private static let chip = Color(white: 0.17)
 
     var body: some View {
-        VStack(spacing: 10) {
-            header
-            composer
-            quickActions
-            shortcutRow
-            modifierRow
-            keyRow
-            Text("modifiers apply to the next key, then release · cmd + typed letter sends the combo")
-                .font(.system(size: 11, weight: .regular, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.38))
-                .frame(maxWidth: .infinity, alignment: .leading)
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 10) {
+                header
+                composer
+                quickActions
+                shortcutRow
+                modifierRow
+                keyRow
+                Text("modifiers apply to the next key, then release · cmd + typed letter sends the combo")
+                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.38))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 10)
         }
-        .padding(.horizontal, 10)
+        .frame(maxHeight: 420)
         .padding(.top, 8)
         .padding(.bottom, 10)
-        .background(Self.panel.opacity(0.96), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.horizontal, 8)
+        .background(Self.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(Self.panel.opacity(0.94), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
         )
         .padding(.horizontal, 8)
         .padding(.bottom, 8)
@@ -61,6 +66,7 @@ struct RemoteKeyboardOverlay: View {
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 28, height: 28)
+                    .hitTarget(8)
                     .background(Self.chip, in: Circle())
             }
             .buttonStyle(.plain)
@@ -223,6 +229,9 @@ struct RemoteKeyboardOverlay: View {
                 .background(active ? Self.accent : Self.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("\(name) modifier")
+        .accessibilityValue(active ? "On" : "Off")
+        .accessibilityAddTraits(active ? .isSelected : [])
     }
 
     private func keyButton(_ title: String, _ key: String) -> some View {
@@ -235,6 +244,21 @@ struct RemoteKeyboardOverlay: View {
                 .background(Self.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityName(for: key))
+    }
+
+    private func accessibilityName(for key: String) -> String {
+        switch key {
+        case "escape": "Escape"
+        case "page_up": "Page Up"
+        case "page_down": "Page Down"
+        case "delete": "Delete"
+        case "left": "Left Arrow"
+        case "right": "Right Arrow"
+        case "up": "Up Arrow"
+        case "down": "Down Arrow"
+        default: key
+        }
     }
 
     private func sendComposer() {

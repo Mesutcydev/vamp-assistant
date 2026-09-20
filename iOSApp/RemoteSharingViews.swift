@@ -15,7 +15,7 @@ struct RemoteShareSheet: View {
             ZStack {
                 RemoteBackdrop()
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 22) {
+                    VStack(alignment: .leading, spacing: 20) {
                         ShareSheetHeader()
                         ClipboardSharingSection(store: store, confirmation: $confirmation)
                         FileSharingSection(
@@ -28,7 +28,8 @@ struct RemoteShareSheet: View {
                 }
             }
             .navigationTitle("Share with Mac").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .remoteNavigationChrome()
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }.vampUtilityAction() }
             .task { await store.loadSharing() }
             .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: false) { result in
                 guard case .success(let urls) = result, let url = urls.first else { return }
@@ -66,8 +67,8 @@ struct ShareSheetHeader: View {
     @Environment(\.remoteAppearance) private var appearance
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Image(systemName: "arrow.left.arrow.right.circle.fill").font(.system(size: 34)).foregroundStyle(BeetTheme.accentBright)
-            Text("Move work, not accounts.").font(.title2.weight(.bold)).tracking(-0.3)
+            Image(systemName: "arrow.left.arrow.right.circle.fill").font(.system(size: 24)).foregroundStyle(BeetTheme.accentBright)
+            Text("Clipboard & files").font(RemoteInstrument.TypeStyle.title).tracking(-0.3)
             Text("Clipboard and files travel directly between this device and your paired Mac.")
                 .font(.subheadline).foregroundStyle(BeetTheme.secondaryText(appearance)).lineSpacing(2)
         }
@@ -79,10 +80,12 @@ struct ClipboardSharingSection: View {
     @Binding var confirmation: String?
     @Environment(\.remoteAppearance) private var appearance
 
+    @Environment(\.dynamicTypeSize) private var typeSize
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             RemoteSectionLabel(title: "CLIPBOARD")
-            HStack(spacing: 10) {
+            (typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 1)) : AnyLayout(HStackLayout(spacing: 1))) {
                 ShareActionButton(title: "Paste from Mac", symbol: "arrow.down.doc", appearance: appearance) {
                     Task {
                         if let text = await store.copyMacClipboard() {
@@ -113,11 +116,11 @@ struct ShareActionButton: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 10) {
                 Image(systemName: symbol).font(.title3.weight(.semibold)).foregroundStyle(BeetTheme.accentBright)
-                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(RemoteInstrument.ink)
             }
-            .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading).padding(.horizontal, 13)
-            .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(BeetTheme.line(appearance).opacity(0.8), lineWidth: 0.75) }
+            .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading).padding(.horizontal, 13)
+            .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(BeetTheme.line(appearance).opacity(0.8), lineWidth: 0.75) }
         }
         .buttonStyle(RemotePressButtonStyle())
     }
@@ -153,8 +156,7 @@ struct FileSharingSection: View {
                         if file.id != store.sharedFiles.last?.id { Divider().overlay(BeetTheme.line(appearance)).padding(.leading, 48) }
                     }
                 }
-                .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
-                .overlay { RoundedRectangle(cornerRadius: 17, style: .continuous).stroke(BeetTheme.line(appearance).opacity(0.8), lineWidth: 0.75) }
+
             }
         }
     }
@@ -166,7 +168,7 @@ struct RemoteSharedFileRow: View {
     var body: some View {
         HStack(spacing: 11) {
             Image(systemName: "doc.fill").foregroundStyle(BeetTheme.accentBright).frame(width: 36, height: 36)
-                .background(BeetTheme.surfaceStrong(appearance).opacity(0.72), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(BeetTheme.surfaceStrong(appearance).opacity(0.72), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             VStack(alignment: .leading, spacing: 3) {
                 Text(file.name).font(.subheadline.weight(.semibold)).lineLimit(1)
                 Text(ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file))
@@ -182,7 +184,7 @@ struct RemoteSharedFileRow: View {
 struct RemoteSectionLabel: View {
     @Environment(\.remoteAppearance) private var appearance
     let title: String
-    var body: some View { Text(title).font(.caption2.weight(.bold)).tracking(0.9).foregroundStyle(BeetTheme.secondaryText(appearance)) }
+    var body: some View { Text(title).font(.system(.caption2, design: .monospaced, weight: .medium)).tracking(0.9).foregroundStyle(BeetTheme.secondaryText(appearance)) }
 }
 
 struct DownloadedRemoteFile: Identifiable {

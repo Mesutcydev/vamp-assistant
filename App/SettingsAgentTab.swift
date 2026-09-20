@@ -24,12 +24,14 @@ struct AgentTab: View {
                     stepperControl(label: "Max agent turns", value: $settings.maxTurns, range: 5...100, step: 1)
                 }
                 SettingRow(label: "Max tokens per turn") {
-                    stepperControl(label: "Max tokens per turn", value: $settings.maxTokensPerTurn, range: 256...8192, step: 256)
+                    stepperControl(label: "Max tokens per turn", value: $settings.maxTokensPerTurn, range: 256...32768, step: 256)
                 }
                 SettingRow(label: "Temperature") {
                     HStack(spacing: Spacing.sm) {
                         Slider(value: $settings.temperature, in: 0...1.5, step: 0.05)
                             .frame(width: 220)
+                            .accessibilityLabel("Temperature")
+                            .accessibilityValue(String(format: "%.2f", settings.temperature))
                         // Fixed-width value label so the slider never reflows.
                         Text(String(format: "%.2f", settings.temperature))
                             .font(.callout.monospacedDigit())
@@ -120,6 +122,34 @@ private struct ExperimentalInferenceCard: View {
             SettingToggle(
                 label: "Use 8-bit MLX KV cache after 512 tokens",
                 isOn: $settings.experimentalMLXQuantizedKVEnabled)
+            SettingToggle(label: "Qwen streaming: Thinking", isOn: $settings.qwenStreamingThinking)
+                .help("Enables reasoning in the model’s chat template. Off by default; takes effect on the next generation.")
+
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                HStack(spacing: Spacing.sm) {
+                    Text("GGUF adapter strength")
+                        .font(.callout)
+                    Spacer()
+                    Text(String(format: "%.2g×", settings.localLoraScale))
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                Slider(value: $settings.localLoraScale, in: 0...3, step: 0.25)
+                    .accessibilityLabel("GGUF adapter strength")
+            }
+            .help("""
+            A LoRA adapter sitting next to a GGUF model's weights is applied at this \
+            strength by llama.cpp's graph — the weights themselves are never modified. \
+            0 disables it (published model behavior), 1 is the adapter exactly as \
+            authored, 2+ is a harder edit. Reload the model to apply.
+            """)
+
+            if let diagnostics = appState.lastEngineStats.qwenStreaming {
+                Text(diagnostics.summary)
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                    .textSelection(.enabled)
+            }
 
             HStack(spacing: Spacing.sm) {
                 Circle()
@@ -198,6 +228,7 @@ private struct ComputerControlCard: View {
     @ObservedObject private var settings = SettingsStore.shared
     @State private var accessibilityGranted = false
     @State private var screenRecordingGranted = false
+    @State private var requestedScreenRecording = false
 
     var body: some View {
         SettingsCard(
@@ -218,9 +249,15 @@ private struct ComputerControlCard: View {
                     grant: { ComputerPermission.requestAccessibility() })
                 permissionRow(
                     label: "Screen Recording",
-                    value: "Capture windows for vision models",
+                    value: requestedScreenRecording && !screenRecordingGranted
+                        ? "Quit and reopen Vamp Assistant to finish"
+                        : "Capture windows for vision models",
                     granted: screenRecordingGranted,
-                    grant: { ComputerPermission.requestScreenRecording() })
+                    pending: requestedScreenRecording && !screenRecordingGranted,
+                    grant: {
+                        ComputerPermission.requestScreenRecording()
+                        requestedScreenRecording = true
+                    })
             }
         }
         .onAppear(perform: refresh)
@@ -235,19 +272,20 @@ private struct ComputerControlCard: View {
         label: String,
         value: String,
         granted: Bool,
+        pending: Bool = false,
         grant: @escaping () -> Void
     ) -> some View {
         SettingRow(label: label, value: value) {
             HStack(spacing: Spacing.sm) {
                 HStack(spacing: 5) {
                     Circle()
-                        .fill(granted ? Theme.accentBright : Theme.textTertiary)
+                        .fill(granted ? Theme.accentBright : (pending ? Theme.warning : Theme.textTertiary))
                         .frame(width: 7, height: 7)
-                    Text(granted ? "Granted" : "Not granted")
+                    Text(granted ? "Granted" : (pending ? "Quit and reopen" : "Not granted"))
                         .font(.callout)
                         .foregroundStyle(Theme.textSecondary)
                 }
-                if !granted {
+                if !granted && !pending {
                     Button("Grant…", action: grant)
                         .controlSize(.small)
                 }

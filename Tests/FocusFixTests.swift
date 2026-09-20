@@ -1,6 +1,108 @@
 import Foundation
+import AppKit
+import SwiftUI
 import XCTest
 @testable import BeetCode
+
+@MainActor
+final class AppearanceConvergenceTests: XCTestCase {
+    func testAppearanceRoundTripsThroughIsolatedPreferences() {
+        let domain = "com.beetcode.tests.appearance.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: domain)!
+        defer { defaults.removePersistentDomain(forName: domain) }
+        let settings = SettingsStore(defaults: defaults, persistentDomainName: domain,
+                                     apiTokenService: domain)
+        for requested in AppAppearance.allCases {
+            settings.appearance = requested
+            let restored = SettingsStore(defaults: defaults, persistentDomainName: domain,
+                                         apiTokenService: domain)
+            XCTAssertEqual(restored.appearance, requested)
+        }
+    }
+
+    func testSystemOverrideDoesNotFallBackToSavedLightOrDark() {
+        for saved in AppAppearance.allCases {
+            let requested = AppAppearance.resolved(saved: saved, override: .system)
+            XCTAssertEqual(requested, .system)
+            XCTAssertNil(requested.colorScheme)
+        }
+    }
+
+    func testSavedAppearanceRemainsTheProductionRequest() {
+        for saved in AppAppearance.allCases {
+            XCTAssertEqual(AppAppearance.resolved(saved: saved, override: nil), saved)
+        }
+    }
+
+    func testAppKitFollowsTheSameRequest() {
+        let previous = Theme.currentAppearance
+        defer { Theme.applyAppearance(previous) }
+        for requested in AppAppearance.allCases {
+            Theme.applyAppearance(requested)
+            XCTAssertEqual(Theme.currentAppearance, requested)
+            switch requested {
+            case .light:
+                XCTAssertEqual(NSApplication.shared.appearance?.bestMatch(from: [.aqua, .darkAqua]), .aqua)
+            case .dark, .oled:
+                XCTAssertEqual(NSApplication.shared.appearance?.bestMatch(from: [.aqua, .darkAqua]), .darkAqua)
+            case .system:
+                XCTAssertNil(NSApplication.shared.appearance)
+            }
+        }
+    }
+
+    func testOLEDChangeInvalidatesObservedSurfaces() async {
+        let previous = Theme.currentAppearance
+        defer { Theme.applyAppearance(previous) }
+        Theme.applyAppearance(.dark)
+        let changed = expectation(description: "Reading surface refreshes")
+        withObservationTracking {
+            _ = Theme.readingSurface
+        } onChange: {
+            changed.fulfill()
+        }
+        Theme.applyAppearance(.oled)
+        await fulfillment(of: [changed], timeout: 1)
+    }
+
+    func testOLEDSurfacesAreBlackAndDarkRemainsDistinct() {
+        let previous = Theme.currentAppearance
+        defer { Theme.applyAppearance(previous) }
+        Theme.applyAppearance(.oled)
+        XCTAssertEqual(AppAppearance.oled.colorScheme, .dark)
+        func resolved(_ surface: Color) -> NSColor {
+            var color = NSColor.black
+            NSAppearance(named: .darkAqua)!.performAsCurrentDrawingAppearance {
+                color = NSColor(surface).usingColorSpace(.sRGB)!
+            }
+            return color
+        }
+        for surface in [Theme.workspaceCanvas, Theme.readingSurface, Theme.headerSurface, Theme.navigationSurface] {
+            let color = resolved(surface)
+            XCTAssertEqual(color.redComponent, 0, accuracy: 0.001)
+            XCTAssertEqual(color.greenComponent, 0, accuracy: 0.001)
+            XCTAssertEqual(color.blueComponent, 0, accuracy: 0.001)
+        }
+        Theme.applyAppearance(.dark)
+        XCTAssertGreaterThan(resolved(Theme.readingSurface).redComponent, 0.05)
+    }
+
+    func testNeutralCanvasResolvesForBothSystemAppearances() {
+        func components(_ name: NSAppearance.Name) -> NSColor {
+            var color = NSColor.black
+            NSAppearance(named: name)!.performAsCurrentDrawingAppearance {
+                color = NSColor(Theme.workspaceCanvas).usingColorSpace(.sRGB)!
+            }
+            return color
+        }
+        let light = components(.aqua)
+        let dark = components(.darkAqua)
+        XCTAssertGreaterThan(light.redComponent, 0.8)
+        XCTAssertLessThan(dark.redComponent, 0.2)
+        XCTAssertEqual(dark.redComponent, dark.greenComponent, accuracy: 0.005)
+        XCTAssertEqual(dark.greenComponent, dark.blueComponent, accuracy: 0.005)
+    }
+}
 
 // MARK: - Stream display filter ("thinking thinking…" fix)
 
@@ -37,6 +139,13 @@ final class StreamDisplayFilterTests: XCTestCase {
         let raw = "<think>still pondering…"
         let (visible, reasoning) = StreamDisplayFilter.display(raw: raw)
         XCTAssertEqual(visible, "")
+        XCTAssertTrue(reasoning)
+    }
+
+    func testOpenFunctionXMLNeverLeaksIntoLiveAnswer() {
+        let raw = "I'll inspect it. <function name=\"list_directory\"><param name=\"path\">/tmp"
+        let (visible, reasoning) = StreamDisplayFilter.display(raw: raw)
+        XCTAssertEqual(visible, "I'll inspect it.")
         XCTAssertTrue(reasoning)
     }
 
@@ -138,5 +247,61 @@ final class ApprovalOverridesGateTests: XCTestCase {
         overrides.allowComputer()
         XCTAssertEqual(gate.decision(for: call("computer_click"), risk: .execute), .auto)
         XCTAssertEqual(gate.decision(for: call("mcp_write"), risk: .execute), .needsApproval)
+    }
+}
+
+@MainActor
+final class DesktopPolishRenderingTests: XCTestCase {
+    func testNativeChatAndControlPreviews() throws {
+        let state = AppState()
+        for scheme in [ColorScheme.light, .dark] {
+            let store = ComposerStore()
+            let content = VStack(alignment: .leading, spacing: 24) {
+                UserBubble(item: .init(id: UUID(), kind: .user("Make the workspace calmer and easier to read.")))
+                AssistantMessage(item: .init(id: UUID(), kind: .assistant("Start with the essentials.\n\nThe conversation uses one reading column, clear speaker labels, and quiet controls. **Your work stays in focus.**")))
+                Spacer(minLength: 20)
+                ChatInputWell(store: store)
+            }
+            .padding(32)
+            .frame(width: 900, height: 580)
+            .background(Theme.readingSurface)
+            .environmentObject(state)
+            .environmentObject(state.sessions)
+            .environment(\.colorScheme, scheme)
+            let host = NSHostingView(rootView: content)
+            host.frame = NSRect(x: 0, y: 0, width: 900, height: 580)
+            host.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+            let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+            window.contentView = host
+            host.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+            XCTAssertGreaterThan(png.count, 10_000)
+            let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+            attachment.name = "mac-native-chat-\(scheme == .dark ? "dark" : "light")"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            window.contentView = nil
+        }
+    }
+}
+
+@MainActor
+final class WindowRecoveryMenuTests: XCTestCase {
+    func testNewWindowIsFoundInsideNestedFileMenu() {
+        let root = NSMenu()
+        let file = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
+        let fileMenu = NSMenu()
+        let new = NSMenuItem(title: "New", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        let window = NSMenuItem(title: "New Window", action: #selector(NSDocumentController.newDocument(_:)), keyEquivalent: "n")
+        submenu.addItem(window)
+        new.submenu = submenu
+        fileMenu.addItem(new)
+        file.submenu = fileMenu
+        root.addItem(file)
+        XCTAssertTrue(BeetCodeAppDelegate.newWindowItem(in: root) === window)
+        XCTAssertNil(BeetCodeAppDelegate.newWindowItem(in: NSMenu()))
     }
 }

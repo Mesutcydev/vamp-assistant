@@ -174,6 +174,86 @@ final class NativeToolAndAppBuildTests: XCTestCase {
         XCTAssertEqual(CreateMacAppTool.sanitizeProduct("Hello-World!!"), "HelloWorld")
     }
 
+    /// Scaffolding over an existing project destroys project.yml, AGENTS.md
+    /// and the App tree. It must refuse unless overwrite is explicit.
+    func testCreateMacAppRefusesToOverwriteExistingProject() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("beet-scaffold-guard-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sentinel = root.appendingPathComponent("project.yml")
+        try "name: Existing".write(to: sentinel, atomically: true, encoding: .utf8)
+        let context = ToolContext(workspace: Workspace(root: root))
+        let tool = CreateMacAppTool()
+
+        do {
+            _ = try await tool.execute(
+                ParsedToolCall(
+                    name: "create_macos_app",
+                    arguments: .object(["name": .string("Demo")]),
+                    index: 0),
+                in: context)
+            XCTFail("expected a refusal when project.yml already exists")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("Refused to scaffold"))
+        }
+        XCTAssertEqual(try String(contentsOf: sentinel, encoding: .utf8), "name: Existing")
+
+        // The explicit overwrite path still works.
+        _ = try await tool.execute(
+            ParsedToolCall(
+                name: "create_macos_app",
+                arguments: .object(["name": .string("Demo"), "overwrite": .bool(true)]),
+                index: 0),
+            in: context)
+        let generated = try String(contentsOf: sentinel, encoding: .utf8)
+        XCTAssertTrue(generated.contains("name: Demo"))
+    }
+
+    func testCreateMacAppRejectsBundleIdInjection() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("beet-scaffold-bundle-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let context = ToolContext(workspace: Workspace(root: root))
+        do {
+            _ = try await CreateMacAppTool().execute(
+                ParsedToolCall(
+                    name: "create_macos_app",
+                    arguments: .object([
+                        "name": .string("Demo"),
+                        "bundleId": .string("com.example.app\n  evil: true"),
+                    ]),
+                    index: 0),
+                in: context)
+            XCTFail("expected an invalid bundle id to be rejected")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("bundleId"))
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("project.yml").path))
+    }
+
+    /// A hostile app name must not escape the generated Swift string literal
+    /// or the YAML/plist values.
+    func testCreateMacAppEscapesHostileDisplayName() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("beet-scaffold-name-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        _ = try await CreateMacAppTool().execute(
+            ParsedToolCall(
+                name: "create_macos_app",
+                arguments: .object(["name": .string(#"Evil"); import Foundation; //"#)]),
+                index: 0),
+            in: ToolContext(workspace: Workspace(root: root)))
+        let contentView = try String(
+            contentsOf: root.appendingPathComponent("App/ContentView.swift"), encoding: .utf8)
+        XCTAssertFalse(contentView.contains("\nimport Foundation"), contentView)
+        let plist = try String(
+            contentsOf: root.appendingPathComponent("App/Info.plist"), encoding: .utf8)
+        XCTAssertFalse(plist.contains("Evil\""), plist)
+    }
+
     func testCreateMacAppWritesXcodeGenTree() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("beet-scaffold-\(UUID().uuidString)", isDirectory: true)

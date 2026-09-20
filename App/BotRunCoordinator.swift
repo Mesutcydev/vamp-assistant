@@ -1,6 +1,43 @@
 import Combine
 import Foundation
 
+/// Draft lifetime is independent of navigation. Files are local and owner-only.
+@MainActor
+final class BotDraftStore: ObservableObject {
+    static let shared = BotDraftStore()
+    @Published private(set) var errorMessage: String?
+    private var values: [String: String] = [:]
+    private let url: URL?
+
+    init(url: URL? = nil) {
+        self.url = url ?? (AppState.isTestHost || ProcessInfo.processInfo.arguments.contains("--design-preview")
+            ? nil : FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("BeetCode/BotDrafts/drafts.json"))
+        if let file = self.url, let data = try? Data(contentsOf: file) {
+            values = (try? JSONDecoder().decode([String: String].self, from: data)) ?? [:]
+        }
+    }
+
+    func value(for key: String) -> String { values[key] ?? "" }
+    func set(_ value: String, for key: String) {
+        values[key] = value.isEmpty ? nil : value
+        retry()
+    }
+    func retry() {
+        guard let url else { return }
+        do {
+            let manager = FileManager.default
+            try manager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                        attributes: [.posixPermissions: 0o700])
+            try JSONEncoder().encode(values).write(to: url, options: .atomic)
+            try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            errorMessage = nil
+        } catch {
+            errorMessage = "Drafts are retained in memory, but could not be saved: \(error.localizedDescription)"
+        }
+    }
+}
+
 @MainActor
 final class BotRunCoordinator: ObservableObject {
     struct StartError: Error, LocalizedError, Equatable {
@@ -29,6 +66,8 @@ final class BotRunCoordinator: ObservableObject {
     private var budgetTasks: [UUID: Task<Void, Never>] = [:]
     /// Tail of the persistence chain. See `persist()`.
     private var persistTask: Task<Void, Never>?
+    @Published private(set) var persistenceError: String?
+    private var deliveringCommands: Set<UUID> = []
 
     init(store: BotRunStore = .shared) {
         self.store = store
@@ -114,28 +153,11 @@ final class BotRunCoordinator: ObservableObject {
     }
 
     func steer(runID: UUID, message: String) -> Bool {
-        let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        // A queued run has no session to steer. Accepting it wrote an optimistic
-        // "Steering queued: ..." onto the card that the runtime then quietly rejected, leaving
-        // text on screen that was never true.
-        guard !text.isEmpty, let run = record(runID), !run.state.isTerminal,
+        guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let run = record(runID), !run.state.isTerminal,
               run.sessionID != nil, steerHandler != nil else { return false }
-        update(runID) {
-            $0.latestOutput = "Steering queued: \(text)"
-            $0.updatedAt = Date()
-        }
-        Task {
-            guard let command = try? await store.enqueueCommand(
-                runID: runID, kind: .steer, payload: text) else { return }
-            let accepted = await MainActor.run { steerHandler?(runID, text) == true }
-            try? await store.acknowledgeCommand(
-                command.id, accepted: accepted,
-                result: accepted ? "Steering delivered." : "Runtime rejected steering.")
-            recordEvent(
-                runID: runID, kind: accepted ? .commandAccepted : .commandRejected,
-                phase: record(runID)?.phase ?? run.phase, detail: "steer")
-        }
-        return true
+        Task { _ = await deliverCommand(runID: runID, kind: .steer, payload: message) }
+        return true // Queued only; delivery is recorded separately.
     }
 
     func stop(runID: UUID) -> Bool {
@@ -182,38 +204,67 @@ final class BotRunCoordinator: ObservableObject {
     }
 
     func approve(runID: UUID, approved: Bool) -> Bool {
-        guard let run = record(runID), run.state == .needsApproval,
-              approvalHandler != nil else { return false }
-        Task {
-            let kind: BotRunCommandRecord.Kind = approved ? .approve : .decline
-            guard let command = try? await store.enqueueCommand(runID: runID, kind: kind) else { return }
-            let accepted = await MainActor.run { approvalHandler?(runID, approved) == true }
-            try? await store.acknowledgeCommand(
-                command.id, accepted: accepted,
-                result: accepted ? "Approval response delivered." : "Approval response rejected.")
-            recordEvent(
-                runID: runID, kind: accepted ? .commandAccepted : .commandRejected,
-                phase: record(runID)?.phase ?? run.phase, detail: kind.rawValue)
-        }
+        guard record(runID)?.state == .needsApproval, approvalHandler != nil else { return false }
+        Task { _ = await deliverCommand(runID: runID, kind: approved ? .approve : .decline) }
         return true
     }
 
     func answer(runID: UUID, text: String) -> Bool {
-        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty, let run = record(runID), run.state == .needsInput,
-              answerHandler != nil else { return false }
-        Task {
-            guard let command = try? await store.enqueueCommand(
-                runID: runID, kind: .answer, payload: value) else { return }
-            let accepted = await MainActor.run { answerHandler?(runID, value) == true }
-            try? await store.acknowledgeCommand(
-                command.id, accepted: accepted,
-                result: accepted ? "Answer delivered." : "Answer rejected.")
-            recordEvent(
-                runID: runID, kind: accepted ? .commandAccepted : .commandRejected,
-                phase: record(runID)?.phase ?? run.phase, detail: "answer")
-        }
+        guard record(runID)?.state == .needsInput, answerHandler != nil,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        Task { _ = await deliverCommand(runID: runID, kind: .answer, payload: text) }
         return true
+    }
+
+    /// UI callers await actual runtime acceptance before clearing their draft.
+    func deliverCommand(runID: UUID, kind: BotRunCommandRecord.Kind,
+                        payload: String? = nil) async -> Bool {
+        guard !deliveringCommands.contains(runID), let run = record(runID) else { return false }
+        let text = payload?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        switch kind {
+        case .approve, .decline:
+            guard run.state == .needsApproval, approvalHandler != nil else { return false }
+        case .answer:
+            guard run.state == .needsInput, answerHandler != nil, !text.isEmpty else { return false }
+        case .steer:
+            guard !run.state.isTerminal, run.sessionID != nil,
+                  steerHandler != nil, !text.isEmpty else { return false }
+        default: return false
+        }
+        deliveringCommands.insert(runID)
+        defer { deliveringCommands.remove(runID) }
+        do {
+            let command = try await store.enqueueCommand(runID: runID, kind: kind, payload: payload)
+            let accepted: Bool
+            switch kind {
+            case .approve, .decline: accepted = approvalHandler?(runID, kind == .approve) == true
+            case .answer: accepted = answerHandler?(runID, text) == true
+            case .steer: accepted = steerHandler?(runID, text) == true
+            default: accepted = false
+            }
+            do {
+                try await store.acknowledgeCommand(command.id, accepted: accepted,
+                    result: accepted ? "Delivered." : "Runtime rejected the command.")
+            } catch {
+                // Runtime already accepted: do not suggest retrying a delivered command.
+                persistenceError = "Command delivery occurred, but its receipt could not be saved: \(error.localizedDescription)"
+            }
+            if !accepted {
+                update(runID) { $0.errorMessage = "Command was not accepted. Your input has been retained." }
+            }
+            recordEvent(runID: runID, kind: accepted ? .commandAccepted : .commandRejected,
+                        phase: record(runID)?.phase ?? run.phase, detail: kind.rawValue)
+            return accepted
+        } catch {
+            update(runID) { $0.errorMessage = "Command was not sent: \(error.localizedDescription)" }
+            return false
+        }
+    }
+
+    func retryPersistence() async {
+        persist()
+        await persistTask?.value
+        if persistenceError == nil { drain() }
     }
 
     func resume(runID: UUID) -> Bool {
@@ -336,7 +387,7 @@ final class BotRunCoordinator: ObservableObject {
     /// concurrently. Local models share one Metal generation gate and are
     /// admitted one at a time; their durable queue remains visible.
     private func drain() {
-        guard let startHandler else { return }
+        guard persistenceError == nil, let startHandler else { return }
         var dispatch: [UUID] = []
         for id in pendingIDs {
             guard var run = record(id) else { continue }
@@ -397,6 +448,18 @@ final class BotRunCoordinator: ObservableObject {
             }
             scheduleBudget(for: run)
             Task {
+                await persistTask?.value
+                guard persistenceError == nil else {
+                    activeRunIDs.remove(id)
+                    if activeLocalRunID == id { activeLocalRunID = nil }
+                    if !pendingIDs.contains(id) { pendingIDs.append(id) }
+                    if let index = runs.firstIndex(where: { $0.id == id }) {
+                        runs[index].state = .queued
+                        runs[index].phase = "Waiting for durable storage"
+                    }
+                    return
+                }
+                guard record(id)?.state == .running else { return }
                 let outcome = await startHandler(run)
                 switch outcome {
                 case .accepted(let sessionID):
@@ -556,7 +619,12 @@ final class BotRunCoordinator: ObservableObject {
         let previous = persistTask
         persistTask = Task { [store] in
             await previous?.value
-            try? await store.save(snapshot)
+            do {
+                try await store.save(snapshot)
+                persistenceError = nil
+            } catch {
+                persistenceError = "Bot recovery could not be saved. New runs are paused. \(error.localizedDescription)"
+            }
         }
     }
 

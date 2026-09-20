@@ -12,6 +12,22 @@ import Foundation
 /// execution is not.
 enum BrowserTools {
 
+    static var all: [any AgentTool] {
+        core + [EvalTool()]
+    }
+
+    static var core: [any AgentTool] {
+        [
+            ReadTool(),
+            ScreenshotTool(),
+            DownloadTool(),
+            NavigateTool(),
+            ClickTool(),
+            TypeTool(),
+            ScrollTool(),
+        ]
+    }
+
     @MainActor
     private static func controller(in context: ToolContext) -> BrowserController {
         BrowserController.controller(for: context.browserSession)
@@ -37,6 +53,9 @@ enum BrowserTools {
         let name = "browser_read"
         let summary = "Read the open page: interactive element refs, visible text, links, and URL"
         let risk = ToolRisk.read
+        /// Page text is external data: everything it says is untrusted until
+        /// the guardrail layer labels it.
+        let untrustedOutput = true
         let schemaText = """
             {"type":"object","properties":{
               "what":{"type":"string","enum":["elements","text","links","info"]},
@@ -140,11 +159,11 @@ enum BrowserTools {
 
     struct NavigateTool: AgentTool {
         let name = "browser_navigate"
-        let summary = "Open a URL in the in-app browser (http/https)"
+        let summary = "Open a URL or a workspace file in the in-app browser (http/https or a local page path)"
         let risk = ToolRisk.execute
         let schemaText = """
             {"type":"object","properties":{
-              "url":{"type":"string"},
+              "url":{"type":"string","description":"http/https URL, or a local page path such as index.html or /site/index.html (workspace-relative paths are resolved against the open project; documents saved with save_document can be opened by their returned path)"},
               "wait":{"type":"boolean","default":true},
               "capture_after":{"type":"boolean","default":true,"description":"Return a fresh bounded element observation after the action"}
             },"required":["url"]}
@@ -161,6 +180,12 @@ enum BrowserTools {
                 // Reveal this bot's WebView so cookies stay on the right profile.
                 controller.reveal()
                 if wait { await controller.waitForLoad() }
+                // A DNS/connection/HTTP failure must be an honest failure, not
+                // "opened <url>" followed by a stale-page observation.
+                if wait, let lastError = controller.lastError {
+                    throw BrowserController.BrowserError.navigationFailed(
+                        url.absoluteString, reason: lastError)
+                }
                 let result = "opened \(url.absoluteString)"
                 return captureAfter
                     ? result + "\n" + (try await BrowserTools.actionObservation(controller))
@@ -275,6 +300,8 @@ enum BrowserTools {
         let name = "browser_eval"
         let summary = "Evaluate a JavaScript expression on the open page and return the result"
         let risk = ToolRisk.execute
+        /// Arbitrary page-authored values come back through here.
+        let untrustedOutput = true
         let schemaText = """
             {"type":"object","properties":{
               "script":{"type":"string"},

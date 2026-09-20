@@ -13,6 +13,10 @@ final class BeetCodeAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        Self.openMainWindowIfNeeded(in: NSApplication.shared)
+    }
+
     func applicationShouldHandleReopen(
         _ sender: NSApplication,
         hasVisibleWindows flag: Bool
@@ -31,26 +35,35 @@ final class BeetCodeAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private static func openMainWindowIfNeeded(in application: NSApplication) {
-        guard application.windows.isEmpty,
-              let item = application.mainMenu?
-                .item(withTitle: "File")?
-                .submenu?
-                .item(withTitle: "New Window"),
+        guard !application.windows.contains(where: { $0.isVisible && $0.canBecomeMain }),
+              let item = newWindowItem(in: application.mainMenu),
               let action = item.action else { return }
         application.sendAction(action, to: item.target, from: item)
         application.activate(ignoringOtherApps: true)
     }
+    static func newWindowItem(in menu: NSMenu?) -> NSMenuItem? {
+        for item in menu?.items ?? [] {
+            if item.title == "New Window", item.action != nil { return item }
+            if let match = newWindowItem(in: item.submenu) { return match }
+        }
+        return nil
+    }
+
 }
 
 /// Maps the persisted appearance setting onto SwiftUI. `nil` means "follow
-/// the OS"; `.light`/`.dark` force it; `.beet` forces dark chrome (its
-/// beet-tinted neutrals come from Theme, not the system scheme).
+/// the OS"; `.light`/`.dark` force it.
 extension AppAppearance {
+    /// Resolve the request before translating System into a nil color scheme.
+    static func resolved(saved: Self, override: Self?) -> Self {
+        override ?? saved
+    }
+
     var colorScheme: ColorScheme? {
         switch self {
         case .system: nil
         case .light: .light
-        case .dark, .beet: .dark
+        case .dark, .oled: .dark
         }
     }
 }
@@ -67,30 +80,27 @@ struct BeetCodeApp: App {
     // user changes Appearance in Settings.
     @ObservedObject private var settings = SettingsStore.shared
 
-    init() {
-        // CLI early-exit (Phase 22): `beetcode intel <command>` runs the
-        // intelligence CLI and terminates before any UI or app state boots.
-        let arguments = CommandLine.arguments
-        if arguments.count > 1, arguments[1] == "intel" {
-            let code = IntelligenceCLIRunner.run(Array(arguments.dropFirst(2)))
-            Foundation.exit(code)
-        }
-    }
+    init() {}
 
     var body: some Scene {
         WindowGroup {
             MainWindowView()
-                // Root face for text that never went through AppFont/.app().
-                .fontDesign(Font.resolvedDesign(.serif))
+                // Un-migrated text defaults to engineered system sans; prose
+                // call sites opt into the user's Typeface via `.appProse`.
                 .tint(Theme.accent)
                 .environmentObject(appState)
                 .environmentObject(appState.sessions)
                 // A real working minimum: sidebar + chat + docked panel need room.
                 .frame(minWidth: 520, minHeight: 640)
-                .preferredColorScheme(settings.appearance.colorScheme)
+                .preferredColorScheme(AppAppearance.resolved(saved: settings.appearance,
+                    override: DesignPreview.appearanceOverride).colorScheme)
                 // Keep AppKit's appearance in sync so Theme's dynamic NSColors
                 // resolve to the forced scheme, not just the OS one.
-                .task(id: settings.appearance) { Theme.applyAppearance(settings.appearance) }
+                .onChange(of: AppAppearance.resolved(saved: settings.appearance,
+                                                    override: DesignPreview.appearanceOverride),
+                          initial: true) { _, appearance in
+                    Theme.applyAppearance(appearance)
+                }
                 // Palette / typeface / text size live in Theme globals that
                 // SwiftUI cannot observe, so mirroring them from a `.task`
                 // would land a frame late and never force a redraw.
@@ -101,11 +111,24 @@ struct BeetCodeApp: App {
                     DiagnosticsCenter.shared.record(
                         .system, "App launched",
                         detail: "appearance: \(settings.appearance.rawValue) · palette: \(settings.accentPalette.rawValue)")
+                    await QwenQ217RelaunchValidation.runIfRequested(appState: appState)
                 }
         }
         .defaultSize(width: 1240, height: 840)
         .windowResizability(.contentMinSize)
         .windowToolbarStyle(.unified)
+        // A separated conversation: dragging a tab out of the main strip
+        // opens that chat in its own window with its own session controller.
+        WindowGroup("Chat", id: "chat", for: UUID.self) { $sessionID in
+            if let sessionID {
+                DetachedChatWindow(sessionID: sessionID)
+                    .environmentObject(appState)
+                    .preferredColorScheme(AppAppearance.resolved(saved: settings.appearance,
+                        override: DesignPreview.appearanceOverride).colorScheme)
+            }
+        }
+        .defaultSize(width: 760, height: 680)
+        .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") {
@@ -158,6 +181,133 @@ struct BeetCodeApp: App {
     }
 }
 
+/// Developer-only fresh-process validation for Q2.17. The normal app never
+/// sets this environment variable, so launch and chat behavior are unchanged.
+@MainActor
+private enum QwenQ217RelaunchValidation {
+    private struct Manifest: Decodable {
+        let fixtureFormatVersion: String
+        let fixtures: [String: Entry]
+    }
+
+    private struct Entry: Decodable {
+        let path: String
+    }
+
+    private struct Fixture: Decodable {
+        let promptTokenIDs: [Int]
+        let generatedTokenIDs: [Int]
+        let stopReason: String
+    }
+
+    private struct Result: Encodable {
+        let status: String
+        let fixtureFormat: String
+        let loadedModelID: String?
+        let generatedTokens: Int
+        let expectedTokens: Int
+        let firstDifference: Int?
+        let stopReason: String?
+        let explicitCalls: Int
+        let fusedCalls: Int
+    }
+
+    static func runIfRequested(appState: AppState) async {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["BEETCODE_QWEN35_Q217_RELAUNCH_FIXTURE"] == "1",
+              let fixturePath = environment["BEETCODE_QWEN35_ORACLE_FIXTURE"],
+              !fixturePath.isEmpty else { return }
+        let reportPath = environment["BEETCODE_QWEN35_Q217_RELAUNCH_REPORT"]
+            ?? "/tmp/qwen35-q217-relaunch-validation.json"
+        do {
+            let (manifest, fixture) = try loadFixture(at: URL(fileURLWithPath: fixturePath))
+            guard manifest.fixtureFormatVersion == "qwen35-k8-q216-explicit-reference-v1" else {
+                throw EngineError.loadFailed("Q2.17 relaunch fixture format is not the accepted Q2.16 explicit fixture.")
+            }
+            guard let pool = appState.engine.enginePool else {
+                throw EngineError.loadFailed("Q2.17 relaunch validation requires the pooled local engine.")
+            }
+            var qwen: QwenStreamingEngine?
+            for _ in 0..<180 {
+                if case .ready = appState.enginePhase,
+                   appState.activeModelID == QwenStreamArtifact.modelID,
+                   let candidate = await pool.debugQwenEngine(modelID: QwenStreamArtifact.modelID) {
+                    qwen = candidate
+                    break
+                }
+                try await Task.sleep(for: .seconds(1))
+            }
+            guard let qwen else {
+                throw EngineError.loadFailed("Q2.17 relaunch validation timed out waiting for restored Qwen readiness.")
+            }
+            let counters = StreamQwen35AttentionDiagnosticCounters()
+            // Q2.18: exercise the shipping production default rather than a
+            // hardcoded strategy, so a fresh-process relaunch proves the path
+            // users actually get.
+            let production = await qwen.debugAttentionStrategy()
+            guard production == .productionDefault else {
+                throw EngineError.loadFailed(
+                    "Q2.18 relaunch probe expected the production default \(StreamQwen35AttentionStrategy.productionDefault.rawValue) but found \(production.rawValue)")
+            }
+            let run = try await qwen.debugGreedy(
+                tokenIDs: fixture.promptTokenIDs,
+                maxTokens: fixture.generatedTokenIDs.count,
+                attentionStrategy: .productionDefault,
+                diagnosticCounters: counters,
+                includeFinalStateProbe: false)
+            let difference = firstDifference(run.generatedTokenIDs, fixture.generatedTokenIDs)
+            let result = Result(
+                status: difference == nil && run.stopReason == fixture.stopReason ? "passed" : "failed",
+                fixtureFormat: manifest.fixtureFormatVersion,
+                loadedModelID: await qwen.loadedModelID,
+                generatedTokens: run.generatedTokenIDs.count,
+                expectedTokens: fixture.generatedTokenIDs.count,
+                firstDifference: difference,
+                stopReason: run.stopReason,
+                explicitCalls: counters.explicitInvocations,
+                fusedCalls: counters.fusedInvocations)
+            try JSONEncoder().encode(result).write(to: URL(fileURLWithPath: reportPath), options: .atomic)
+            if result.status == "failed" {
+                throw EngineError.loadFailed("Q2.17 relaunch fixture diverged at \(difference.map(String.init) ?? "stop")")
+            }
+        } catch {
+            let failure = Result(
+                status: "failed: \(error)", fixtureFormat: "unknown", loadedModelID: appState.activeModelID,
+                generatedTokens: 0, expectedTokens: 0, firstDifference: nil, stopReason: nil,
+                explicitCalls: 0, fusedCalls: 0)
+            try? JSONEncoder().encode(failure).write(to: URL(fileURLWithPath: reportPath), options: .atomic)
+        }
+        NSApplication.shared.terminate(nil)
+    }
+
+    private static func loadFixture(at source: URL) throws -> (Manifest, Fixture) {
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent("qwen35-q217-relaunch-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let unzip = Process()
+        unzip.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        unzip.arguments = ["-q", "-o", source.path, "-d", temporary.path]
+        try unzip.run()
+        unzip.waitUntilExit()
+        guard unzip.terminationStatus == 0 else {
+            throw EngineError.loadFailed("Q2.17 relaunch fixture could not be extracted.")
+        }
+        let manifestURL = temporary.appendingPathComponent("manifest.json")
+        let manifest = try JSONDecoder().decode(Manifest.self, from: Data(contentsOf: manifestURL))
+        guard let entry = manifest.fixtures["primary"] else {
+            throw EngineError.loadFailed("Q2.17 relaunch fixture has no primary entry.")
+        }
+        let fixtureURL = temporary.appendingPathComponent(entry.path)
+        return (manifest, try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: fixtureURL)))
+    }
+
+    private static func firstDifference(_ lhs: [Int], _ rhs: [Int]) -> Int? {
+        for index in 0..<min(lhs.count, rhs.count) where lhs[index] != rhs[index] { return index }
+        return lhs.count == rhs.count ? nil : min(lhs.count, rhs.count)
+    }
+}
+
 extension Notification.Name {
     static let openModelManager = Notification.Name("com.beetcode.openModelManager")
     static let openProviderSettings = Notification.Name("com.beetcode.openProviderSettings")
@@ -175,6 +325,9 @@ extension Notification.Name {
     static let stopAgent = Notification.Name("com.beetcode.stopAgent")
     static let sendMessage = Notification.Name("com.beetcode.sendMessage")
     static let sessionTitleChanged = Notification.Name("com.beetcode.sessionTitleChanged")
+    /// A chat was deleted. Open tabs drop the id so a deleted conversation
+    /// cannot be selected (and then silently re-saved) from the tab strip.
+    static let sessionDeleted = Notification.Name("com.beetcode.sessionDeleted")
     /// A paired device changed the session list (delete or rename). The
     /// sidebar keeps its own decrypted snapshot, which nothing else invalidates.
     static let remoteSessionsChanged = Notification.Name("com.beetcode.remoteSessionsChanged")
@@ -184,6 +337,12 @@ extension Notification.Name {
     static let openBotsDashboard = Notification.Name("com.beetcode.openBotsDashboard")
     static let openAssistantHome = Notification.Name("com.beetcode.openAssistantHome")
     static let openAppSettings = Notification.Name("com.beetcode.openAppSettings")
+    /// Open one saved conversation by id (object: UUID) — posted by the
+    /// history popover so any surface can request a chat without owning the
+    /// window's tab logic.
+    static let openSessionRecord = Notification.Name("com.beetcode.openSessionRecord")
+    static let importChats = Notification.Name("com.beetcode.importChats")
+    static let importBundle = Notification.Name("com.beetcode.importBundle")
 }
 
 /// Mirrors the user's theme settings into `Theme`'s draw-time globals. The

@@ -293,12 +293,29 @@ final class ParallelChunkDownloader: @unchecked Sendable, FileDownloading {
         } catch is CancellationError {
             throw ChunkError.paused
         } catch {
+            // A full disk must not masquerade as a server change: that message
+            // sends the user to re-check the Hugging Face side while the real
+            // fix is freeing space. Keep the partial so the resume still works.
+            if Self.isOutOfSpace(error) {
+                throw ChunkError.io(
+                    "the disk is full. Free space on the model volume and retry — "
+                    + "the partial download resumes where it stopped.")
+            }
             throw ChunkError.serverChanged
         }
 
         guard received == chunk.length else {
             throw ChunkError.serverChanged
         }
+    }
+
+    /// ENOSPC reaches us as a POSIX error from write(2) or as Foundation's
+    /// out-of-space code, depending on where in the stack it surfaces.
+    static func isOutOfSpace(_ error: Error) -> Bool {
+        let ns = error as NSError
+        if ns.domain == NSPOSIXErrorDomain, ns.code == Int(ENOSPC) { return true }
+        if ns.domain == NSCocoaErrorDomain, ns.code == NSFileWriteOutOfSpaceError { return true }
+        return false
     }
 
     // MARK: Helpers

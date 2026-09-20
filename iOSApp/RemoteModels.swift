@@ -299,6 +299,12 @@ struct RemoteStartModelOption: Decodable, Identifiable, Hashable {
     let detail: String
     let reasoningEfforts: [String]?
     let defaultReasoningEffort: String?
+
+    var isLatest: Bool {
+        let slug = (id.split(separator: "|").last.map(String.init) ?? id).lowercased()
+        return slug.contains("gpt-6-astra") || slug == "astra"
+            || name.localizedCaseInsensitiveContains("astra")
+    }
 }
 
 extension Array where Element == RemoteStartModelOption {

@@ -12,14 +12,16 @@ struct CreateMacAppTool: AgentTool {
         {"type":"object","properties":{
           "name":{"type":"string","description":"App name (letters, numbers, spaces). Becomes the target and product."},
           "bundleId":{"type":"string","description":"Optional bundle id (default com.example.<slug>)"},
-          "path":{"type":"string","description":"Directory inside the workspace to create (default: workspace root)"}
+          "path":{"type":"string","description":"Directory inside the workspace to create (default: workspace root)"},
+          "overwrite":{"type":"boolean","default":false,"description":"Replace existing project.yml, AGENTS.md, and App/ files in the destination"}
         },"required":["name"]}
         """
 
     func preview(_ call: ParsedToolCall, in context: ToolContext) -> ApprovalPreview {
         let name = call.string("name") ?? "App"
         let path = call.string("path") ?? "."
-        return .command("scaffold macOS app “\(name)” in \(path)")
+        let overwrite = call.bool("overwrite") ?? false
+        return .command("scaffold macOS app “\(name)” in \(path)" + (overwrite ? " (replacing existing scaffold files)" : ""))
     }
 
     func execute(_ call: ParsedToolCall, in context: ToolContext) async throws -> String {
@@ -32,8 +34,10 @@ struct CreateMacAppTool: AgentTool {
             throw ToolError.missingArgument("name")
         }
         let slug = product.lowercased()
-        let trimmedBundle = call.string("bundleId")?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let bundle = (trimmedBundle?.isEmpty == false ? trimmedBundle : nil) ?? "com.example.\(slug)"
+        let requestedBundle = try Self.validatedBundleId(call.string("bundleId"))
+        let bundle = requestedBundle.isEmpty ? "com.example.\(slug)" : requestedBundle
+        let displayName = Self.safeDisplayName(rawName)
+        let overwrite = call.bool("overwrite") ?? false
 
         let dest: URL
         if let rel = call.string("path"), !rel.isEmpty, rel != "." {
@@ -41,9 +45,10 @@ struct CreateMacAppTool: AgentTool {
         } else {
             dest = context.workspace.root
         }
+        try Self.ensureScaffoldDestinationIsSafe(dest: dest, overwrite: overwrite)
         try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
 
-        try Self.writeScaffold(product: product, displayName: rawName, bundleId: bundle, dest: dest)
+        try Self.writeScaffold(product: product, displayName: displayName, bundleId: bundle, dest: dest)
 
         var notes = [
             "Created \(product) at \(dest.path)",
@@ -77,6 +82,51 @@ struct CreateMacAppTool: AgentTool {
             return first.uppercased() + part.dropFirst()
         }
         return words.joined()
+    }
+
+    /// Scaffold files that must never be replaced silently: a `project.yml`,
+    /// `App/` tree, or `AGENTS.md` already present means the destination is an
+    /// existing project, not an empty scaffold target.
+    static let scaffoldConflicts = ["project.yml", "AGENTS.md", "App"]
+
+    static func ensureScaffoldDestinationIsSafe(dest: URL, overwrite: Bool) throws {
+        let existing = scaffoldConflicts.filter {
+            FileManager.default.fileExists(atPath: dest.appendingPathComponent($0).path)
+        }
+        guard existing.isEmpty || overwrite else {
+            let list = existing.joined(separator: ", ")
+            throw ToolError.scaffoldWouldOverwrite(
+                "'\(dest.path)' already contains \(list)")
+        }
+    }
+
+    /// Display names land in generated Swift string literals, YAML, and XML
+    /// plists. Strip the characters that would break or inject into any of
+    /// them; the product name and bundle id stay separately validated.
+    static func safeDisplayName(_ raw: String) -> String {
+        let filtered = raw.unicodeScalars.filter { scalar in
+            if CharacterSet.controlCharacters.contains(scalar) { return false }
+            switch scalar {
+            case "\"", "\\", "`", "<", ">", "&": return false
+            default: return true
+            }
+        }
+        let value = String(String.UnicodeScalarView(filtered))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? "App" : value
+    }
+
+    /// Returns "" when no bundle id was requested; otherwise validates the
+    /// reverse-DNS shape before it is interpolated into XcodeGen YAML.
+    static func validatedBundleId(_ raw: String?) throws -> String {
+        let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return "" }
+        let pattern = #"^[A-Za-z][A-Za-z0-9-]*(\.[A-Za-z0-9][A-Za-z0-9-]*)+$"#
+        guard trimmed.range(of: pattern, options: .regularExpression) != nil else {
+            throw ToolError.invalidArguments(
+                "bundleId '\(trimmed)' must look like com.example.app (letters, digits, dots, hyphens)")
+        }
+        return trimmed
     }
 
     static func xcodegenURL() -> URL? {
@@ -241,14 +291,16 @@ struct CreateIOSAppTool: AgentTool {
         {"type":"object","properties":{
           "name":{"type":"string","description":"App name (letters, numbers, spaces). Becomes the target and product."},
           "bundleId":{"type":"string","description":"Optional bundle id (default com.example.<slug>)"},
-          "path":{"type":"string","description":"Directory inside the workspace to create (default: workspace root)"}
+          "path":{"type":"string","description":"Directory inside the workspace to create (default: workspace root)"},
+          "overwrite":{"type":"boolean","default":false,"description":"Replace existing project.yml, AGENTS.md, and App/ files in the destination"}
         },"required":["name"]}
         """
 
     func preview(_ call: ParsedToolCall, in context: ToolContext) -> ApprovalPreview {
         let name = call.string("name") ?? "App"
         let path = call.string("path") ?? "."
-        return .command("scaffold iOS app “\(name)” in \(path)")
+        let overwrite = call.bool("overwrite") ?? false
+        return .command("scaffold iOS app “\(name)” in \(path)" + (overwrite ? " (replacing existing scaffold files)" : ""))
     }
 
     func execute(_ call: ParsedToolCall, in context: ToolContext) async throws -> String {
@@ -259,8 +311,10 @@ struct CreateIOSAppTool: AgentTool {
         let product = CreateMacAppTool.sanitizeProduct(rawName)
         guard !product.isEmpty else { throw ToolError.missingArgument("name") }
         let slug = product.lowercased()
-        let trimmedBundle = call.string("bundleId")?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let bundle = (trimmedBundle?.isEmpty == false ? trimmedBundle : nil) ?? "com.example.\(slug)"
+        let requestedBundle = try CreateMacAppTool.validatedBundleId(call.string("bundleId"))
+        let bundle = requestedBundle.isEmpty ? "com.example.\(slug)" : requestedBundle
+        let displayName = CreateMacAppTool.safeDisplayName(rawName)
+        let overwrite = call.bool("overwrite") ?? false
 
         let dest: URL
         if let rel = call.string("path"), !rel.isEmpty, rel != "." {
@@ -268,8 +322,9 @@ struct CreateIOSAppTool: AgentTool {
         } else {
             dest = context.workspace.root
         }
+        try CreateMacAppTool.ensureScaffoldDestinationIsSafe(dest: dest, overwrite: overwrite)
         try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
-        try Self.writeScaffold(product: product, displayName: rawName, bundleId: bundle, dest: dest)
+        try Self.writeScaffold(product: product, displayName: displayName, bundleId: bundle, dest: dest)
 
         var notes = [
             "Created \(product) (iOS) at \(dest.path)",

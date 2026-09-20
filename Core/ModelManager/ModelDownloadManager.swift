@@ -225,7 +225,8 @@ final class ModelDownloadManager: ObservableObject {
     ) async -> FileOutcome {
         guard !pauseRequestedModelIDs.contains(modelID) else { return .paused }
         let destination = directory.appendingPathComponent(file.path)
-        let source = hub.resolveURL(repo: repo, path: file.path)
+        let source = hub.resolveURL(repo: repo, path: file.path,
+            revision: modelID == QwenStreamArtifact.modelID ? QwenStreamArtifact.revision : "main")
         let fileName = (file.path as NSString).lastPathComponent
 
         // Large files → parallel ranged chunks; everything else → sequential.
@@ -347,7 +348,15 @@ final class ModelDownloadManager: ObservableObject {
         let modelID = model.id
         do {
             // Fresh metadata doubles as etag-change detection for partials.
-            let files = try await hub.listModelFiles(repo: model.repo)
+            let files: [HubFile]
+            if model.format == .qwenStreaming {
+                files = QwenStreamArtifact.files.map {
+                    HubFile(path: $0.name, sizeBytes: $0.bytes, etag: $0.sha256.isEmpty ? QwenStreamArtifact.revision : $0.sha256,
+                            sha256: $0.sha256.isEmpty ? nil : $0.sha256)
+                }
+            } else {
+                files = try await hub.listModelFiles(repo: model.repo)
+            }
             guard !files.isEmpty else {
                 throw HFHubClient.HubError.repoNotFound(model.repo)
             }
@@ -358,12 +367,36 @@ final class ModelDownloadManager: ObservableObject {
 
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
+            // Free-space preflight for EVERY format, not just the pinned Qwen
+            // checkpoint. A 7-20 GB GGUF used to start with no headroom check
+            // and then fail late, with ENOSPC surfacing as a bogus "file
+            // changed on the server". The cushion covers the .incomplete
+            // preallocation, the sidecar manifest and macOS's own need for
+            // breathing room while weights page in.
+            let resource = try directory.resourceValues(
+                forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+            guard let available = resource.volumeAvailableCapacityForImportantUsage else {
+                throw HFHubClient.HubError.badResponse("Cannot determine free space on the model volume.")
+            }
+            let remaining = max(0, total - Self.downloadedBytes(in: directory))
+            let required = remaining + Self.freeSpaceHeadroom
+            guard available >= required else {
+                throw HFHubClient.HubError.badResponse(
+                    "Not enough free space for \(model.displayName): about "
+                    + "\(ByteFormatter.bytes(required)) needed, \(ByteFormatter.bytes(available)) available. "
+                    + "Free space on that volume and retry — the download resumes where it stopped.")
+            }
+
             // Split into already-complete files (skip) and pending files.
             var pending: [(file: HubFile, partialBytes: Int64)] = []
             var completed: Int64 = 0
             for file in files {
                 let destination = directory.appendingPathComponent(file.path)
-                if Self.isComplete(file: file, at: destination) {
+                var complete = Self.isComplete(file: file, at: destination)
+                if complete, model.format == .qwenStreaming, let expected = file.sha256 {
+                    complete = await HFHubClient.sha256Hex(ofFile: destination) == expected
+                }
+                if complete {
                     completed += file.sizeBytes
                 } else {
                     pending.append((file, Self.partialBytes(near: destination)))
@@ -420,6 +453,18 @@ final class ModelDownloadManager: ObservableObject {
                 states[modelID] = .idle
                 removeManifest(modelID: modelID)
             } else {
+                if model.format == .qwenStreaming {
+                    let validation = Task.detached(priority: .utility) {
+                        _ = try QwenStreamArtifact.inspect(directory)
+                        try QwenStreamArtifact.verifyPayloads(directory)
+                    }
+                    try await withTaskCancellationHandler {
+                        try await validation.value
+                    } onCancel: {
+                        validation.cancel()
+                    }
+                    try Task.checkCancellation()
+                }
                 states[modelID] = .completed
                 removeManifest(modelID: modelID)
                 // The completion handler is MainActor-isolated; hop
@@ -467,6 +512,11 @@ final class ModelDownloadManager: ObservableObject {
         let attributes = try? FileManager.default.attributesOfItem(atPath: incomplete.path)
         return (attributes?[.size] as? NSNumber)?.int64Value ?? 0
     }
+
+    /// Headroom demanded on top of the remaining bytes before a download may
+    /// start: covers the sparse .incomplete preallocation, the resume sidecar
+    /// manifest, and macOS's own need for free space while the download runs.
+    nonisolated static let freeSpaceHeadroom: Int64 = 512 * 1_048_576
 
     /// Total real bytes a partially-downloaded model directory already holds:
     /// completed files at full size plus each partial's true progress. Used

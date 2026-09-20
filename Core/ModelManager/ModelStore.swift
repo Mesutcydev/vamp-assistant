@@ -9,6 +9,9 @@ struct InstalledModel: Codable, Identifiable, Sendable, Equatable {
     var repo: String
     var addedAt: Date
     var sizeBytes: Int64
+    var artifactRevision: String? = nil
+    var validationStatus: String? = nil
+    var directoryBookmark: Data? = nil
     /// Explicit base directory when the model lives OUTSIDE the managed
     /// Application Support Models folder (e.g. the project's gitignored
     /// `beetcode-models/` created by the legacy `lf download` CLI). nil means
@@ -69,7 +72,8 @@ final class ModelStore: ObservableObject {
         // deleted outside the app).
         let before = installed.count
         installed.removeAll { model in
-            !fileManager.fileExists(atPath: directory(for: model).path)
+            if model.directoryBookmark != nil { return false }
+            return !fileManager.fileExists(atPath: directory(for: model).path)
                 || !self.hasConfiguration(model)
         }
         if installed.count != before {
@@ -106,6 +110,25 @@ final class ModelStore: ObservableObject {
     }
 
     func directory(for model: InstalledModel) -> URL {
+        if let bookmark = model.directoryBookmark {
+            var stale = false
+            if let url = try? URL(resolvingBookmarkData: bookmark,
+                                  options: [.withSecurityScope, .withoutUI],
+                                  relativeTo: nil, bookmarkDataIsStale: &stale) {
+                if stale {
+                    let scope = url.startAccessingSecurityScopedResource()
+                    defer { if scope { url.stopAccessingSecurityScopedResource() } }
+                    if let renewed = try? url.bookmarkData(options: .withSecurityScope,
+                                                          includingResourceValuesForKeys: nil, relativeTo: nil),
+                       let i = installed.firstIndex(where: { $0.id == model.id }) {
+                        installed[i].directoryBookmark = renewed
+                        saveRegistry()
+                    }
+                }
+                return url
+            }
+            return modelsDirectory.appendingPathComponent(".unavailable-" + model.id)
+        }
         if let basePath = model.basePath {
             return URL(fileURLWithPath: basePath, isDirectory: true)
                 .appendingPathComponent(model.directoryName, isDirectory: true)
@@ -121,6 +144,11 @@ final class ModelStore: ObservableObject {
     /// A leftover `.incomplete` file always means the download never finished.
     func hasConfiguration(_ model: InstalledModel) -> Bool {
         let dir = directory(for: model)
+        if model.id == QwenStreamArtifact.modelID {
+            let scoped = dir.startAccessingSecurityScopedResource()
+            defer { if scoped { dir.stopAccessingSecurityScopedResource() } }
+            return (try? QwenStreamArtifact.inspect(dir)) != nil
+        }
         guard let names = try? fileManager.contentsOfDirectory(atPath: dir.path) else {
             return false
         }
@@ -174,6 +202,7 @@ final class ModelStore: ObservableObject {
 
     /// Detects the weights format present on disk for an installed model.
     func detectedFormat(_ model: InstalledModel) -> CatalogModel.Format {
+        if model.id == QwenStreamArtifact.modelID { return .qwenStreaming }
         let dir = directory(for: model)
         guard let names = try? fileManager.contentsOfDirectory(atPath: dir.path) else {
             return .mlx
@@ -200,7 +229,10 @@ final class ModelStore: ObservableObject {
             id: catalogModel.id,
             repo: catalogModel.repo,
             addedAt: Date(),
-            sizeBytes: sizeBytes)
+            sizeBytes: sizeBytes,
+            artifactRevision: catalogModel.format == .qwenStreaming ? QwenStreamArtifact.revision : nil,
+            validationStatus: catalogModel.format == .qwenStreaming ? "payload-verified" : nil,
+            directoryBookmark: catalogModel.directoryBookmark)
         installed.removeAll { $0.id == model.id }
         installed.append(model)
         installed.sort { $0.addedAt > $1.addedAt }
@@ -213,7 +245,7 @@ final class ModelStore: ObservableObject {
         // living in an external base (legacy CLI folder, user import) get
         // de-registered but their files stay put — deleting repo-local or
         // user-owned directories would be surprising and destructive.
-        if model.basePath == nil {
+        if model.basePath == nil && model.directoryBookmark == nil {
             try? fileManager.removeItem(at: directory(for: model))
         }
         installed.removeAll { $0.id == model.id }
@@ -252,6 +284,7 @@ final class ModelStore: ObservableObject {
             guard let dirNames = try? FileManager.default.contentsOfDirectory(atPath: dir.path),
                   (isCompleteSnapshot(dirNames: dirNames) || isCompleteCoreAIPack(at: dir))
             else { return nil }
+            if catalog.format == .qwenStreaming, (try? QwenStreamArtifact.inspect(dir)) == nil { return nil }
             let size = (try? sizeOfDirectory(dir)) ?? catalog.diskBytes
             return InstalledModel(
                 id: name, repo: catalog.repo, addedAt: Date(), sizeBytes: size,
@@ -281,7 +314,8 @@ final class ModelStore: ObservableObject {
                 // Drop entries whose directories vanished or went incomplete.
                 let before = self.installed.count
                 self.installed.removeAll { model in
-                    !self.fileManager.fileExists(atPath: self.directory(for: model).path)
+                    if model.directoryBookmark != nil { return false }
+                    return !self.fileManager.fileExists(atPath: self.directory(for: model).path)
                         || !self.hasConfiguration(model)
                 }
                 if self.installed.count != before { changed = true }

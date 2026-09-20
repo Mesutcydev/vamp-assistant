@@ -247,6 +247,37 @@ final class PermissionGateTests: XCTestCase {
         }
     }
 
+    /// An imported `ask` rule must prompt even when the native flag would have
+    /// auto-approved the action. Only Full Access may bypass it.
+    func testImportedAskRulePromptsOutsideFullAccess() {
+        let workspace = Workspace(root: FileManager.default.temporaryDirectory)
+        var gate = PermissionGate(autoApproveEdits: true, workspace: workspace)
+        gate.openCodePermissions = .init(rules: [
+            .init(action: "edit", resource: "*", effect: .ask),
+        ])
+        let write = ParsedToolCall(
+            name: "write_file",
+            arguments: .object(["path": .string("a.swift"), "content": .string("x")]),
+            index: 0)
+        XCTAssertEqual(
+            gate.decision(for: write, risk: .write),
+            .needsApproval,
+            "auto-approve edits must not silently skip an imported ask rule")
+
+        var readGate = PermissionGate(workspace: workspace)
+        readGate.openCodePermissions = .init(rules: [
+            .init(action: "read", resource: "*", effect: .ask),
+        ])
+        XCTAssertEqual(
+            readGate.decision(
+                for: ParsedToolCall(
+                    name: "read_file",
+                    arguments: .object(["path": .string("a.swift")]),
+                    index: 0),
+                risk: .read),
+            .needsApproval)
+    }
+
     func testGuestShellRunsFullCommandsWithoutHostAllowlist() {
         let workspace = Workspace(root: FileManager.default.temporaryDirectory)
         let gate = PermissionGate(workspace: workspace, guestShell: true)
@@ -631,6 +662,120 @@ final class GitCheckpointerTests: XCTestCase {
         return String(decoding: data, as: UTF8.self)
     }
 
+    // MARK: Checkpoint pin refs
+
+    func testSnapshotRecordsPinRefAndTree() throws {
+        try runGit(["init", "-q"])
+        try "original".write(toFile: tempDir.appendingPathComponent("file.txt").path, atomically: true, encoding: .utf8)
+
+        let checkpoint = try checkpointer.snapshot(summary: "before")
+        let refName = try XCTUnwrap(checkpoint.refName)
+        XCTAssertTrue(refName.hasPrefix("refs/beetcode/checkpoints/"))
+        XCTAssertEqual(checkpointer.pinnedCheckpointRefs()[refName], checkpoint.treeSHA)
+    }
+
+    func testPrunePinsDeletesRecordedRefs() throws {
+        try runGit(["init", "-q"])
+        try "original".write(toFile: tempDir.appendingPathComponent("file.txt").path, atomically: true, encoding: .utf8)
+        let checkpoint = try checkpointer.snapshot(summary: "before")
+        let refName = try XCTUnwrap(checkpoint.refName)
+
+        GitCheckpointer.prunePins(checkpoints: [checkpoint], workspacePath: tempDir.path)
+
+        XCTAssertNil(checkpointer.pinnedCheckpointRefs()[refName])
+        // Deleting the pin does not break undo before the next gc.
+        try checkpointer.restore(checkpoint)
+    }
+
+    func testPrunePinsRefusesForeignRefs() throws {
+        try runGit(["init", "-q"])
+        try "original".write(toFile: tempDir.appendingPathComponent("file.txt").path, atomically: true, encoding: .utf8)
+        try runGit(["add", "-A"])
+        try runGit(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base"])
+        try runGit(["branch", "keep-me"])
+
+        // A crafted record must never delete a user ref through pruning.
+        let crafted = SessionCheckpoint(
+            id: UUID(),
+            treeSHA: "0000000000000000000000000000000000000000",
+            createdAt: Date(),
+            summary: "crafted",
+            refName: "refs/heads/keep-me")
+        GitCheckpointer.prunePins(checkpoints: [crafted], workspacePath: tempDir.path)
+
+        XCTAssertTrue(try runGitOutput(["branch", "--list", "keep-me"]).contains("keep-me"))
+    }
+
+    func testSweepKeepsReferencedTreesAndDeletesOrphans() throws {
+        try runGit(["init", "-q"])
+        try "one".write(toFile: tempDir.appendingPathComponent("file.txt").path, atomically: true, encoding: .utf8)
+        let first = try checkpointer.snapshot(summary: "first")
+        try "two".write(toFile: tempDir.appendingPathComponent("file.txt").path, atomically: true, encoding: .utf8)
+        let second = try checkpointer.snapshot(summary: "second")
+        let firstName = try XCTUnwrap(first.refName)
+        let secondName = try XCTUnwrap(second.refName)
+
+        let deleted = GitCheckpointer.sweepOrphanedPins(
+            workspacePath: tempDir.path,
+            referencedTreeSHAs: [second.treeSHA])
+
+        XCTAssertEqual(deleted, [firstName])
+        let remaining = checkpointer.pinnedCheckpointRefs()
+        XCTAssertEqual(remaining[secondName], second.treeSHA)
+        XCTAssertNil(remaining[firstName])
+    }
+
+    func testSweepMatchesLegacyRefsByTreeSHA() throws {
+        try runGit(["init", "-q"])
+        try "one".write(toFile: tempDir.appendingPathComponent("file.txt").path, atomically: true, encoding: .utf8)
+        let snapshot = try checkpointer.snapshot(summary: "legacy")
+        // Simulate a pre-refName app version: the ref exists, but the record
+        // does not name it (only the tree SHA ties them together).
+        let legacy = SessionCheckpoint(
+            id: snapshot.id,
+            treeSHA: snapshot.treeSHA,
+            createdAt: snapshot.createdAt,
+            summary: snapshot.summary)
+        XCTAssertNil(legacy.refName)
+
+        var deleted = GitCheckpointer.sweepOrphanedPins(
+            workspacePath: tempDir.path,
+            referencedTreeSHAs: [legacy.treeSHA])
+        XCTAssertEqual(deleted, [], "a legacy ref whose session still exists must be kept")
+
+        deleted = GitCheckpointer.sweepOrphanedPins(
+            workspacePath: tempDir.path,
+            referencedTreeSHAs: [])
+        XCTAssertEqual(deleted, [try XCTUnwrap(snapshot.refName)])
+    }
+
+    func testDeletingSessionPrunesItsCheckpointRefs() throws {
+        try runGit(["init", "-q"])
+        try "original".write(toFile: tempDir.appendingPathComponent("file.txt").path, atomically: true, encoding: .utf8)
+        let checkpoint = try checkpointer.snapshot(summary: "before")
+        let refName = try XCTUnwrap(checkpoint.refName)
+
+        let store = SessionStore()
+        store.overrideSessionsDir = tempDir.appendingPathComponent("sessions", isDirectory: true)
+        let record = SessionRecord(
+            id: UUID(),
+            title: "delete me",
+            createdAt: Date(),
+            updatedAt: Date(),
+            workspacePath: tempDir.path,
+            modelID: "m",
+            messages: [],
+            checkpoints: [checkpoint])
+        guard case .success = store.save(record) else {
+            return XCTFail("session save failed")
+        }
+
+        store.delete(record)
+
+        XCTAssertNil(store.load(id: record.id))
+        XCTAssertNil(checkpointer.pinnedCheckpointRefs()[refName])
+    }
+
 
 }
 
@@ -707,6 +852,20 @@ final class CommandPolicyTests: XCTestCase {
         XCTAssertTrue(evaluate("ls sub").safeForAutoApproval)
         XCTAssertTrue(evaluate("find sub -name '*.swift'").safeForAutoApproval)
         XCTAssertTrue(evaluate("rg pattern sub").safeForAutoApproval)
+    }
+
+    /// The shell removes quotes before the command sees its arguments, so the
+    /// policy must validate the unquoted token. A quoted absolute path used to
+    /// look like a relative in-workspace path and auto-approve.
+    func testQuotedPathsAreValidatedAfterUnquoting() {
+        XCTAssertFalse(evaluate("cat \"/etc/passwd\"").safeForAutoApproval)
+        XCTAssertFalse(evaluate("cat '/etc/passwd'").safeForAutoApproval)
+        XCTAssertFalse(evaluate("cat \"\"/etc/passwd").safeForAutoApproval)
+        XCTAssertFalse(evaluate("cat /e\"tc\"/passwd").safeForAutoApproval)
+        // Escapes are refused outright rather than decoded by hand.
+        XCTAssertFalse(evaluate("cat /etc/pass\\wd").safeForAutoApproval)
+        // Quote-free, in-workspace paths still auto-approve.
+        XCTAssertTrue(evaluate("cat sub/file.txt").safeForAutoApproval)
     }
 
     func testGitAndFindMutationsAreNeverAutoApproved() {

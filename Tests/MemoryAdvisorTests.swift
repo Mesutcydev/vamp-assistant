@@ -37,6 +37,22 @@ final class MemoryAdvisorTests: XCTestCase {
         XCTAssertEqual(projected, 1_300_000_000 + 500_000_000)
     }
 
+    func testGGUFProjectionCountsMappedWeightsOnce() {
+        let disk: Int64 = 1_000_000_000
+        let projected = MemoryAdvisor.projectedFootprint(diskBytes: disk, format: .gguf)
+        XCTAssertEqual(
+            projected,
+            UInt64(disk) + MemoryAdvisor.ggufHeadroomReserveBytes)
+        XCTAssertLessThan(projected, MemoryAdvisor.projectedFootprint(diskBytes: disk))
+    }
+
+    func testLargeGGUFIsAdmissibleWithAControlledBudget() {
+        let disk: Int64 = 10_864_587_872
+        let projected = MemoryAdvisor.projectedFootprint(diskBytes: disk, format: .gguf)
+        let budget: UInt64 = 11_890_000_000
+        XCTAssertTrue(MemoryAdvisor.verdict(projected: projected, budget: budget).fitsLoad)
+    }
+
     func testZeroBudgetNeverFits() {
         if case .wontFit = MemoryAdvisor.verdict(projected: 1, budget: 0) {
             // expected

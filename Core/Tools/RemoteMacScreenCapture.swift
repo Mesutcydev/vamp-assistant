@@ -17,6 +17,13 @@ final class RemoteMacScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate, 
         var displayID: CGDirectDisplayID?
         var windowID: CGWindowID?
         var maxWidth: Int?
+        /// Ceiling on total pixels, applied alongside `maxWidth`.
+        ///
+        /// A long-edge cap alone is not enough: a near-square window such as 3800×3800 is
+        /// 14.4 MP — well past the 8.29 MP of a 4K UHD frame — and it passes a 3840 edge cap
+        /// untouched. That is past what the client's decoder and this host's encoder are
+        /// budgeted for, so both ceilings are applied, shrink-only and aspect-preserving.
+        var maxPixels: Int?
         var averageBitrate: Int
         var framesPerSecond: Int
         var showsCursor: Bool
@@ -25,6 +32,7 @@ final class RemoteMacScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate, 
             displayID: CGDirectDisplayID? = nil,
             windowID: CGWindowID? = nil,
             maxWidth: Int? = RemoteStreamResolution.high.maxWidth,
+            maxPixels: Int? = RemoteStreamResolution.high.maxPixels,
             averageBitrate: Int = RemoteStreamResolution.high.averageBitrate,
             framesPerSecond: Int = RemoteStreamResolution.high.framesPerSecond,
             showsCursor: Bool = true
@@ -32,6 +40,7 @@ final class RemoteMacScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate, 
             self.displayID = displayID
             self.windowID = windowID
             self.maxWidth = maxWidth
+            self.maxPixels = maxPixels
             self.averageBitrate = max(averageBitrate, 250_000)
             self.framesPerSecond = min(max(framesPerSecond, 5), 60)
             self.showsCursor = showsCursor
@@ -39,6 +48,39 @@ final class RemoteMacScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate, 
     }
 
     typealias Frame = RemoteMacControl.Frame
+
+    /// The capture size for a source of `pixelWidth` × `pixelHeight`.
+    ///
+    /// Applies both ceilings — longest axis and total pixels — shrink-only, aspect-preserving,
+    /// and rounds both axes down to even (H.264 4:2:0 requires even dimensions). Never upscales:
+    /// a source already inside both ceilings passes through only evened, so a real
+    /// hardware-sized window is not resampled.
+    ///
+    /// Pure and synchronous so the ceilings are unit-testable without a live capture.
+    nonisolated static func fittedPixelSize(
+        pixelWidth: Int,
+        pixelHeight: Int,
+        maxLongEdge: Int?,
+        maxPixels: Int?
+    ) -> (width: Int, height: Int) {
+        let sourceWidth = max(pixelWidth, 1)
+        let sourceHeight = max(pixelHeight, 1)
+        let longest = max(sourceWidth, sourceHeight)
+        let pixels = sourceWidth * sourceHeight
+
+        var scale = 1.0
+        if let maxLongEdge, maxLongEdge > 0 {
+            scale = min(scale, Double(maxLongEdge) / Double(longest))
+        }
+        if let maxPixels, maxPixels > 0 {
+            scale = min(scale, (Double(maxPixels) / Double(pixels)).squareRoot())
+        }
+        scale = min(scale, 1)
+
+        let width = max(2, Int((Double(sourceWidth) * scale).rounded(.down) / 2) * 2)
+        let height = max(2, Int((Double(sourceHeight) * scale).rounded(.down) / 2) * 2)
+        return (width, height)
+    }
 
     private struct State {
         var stream: SCStream?
@@ -203,14 +245,20 @@ final class RemoteMacScreenCapture: NSObject, SCStreamOutput, SCStreamDelegate, 
             streamConfig.showsCursor = config.showsCursor
             streamConfig.queueDepth = 2
             streamConfig.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(config.framesPerSecond))
-            // Cap the longest axis rather than the width. A whole display is always landscape,
-            // so "width" and "long axis" were the same thing; a window fitted to a portrait
-            // phone is taller than it is wide, and a width-only cap left its height entirely
-            // unbounded. Landscape sources scale exactly as before.
-            let longestPixels = max(pixelWidth, pixelHeight)
-            let scale = config.maxWidth.map { min(1, Double($0) / Double(longestPixels)) } ?? 1
-            let width = max(2, Int((Double(pixelWidth) * scale).rounded(.down) / 2) * 2)
-            let height = max(2, Int((Double(pixelHeight) * scale).rounded(.down) / 2) * 2)
+            // Cap the longest axis **and** the total pixel count rather than the width.
+            //
+            // A whole display is always landscape, so "width" and "long axis" were the same
+            // thing; a window fitted to a portrait phone is taller than it is wide, and a
+            // width-only cap left its height entirely unbounded. Landscape sources scale exactly
+            // as before. The pixel ceiling then catches the near-square case a long-edge cap
+            // cannot see (3800×3800 is 14.4 MP and passes a 3840 edge cap untouched).
+            let size = Self.fittedPixelSize(
+                pixelWidth: pixelWidth,
+                pixelHeight: pixelHeight,
+                maxLongEdge: config.maxWidth,
+                maxPixels: config.maxPixels)
+            let width = size.width
+            let height = size.height
             streamConfig.width = width
             streamConfig.height = height
             streamConfig.scalesToFit = true

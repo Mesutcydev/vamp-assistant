@@ -12,6 +12,33 @@ struct ConversationView: View {
     @State private var showSharing = false
     @State private var selectedModelID = ""
     @State private var dismissedErrorMessage: String?
+
+    /// Chat titles arrive as generated Markdown. The navigation bar displays
+    /// plain text, so emphasis and code delimiters must be removed before
+    /// SwiftUI truncates the title.
+    private var displayTitle: String {
+        let raw = store.sessions.first(where: { $0.id == sessionID })?.title ?? "Conversation"
+        var title = raw
+        let emphasisPatterns = [
+            #"\*\*([^*\n]+)\*\*"#,
+            #"\*([^*\n]+)\*"#,
+            #"__([^_\n]+)__"#,
+            #"_([^_\n]+)_"#,
+            #"`([^`\n]+)`"#,
+        ]
+        for pattern in emphasisPatterns {
+            title = title.replacingOccurrences(
+                of: pattern, with: "$1", options: .regularExpression)
+        }
+        title = title
+            .replacingOccurrences(of: "*", with: "")
+            .replacingOccurrences(of: "`", with: "")
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        return title.isEmpty ? "Conversation" : title
+    }
+
     var body: some View {
         ZStack {
             RemoteBackdrop()
@@ -22,6 +49,8 @@ struct ConversationView: View {
                         models: store.startModels,
                         selectedModelID: $selectedModelID,
                         showsModel: false,
+                        isReachable: store.isConnected,
+                        isSending: store.sendingSessionIDs.contains(sessionID),
                         onStop: { Task { await store.stop() } },
                         onRefreshModels: { await store.loadStartModels() })
                     if !store.isConnected {
@@ -57,26 +86,35 @@ struct ConversationView: View {
                         }
                     })
             }
-        }.navigationTitle(store.sessions.first(where: { $0.id == sessionID })?.title ?? "Conversation").navigationBarTitleDisplayMode(.inline)
+        }.navigationTitle("").navigationBarTitleDisplayMode(.inline)
             .remoteNavigationChrome()
+            .keyboardDismissToolbar()
             .toolbarBackground(BeetTheme.background(appearance).opacity(0.92), for: .navigationBar).toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    VampModeToggle(
-                        title: "AUTO",
-                        isOn: store.autoMode,
-                        isDisabled: store.isUpdatingAccess || !store.isConnected) {
-                            Task { await store.setAccessMode(autoMode: !store.autoMode, fullAccess: false) }
-                        }
+                ToolbarItem(placement: .principal) {
+                    Text(displayTitle)
+                        .font(.headline)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: 170)
+                        .padding(.horizontal, 4)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    VampModeToggle(
-                        title: "FULL",
-                        isOn: store.fullAccess,
-                        isDisabled: store.isUpdatingAccess || !store.isConnected) {
-                            Task { await store.setAccessMode(autoMode: false, fullAccess: !store.fullAccess) }
-                        }
+                    let locked = store.isUpdatingAccess || !store.isConnected
+                    InstrumentKeyBank(
+                        selection: Binding(
+                            get: { store.isFullAccessSelected },
+                            set: { full in
+                                Task { await store.setAccessMode(autoMode: !full, fullAccess: full) }
+                            }),
+                        titles: ["AUTO", "FULL"],
+                        values: [false, true],
+                        isMono: true,
+                        size: .compact)
+                    .disabled(locked)
+                    .accessibilityLabel("Access mode")
                 }
+                .vampUtilityAction()
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if let detail = store.selectedSession, detail.id == sessionID {
@@ -123,7 +161,9 @@ struct ConversationView: View {
                 dismissedErrorMessage = store.selectedSession?.error?.message ?? dismissedErrorMessage
             }
             .sheet(isPresented: $showModelPicker) {
-                RemoteModelPickerSheet(models: store.startModels, source: $pickerSource,
+                RemoteModelPickerSheet(models: store.startModels,
+                    modeName: store.selectedSession?.mode == "code" || !(store.selectedSession?.workspacePath ?? "").isEmpty ? "Code" : "Chat",
+                    source: $pickerSource,
                     selectedModelID: $selectedModelID, onRefresh: { await store.loadStartModels() })
                     .presentationDetents([.large])
             }
@@ -138,51 +178,6 @@ struct ConversationView: View {
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
             }
         }
-    }
-}
-
-/// A single compact mode toggle for the conversation toolbar. Reads as an
-/// instrument key: a flat label, a subtle recessed active fill, and a tiny
-/// orange underline when engaged. Matches the composer deck's control language.
-struct VampModeToggle: View {
-    let title: String
-    let isOn: Bool
-    let isDisabled: Bool
-    let action: () -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(isOn ? Color.white : RemoteInstrument.ink.opacity(0.72))
-                .frame(minWidth: 40, minHeight: 32)
-                .padding(.horizontal, 4)
-                .background(isOn ? RemoteInstrument.darkInsert : .clear,
-                            in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .overlay(alignment: .bottom) {
-                    Capsule()
-                        .fill(RemoteInstrument.orange)
-                        .frame(width: 10, height: 2)
-                        .padding(.bottom, 3)
-                        .opacity(isOn ? 1 : 0)
-                        .allowsHitTesting(false)
-                }
-                .overlay {
-                    if !isOn {
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .strokeBorder(RemoteInstrument.seam.opacity(0.65), lineWidth: 0.75)
-                            .allowsHitTesting(false)
-                    }
-                }
-                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        }
-        .buttonStyle(RemotePressButtonStyle())
-        .disabled(isDisabled)
-        .opacity(isDisabled ? 0.5 : 1)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isOn)
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }
 
@@ -234,6 +229,8 @@ struct ConversationStatus: View {
     let models: [RemoteStartModelOption]
     @Binding var selectedModelID: String
     var showsModel = true
+    var isReachable = true
+    var isSending = false
     var onStop: (() -> Void)? = nil
     var onRefreshModels: (() async -> Void)? = nil
     @Environment(\.remoteAppearance) private var appearance
@@ -253,7 +250,7 @@ struct ConversationStatus: View {
         .font(.caption2.monospaced())
                 .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .foregroundStyle(BeetTheme.secondaryText(appearance))
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 12)
         .padding(.vertical, verticalSizeClass == .compact ? 3 : 6)
         .frame(maxWidth: .infinity, minHeight: verticalSizeClass == .compact ? 26 : 34, alignment: .leading)
         .background(BeetTheme.readingSurface(appearance))
@@ -304,12 +301,13 @@ struct ConversationStatus: View {
     private var statusIdentity: some View {
         HStack(spacing: 7) {
             Circle()
-                .fill(detail.isRunning ? RemoteInstrument.orange : RemoteInstrument.green)
-                .frame(width: 7, height: 7)
-            Text(detail.isRunning ? detail.phase.capitalized : "Ready")
+                .fill(!isReachable ? RemoteInstrument.secondaryInk : (detail.error != nil ? RemoteInstrument.danger : (detail.isRunning || isSending ? RemoteInstrument.orange : RemoteInstrument.green)))
+                .frame(width: 5.5, height: 5.5)
+            Text((!isReachable ? "Offline" : detail.error != nil ? "Error" : isSending ? "Sending" : detail.isRunning ? detail.phase.capitalized : "Ready").uppercased())
                 .fontWeight(.semibold)
             Text("·")
             Text(detail.mode == "code" || !(detail.workspacePath ?? "").isEmpty ? "Code" : "Chat")
+                .textCase(.uppercase)
                 .fontWeight(.semibold)
         }
     }
@@ -346,10 +344,10 @@ struct ConversationStatus: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 12)
                     .frame(minHeight: 44)
-                    .background(BeetTheme.accent, in: Capsule())
-                    .hitTarget(7)
+
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RemoteKeyButtonStyle(prominent: true))
+            .disabled(!isReachable || isSending)
             .accessibilityLabel("Stop the agent")
         } else {
             Label("\(detail.messages.count)", systemImage: "text.bubble")

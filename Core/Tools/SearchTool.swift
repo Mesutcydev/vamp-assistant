@@ -6,6 +6,7 @@ struct SearchTool: AgentTool {
     let name = "search"
     let summary = "Search file contents with a regular expression"
     let risk = ToolRisk.read
+    let treatsErrorPrefixAsFailure = true
 
     // Search spans the whole workspace; a short TTL absorbs duplicate queries
     // in one turn without pretending the tree is frozen.

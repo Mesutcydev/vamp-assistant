@@ -44,14 +44,32 @@ enum RemoteAPIProtocol: String, Codable, Sendable, Equatable {
             return .openAIResponses
         }
 
-        // OpenCode Zen/Go use a mixed gateway: GPT/Codex models speak
-        // Responses, Claude/Qwen/MiniMax models speak Messages, and the
-        // remaining models use chat completions.
+        // OpenCode Zen/Go are mixed gateways. The model-to-protocol table is
+        // published per model (opencode.ai/docs/zen, /docs/go and models.dev);
+        // these rules mirror it:
+        //   Gemini        -> native Google protocol under /v1/models/<id>
+        //   Claude/Qwen   -> Anthropic Messages (/messages)
+        //   MiniMax       -> Messages on Go and for Zen's `-free` variants;
+        //                    OpenAI chat completions for Zen's paid variants
+        //   GPT/Codex, Grok 4.x/Build, Muse Spark -> OpenAI Responses
+        //   everything else (GLM, Kimi, DeepSeek, LongCat, MiMo, Hy3, ...)
+        //                    -> OpenAI chat completions
         if provider == "opencode" || provider == "opencode-go" {
-            if model.contains("claude") || model.contains("qwen") || model.contains("minimax") {
+            let isGo = provider == "opencode-go"
+            let leaf = model.split(separator: "/").last.map(String.init) ?? model
+
+            if leaf.hasPrefix("gemini") {
+                return .gemini
+            }
+            if leaf.contains("claude") || leaf.contains("qwen") {
                 return .anthropicMessages
             }
-            if model.contains("gpt") || model.contains("codex") {
+            if leaf.contains("minimax") {
+                return isGo || leaf.contains("-free") ? .anthropicMessages : .openAIChatCompletions
+            }
+            if leaf.contains("gpt") || leaf.contains("codex")
+                || leaf.contains("muse-spark")
+                || leaf.hasPrefix("grok-4") || leaf.hasPrefix("grok-build") {
                 return .openAIResponses
             }
         }

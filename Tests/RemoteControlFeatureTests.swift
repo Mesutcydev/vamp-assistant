@@ -78,16 +78,26 @@ final class RemoteControlFeatureTests: XCTestCase {
     func testStreamResolutionProfilesAreSelectableAndBounded() {
         XCTAssertEqual(RemoteStreamResolution.resolve("1080P"), .high)
         XCTAssertEqual(RemoteStreamResolution.resolve("unknown"), .high)
-        XCTAssertEqual(RemoteStreamResolution.native.maxWidth, 2560)
+        // Native tracks Vamp's high-resolution allowance instead of a 2560 soft cap.
+        XCTAssertEqual(RemoteStreamResolution.native.maxWidth, 3840)
+        // Every tier also carries a total-pixel ceiling, so a near-square source
+        // cannot slip past a long-edge-only cap.
+        XCTAssertEqual(RemoteStreamResolution.native.maxPixels, 3840 * 2160)
+        XCTAssertEqual(RemoteStreamResolution.high.maxPixels, 1920 * 1080)
         XCTAssertEqual(RemoteStreamResolution.low.averageBitrate, 2_000_000)
         XCTAssertEqual(RemoteStreamResolution.balanced.averageBitrate, 8_000_000)
         XCTAssertEqual(RemoteStreamResolution.high.averageBitrate, 16_000_000)
-        XCTAssertEqual(RemoteStreamResolution.native.averageBitrate, 24_000_000)
+        // Native carries the highest budget the host advertises: it is the only
+        // tier that can reach a 3840x2160 envelope, and it runs at 60 fps.
+        XCTAssertEqual(RemoteStreamResolution.native.averageBitrate, 48_000_000)
         XCTAssertLessThan(RemoteStreamResolution.low.averageBitrate, RemoteStreamResolution.high.averageBitrate)
         XCTAssertEqual(RemoteStreamResolution.balanced.framesPerSecond, 30)
         XCTAssertEqual(RemoteStreamResolution.low.framesPerSecond, 24)
-        XCTAssertEqual(RemoteStreamResolution.native.framesPerSecond, 24)
+        // Native was 30 fps, which left the sharpest tier the least fluid one;
+        // both ends of the pair handle 4K60.
+        XCTAssertEqual(RemoteStreamResolution.native.framesPerSecond, 60)
         XCTAssertLessThanOrEqual(RemoteStreamResolution.balanced.refreshIntervalMilliseconds, 50)
+        XCTAssertEqual(RemoteStreamResolution.native.refreshIntervalMilliseconds, 16)
     }
 
     func testScreenCaptureCursorDefaultsOnAndCanBeDisabledPerViewer() {
@@ -105,7 +115,14 @@ final class RemoteControlFeatureTests: XCTestCase {
         XCTAssertEqual(split[0], sps)
         XCTAssertEqual(split[1], pps)
         XCTAssertGreaterThanOrEqual(RemoteStreamResolution.low.averageBitrate, 1_000_000)
-        XCTAssertLessThanOrEqual(RemoteStreamResolution.native.averageBitrate, 40_000_000)
+        // Every tier stays at or below the highest budget the host advertises. The
+        // per-tier values are asserted in testStreamResolutionProfilesAreSelectableAndBounded;
+        // this is only the envelope guard.
+        for resolution in RemoteStreamResolution.allCases {
+            XCTAssertLessThanOrEqual(
+                resolution.averageBitrate, 48_000_000,
+                "\(resolution.rawValue) must not exceed the 48 Mbps host ceiling")
+        }
     }
 
     func testDisplayMappingFitsAndFillsWithoutStretchingClicks() {
@@ -207,6 +224,22 @@ final class RemoteControlFeatureTests: XCTestCase {
             from: Data("{\"out\":\"prompt> \"}".utf8)
         )
         XCTAssertEqual(legacy.bytes, Data("prompt> ".utf8))
+    }
+
+    func testApplicationClosePolicyRejectsProtectedAndUnnormalizedIdentifiers() {
+        XCTAssertTrue(RemoteApplicationClosePolicy.canClose("com.example.Notes"))
+        XCTAssertTrue(
+            RemoteApplicationClosePolicy.canClose(
+                "com.example.notes",
+                hostBundleIdentifier: "com.example.other"))
+        XCTAssertFalse(RemoteApplicationClosePolicy.canClose("com.apple.dock"))
+        XCTAssertFalse(RemoteApplicationClosePolicy.canClose("com.apple.finder"))
+        XCTAssertFalse(
+            RemoteApplicationClosePolicy.canClose(
+                "com.example.host",
+                hostBundleIdentifier: "com.example.host"))
+        XCTAssertNil(RemoteApplicationClosePolicy.normalizedBundleIdentifier("../Notes"))
+        XCTAssertNil(RemoteApplicationClosePolicy.normalizedBundleIdentifier("no-bundle-id"))
     }
 }
 

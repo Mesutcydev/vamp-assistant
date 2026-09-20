@@ -13,6 +13,15 @@ import Foundation
 ///    transcript, and surfaced as a proper "Reasoning…" indicator.
 enum StreamDisplayFilter {
 
+    /// Wire-format probes used while a stream is live. They are compile-time
+    /// constants, so they are compiled once per process instead of on every
+    /// ~120 ms token flush; matching on a shared NSRegularExpression is
+    /// documented thread-safe (and the SDK already marks it Sendable).
+    private static let openFunctionRegex = try? NSRegularExpression(
+        pattern: #"(?is)<function(?:\s+name=["']?[A-Za-z0-9_]+["']?|=[A-Za-z0-9_]+)[^>]*>"#)
+    private static let toolFragmentRegex = try? NSRegularExpression(
+        pattern: #"\{\s*"name"\s*:"#)
+
     /// The visible portion of what has streamed so far, plus whether the
     /// model currently appears to be reasoning.
     static func display(raw: String) -> (visible: String, reasoning: Bool) {
@@ -29,12 +38,13 @@ enum StreamDisplayFilter {
             return (trimmingFillerTail(visible), true)
         }
         let inOpenThink = PromptBuilder.hasOpenThinkingBlock(raw)
+        let inOpenTool = hasOpenFunctionWrapper(raw)
         // Everything streamed so far is think/tool wire format — show the
         // working indicator instead of an empty or raw-JSON bubble.
-        if visible.isEmpty, !stripped.isEmpty {
+        if visible.isEmpty, (!stripped.isEmpty || inOpenTool) {
             return ("", true)
         }
-        return (visible, inOpenThink)
+        return (visible, inOpenThink || inOpenTool)
     }
 
     /// Returns the reasoning channel accumulated so far. This uses the same
@@ -71,9 +81,21 @@ enum StreamDisplayFilter {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
             }
         }
+        // Small instruct models also emit function XML with an attribute
+        // header. Keep the wire format out of the live answer while its
+        // closing tag is still in flight.
+        if let regex = Self.openFunctionRegex {
+            let nsRange = NSRange(text.startIndex..., in: text)
+            if let match = regex.matches(in: text, range: nsRange).last,
+               let openRange = Range(match.range, in: text),
+               !text[openRange.upperBound...].contains("</function>") {
+                return String(text[..<openRange.lowerBound])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
         // Trailing unbalanced {"name": … object.
         if ToolParser.looksLikeToolCallFragment(text),
-           let regex = try? NSRegularExpression(pattern: #"\{\s*"name"\s*:"#) {
+           let regex = Self.toolFragmentRegex {
             let nsRange = NSRange(text.startIndex..., in: text)
             if let last = regex.matches(in: text, range: nsRange).last,
                let range = Range(last.range, in: text) {
@@ -82,6 +104,14 @@ enum StreamDisplayFilter {
             }
         }
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func hasOpenFunctionWrapper(_ text: String) -> Bool {
+        guard let regex = Self.openFunctionRegex else { return false }
+        let range = NSRange(text.startIndex..., in: text)
+        guard let match = regex.matches(in: text, range: range).last,
+              let open = Range(match.range, in: text) else { return false }
+        return !text[open.upperBound...].contains("</function>")
     }
 
     /// "thinking thinking thinking …" — the same word (2–12 chars) repeated

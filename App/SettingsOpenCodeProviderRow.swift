@@ -64,7 +64,7 @@ struct OpenCodeProviderRow: View {
                 if configured {
                     Label("Configured", systemImage: "checkmark.seal.fill")
                         .font(.caption2.weight(.medium))
-                        .foregroundStyle(Theme.success)
+                        .foregroundStyle(Theme.positive)
                 }
             }
             if let baseURL = provider.baseURL {
@@ -85,7 +85,7 @@ struct OpenCodeProviderRow: View {
                     .onChange(of: modelDraft) { _, _ in persistSelectedModel() }
                 }
                 TextField("Model id", text: $modelDraft)
-                    .textFieldStyle(.roundedBorder)
+                    .vampField()
                     .font(.callout.monospaced())
                     .onSubmit { persistSelectedModel() }
                 if let profile = selectedProfile {
@@ -103,7 +103,7 @@ struct OpenCodeProviderRow: View {
             }
             HStack(spacing: Spacing.sm) {
                 SecureField(configured ? "API key (replace)" : "API key", text: $keyDraft)
-                    .textFieldStyle(.roundedBorder)
+                    .vampField()
                     .autocorrectionDisabled()
                 Button("Save") {
                     guard !keyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
@@ -111,10 +111,10 @@ struct OpenCodeProviderRow: View {
                     keyDraft = ""
                     testState = .idle
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
                 .tint(Theme.accent)
                 Button("Test") { test() }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(LFCapsuleButtonStyle())
                     .disabled(selectedProfile == nil || testState == .running || resolvedKey.isEmpty)
             }
             switch testState {
@@ -126,11 +126,11 @@ struct OpenCodeProviderRow: View {
             case .ok(let detail):
                 Label(detail, systemImage: "checkmark.circle.fill")
                     .font(.caption)
-                    .foregroundStyle(Theme.success)
+                    .foregroundStyle(Theme.positive)
             case .failed(let detail):
                 Label(detail, systemImage: "xmark.octagon.fill")
                     .font(.caption)
-                    .foregroundStyle(Theme.danger)
+                    .foregroundStyle(Theme.negative)
             }
         }
         .padding(.vertical, Spacing.sm)

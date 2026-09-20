@@ -54,6 +54,11 @@ enum RemoteAPIModelCatalog {
         }
 
         for provider in KnownRemoteProvider.all where hasKeyForProviderID(provider.id) {
+            if let builtIn = LLMProvider.fromOpenCodeIdentifier(provider.id),
+               builtIn != .custom,
+               configuredProviders.contains(builtIn) {
+                continue
+            }
             for model in provider.availableModels + [provider.defaultModel] {
                 add(RemoteModelProfile(
                     provider: .custom,
@@ -70,6 +75,9 @@ enum RemoteAPIModelCatalog {
             if $0.displayProviderName != $1.displayProviderName {
                 return $0.displayProviderName.localizedStandardCompare($1.displayProviderName) == .orderedAscending
             }
+            let leftLatest = CodexAccountCatalog.isLatest(modelID: $0.model)
+            let rightLatest = CodexAccountCatalog.isLatest(modelID: $1.model)
+            if leftLatest != rightLatest { return leftLatest }
             return $0.model.localizedStandardCompare($1.model) == .orderedAscending
         }
     }

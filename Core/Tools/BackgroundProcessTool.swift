@@ -106,6 +106,7 @@ struct BackgroundProcessTool: AgentTool {
     let name = "background_process"
     let summary = "Start or stop a long-running workspace process (dev server)"
     let risk = ToolRisk.execute
+    let treatsErrorPrefixAsFailure = true
 
     let schemaText = """
         {"type":"object","properties":{
@@ -151,6 +152,7 @@ struct BackgroundStatusTool: AgentTool {
     let name = "background_status"
     let summary = "List long-running workspace processes or read their logs"
     let risk = ToolRisk.read
+    let treatsErrorPrefixAsFailure = true
 
     let schemaText = """
         {"type":"object","properties":{

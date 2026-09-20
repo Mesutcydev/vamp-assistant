@@ -64,6 +64,13 @@ actor AgentLoop {
         /// as a user project. No tools, hooks, project context, memory,
         /// checkpoints, or subagents enter a chat-only loop.
         var chatOnly: Bool = false
+        /// TypeSafe guardrails (System One decisions, opt-in). Screening
+        /// labels observation content that came from outside the workspace
+        /// before the model reads it; escalation turns a would-be
+        /// auto-approved action into an approval card. Both are additive
+        /// only — the deterministic gate stays the floor.
+        var typeSafeContentScreening: Bool = false
+        var typeSafeCommandEscalation: Bool = false
     }
 
     // Dependencies
@@ -78,6 +85,10 @@ actor AgentLoop {
     private let checkpointer: GitCheckpointer
     private let configuration: Configuration
     private let commandPolicy: CommandPolicy
+    /// TypeSafe guardrail seam. nil = guardrails off (no key configured or
+    /// both settings disabled): every guardrail path then no-ops and the loop
+    /// behaves exactly as it did before.
+    private let typeSafe: (any TypeSafeJudging)?
     private let memory: AgentMemory?
     private let taskHint: String
     private let hooks: HookRunner
@@ -91,6 +102,9 @@ actor AgentLoop {
     private var systemPrompt: String
     private var sentTurnCount = 0
     private var history: [ChatTurn] = []
+    /// Images attached to the current user turn (native image input). Valid
+    /// for one run; the session record carries them for later resumes.
+    private var userImages: [ChatImage] = []
     private var record: SessionRecord
     private var pending: PendingRequest?
     private var cancelled = false
@@ -143,7 +157,8 @@ actor AgentLoop {
         taskHint: String = "",
         hooks: HookRunner? = nil,
         linuxContainer: LinuxContainerTarget? = nil,
-        browserSession: BrowserSession? = nil
+        browserSession: BrowserSession? = nil,
+        typeSafe: (any TypeSafeJudging)? = nil
     ) {
         self.engine = engine
         self.workspace = workspace
@@ -157,6 +172,7 @@ actor AgentLoop {
                 includeWorkspace: WorkspaceTrust.isTrusted(workspace.root)))
         self.linuxContainer = linuxContainer
         self.browserSession = browserSession
+        self.typeSafe = typeSafe
         let projectPolicy = configuration.chatOnly
             ? nil
             : ProjectPolicy.load(workspaceRoot: workspace.root)
@@ -298,7 +314,7 @@ actor AgentLoop {
     /// Runs a task to completion (or max turns). Events stream out; the loop
     /// suspends when user input is needed, resumed via `resolve`. A second
     /// run while one is active is rejected immediately (one actor, one task).
-    func run(userMessage: String) -> AsyncStream<AgentEvent> {
+    func run(userMessage: String, images: [ChatImage] = []) -> AsyncStream<AgentEvent> {
         guard !isRunning else {
             return AsyncStream { continuation in
                 continuation.yield(.finished(.engineError("A task is already running in this session.")))
@@ -308,6 +324,7 @@ actor AgentLoop {
 
         isRunning = true
         cancelled = false
+        userImages = images
         pendingSteer = nil
         hasFinished = false
         pending = nil
@@ -429,7 +446,15 @@ actor AgentLoop {
         eventContinuation = continuation
         continuation.yield(.taskStarted)
         record.messages.append(
-            SessionMessage(role: .user, content: userMessage, toolName: nil, timestamp: Date()))
+            SessionMessage(
+                role: .user,
+                content: userMessage,
+                toolName: nil,
+                timestamp: Date(),
+                images: userImages.isEmpty ? nil : userImages.map(SessionImage.init)))
+        if let persistenceError = persist() {
+            continuation.yield(.persistenceFailed(persistenceError))
+        }
         Task { await self.step(userMessage: userMessage) }
     }
 
@@ -500,7 +525,10 @@ actor AgentLoop {
                 history.append(contentsOf: seeded.compactMap { message in
                     switch message.role {
                     case .user:
-                        return ChatTurn(role: .user, content: message.content)
+                        return ChatTurn(
+                    role: .user,
+                    content: message.content,
+                    images: message.images?.compactMap(\.chatImage) ?? [])
                     case .assistant:
                         return ChatTurn(
                             role: .assistant,
@@ -536,7 +564,7 @@ actor AgentLoop {
                 \(userMessage)
                 """
             }
-            history.append(ChatTurn(role: .user, content: effectiveMessage))
+            history.append(ChatTurn(role: .user, content: effectiveMessage, images: userImages))
             // A resumed session may already contain large tool observations.
             // Compact before the first generation as well as after later tool
             // calls, so the initial plan/reply gets the same protection.
@@ -557,6 +585,13 @@ actor AgentLoop {
                 do {
                     raw = try await generate()
                 } catch {
+                    if pendingSteer != nil && !cancelled {
+                        // A steer intentionally cancels this generation. Drain
+                        // cancellation before starting the replacement stream.
+                        await engineCancelTask?.value
+                        engineCancelTask = nil
+                        continue
+                    }
                     guard Self.isContextOverflow(error),
                           await recoverFromContextOverflow(error) else {
                         throw error
@@ -585,7 +620,7 @@ actor AgentLoop {
                     from: PromptBuilder.cleaningGeneratedText(raw))
 
                 // 2. Parse tool calls.
-                let calls = ToolParser.parse(visible)
+                var calls = ToolParser.parse(visible)
                 // A short exact-answer request is an explicit output
                 // contract, not a request for conversational filler. A few
                 // instruct finetunes answer "Reply with exactly OK" with a
@@ -594,6 +629,22 @@ actor AgentLoop {
                 if calls.isEmpty,
                    let exact = PromptBuilder.exactRequestedAnswer(in: taskHint) {
                     visible = exact
+                }
+
+                // Some compact instruct models emit several XML function
+                // wrappers in one generation even after being told to send
+                // one call at a time. Execute the first well-formed call and
+                // hand control back to the loop; the next model turn can
+                // inspect its result and choose the next action. This keeps
+                // the user-visible stream structured instead of turning a
+                // recoverable batch into a repeated protocol-error loop.
+                if calls.count > 1,
+                   visible.range(of: #"<function\s+name="#, options: .regularExpression) != nil {
+                    let first = calls[0]
+                    calls = [first]
+                    visible = ToolCallText.serialize(
+                        name: first.name,
+                        argumentsJSON: first.argumentsJSON)
                 }
 
                 // 2t. A reply ending in an UNTERMINATED tool-call object
@@ -734,6 +785,7 @@ actor AgentLoop {
                 record.messages.append(
                     SessionMessage(role: .assistant, content: visible, toolName: nil, timestamp: Date(), thoughtSignature: thoughtSignature))
                 history.append(ChatTurn(role: .assistant, content: visible, thoughtSignature: thoughtSignature))
+                _ = persist()
 
                 // 3a. One tool call per reply. Multiple calls are a
                 // structured protocol error observation, never a bundled
@@ -892,7 +944,18 @@ actor AgentLoop {
                     await compactIfNeeded()
                     continue
                 }
-                switch permissionGate.decision(for: call, risk: risk) {
+                var decision = permissionGate.decision(for: call, risk: risk)
+                // TypeSafe escalation: the guard is consulted ONLY where the
+                // gate would have acted silently — a confident "destroys data
+                // / acts outside the project" verdict makes it ask instead.
+                // Additive only: it can never turn .needsApproval or .denied
+                // into an auto decision, and never relaxes the command policy.
+                if case .auto = decision, risk != .read, !cancelled,
+                   let notice = await typeSafeEscalation(for: call) {
+                    eventContinuation?.yield(.guardrail(notice))
+                    decision = .needsApproval
+                }
+                switch decision {
                 case .denied(let reason):
                     let message = "denied by OpenCode permission: \(reason)"
                     record.messages.append(
@@ -938,7 +1001,15 @@ actor AgentLoop {
                     call = ParsedToolCall(name: call.name, arguments: next, index: call.index)
                     // A rewrite must re-enter the gate. Otherwise a workspace
                     // hook can turn an approved `ls` into `rm -rf .`.
-                    switch permissionGate.decision(for: call, risk: risk) {
+                    var rewrittenDecision = permissionGate.decision(for: call, risk: risk)
+                    // The rewritten command is what actually runs, so the
+                    // guardrail verdict has to be taken again for it.
+                    if case .auto = rewrittenDecision, risk != .read, !cancelled,
+                       let notice = await typeSafeEscalation(for: call) {
+                        eventContinuation?.yield(.guardrail(notice))
+                        rewrittenDecision = .needsApproval
+                    }
+                    switch rewrittenDecision {
                     case .denied(let reason):
                         let message = "denied by OpenCode permission after hook rewrite: \(reason)"
                         record.messages.append(
@@ -1001,26 +1072,47 @@ actor AgentLoop {
                 hooks.runPostToolUse(
                     tool: call.name, arguments: call.arguments,
                     output: result.output, failed: result.failed)
-                eventContinuation?.yield(.toolCallFinished(invocation, output: result.output, failed: result.failed))
+
+                // 3e½. Guardrail screening: observations that came from
+                // outside the workspace are labeled before the model reads
+                // them. The content still flows — an unreadable page is not
+                // intelligence — but a "this contains instructions aimed at
+                // an agent" verdict is stated up front and the matching lines
+                // are redacted.
+                var observation = result.output
+                if !result.failed,
+                   let screened = await screenUntrustedOutput(result.output, source: call.name) {
+                    observation = screened.output
+                    eventContinuation?.yield(.guardrail(screened.notice))
+                }
+                eventContinuation?.yield(.toolCallFinished(invocation, output: observation, failed: result.failed))
                 record.messages.append(
-                    SessionMessage(role: .toolResult, content: result.output, toolName: call.name, timestamp: Date()))
-                history.append(ChatTurn(role: .tool, content: result.output))
+                    SessionMessage(role: .toolResult, content: observation, toolName: call.name, timestamp: Date()))
+                history.append(ChatTurn(role: .tool, content: observation))
+                _ = persist()
 
                 if result.failed {
                     if isVerificationCall(call) { lastVerificationFailed = true }
-                    let failureSignature = actionSignature + "\n" + result.output
-                    let count = failedActionCounts[failureSignature, default: 0] + 1
-                    failedActionCounts[failureSignature] = count
-                    if count == 2 {
-                        let notice = "loop warning: the same action failed twice with the same result. Inspect the relevant files or change strategy before retrying."
-                        record.messages.append(
-                            SessionMessage(role: .toolResult, content: notice, toolName: "reliability", timestamp: Date()))
-                        history.append(ChatTurn(role: .tool, content: notice))
-                        eventContinuation?.yield(.protocolError(notice))
-                    } else if count >= 3 {
-                        await finish(.engineError(
-                            "Reliability V2 stopped a repeated failing action after three identical attempts. The workspace remains recoverable from its checkpoints."))
-                        return
+                    // The repeated-failure interlock is part of Reliability V2.
+                    // Chat-only/Assistant runs intentionally disable V2, so a
+                    // weak model there must not have its whole task killed by
+                    // a mechanism the session opted out of; the error
+                    // observation itself is still returned to the model.
+                    if configuration.reliabilityV2 {
+                        let failureSignature = actionSignature + "\n" + result.output
+                        let count = failedActionCounts[failureSignature, default: 0] + 1
+                        failedActionCounts[failureSignature] = count
+                        if count == 2 {
+                            let notice = "loop warning: the same action failed twice with the same result. Inspect the relevant files or change strategy before retrying."
+                            record.messages.append(
+                                SessionMessage(role: .toolResult, content: notice, toolName: "reliability", timestamp: Date()))
+                            history.append(ChatTurn(role: .tool, content: notice))
+                            eventContinuation?.yield(.protocolError(notice))
+                        } else if count >= 3 {
+                            await finish(.engineError(
+                                "Reliability V2 stopped a repeated failing action after three identical attempts. The workspace remains recoverable from its checkpoints."))
+                            return
+                        }
                     }
                 } else {
                     successfulToolActionCount += 1
@@ -1070,6 +1162,71 @@ actor AgentLoop {
         }
     }
 
+    // MARK: TypeSafe guardrails
+
+    /// Screens one observation from a tool whose output comes from outside
+    /// the workspace. Returns nil when nothing needs labeling — the caller
+    /// then hands the raw result through untouched.
+    ///
+    /// The local `PromptInjectionSanitizer` stays the floor: its findings
+    /// label content even when TypeSafe has no verdict (unreachable, rate
+    /// limited, or no key configured), so a dead guardrail degrades to the
+    /// previous heuristics instead of to silence.
+    private func screenUntrustedOutput(
+        _ output: String,
+        source: String
+    ) async -> (output: String, notice: GuardrailNotice)? {
+        guard configuration.typeSafeContentScreening,
+              let tool = executor.tool(named: source),
+              tool.untrustedOutput else { return nil }
+
+        let findings = PromptInjectionSanitizer.findings(in: output)
+        let screening = await typeSafe?.screenUntrustedText(output, source: source)
+
+        if let screening, screening.flagged {
+            let banner = TypeSafeGuard.annotation(
+                for: screening, source: source, redactedLines: findings.count)
+            let notice = GuardrailNotice(
+                kind: .contentScreening,
+                summary: screening.summary,
+                detail: "\(source) output labeled before it reached the model.")
+            return (Self.annotated(PromptInjectionSanitizer.sanitize(output), banner: banner), notice)
+        }
+
+        // TypeSafe judged it clean, or had no verdict — either way the
+        // deterministic scan still gets its say.
+        guard !findings.isEmpty else { return nil }
+        let banner = TypeSafeGuard.annotation(heuristicFindings: findings.count, source: source)
+        let notice = GuardrailNotice(
+            kind: .contentHeuristic,
+            summary: "Local scan flagged \(findings.count) instruction-like line(s) in \(source) content",
+            detail: screening == nil
+                ? "TypeSafe screening returned no verdict for this observation."
+                : "TypeSafe judged the content clean; the local scan still matched.")
+        return (Self.annotated(PromptInjectionSanitizer.sanitize(output), banner: banner), notice)
+    }
+
+    /// Asks the guard whether this call is destructive enough to need a human
+    /// even where the gate would have acted silently. Returns nil whenever the
+    /// guard is off, unavailable, or unsure — the caller then keeps its own
+    /// decision.
+    private func typeSafeEscalation(for call: ParsedToolCall) async -> GuardrailNotice? {
+        guard configuration.typeSafeCommandEscalation, let typeSafe else { return nil }
+        let subject = call.string("command") ?? call.argumentsJSON
+        guard let verdict = await typeSafe.assessCommand(subject, toolName: call.name),
+              verdict.escalate else { return nil }
+        return GuardrailNotice(
+            kind: .commandEscalation,
+            summary: verdict.summary,
+            detail: "Answered by \(verdict.model).")
+    }
+
+    /// Wraps screened content in its banner. The banner is a label, not a
+    /// rewrite: the observation's own structure stays intact.
+    private static func annotated(_ text: String, banner: String) -> String {
+        banner + "\n\n" + text
+    }
+
     /// One model generation: sends only unsent turns.
     private func generate() async throws -> String {
         let contextTokens = history.reduce(0) { partial, turn in
@@ -1082,14 +1239,13 @@ actor AgentLoop {
             contextTokens: contextTokens,
             contextWindow: configuration.contextWindowTokens)
 
-        let unsent = Array(history[sentTurnCount...])
-        sentTurnCount = history.count
-
         var result = ""
         let maxTokens = configuration.thermalTokenCeiling.map {
             min(configuration.maxTokensPerTurn, $0)
         } ?? configuration.maxTokensPerTurn
         do {
+            let unsent = Array(history[sentTurnCount...])
+            sentTurnCount = history.count
             let stream = engine.stream(
                 adding: unsent,
                 maxTokens: maxTokens,
@@ -1100,7 +1256,7 @@ actor AgentLoop {
                 eventContinuation?.yield(.tokenDelta(chunk))
             }
         } catch is CancellationError {
-            if cancelled { throw CancellationError() }
+            throw CancellationError()
         }
         return result
     }
@@ -1252,12 +1408,43 @@ actor AgentLoop {
         return summary + "\n\nVerified project checks passed. Changed: \(paths)."
     }
 
+    /// True when this call is a real project verification pass. Classified
+    /// from the executable and subcommand, never from a substring: commands
+    /// like `mkdir -p build`, `node builder.js`, or `grep "test " logs` must
+    /// not pay Reliability V2 verification debt.
     private func isVerificationCall(_ call: ParsedToolCall) -> Bool {
         if call.name == "build_diagnostics" { return true }
         guard call.name == "run_command",
-              let command = call.string("command")?.lowercased() else { return false }
-        return [" test", "test ", "swift test", "build", "lint", "typecheck", "xcodebuild"]
-            .contains { command.contains($0) }
+              let command = call.string("command") else { return false }
+        return Self.looksLikeVerificationCommand(command)
+    }
+
+    /// Tokenized verification classification shared with tests.
+    static func looksLikeVerificationCommand(_ command: String) -> Bool {
+        let tokens = command
+            .split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\n" })
+            .map(String.init)
+        guard let first = tokens.first, !first.isEmpty else { return false }
+        let executable = URL(fileURLWithPath: first).lastPathComponent.lowercased()
+        let rest = tokens.dropFirst().map { $0.lowercased() }
+        switch executable {
+        case "xcodebuild", "xcodegen", "pytest", "ruff", "mypy", "eslint",
+             "tsc", "swiftlint", "gradle", "make":
+            return true
+        case "swift":
+            guard let subcommand = rest.first else { return false }
+            return ["build", "test", "package"].contains(subcommand)
+        case "npm", "yarn", "pnpm", "bun":
+            return rest.contains { ["test", "build", "lint", "typecheck", "check"].contains($0) }
+        case "cargo":
+            return rest.contains { ["build", "test", "check", "clippy"].contains($0) }
+        case "go":
+            return rest.contains { ["build", "test", "vet"].contains($0) }
+        case "git":
+            return rest.contains("diff") && rest.contains("--check")
+        default:
+            return false
+        }
     }
 
     private static func actionSignature(_ call: ParsedToolCall) -> String {
@@ -1298,13 +1485,19 @@ actor AgentLoop {
         history.append(contentsOf: messages.compactMap { message in
             switch message.role {
             case .user:
-                return ChatTurn(role: .user, content: message.content)
+                return ChatTurn(
+                    role: .user,
+                    content: message.content,
+                    images: message.images?.compactMap(\.chatImage) ?? [])
             case .assistant:
-                return ChatTurn(role: .assistant, content: message.content)
+                return ChatTurn(
+                    role: .assistant,
+                    content: message.content,
+                    thoughtSignature: message.thoughtSignature)
             case .reasoning:
                 return nil
             case .toolResult:
-                return ChatTurn(role: .tool, content: message.content)
+                return ChatTurn(role: .tool, content: message.content, toolName: message.toolName)
             case .system:
                 return ChatTurn(role: .system, content: message.content)
             case .toolCall:
@@ -1333,10 +1526,31 @@ actor AgentLoop {
             setPhase(.working)
             return true
         }
-        let call = ParsedToolCall(
-            name: "build_diagnostics",
-            arguments: .object(["command": .string(detectedCommand)]),
-            index: 0)
+        let call: ParsedToolCall
+        if executor.tool(named: "build_diagnostics") != nil {
+            call = ParsedToolCall(
+                name: "build_diagnostics",
+                arguments: .object(["command": .string(detectedCommand)]),
+                index: 0)
+        } else if executor.tool(named: "run_command") != nil {
+            // Compact local and guest tool sets omit build_diagnostics. Without
+            // this fallback the verification debt could never be paid — the
+            // executor would fail on an unknown tool and every completion
+            // attempt would be blocked until the turn limit.
+            call = ParsedToolCall(
+                name: "run_command",
+                arguments: .object(["command": .string(detectedCommand)]),
+                index: 0)
+        } else {
+            let observation = "No build, test, or command tool is available in this run's tool set; the changed paths are recorded for review."
+            record.messages.append(
+                SessionMessage(role: .toolResult, content: observation, toolName: "verification", timestamp: Date()))
+            history.append(ChatTurn(role: .tool, content: observation))
+            lastVerificationFailed = false
+            verifiedMutationGeneration = mutationGeneration
+            setPhase(.working)
+            return true
+        }
         let invocation = ToolInvocation(call: call, summary: "Run build diagnostics after edit")
         eventContinuation?.yield(.toolCallStarted(invocation))
         record.messages.append(
@@ -1441,13 +1655,19 @@ actor AgentLoop {
         history.append(contentsOf: fitted.compactMap { message in
             switch message.role {
             case .user:
-                return ChatTurn(role: .user, content: message.content)
+                return ChatTurn(
+                    role: .user,
+                    content: message.content,
+                    images: message.images?.compactMap(\.chatImage) ?? [])
             case .assistant:
-                return ChatTurn(role: .assistant, content: message.content)
+                return ChatTurn(
+                    role: .assistant,
+                    content: message.content,
+                    thoughtSignature: message.thoughtSignature)
             case .reasoning:
                 return nil
             case .toolResult:
-                return ChatTurn(role: .tool, content: message.content)
+                return ChatTurn(role: .tool, content: message.content, toolName: message.toolName)
             case .system:
                 return ChatTurn(role: .system, content: message.content)
             case .toolCall:
@@ -1552,17 +1772,37 @@ actor AgentLoop {
             replacePending(.question(requestID, question, continuation))
         }
     }
+    /// Human-readable one-line summary for an activity row. Extracts the
+    /// meaningful argument when present (command, path, query/pattern);
+    /// otherwise falls back to a NEUTRAL action label — never the serialized
+    /// argument JSON, which reads as raw plumbing in the transcript.
     private func invocationSummary(_ call: ParsedToolCall) -> String {
         switch call.name {
         case "run_command":
-            return call.string("command") ?? call.argumentsJSON
-        case "read_file", "write_file", "apply_patch":
-            return call.string("path") ?? call.argumentsJSON
+            return call.string("command") ?? "Run a command"
+        case "read_file", "list_directory", "find_files", "glob":
+            return call.string("path") ?? call.string("directory") ?? "Read files"
+        case "write_file", "apply_patch", "move_file":
+            return call.string("path") ?? "Edit files"
         case "search":
-            return call.string("pattern") ?? call.argumentsJSON
+            return call.string("pattern") ?? call.string("query") ?? "Search the workspace"
+        case "web_search":
+            return call.string("query") ?? "Search the web"
+        case "build_diagnostics", "sim_build_run", "macos_build_run":
+            return call.string("target") ?? "Build and diagnose"
+        case "task":
+            return call.string("description") ?? call.string("prompt") ?? "Delegate a task"
         default:
-            return call.argumentsJSON
+            return call.string("path") ?? call.string("command") ?? call.string("query")
+                ?? Self.neutralActionLabel(call.name)
         }
+    }
+
+    /// Neutral verb phrase for tools whose arguments carry no displayable
+    /// summary, so activity rows stay meaningful without inventing detail.
+    private static func neutralActionLabel(_ name: String) -> String {
+        let readable = name.replacingOccurrences(of: "_", with: " ")
+        return readable.prefix(1).uppercased() + readable.dropFirst()
     }
 
     /// Rule-based memory extraction on completion: stores a session summary
@@ -1644,11 +1884,11 @@ actor AgentLoop {
         return nil
     }
 
-    /// Nested agent. Shares the parent's engine through IsolatedReplayEngine
-    /// so the parent conversation is not reset. Writes and commands go
-    /// through the same PermissionGate; approvals are forwarded to the
-    /// parent UI. Role-specific tools keep read-only work read-only, while
-    /// implementation children inherit the parent's verification setting.
+    /// Nested agent. Shares the parent's engine and replays its own
+    /// transcript so the parent conversation is not reset. Writes and
+    /// commands go through the same PermissionGate; approvals are forwarded
+    /// to the parent UI. Role-specific tools keep read-only work read-only,
+    /// while implementation children inherit the parent's verification setting.
     private func runSubagent(
         prompt: String,
         role: SubagentRole,
@@ -1701,49 +1941,35 @@ actor AgentLoop {
                     .init(action: "edit", resource: "*", effect: .deny),
                 ])))
 
+        let inspect: [any AgentTool] = [
+            ReadFileTool(),
+            ListDirectoryTool(),
+            SearchTool(),
+            TinyFishSearchTool(),
+            WebFetchTool(),
+            FindFilesTool(),
+        ]
         let childTools: [any AgentTool]
         switch role {
         case .research:
-            childTools = [
-                ReadFileTool(),
-                ListDirectoryTool(),
-                SearchTool(),
-                TinyFishSearchTool(),
-                WebFetchTool(),
-                FindFilesTool(),
-                FindFilesTool(name: "glob"),
-            ]
+            childTools = inspect
         case .implement:
-            childTools = [
-                ReadFileTool(),
+            childTools = inspect + [
                 WriteFileTool(),
                 MoveFileTool(),
                 ApplyPatchTool(),
-                ListDirectoryTool(),
-                SearchTool(),
-                TinyFishSearchTool(),
-                WebFetchTool(),
-                FindFilesTool(),
-                FindFilesTool(name: "glob"),
                 RunCommandTool(),
                 BuildDiagnosticsTool(),
             ]
         case .verify, .review:
-            childTools = [
-                ReadFileTool(),
-                ListDirectoryTool(),
-                SearchTool(),
-                TinyFishSearchTool(),
-                WebFetchTool(),
-                FindFilesTool(),
-                FindFilesTool(name: "glob"),
+            childTools = inspect + [
                 RunCommandTool(),
                 BuildDiagnosticsTool(),
             ]
         }
 
         let child = AgentLoop(
-            engine: IsolatedReplayEngine(base: engine),
+            engine: IsolatedReplayEngine(engine),
             workspace: childWorkspace,
             tools: childTools,
             permissions: childGate,

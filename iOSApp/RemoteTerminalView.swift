@@ -271,18 +271,18 @@ struct RemoteTerminalView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Task chat")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .font(.system(size: 16, weight: .semibold, design: .monospaced))
                 HStack(spacing: 5) {
                     Circle()
                         .fill(statusColor)
                         .frame(width: 7, height: 7)
                     Text(statusText)
                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.65))
+                        .foregroundStyle(RemoteInstrument.secondaryInk)
                         .lineLimit(1)
                 }
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(RemoteInstrument.ink)
 
             Spacer(minLength: 4)
 
@@ -303,20 +303,21 @@ struct RemoteTerminalView: View {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 15, weight: .bold))
                     .frame(width: 36, height: 36)
-                    .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(RemoteInstrument.recess, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
             .accessibilityLabel("Terminal actions")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(Color(white: 0.055))
+        .foregroundStyle(RemoteInstrument.ink)
+        .background(RemoteInstrument.pearl)
     }
 
     private var presentationBar: some View {
         HStack(spacing: 6) {
             Text("SESSION")
                 .font(.system(size: 10, weight: .bold, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(RemoteInstrument.secondaryInk)
             Spacer(minLength: 4)
             ForEach(RemoteTerminalPresentation.allCases) { mode in
                 Button {
@@ -325,21 +326,18 @@ struct RemoteTerminalView: View {
                     }
                 } label: {
                     Label(mode.title, systemImage: mode.icon)
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(presentation == mode ? .white : .white.opacity(0.55))
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(presentation == mode ? .white : RemoteInstrument.secondaryInk)
                         .padding(.horizontal, 10)
-                        .frame(minHeight: 32)
-                        .background(
-                            presentation == mode ? Color.white.opacity(0.15) : .clear,
-                            in: Capsule(style: .continuous)
-                        )
+                        .frame(minHeight: 44)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RemoteKeyButtonStyle(isSelected: presentation == mode))
+                .accessibilityAddTraits(presentation == mode ? .isSelected : [])
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 5)
-        .background(Color(white: 0.08))
+        .background(RemoteInstrument.header)
     }
 
     private var commandComposer: some View {
@@ -350,14 +348,14 @@ struct RemoteTerminalView: View {
                 Image(systemName: composerFocused ? "keyboard.chevron.compact.down" : "keyboard")
                     .font(.system(size: 15, weight: .semibold))
                     .frame(width: 40, height: 40)
-                    .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    .background(RemoteInstrument.recess, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
             .accessibilityLabel(composerFocused ? "Hide keyboard" : "Show keyboard")
 
-            TextField("Type a command…", text: $draft, axis: .vertical)
+            TextField("Type a command…", text: $draft, prompt: Text("Type a command…").foregroundStyle(RemoteInstrument.secondaryInk), axis: .vertical)
                 .focused($composerFocused)
                 .font(.system(size: 14, weight: .regular, design: .monospaced))
-                .foregroundStyle(.white)
+                .foregroundStyle(RemoteInstrument.ink)
                 .lineLimit(1...3)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -378,19 +376,19 @@ struct RemoteTerminalView: View {
             Button { sendDraft() } label: {
                 Image(systemName: "arrow.up")
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(Color.black)
+                    .foregroundStyle(Color.white)
                     .frame(width: 40, height: 40)
-                    .background(Color.white, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    .background(RemoteInstrument.darkInsert, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
             .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || session.state != .open)
             .opacity(session.state == .open ? 1 : 0.45)
             .accessibilityLabel("Send command")
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(RemoteInstrument.ink)
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(Color(white: 0.10))
-        .overlay(alignment: .top) { Rectangle().fill(Color.white.opacity(0.10)).frame(height: 0.5) }
+        .background(RemoteInstrument.pearl)
+        .overlay(alignment: .top) { Rectangle().fill(RemoteInstrument.seam).frame(height: 0.5) }
     }
 
     private var specialKeysBar: some View {
@@ -411,7 +409,7 @@ struct RemoteTerminalView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
         }
-        .background(Color(white: 0.075))
+        .background(RemoteInstrument.pearl)
     }
 
     private func specialKey(
@@ -429,12 +427,29 @@ struct RemoteTerminalView: View {
                 Text(title)
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
             }
-            .foregroundStyle(isOn ? .black : .white.opacity(0.9))
+            .foregroundStyle(isOn ? .white : RemoteInstrument.ink)
             .padding(.horizontal, 11)
-            .frame(minWidth: 40, minHeight: 38)
-            .background(isOn ? Color.white : Color.white.opacity(0.11), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .frame(minWidth: 44, minHeight: 44)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RemoteKeyButtonStyle(isSelected: isOn))
+        .accessibilityLabel(specialKeyAccessibilityName(title))
+        .accessibilityValue(isOn ? "On" : "")
+        .accessibilityAddTraits(isOn ? .isSelected : [])
+    }
+
+    private func specialKeyAccessibilityName(_ title: String) -> String {
+        switch title {
+        case "esc": "Escape"
+        case "tab": "Tab"
+        case "⌃C": "Control C"
+        case "⌃D": "Control D"
+        case "⌃Z": "Control Z"
+        case "↑": "Up Arrow"
+        case "↓": "Down Arrow"
+        case "←": "Left Arrow"
+        case "→": "Right Arrow"
+        default: title
+        }
     }
 
     private func send(bytes: [UInt8]) {
@@ -476,8 +491,8 @@ struct RemoteTerminalView: View {
 
     private var statusColor: SwiftUI.Color {
         switch session.state {
-        case .open: .green
-        case .opening: .orange
+        case .open: RemoteInstrument.green
+        case .opening: RemoteInstrument.orange
         case .failed, .closed: .red
         case .idle: .white.opacity(0.45)
         }

@@ -72,7 +72,7 @@ struct QRScannerSheet: View {
             ZStack {
                 if DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
                     QRScannerView(onScan: onScan).ignoresSafeArea()
-                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .stroke(.white.opacity(0.88), lineWidth: 3)
                         .frame(width: 250, height: 250)
                         .shadow(color: .black.opacity(0.35), radius: 12)
@@ -90,7 +90,7 @@ struct QRScannerSheet: View {
                     .padding(.horizontal, 22)
                     .padding(.vertical, 14)
                     .frame(maxWidth: .infinity)
-                    .background(.ultraThinMaterial)
+                    .background(RemoteInstrument.panel)
             }
             .navigationTitle("Scan Vamp Assistant")
             .navigationBarTitleDisplayMode(.inline)

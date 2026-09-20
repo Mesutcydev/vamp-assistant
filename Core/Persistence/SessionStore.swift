@@ -9,6 +9,11 @@ struct SessionCheckpoint: Codable, Identifiable, Sendable, Equatable {
     var treeSHA: String
     var createdAt: Date
     var summary: String
+    /// Local ref (`refs/beetcode/checkpoints/…`) pinning `treeSHA` so `git gc`
+    /// cannot collect the snapshot. Optional because records written before
+    /// refs were persisted decode without it; those refs are matched by tree
+    /// SHA during the one-time orphan sweep.
+    var refName: String? = nil
 }
 
 /// Small, durable generation details shown beneath a finished assistant
@@ -41,6 +46,10 @@ struct SessionMessage: Codable, Sendable, Equatable {
     var answerMetrics: AnswerMetrics?
     /// Echoed to Gemini on replay so function-calling turns do not 400.
     var thoughtSignature: String? = nil
+    /// Images the user attached to this turn. Persisted base64 so a resumed
+    /// session still shows (and can resend) what was attached; nil in
+    /// sessions written before native image input existed.
+    var images: [SessionImage]? = nil
 
     init(
         role: Role,
@@ -48,7 +57,8 @@ struct SessionMessage: Codable, Sendable, Equatable {
         toolName: String?,
         timestamp: Date,
         answerMetrics: AnswerMetrics? = nil,
-        thoughtSignature: String? = nil
+        thoughtSignature: String? = nil,
+        images: [SessionImage]? = nil
     ) {
         self.role = role
         self.content = content
@@ -56,6 +66,33 @@ struct SessionMessage: Codable, Sendable, Equatable {
         self.timestamp = timestamp
         self.answerMetrics = answerMetrics
         self.thoughtSignature = thoughtSignature
+        self.images = images
+    }
+}
+
+/// A user-attached image as stored in a session record. Base64 on disk (the
+/// session file is already encrypted with the app's Keychain key); the send
+/// path bounds how many bytes can land here.
+struct SessionImage: Codable, Sendable, Equatable {
+    var name: String
+    var mimeType: String
+    var base64: String
+
+    init(name: String, mimeType: String, base64: String) {
+        self.name = name
+        self.mimeType = mimeType
+        self.base64 = base64
+    }
+
+    init(_ image: ChatImage) {
+        self.name = image.name
+        self.mimeType = image.mimeType
+        self.base64 = image.data.base64EncodedString()
+    }
+
+    /// Back to the engine form. nil when the payload is not valid base64.
+    var chatImage: ChatImage? {
+        ChatImage(dataURL: "data:\(mimeType);base64,\(base64)")
     }
 }
 
@@ -200,7 +237,10 @@ enum SessionCrypto {
     }
 
     static func decrypt(_ data: Data) -> Data? {
-        guard data.count > magic.count + 12,
+        // LFS1 + 12-byte nonce + at least a 16-byte GCM tag. The old guard
+        // only checked the nonce, so a 17–31 byte truncated file trapped in
+        // the ciphertext range instead of failing closed.
+        guard data.count >= magic.count + 12 + 16,
               data.prefix(magic.count) == magic,
               let key = try? key(interactionAllowed: false)
         else { return nil }
@@ -209,8 +249,9 @@ enum SessionCrypto {
             let nonceData = data[offset..<(offset + 12)]
             offset += 12
             let nonce = try AES.GCM.Nonce(data: nonceData)
-            let ciphertext = data[offset..<(data.count - 16)]
-            let tag = data[(data.count - 16)...]
+            let tagStart = data.endIndex - 16
+            let ciphertext = data[offset..<tagStart]
+            let tag = data[tagStart...]
             let sealed = try AES.GCM.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag)
             return try AES.GCM.open(sealed, using: key)
         } catch {
@@ -313,6 +354,12 @@ enum SessionCrypto {
             throw SessionCryptoError.keyStorageFailed(status)
         }
         if status == errSecItemNotFound {
+            if hasExistingSessionFiles() {
+                // A missing key with existing ciphertext means the designated
+                // requirement changed. Minting a new key would orphan every chat.
+                setNeedsInteractiveUnlock(true)
+                throw SessionCryptoError.keyStorageFailed(status)
+            }
             var newKey = Data(count: 32)
             let result = newKey.withUnsafeMutableBytes { buffer in
                 SecRandomCopyBytes(kSecRandomDefault, buffer.count, buffer.baseAddress!)
@@ -343,6 +390,13 @@ enum SessionCrypto {
         nonInteractiveReadFailed = true
         keyCacheLock.unlock()
         throw SessionCryptoError.keyStorageFailed(status)
+    }
+
+    private static func hasExistingSessionFiles() -> Bool {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("BeetCode/Sessions", isDirectory: true)
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        return names.contains { $0.hasSuffix(".session") }
     }
 
     /// Test seam — clears the in-memory key cache.
@@ -391,6 +445,8 @@ final class SessionStore: @unchecked Sendable {
     /// later explicit retry can persist them without ever falling back to
     /// plaintext on disk.
     private var pendingSaves: [UUID: SessionRecord] = [:]
+    /// Bumped on delete so a save that finishes after delete cannot recreate the file.
+    private var saveGenerations: [UUID: UInt64] = [:]
 
     /// Test seam: redirects the sessions directory away from the real
     /// Application Support folder.
@@ -433,6 +489,17 @@ final class SessionStore: @unchecked Sendable {
         // redacted and oversized tool results are truncated before writing.
         record.messages = Self.redactAndBound(record.messages)
         let target = url(for: record.id)
+        lock.lock()
+        let generation = saveGenerations[record.id] ?? 0
+        // Supersession guard: once a newer version of this record has been
+        // submitted, an older one (typically a retry from pendingSaves) must
+        // not overwrite it.
+        if let newest = newestSaveStamp[record.id], newest > record.updatedAt {
+            lock.unlock()
+            return .success(())
+        }
+        newestSaveStamp[record.id] = record.updatedAt
+        lock.unlock()
         // Encrypt + write OUTSIDE the store lock: encryption can block on
         // Keychain/securityd IPC, and holding the lock across it deadlocks
         // every concurrent load().
@@ -456,11 +523,23 @@ final class SessionStore: @unchecked Sendable {
             return rememberFailedSave(record, error: .permissionsFailed(error.localizedDescription))
         }
         lock.lock()
+        if (saveGenerations[record.id] ?? 0) != generation {
+            lock.unlock()
+            try? FileManager.default.removeItem(at: target)
+            return .success(())
+        }
         pendingSaves.removeValue(forKey: record.id)
         lock.unlock()
-        invalidateCache()
+        // Update the browsing snapshot in place instead of dropping it: a
+        // save during a chat must not force the next list/popover open to
+        // re-decrypt the whole library.
+        updateCache(with: record)
         return .success(())
     }
+
+    /// Newest `updatedAt` submitted per record; blocks older retries from
+    /// overwriting a newer save. Guarded by `lock`.
+    private var newestSaveStamp: [UUID: Date] = [:]
 
     var pendingSaveCount: Int {
         lock.lock()
@@ -483,7 +562,11 @@ final class SessionStore: @unchecked Sendable {
         error: SaveError
     ) -> Result<Void, SaveError> {
         lock.lock()
-        pendingSaves[record.id] = record
+        if let existing = pendingSaves[record.id], existing.updatedAt > record.updatedAt {
+            // Keep the newest failed version; an older retry must not replace it.
+        } else {
+            pendingSaves[record.id] = record
+        }
         lock.unlock()
         return .failure(error)
     }
@@ -532,9 +615,27 @@ final class SessionStore: @unchecked Sendable {
 
     func delete(_ record: SessionRecord) {
         lock.lock()
-        defer { lock.unlock() }
+        saveGenerations[record.id] = (saveGenerations[record.id] ?? 0) &+ 1
+        pendingSaves.removeValue(forKey: record.id)
+        if var cache = allCache {
+            cache.records.removeAll { $0.id == record.id }
+            allCache = cache
+        }
+        lock.unlock()
         try? FileManager.default.removeItem(at: url(for: record.id))
-        allCache = nil
+        // Release the tree pins this session created. Best-effort and outside
+        // the store lock: a moved workspace or missing git must never block
+        // deletion, and a slow git must not stall concurrent saves/loads.
+        GitCheckpointer.prunePins(
+            checkpoints: record.checkpoints, workspacePath: record.workspacePath)
+    }
+
+    /// Records whose last save failed and are still retryable in memory. The
+    /// checkpoint-ref sweep keeps their pins alive.
+    var pendingRecords: [SessionRecord] {
+        lock.lock()
+        defer { lock.unlock() }
+        return Array(pendingSaves.values)
     }
 
     /// TTL cache over loadAll(): consumers that need "all sessions" often
@@ -559,8 +660,62 @@ final class SessionStore: @unchecked Sendable {
         return records
     }
 
-    /// Drops the snapshot — called after every save/delete so the next
-    /// cachedAll() re-reads. Tests can call it directly for determinism.
+    /// Fold one saved record into the browsing snapshot, keeping it warm.
+    private func updateCache(with record: SessionRecord) {
+        lock.lock()
+        if var cache = allCache {
+            if let index = cache.records.firstIndex(where: { $0.id == record.id }) {
+                cache.records[index] = record
+            } else {
+                cache.records.insert(record, at: 0)
+            }
+            allCache = cache
+        }
+        lock.unlock()
+    }
+
+    /// The newest `limit` conversations, decoded straight from disk without
+    /// decrypting the whole library. File modification dates order the list,
+    /// so a history popover stays instant even with hundreds of sessions.
+    func recent(limit: Int) -> [SessionRecord] {
+        let dir = sessionsDir
+        let entries: [(url: URL, modified: Date)] = {
+            let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+            return names.compactMap { name in
+                guard name.hasSuffix(".session"),
+                      UUID(uuidString: String(name.dropLast(".session".count))) != nil
+                else { return nil }
+                let url = dir.appendingPathComponent(name)
+                let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                    .contentModificationDate ?? .distantPast
+                return (url, modified)
+            }
+            .sorted { $0.modified > $1.modified }
+            .prefix(max(1, limit))
+            .map { $0 }
+        }()
+        return entries.compactMap { entry in
+            guard let data = try? Data(contentsOf: entry.url) else { return nil }
+            if let decrypted = SessionCrypto.decrypt(data),
+               let record = try? JSONDecoder().decode(SessionRecord.self, from: decrypted) {
+                return migrateIfNeeded(record)
+            }
+            return try? JSONDecoder().decode(SessionRecord.self, from: data)
+        }
+    }
+
+    /// The browsing snapshot WITHOUT triggering a load: nil when cold or
+    /// stale. Lets a popover paint instantly from warm state instead of
+    /// showing an empty "loading" shell.
+    func cachedSnapshot(maxAge: TimeInterval = 60) -> [SessionRecord]? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let cache = allCache,
+              Date().timeIntervalSince(cache.at) < maxAge else { return nil }
+        return cache.records
+    }
+
+    /// Drops the snapshot — tests can call it directly for determinism.
     func invalidateCache() {
         lock.lock()
         allCache = nil

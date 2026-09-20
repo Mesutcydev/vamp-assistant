@@ -48,6 +48,11 @@ final class RemoteStore {
     var workspaceCreateParent: String?
     var workspacesSupported = true
     var fullAccess = false
+    /// In-session AUTO/FULL key bank selection. Agent Auto is its own
+    /// modality: a run may carry full-access authority while still being
+    /// AUTO, so it must never render as FULL just because the host's
+    /// effective access folds Auto in.
+    var isFullAccessSelected: Bool { fullAccess && !autoMode }
     var reasoningEffort: String?
     /// Failure text for loads the user did not explicitly ask for. Rendered
     /// inline next to whatever is missing rather than as an alert.
@@ -129,7 +134,9 @@ final class RemoteStore {
         if isConnecting || connectionLabel == "Reconnecting…" || connectionLabel == "Connecting…" {
             return "Looking for \(activeComputerName)"
         }
-        return "Tap to retry"
+        // Reads as an instruction, but the text itself is never the tap target —
+        // every surface that shows this puts a Retry/Reconnect button beside it.
+        return "Reconnect to continue"
     }
     var savedMacAddress: String? { baseURL?.absoluteString }
     var activeComputer: PairedBeetCodeComputer? {
@@ -311,6 +318,13 @@ final class RemoteStore {
         if let id = selectedSession?.id,
            sessions.contains(where: { $0.id == id }) {
             if !isSessionStreamHealthy(for: id) {
+                // A half-open URLSession stream can stay non-nil but silent
+                // forever; tear it down so the reconnect below starts a fresh
+                // stream instead of degrading to polling until re-selection.
+                sessionStreamTask?.cancel()
+                sessionStreamTask = nil
+                sessionStreamPhase = .stopped
+                sessionStreamLastActivity = nil
                 let selection = selectionGeneration
                 let detail = try await client.session(id)
                 try requireConnection(generation)
@@ -679,7 +693,10 @@ final class RemoteStore {
         botProfileID: String? = nil,
         botComputerID: UUID? = nil,
         workspacePath: String? = nil,
-        chatOnly: Bool = false
+        chatOnly: Bool = false,
+        autoMode: Bool = true,
+        fullAccess: Bool = false,
+        reasoningEffort: String? = nil
     ) async -> UUID? {
         guard let client else { return nil }
         let generation = connectionGeneration
@@ -822,25 +839,34 @@ final class RemoteStore {
 
     func cancelQueuedTask(_ taskID: UUID) async {
         guard let client, let id = selectedSession?.id else { return }
+        let generation = connectionGeneration
         do {
             _ = try await client.cancelQueuedTask(taskID, sessionID: id) as RemoteAcceptedResponse
         } catch {
+            guard isCurrentConnection(generation) else { return }
             presentError("Couldn't remove follow-up", error)
         }
     }
 
     func stop() async {
         guard let client, let id = selectedSession?.id else { return }
+        let generation = connectionGeneration
         do { _ = try await client.stop(id) as RemoteAcceptedResponse }
-        catch { presentError("Couldn't stop", error) }
+        catch {
+            guard isCurrentConnection(generation) else { return }
+            presentError("Couldn't stop", error)
+        }
     }
 
     func undoCheckpoint() async {
         guard let client, let id = selectedSession?.id else { return }
+        let generation = connectionGeneration
         do {
             _ = try await client.undoCheckpoint(id) as RemoteAcceptedResponse
+            try requireConnection(generation)
             try? await refresh()
         } catch {
+            guard isCurrentConnection(generation) else { return }
             presentError("Couldn't restore the checkpoint", error)
         }
     }
@@ -895,22 +921,31 @@ final class RemoteStore {
         }
     }
 
+    enum RevokeOutcome: Equatable {
+        /// The Mac acknowledged the revoke; the local pairing was removed.
+        case revoked
+        /// The Mac could not be reached. The local pairing is untouched so
+        /// the user can choose to forget it locally.
+        case unreachable
+    }
+
     @discardableResult
-    func revoke() async -> Bool {
+    func revoke() async -> RevokeOutcome {
         guard let client else {
             forgetSavedMac()
-            return true
+            return .revoked
         }
         let generation = connectionGeneration
         do {
             try await client.revoke()
             try requireConnection(generation)
             forgetSavedMac()
-            return true
+            return .revoked
         } catch {
-            guard isCurrentConnection(generation) else { return false }
-            presentError("Couldn't unpair this Mac", error)
-            return false
+            // The raw transport error is deliberately not presented here: the
+            // settings UI turns this into an explicit "forget locally" choice,
+            // so an offline Mac can still be unpaired from this device.
+            return .unreachable
         }
     }
 
@@ -1243,6 +1278,12 @@ final class RemoteStore {
             while !Task.isCancelled {
                 guard let self, self.isCurrentConnection(generation),
                       self.selectionGeneration == selection, self.selectedSession?.id == id else { return }
+                // A Mac app restart resets its per-session revision counter to
+                // 1. Revision checks must guard within one host lifetime, not
+                // across host launches: without this reset the phone rejects
+                // every post-restart snapshot forever and the conversation
+                // freezes until the user re-opens it manually.
+                self.selectedSessionRevision = nil
                 do {
                     for try await event in client.sessionEvents(id) {
                         guard self.isCurrentConnection(generation), self.selectionGeneration == selection,

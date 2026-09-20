@@ -130,13 +130,13 @@ private struct TinyFishSearchCredentialRow: View {
     var body: some View {
         HStack(spacing: Spacing.sm) {
             SecureField(configured ? "Replace API key" : "Paste TinyFish API key", text: $keyDraft)
-                .textFieldStyle(.roundedBorder)
+                .vampField()
                 .autocorrectionDisabled()
                 .textContentType(.password)
                 .onSubmit(onSave)
 
             Button("Save", action: onSave)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
                 .tint(Theme.accent)
                 .controlSize(.small)
                 .disabled(keyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -166,7 +166,7 @@ private struct TinyFishSearchActions: View {
                     Label("Test connection", systemImage: "checkmark.circle")
                 }
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(LFCapsuleButtonStyle())
             .controlSize(.small)
             .disabled(testing || !configured)
 
@@ -174,7 +174,7 @@ private struct TinyFishSearchActions: View {
                 guard let url = URL(string: "https://agent.tinyfish.ai/api-keys") else { return }
                 NSWorkspace.shared.open(url)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(LFCapsuleButtonStyle())
             .controlSize(.small)
 
             Spacer()

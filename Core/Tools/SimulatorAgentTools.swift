@@ -95,24 +95,36 @@ struct SimSwipeTool: AgentTool {
     let schemaText = """
         {"type":"object","properties":{
           "udid":{"type":"string"},
-          "startX":{"type":"number"},"startY":{"type":"number"},
-          "endX":{"type":"number"},"endY":{"type":"number"},
+          "fromX":{"type":"number","description":"Start x: 0–1 fraction of width"},
+          "fromY":{"type":"number","description":"Start y: 0–1 fraction of height"},
+          "toX":{"type":"number","description":"End x: 0–1 fraction of width"},
+          "toY":{"type":"number","description":"End y: 0–1 fraction of height"},
           "durationMs":{"type":"integer","description":"Optional swipe duration"}
-        },"required":["udid","startX","startY","endX","endY"]}
+        },"required":["udid","fromX","fromY","toX","toY"]}
         """
 
     func execute(_ call: ParsedToolCall, in context: ToolContext) async throws -> String {
-        guard let udid = call.string("udid") else { throw ToolError.missingArgument("udid") }
-        guard let sx = call.number("startX"), let sy = call.number("startY") else {
-            throw ToolError.missingArgument("startX/startY")
-        }
-        guard let ex = call.number("endX"), let ey = call.number("endY") else {
-            throw ToolError.missingArgument("endX/endY")
-        }
-        var args: [String: Any] = ["udid": udid, "startX": sx, "startY": sy, "endX": ex, "endY": ey]
-        if let duration = call.int("durationMs") { args["durationMs"] = duration }
+        let args = try Self.swipeArguments(call)
         let output = try ArgentBridge.run("gesture-swipe", args: args)
         return Summarize.argentOutput(output, tool: "gesture-swipe")
+    }
+
+    /// Builds the argent payload from either the canonical `fromX/fromY/toX/toY`
+    /// names or the older `startX/startY/endX/endY` spellings. Exposed for
+    /// hermetic tests: argent rejects any other names.
+    static func swipeArguments(_ call: ParsedToolCall) throws -> [String: Any] {
+        guard let udid = call.string("udid") else { throw ToolError.missingArgument("udid") }
+        guard let sx = call.number("fromX") ?? call.number("startX"),
+              let sy = call.number("fromY") ?? call.number("startY") else {
+            throw ToolError.missingArgument("fromX/fromY")
+        }
+        guard let ex = call.number("toX") ?? call.number("endX"),
+              let ey = call.number("toY") ?? call.number("endY") else {
+            throw ToolError.missingArgument("toX/toY")
+        }
+        var args: [String: Any] = ["udid": udid, "fromX": sx, "fromY": sy, "toX": ex, "toY": ey]
+        if let duration = call.int("durationMs") { args["durationMs"] = duration }
+        return args
     }
 }
 

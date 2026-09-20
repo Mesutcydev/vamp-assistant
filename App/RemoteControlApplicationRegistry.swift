@@ -59,57 +59,91 @@ final class RemoteControlApplicationRegistry {
         let windowsByPID = Dictionary(grouping: onScreenWindows(), by: \.ownerPID)
         let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         let selfBundleID = Bundle.main.bundleIdentifier
-        var applicationsByBundleID: [String: Application] = [:]
+        var runningApplications: [Application] = []
+        var runningBundleIdentifiers: Set<String> = []
 
         for running in NSWorkspace.shared.runningApplications {
             guard running.activationPolicy == .regular,
                   let bundleIdentifier = running.bundleIdentifier,
                   bundleIdentifier != selfBundleID,
                   let name = running.localizedName else { continue }
-            let window = bestWindow(in: windowsByPID[running.processIdentifier] ?? [])
-            applicationsByBundleID[bundleIdentifier] = Application(
-                bundleIdentifier: bundleIdentifier,
-                name: name,
-                isRunning: true,
-                isActive: running.processIdentifier == frontmostPID,
-                iconPNGBase64: includeIcons ? iconBase64(bundleIdentifier: bundleIdentifier, icon: running.icon) : nil,
-                windowID: window?.id,
-                windowTitle: window?.title,
-                width: window.map { Double($0.bounds.width) } ?? 0,
-                height: window.map { Double($0.bounds.height) } ?? 0)
-        }
+            let isActive = running.processIdentifier == frontmostPID
+            let icon = includeIcons
+                ? iconBase64(bundleIdentifier: bundleIdentifier, icon: running.icon)
+                : nil
+            let windows = Self.streamableWindows(
+                windowsByPID[running.processIdentifier] ?? [])
 
-        for url in Self.installedApplicationURLs() {
-                guard let bundle = Bundle(url: url),
-                      let bundleIdentifier = bundle.bundleIdentifier,
-                      bundle.object(forInfoDictionaryKey: "CFBundlePackageType") as? String == "APPL",
-                      bundle.object(forInfoDictionaryKey: "LSBackgroundOnly") as? Bool != true,
-                      bundle.object(forInfoDictionaryKey: "LSUIElement") as? Bool != true,
-                      bundleIdentifier != selfBundleID,
-                      applicationsByBundleID[bundleIdentifier] == nil else { continue }
-                let name = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
-                    ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
-                    ?? url.deletingPathExtension().lastPathComponent
-                applicationsByBundleID[bundleIdentifier] = Application(
+            // A running app with no on-screen layer-0 window stays visible as a
+            // launchable/activatable row. Apps with one or more windows expose each
+            // window independently, matching Sync's window-aware inventory instead
+            // of silently hiding every non-largest window.
+            if windows.isEmpty {
+                runningApplications.append(Application(
                     bundleIdentifier: bundleIdentifier,
                     name: name,
                     isRunning: false,
-                    isActive: false,
-                    iconPNGBase64: includeIcons
-                        ? iconBase64(
-                            bundleIdentifier: bundleIdentifier,
-                            icon: NSWorkspace.shared.icon(forFile: url.path))
-                        : nil,
+                    isActive: isActive,
+                    iconPNGBase64: icon,
                     windowID: nil,
                     windowTitle: nil,
                     width: 0,
-                    height: 0)
+                    height: 0))
+            } else {
+                for window in windows {
+                    runningApplications.append(Application(
+                        bundleIdentifier: bundleIdentifier,
+                        name: name,
+                        isRunning: true,
+                        isActive: isActive,
+                        iconPNGBase64: icon,
+                        windowID: window.id,
+                        windowTitle: window.title,
+                        width: Double(window.bounds.width),
+                        height: Double(window.bounds.height)))
+                }
+            }
+            runningBundleIdentifiers.insert(bundleIdentifier)
         }
 
-        return applicationsByBundleID.values.sorted { lhs, rhs in
+        for url in Self.installedApplicationURLs() {
+            guard let bundle = Bundle(url: url),
+                  let bundleIdentifier = bundle.bundleIdentifier,
+                  bundle.object(forInfoDictionaryKey: "CFBundlePackageType") as? String == "APPL",
+                  bundle.object(forInfoDictionaryKey: "LSBackgroundOnly") as? Bool != true,
+                  bundle.object(forInfoDictionaryKey: "LSUIElement") as? Bool != true,
+                  bundleIdentifier != selfBundleID,
+                  !runningBundleIdentifiers.contains(bundleIdentifier) else { continue }
+            let name = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+                ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
+                ?? url.deletingPathExtension().lastPathComponent
+            runningApplications.append(Application(
+                bundleIdentifier: bundleIdentifier,
+                name: name,
+                isRunning: false,
+                isActive: false,
+                iconPNGBase64: includeIcons
+                    ? iconBase64(
+                        bundleIdentifier: bundleIdentifier,
+                        icon: NSWorkspace.shared.icon(forFile: url.path))
+                    : nil,
+                windowID: nil,
+                windowTitle: nil,
+                width: 0,
+                height: 0))
+        }
+
+        return runningApplications.sorted { lhs, rhs in
             if lhs.isActive != rhs.isActive { return lhs.isActive }
             if lhs.isRunning != rhs.isRunning { return lhs.isRunning }
             return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    private static func streamableWindows(_ windows: [Window]) -> [Window] {
+        windows.sorted { lhs, rhs in
+            if lhs.area != rhs.area { return lhs.area > rhs.area }
+            return lhs.id < rhs.id
         }
     }
 
@@ -117,15 +151,25 @@ final class RemoteControlApplicationRegistry {
         if let clientViewportAspect {
             try Self.validate(aspect: clientViewportAspect)
         }
-        if let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).first {
+        guard let url = ApplicationLaunchResolver.resolveLaunchURL(
+            appName: nil, bundleID: bundleIdentifier)
+        else { throw RegistryError.applicationUnavailable }
+        let preferred = url.standardizedFileURL
+        if let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
+            .first(where: { $0.bundleURL?.standardizedFileURL == preferred }) {
             running.activate(options: [.activateAllWindows])
         } else {
-            guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
-                throw RegistryError.applicationUnavailable
-            }
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = true
-            _ = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+            _ = try await NSWorkspace.shared.openApplication(at: preferred, configuration: configuration)
+        }
+        for running in NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier) {
+            guard let runningURL = running.bundleURL?.standardizedFileURL,
+                  runningURL != preferred,
+                  ApplicationLaunchResolver.isBackupAppName(
+                    runningURL.deletingPathExtension().lastPathComponent)
+            else { continue }
+            running.terminate()
         }
 
         var requestedNewWindow = false
@@ -205,7 +249,8 @@ final class RemoteControlApplicationRegistry {
         try resizeFocusedWindow(
             pid: window.ownerPID,
             toAspect: clientViewportAspect,
-            preferredBounds: window.bounds)
+            preferredBounds: window.bounds,
+            windowID: windowID)
         try await Task.sleep(for: .milliseconds(350))
         // Same window in, same window out — resizing never changes a CGWindowID, and looking
         // it back up by bundle identifier would hand back the app's largest window instead.
@@ -215,39 +260,42 @@ final class RemoteControlApplicationRegistry {
         return application
     }
 
-    /// The Accessibility element for the window at `bounds`, falling back to the application's
-    /// focused window when no frame matches (or when the caller named no window).
+    /// The Accessibility element for the window at `bounds`. A nil `bounds` means
+    /// the caller named no window (the launch path, where no bounds are known
+    /// yet) and the app's focused window is the only sensible answer.
     ///
     /// AX exposes no public window-number attribute, so the on-screen frame is the join key
     /// back to the `CGWindowID` the client asked about. `kAXFocusedWindowAttribute` alone was
     /// not the same window: `resize(windowID:)` names one window, and an app with several
     /// windows can easily have focus on a different one — the fit then reshaped a window
     /// nobody was streaming. AXPosition and kCGWindowBounds are both global, points, top-left.
+    ///
+    /// When bounds *are* supplied the match must be unique. Matching on origin alone, and then
+    /// silently falling back to the focused window, meant a stale or ambiguous frame reshaped
+    /// a window the client never named. Refusing is the honest answer: the caller reports that
+    /// this window could not be resized instead of moving an unrelated one.
     nonisolated private static func axWindow(pid: pid_t, matching bounds: CGRect?) -> AXUIElement? {
         let application = AXUIElementCreateApplication(pid)
+        var windows: [AXUIElement] = []
+        var windowsReference: CFTypeRef?
+        if AXUIElementCopyAttributeValue(
+            application,
+            kAXWindowsAttribute as CFString,
+            &windowsReference
+        ) == .success, let listed = windowsReference as? [AXUIElement] {
+            windows = listed
+        }
+
         if let bounds {
-            var windowsReference: CFTypeRef?
-            if AXUIElementCopyAttributeValue(
-                application,
-                kAXWindowsAttribute as CFString,
-                &windowsReference
-            ) == .success, let windows = windowsReference as? [AXUIElement] {
-                for window in windows {
-                    var positionReference: CFTypeRef?
-                    guard AXUIElementCopyAttributeValue(
-                        window,
-                        kAXPositionAttribute as CFString,
-                        &positionReference
-                    ) == .success,
-                    let positionReference,
-                    CFGetTypeID(positionReference) == AXValueGetTypeID() else { continue }
-                    var position = CGPoint.zero
-                    AXValueGetValue(positionReference as! AXValue, .cgPoint, &position)
-                    if abs(position.x - bounds.origin.x) < 2, abs(position.y - bounds.origin.y) < 2 {
-                        return window
-                    }
-                }
+            let frames = windows.map(frame(of:))
+            guard let index = uniqueWindowIndex(matching: bounds, among: frames) else {
+                return nil
             }
+            return windows[index]
+        }
+
+        if let index = windows.firstIndex(where: { isFocusedWindow($0, of: application) }) {
+            return windows[index]
         }
         var focusedReference: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
@@ -258,6 +306,66 @@ final class RemoteControlApplicationRegistry {
         let focusedReference,
         CFGetTypeID(focusedReference) == AXUIElementGetTypeID() else { return nil }
         return (focusedReference as! AXUIElement)
+    }
+
+    /// The index of the one window whose frame matches `bounds` on origin **and** size.
+    ///
+    /// Returns nil for no match and — deliberately — for more than one. Two windows of the same
+    /// app at the same origin is exactly the case where resizing the wrong one is invisible to
+    /// the user until the phone shows the wrong window.
+    nonisolated static func uniqueWindowIndex(
+        matching bounds: CGRect,
+        among frames: [CGRect],
+        tolerance: CGFloat = 2
+    ) -> Int? {
+        let matches = frames.indices.filter { index in
+            let frame = frames[index]
+            return abs(frame.origin.x - bounds.origin.x) <= tolerance
+                && abs(frame.origin.y - bounds.origin.y) <= tolerance
+                && abs(frame.width - bounds.width) <= tolerance
+                && abs(frame.height - bounds.height) <= tolerance
+        }
+        return matches.count == 1 ? matches[0] : nil
+    }
+
+    /// The on-screen frame of a window element, or nil when AX will not report one.
+    nonisolated private static func frame(of window: AXUIElement) -> CGRect {
+        var position = CGPoint.zero
+        var size = CGSize.zero
+        var positionReference: CFTypeRef?
+        var sizeReference: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            window,
+            kAXPositionAttribute as CFString,
+            &positionReference
+        ) == .success,
+        let positionReference,
+        CFGetTypeID(positionReference) == AXValueGetTypeID(),
+        AXUIElementCopyAttributeValue(
+            window,
+            kAXSizeAttribute as CFString,
+            &sizeReference
+        ) == .success,
+        let sizeReference,
+        CFGetTypeID(sizeReference) == AXValueGetTypeID() else { return .zero }
+        AXValueGetValue(positionReference as! AXValue, .cgPoint, &position)
+        AXValueGetValue(sizeReference as! AXValue, .cgSize, &size)
+        return CGRect(origin: position, size: size)
+    }
+
+    nonisolated private static func isFocusedWindow(
+        _ window: AXUIElement,
+        of application: AXUIElement
+    ) -> Bool {
+        var focusedReference: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            application,
+            kAXFocusedWindowAttribute as CFString,
+            &focusedReference
+        ) == .success,
+        let focusedReference,
+        CFGetTypeID(focusedReference) == AXUIElementGetTypeID() else { return false }
+        return CFEqual(focusedReference as! AXUIElement, window)
     }
 
     /// The registry entry for one specific window, rather than for the app's largest one.
@@ -296,59 +404,64 @@ final class RemoteControlApplicationRegistry {
         }
     }
 
-    private func resizeFocusedWindow(
-        pid: pid_t,
-        toAspect aspect: Double,
-        preferredBounds: CGRect?
-    ) throws {
-        guard AXIsProcessTrusted() else { throw RegistryError.accessibilityRequired }
-        guard let window = Self.axWindow(pid: pid, matching: preferredBounds) else {
-            throw RegistryError.windowUnavailable
-        }
-        var currentSize = CGSize(width: 1_280, height: 800)
-        var sizeReference: CFTypeRef?
-        if AXUIElementCopyAttributeValue(
-            window,
-            kAXSizeAttribute as CFString,
-            &sizeReference
-        ) == .success,
-        let sizeReference,
-        CFGetTypeID(sizeReference) == AXValueGetTypeID() {
-            AXValueGetValue(sizeReference as! AXValue, .cgSize, &currentSize)
-        }
-        var currentPosition = preferredBounds?.origin ?? .zero
-        var positionReference: CFTypeRef?
-        if AXUIElementCopyAttributeValue(
-            window,
-            kAXPositionAttribute as CFString,
-            &positionReference
-        ) == .success,
-        let positionReference,
-        CFGetTypeID(positionReference) == AXValueGetTypeID() {
-            AXValueGetValue(positionReference as! AXValue, .cgPoint, &currentPosition)
-        }
+    /// Where a window of `size` should be anchored: its current origin when that still fits on
+    /// the display, otherwise pushed inside the usable area.
+    ///
+    /// Computed from the **requested** size, never from a freshly-read AX frame. An AX size set
+    /// is applied asynchronously, so an immediate read still returns the old frame — which is how
+    /// a window low on the display ended up clamped to the room below its *old* origin, keeping a
+    /// different shape than the requested aspect and capturing smaller than the phone renders.
+    nonisolated static func anchoredOrigin(
+        requestedSize size: CGSize,
+        currentOrigin: CGPoint,
+        display: CGRect
+    ) -> CGPoint {
+        let available = Self.usableArea(display)
+        let x = max(available.minX,
+                    min(currentOrigin.x, max(available.maxX - size.width, available.minX)))
+        let y = max(available.minY,
+                    min(currentOrigin.y, max(available.maxY - size.height, available.minY)))
+        return CGPoint(x: x, y: y)
+    }
 
-        let currentBounds = CGRect(origin: currentPosition, size: currentSize)
-        let displayBounds = Self.displayBounds(containing: currentBounds)
-        let targetFrame = Self.targetWindowFrame(
-            current: currentBounds,
-            display: displayBounds,
-            aspect: CGFloat(aspect))
-        var requestedSize = targetFrame.size
-        guard let sizeValue = AXValueCreate(.cgSize, &requestedSize) else {
-            throw RegistryError.windowUnavailable
-        }
-        // A fixed-size window, or one enforcing a minimum, returns a failure here. That is the
-        // app declining a size, not a window that has gone away — and failing the whole request
-        // on it made apps that stream perfectly well unstreamable. The snapshot below stays
-        // authoritative for whatever geometry the window actually settled on.
-        _ = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sizeValue)
+    /// The display minus the menu bar and a small margin, so a fitted window is never flush to a
+    /// screen edge or tucked under the menu bar.
+    nonisolated private static func usableArea(_ display: CGRect) -> CGRect {
+        CGRect(
+            x: display.minX + 24,
+            y: display.minY + 52,
+            width: max(display.width - 48, 1),
+            height: max(display.height - 76, 1))
+    }
 
-        // Keep the resized app entirely on the same display. AX may clamp the
-        // requested size to an application's minimum; the subsequent registry
-        // snapshot remains authoritative for the actual streamed geometry.
-        var requestedPosition = targetFrame.origin
-        if let positionValue = AXValueCreate(.cgPoint, &requestedPosition) {
+    /// Position, then size, then re-assert the position.
+    ///
+    /// AppKit constrains a window's frame to the screen when its size is applied, so sizing a
+    /// window that sits low on the display silently clamps its height to whatever fit below the
+    /// *old* origin. Moving first — to an anchor derived from the requested size — gives the size
+    /// set room to be honoured; re-applying the anchor afterwards keeps the window there, because
+    /// growing can shift the origin. Mirrors `HostSessionCoordinator.resizeWindow`.
+    nonisolated private static func applyFrame(
+        to window: AXUIElement,
+        origin: CGPoint,
+        size: CGSize
+    ) {
+        var requestedOrigin = origin
+        let positionValue = AXValueCreate(.cgPoint, &requestedOrigin)
+        if let positionValue {
+            _ = AXUIElementSetAttributeValue(
+                window,
+                kAXPositionAttribute as CFString,
+                positionValue)
+        }
+        var requestedSize = size
+        if let sizeValue = AXValueCreate(.cgSize, &requestedSize) {
+            _ = AXUIElementSetAttributeValue(
+                window,
+                kAXSizeAttribute as CFString,
+                sizeValue)
+        }
+        if let positionValue {
             _ = AXUIElementSetAttributeValue(
                 window,
                 kAXPositionAttribute as CFString,
@@ -356,11 +469,86 @@ final class RemoteControlApplicationRegistry {
         }
     }
 
-    /// Produces the largest same-or-smaller window matching the phone viewport
-    /// while keeping the complete frame visible on its Mac display. Preserving
-    /// width for a portrait phone created windows thousands of points tall and
-    /// made App Stream show only their middle; this instead preserves the
-    /// constraining dimension and fits both axes.
+    private func resizeFocusedWindow(
+        pid: pid_t,
+        toAspect aspect: Double,
+        preferredBounds: CGRect?,
+        windowID: UInt32? = nil
+    ) throws {
+        guard AXIsProcessTrusted() else { throw RegistryError.accessibilityRequired }
+        guard let window = Self.axWindow(pid: pid, matching: preferredBounds) else {
+            throw RegistryError.windowUnavailable
+        }
+
+        let before = Self.frame(of: window)
+        let currentBounds = before == .zero ? (preferredBounds ?? .zero) : before
+        let displayBounds = Self.displayBounds(containing: currentBounds)
+        let targetFrame = Self.targetWindowFrame(
+            current: currentBounds,
+            display: displayBounds,
+            aspect: CGFloat(aspect))
+        let requestedSize = targetFrame.size
+        let requestedOrigin = Self.anchoredOrigin(
+            requestedSize: requestedSize,
+            currentOrigin: currentBounds.origin,
+            display: displayBounds)
+
+        var retried = false
+        var observed = before
+        // Two passes at most. The first is the fix; the second is idempotent and covers an app
+        // whose AX size set landed before the move settled.
+        //
+        // The retry keys on **aspect**, not on the size matching exactly. An app that constrains
+        // its first AX resize — before accepting the new origin, or while it relayouts — leaves a
+        // window that kept its own shape, and shape is what the phone actually renders: a window
+        // that is 3pt off its request is fine, a window at the wrong aspect is letterboxed. A
+        // size set can still report failure for a window enforcing a minimum, or one that is
+        // simply fixed — that is the app declining, not a window that has gone away, so the
+        // request never fails here. The snapshot in `resize(windowID:)` stays authoritative.
+        for attempt in 0..<2 {
+            Self.applyFrame(to: window, origin: requestedOrigin, size: requestedSize)
+            observed = Self.frame(of: window)
+            let mismatched = Self.aspectMismatch(observed.size, desired: requestedSize)
+            if !mismatched { break }
+            retried = attempt == 0
+        }
+
+        // Durability matters: a live "the Mac kept a different window shape" report has to be
+        // diagnosable from the host's ordinary log, without a special build. `.notice` survives
+        // the default in-memory level, and the payload is geometry only — never a title, never
+        // window content.
+        let requested = "\(Int(requestedSize.width))x\(Int(requestedSize.height))"
+            + "@\(Int(requestedOrigin.x)),\(Int(requestedOrigin.y))"
+        let seen = "\(Int(observed.width))x\(Int(observed.height))"
+            + "@\(Int(observed.origin.x)),\(Int(observed.origin.y))"
+        Log.app.notice(
+            "window resize requested=\(requested, privacy: .public) observed=\(seen, privacy: .public) aspect=\(aspect, privacy: .public) windowID=\(windowID.map(String.init) ?? "launch", privacy: .public) retried=\(retried, privacy: .public)"
+        )
+    }
+
+    /// The longest edge a fitted window may reach, in points.
+    ///
+    /// The client is an iPhone 17 Pro Max at 1320×2868 px, so a 2× Mac needs 1434 points to hand
+    /// it native pixels; 1440 points is 2880 px — just over that, while still inside the decoder
+    /// envelope. Without the cap a 5K/6K display would produce a capture taller than the client's
+    /// hardware decoder accepts. Mirrors `AdaptiveWindowSizing.maxEdgePoints` in the Sync host.
+    nonisolated static let maxEdgePoints: CGFloat = 1440
+
+    /// The largest window matching the phone viewport that still fits the Mac display.
+    ///
+    /// Two corrections over the previous shrink-only fit, both ported from the Sync host's
+    /// `AdaptiveWindowSizing` so the two providers shape a streamed window identically:
+    ///
+    /// 1. **Fit into the display rather than shrinking to the source.** Shrink-only turned a
+    ///    small source window (Terminal's default is about 528×374) into roughly 172×374, which
+    ///    the phone then upscaled ~3× — giant text and ~31 columns. The matched shape is now
+    ///    scaled *up* to fill the available space, so the same source yields a full-size window.
+    /// 2. **Cap the longest edge** so a 5K-class display cannot produce a capture taller than the
+    ///    client's hardware decoder accepts.
+    ///
+    /// Sizing is deliberately app-agnostic. A per-app width exception would put the window's
+    /// aspect above the viewport's, and an aspect-fit renderer shrinks that into a horizontal
+    /// strip with black bars — the letterbox this whole path exists to remove.
     nonisolated static func targetWindowFrame(
         current: CGRect,
         display: CGRect,
@@ -372,24 +560,34 @@ final class RemoteControlApplicationRegistry {
             y: display.minY + 52,
             width: max(display.width - 48, 1),
             height: max(display.height - 76, 1))
+        let clampedAspect = min(max(aspect, 0.25), 4)
+        // Clamp first so the aspect match starts from a shape the display can actually hold.
         let currentSize = CGSize(
             width: min(max(current.width, 1), available.width),
             height: min(max(current.height, 1), available.height))
-        let currentAspect = currentSize.width / currentSize.height
-        var size: CGSize
-        if aspect < currentAspect {
-            size = CGSize(width: currentSize.height * aspect, height: currentSize.height)
-        } else {
-            size = CGSize(width: currentSize.width, height: currentSize.width / aspect)
-        }
-        let fitScale = min(1, min(available.width / size.width, available.height / size.height))
-        size.width = max(1, floor(size.width * fitScale))
-        size.height = max(1, floor(size.height * fitScale))
+        // Match the viewport aspect by holding the **width** and deriving the height.
+        //
+        // Holding the shorter dimension instead (the previous behaviour) asked for a narrow
+        // window: from a 640x480 source and a portrait viewport it requested 220x480. An app with
+        // a minimum window width — Safari's floor is 574pt — cannot accept that, so it stayed
+        // 574x480. The aspect then came back 1.196 against the phone's 0.461, which is precisely
+        // the "The Mac kept a different window shape" letterbox. Deriving the height from the
+        // current width keeps the request inside what the app will accept, and the fit below has
+        // already bounded it by the display, so the window still cannot grow off-screen.
+        let matchedWidth = currentSize.width
+        let matchedHeight = currentSize.width / clampedAspect
+        // Then scale that shape *into* the display instead of leaving it small, bounded by the
+        // decoder-friendly longest edge.
+        let fitScale = min(
+            min(available.width / matchedWidth, available.height / matchedHeight),
+            maxEdgePoints / max(matchedWidth, matchedHeight))
+        var size = CGSize(
+            width: max(1, floor(matchedWidth * fitScale)),
+            height: max(1, floor(matchedHeight * fitScale)))
         // Never fit below what `onScreenWindows()` will still report as a window (80 x 60).
         // A portrait viewport sets width to height x ~0.46, so a window under ~173pt tall fitted
         // to under 80pt wide and vanished from discovery entirely — taking the stream target
-        // with it, and turning a short wide window into one that could not be streamed at all.
-        // Exact aspect is worth trading for a window that still exists.
+        // with it. Exact aspect is worth trading for a window that still exists.
         size.width = min(max(size.width, 96), available.width)
         size.height = min(max(size.height, 72), available.height)
         let maxX = max(available.minX, available.maxX - size.width)
@@ -399,6 +597,24 @@ final class RemoteControlApplicationRegistry {
             y: min(max(current.minY, available.minY), maxY),
             width: size.width,
             height: size.height)
+    }
+
+    /// Whether an accepted window frame still disagrees with the requested shape by more than
+    /// `tolerance` of aspect. Pure, and shared by the retry decision and the user-visible
+    /// notice, so "we retried" and "we told the user" can never disagree — the Sync host's
+    /// `aspectMismatch`, used identically.
+    nonisolated static func aspectMismatch(
+        _ accepted: CGSize,
+        desired: CGSize,
+        tolerance: CGFloat = 0.05
+    ) -> Bool {
+        guard accepted.width.isFinite, accepted.height.isFinite, accepted.width > 0,
+              accepted.height > 0,
+              desired.width.isFinite, desired.height.isFinite, desired.width > 0,
+              desired.height > 0 else { return false }
+        let acceptedAspect = accepted.width / accepted.height
+        let desiredAspect = desired.width / desired.height
+        return abs(acceptedAspect - desiredAspect) > tolerance
     }
 
     nonisolated private static func displayBounds(containing window: CGRect) -> CGRect {
@@ -442,17 +658,19 @@ final class RemoteControlApplicationRegistry {
         }
     }
 
-    private func bestWindow(in windows: [Window]) -> Window? {
-        windows.max { lhs, rhs in
-            if lhs.area != rhs.area { return lhs.area < rhs.area }
-            return lhs.id > rhs.id
-        }
-    }
+    /// Edge, in pixels, of the square PNG tile published for every application in the browser.
+    ///
+    /// Every app list (Vamp Stream, Vamp Control, Vamp Assistant's own iOS app, the Mac client)
+    /// draws the icon inside a fixed 42 pt row, so a 3x device samples it into 126 device pixels
+    /// and 192 px keeps ~1.5x headroom over that. The previous 48 px tile was upscaled ~2.6x in
+    /// the row, which is what read as low resolution. Kept identical to Vamp Sync's
+    /// `HostApplicationRegistry.iconTilePixels` so both Stream providers look the same.
+    private static let iconTilePixels = 192
 
     private func iconBase64(bundleIdentifier: String, icon: NSImage?) -> String? {
         if let cached = iconCache[bundleIdentifier] { return cached }
         guard let icon else { return nil }
-        let side = 48
+        let side = Self.iconTilePixels
         let target = NSImage(size: NSSize(width: side, height: side))
         target.lockFocus()
         icon.draw(in: NSRect(x: 0, y: 0, width: side, height: side))

@@ -158,10 +158,10 @@ final class RemoteSessionHost {
     var botRunsHandler: (() -> [BotRunRecord])?
     var startBotRunHandler: ((String, String?, String) async -> (UUID?, String?))?
     var orchestrateBotRunsHandler: ((String?, String) async -> (UUID?, String?))?
-    var steerBotRunHandler: ((UUID, String) -> Bool)?
+    var steerBotRunHandler: ((UUID, String) async -> Bool)?
     var stopBotRunHandler: ((UUID) -> Bool)?
-    var approveBotRunHandler: ((UUID, Bool) -> Bool)?
-    var answerBotRunHandler: ((UUID, String) -> Bool)?
+    var approveBotRunHandler: ((UUID, Bool) async -> Bool)?
+    var answerBotRunHandler: ((UUID, String) async -> Bool)?
     var resumeBotRunHandler: ((UUID) -> Bool)?
     /// Returns nil on success, or a user-facing error string.
     var startSessionHandler: ((String, String, RemoteRunOptions) async -> RemoteSessionStartOutcome)?
@@ -524,6 +524,9 @@ final class RemoteSessionHost {
         case ("POST", "/api/control/apps/resize"):
             guard authorized(request) else { return unauthorized() }
             return await macControlResizeApplication(request)
+        case ("POST", "/api/control/apps/quit"):
+            guard authorized(request) else { return unauthorized() }
+            return await macControlCloseApplication(request)
         case ("GET", "/api/control/screen"):
             guard authorized(request) else { return unauthorized() }
             return await macControlScreen(request)
@@ -609,6 +612,17 @@ final class RemoteSessionHost {
                   let startSessionHandler else {
                 return .response(json(["error": .string("Choose a model and enter a first prompt.")], status: 400))
             }
+            // Activating a model for a new session stops whatever is running
+            // (startRemoteSession → activate → stopAndWait). A paired client
+            // must never silently abort the Mac user's in-flight task; the
+            // app's own composer refuses while running, so the API does too.
+            let replaceRequested = request.bodyJSON?.objectValue?["replace"]?.boolValue == true
+            guard !sessions.isRunning || replaceRequested else {
+                return .response(json([
+                    "error": .string("Vamp Assistant is already working on a task. Wait for it to finish, or send this as a follow-up message."),
+                    "busy": .bool(true),
+                ], status: 409))
+            }
             var options = runOptions(from: request)
             if let botID = options.botComputerID {
                 do {
@@ -671,13 +685,16 @@ final class RemoteSessionHost {
                 return await botComputerRoute(request)
             }
             if request.path.hasPrefix("/api/bot-runs/") {
-                return botRunRoute(request)
+                return await botRunRoute(request)
             }
             return await sessionRoute(request)
         }
     }
 
-    private func botRunRoute(_ request: LocalAPIServer.Request) -> LocalAPIServer.RouteResult {
+    /// Bot commands are awaited to runtime acceptance before a 202: a queued-only
+    /// acknowledgement let the phone clear its input for a command the runtime
+    /// later rejected (or that never reached it).
+    private func botRunRoute(_ request: LocalAPIServer.Request) async -> LocalAPIServer.RouteResult {
         let parts = request.path.split(separator: "/")
         guard parts.count >= 3, let id = UUID(uuidString: String(parts[2])) else {
             return .response(json(["error": .string("Unknown bot run endpoint.")], status: 404))
@@ -698,7 +715,7 @@ final class RemoteSessionHost {
                   message.utf8.count <= Self.maxMessageBytes else {
                 return .response(json(["error": .string("Enter steering guidance.")], status: 400))
             }
-            guard steerBotRunHandler?(id, message) == true else {
+            guard await steerBotRunHandler?(id, message) == true else {
                 return .response(json(["error": .string("That run cannot be steered right now.")], status: 409))
             }
             return .response(json(["accepted": .bool(true)], status: 202))
@@ -709,7 +726,7 @@ final class RemoteSessionHost {
             return .response(json(["accepted": .bool(true)]))
         case "approve", "decline":
             let approved = String(parts[3]) == "approve"
-            guard approveBotRunHandler?(id, approved) == true else {
+            guard await approveBotRunHandler?(id, approved) == true else {
                 return .response(json(["error": .string("That run has no pending approval.")], status: 409))
             }
             return .response(json(["accepted": .bool(true)], status: 202))
@@ -717,7 +734,7 @@ final class RemoteSessionHost {
             guard let answer = request.bodyJSON?.objectValue?["answer"]?.stringValue,
                   !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   answer.utf8.count <= Self.maxMessageBytes,
-                  answerBotRunHandler?(id, answer) == true else {
+                  await answerBotRunHandler?(id, answer) == true else {
                 return .response(json(["error": .string("That run has no pending question.")], status: 409))
             }
             return .response(json(["accepted": .bool(true)], status: 202))
@@ -1013,6 +1030,48 @@ final class RemoteSessionHost {
         }
     }
 
+    private func macControlCloseApplication(_ request: LocalAPIServer.Request) async -> LocalAPIServer.RouteResult {
+        guard macControlAllowedHandler?() ?? false else {
+            return macControlDenied("Mac Control is off on this Mac. Enable it in Remote Sessions.")
+        }
+        let bundleIdentifier = request.bodyJSON?.objectValue?["bundleIdentifier"]?.stringValue ?? ""
+        guard let normalizedBundleID = RemoteApplicationClosePolicy.normalizedBundleIdentifier(bundleIdentifier),
+              RemoteApplicationClosePolicy.canClose(
+                normalizedBundleID,
+                hostBundleIdentifier: Bundle.main.bundleIdentifier) else {
+            return .response(json(["error": .string("That application cannot be closed remotely.")], status: 403))
+        }
+
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: normalizedBundleID)
+        guard !running.isEmpty else {
+            return .response(json(["accepted": .bool(true)]))
+        }
+
+        let displayName = running.first?.localizedName ?? normalizedBundleID
+        await MainActor.run {
+            for application in running {
+                _ = application.terminate()
+            }
+        }
+
+        var stillRunning = true
+        for _ in 0..<40 {
+            try? await Task.sleep(for: .milliseconds(100))
+            if NSRunningApplication.runningApplications(withBundleIdentifier: normalizedBundleID).isEmpty {
+                stillRunning = false
+                break
+            }
+        }
+
+        if stillRunning {
+            return .response(json([
+                "accepted": .bool(false),
+                "reason": .string("\(displayName) did not quit. It may have unsaved changes."),
+            ], status: 409))
+        }
+        return .response(json(["accepted": .bool(true)]))
+    }
+
     private static func macControlApplicationJSON(
         _ application: RemoteControlApplicationRegistry.Application
     ) -> LFJSONValue {
@@ -1120,6 +1179,7 @@ final class RemoteSessionHost {
             displayID: displayID,
             windowID: windowID,
             maxWidth: profile.maxWidth,
+            maxPixels: profile.maxPixels,
             averageBitrate: profile.averageBitrate,
             framesPerSecond: profile.framesPerSecond,
             showsCursor: request.query["cursor"] != "0")
@@ -1667,7 +1727,12 @@ final class RemoteSessionHost {
 
     private func sessionSummaries() -> [LFJSONValue] {
         let activeID = sessions.activeSessionID
-        return SessionStore.shared.cachedAll(maxAge: 2)
+        // A long TTL is safe because the snapshot is maintained incrementally:
+        // save() folds the saved record in (SessionStore.updateCache) and
+        // delete() removes it, so a list served from a warm snapshot is never
+        // missing a session the user just created. The previous 2 s TTL meant
+        // every other 1.8 s client poll re-decrypted the whole library.
+        return SessionStore.shared.cachedAll(maxAge: 60)
             .filter { $0.source == .app }
             .prefix(100)
             .map { record in
@@ -1701,7 +1766,7 @@ final class RemoteSessionHost {
             ? sessions.remoteRunAgentMode
             : nil
         let remoteFullAccess = isCurrent
-            ? sessions.remoteRunHasFullAccess
+            ? sessions.remoteRunFullAccess
             : nil
         var detail: [String: LFJSONValue] = [
             "id": .string(record.id.uuidString),
@@ -1718,12 +1783,12 @@ final class RemoteSessionHost {
             "streamingText": .string(liveText),
             // Active remote options are session-scoped. Falling back to the
             // Mac's global settings here made the phone show the wrong mode,
-            // then send a new turn with unexpected approval behavior.
+            // then send a new turn with unexpected approval behavior. Full
+            // Access is reported raw: Auto mode is a separate flag, and folding
+            // it in here made every AUTO session render as FULL on the phone.
             "agentMode": .string(remoteAgentMode ?? SettingsStore.shared.agentMode.rawValue),
             "fullAccess": .bool(
-                remoteFullAccess
-                    ?? (SettingsStore.shared.remoteFullAccessEnabled
-                        || SettingsStore.shared.agentMode == .auto)),
+                remoteFullAccess ?? SettingsStore.shared.remoteFullAccessEnabled),
         ]
         detail["pending"] = pendingInteraction(for: record.id)
         detail["error"] = errorPresentation(for: record)
@@ -1871,7 +1936,7 @@ final class RemoteSessionHost {
             String(pendingInteractionHash),
             String(errorPresentationHash),
             sessions.remoteRunAgentMode ?? "none",
-            String(sessions.remoteRunHasFullAccess ?? false),
+            String(sessions.remoteRunFullAccess ?? false),
             taskSignal,
             queued,
         ]
@@ -1990,7 +2055,7 @@ final class RemoteSessionHost {
     }
 
     private var taskQueueCount: Int {
-        Set(SessionStore.shared.cachedAll(maxAge: 2).compactMap { record in
+        Set(SessionStore.shared.cachedAll(maxAge: 60).compactMap { record in
             taskLookupHandler?(record.id)?.id
         }).count
     }
@@ -2257,7 +2322,7 @@ final class RemoteSessionHost {
         let items = RemoteWorkspaceCatalog.list(
             currentPath: sessions.workspaceURL?.path,
             lastPath: AppPreferencesStore.shared.current.lastWorkspacePath,
-            records: SessionStore.shared.cachedAll(maxAge: 2).map {
+            records: SessionStore.shared.cachedAll(maxAge: 60).map {
                 (path: $0.workspacePath, updatedAt: $0.updatedAt)
             },
             home: home)
@@ -2277,7 +2342,7 @@ final class RemoteSessionHost {
         RemoteWorkspaceCatalog.list(
             currentPath: sessions.workspaceURL?.path,
             lastPath: AppPreferencesStore.shared.current.lastWorkspacePath,
-            records: SessionStore.shared.cachedAll(maxAge: 2).map {
+            records: SessionStore.shared.cachedAll(maxAge: 60).map {
                 (path: $0.workspacePath, updatedAt: $0.updatedAt)
             }).map(\.path)
     }
@@ -2362,6 +2427,47 @@ final class RemoteSessionHost {
             difference |= a ^ b
         }
         return difference == 0
+    }
+}
+
+/// Shared allow-list for remote quit. System shells and the Assistant host stay off-limits.
+enum RemoteApplicationClosePolicy {
+    static let protectedBundleIdentifiers: Set<String> = [
+        "com.mesutcy.remotedesktop.minhost",
+        "com.mesutcy.remotedesktop.host",
+        "com.mesutcy.remotedesktop.terminalhost",
+        "com.apple.loginwindow",
+        "com.apple.WindowServer",
+        "com.apple.dock",
+        "com.apple.finder",
+        "com.apple.systemuiserver",
+        "com.apple.controlcenter",
+        "com.apple.notificationcenterui",
+        "com.apple.UserNotificationCenter",
+        "com.apple.SecurityAgent",
+    ]
+
+    static func normalizedBundleIdentifier(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (1...256).contains(trimmed.count) else { return nil }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: ".-"))
+        guard trimmed.unicodeScalars.allSatisfy(allowed.contains) else { return nil }
+        guard trimmed.contains(".") else { return nil }
+        return trimmed
+    }
+
+    static func canClose(_ raw: String, hostBundleIdentifier: String? = nil) -> Bool {
+        guard let identifier = normalizedBundleIdentifier(raw) else { return false }
+        let lower = identifier.lowercased()
+        if protectedBundleIdentifiers.contains(where: { $0.lowercased() == lower }) {
+            return false
+        }
+        if let host = hostBundleIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !host.isEmpty,
+           host.lowercased() == lower {
+            return false
+        }
+        return true
     }
 }
 

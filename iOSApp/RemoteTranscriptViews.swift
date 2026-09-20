@@ -10,6 +10,7 @@ struct MessageTranscript: View {
     /// button should not be offered rather than offered and rejected.
     var onRevertCheckpoint: (() -> Void)? = nil
     @Environment(\.remoteAppearance) private var appearance
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Whether the transcript should keep the newest response in view. This is
     /// deliberately separate from the scroll geometry: content height grows
     /// while a response streams, and treating that growth as user scrolling
@@ -44,11 +45,13 @@ struct MessageTranscript: View {
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }
-                .frame(maxWidth: 720)
-                .padding(.horizontal, 16).padding(.vertical, 22).frame(maxWidth: .infinity)
+                .frame(maxWidth: RemoteInstrument.contentWidth)
+                .padding(.horizontal, 16).padding(.vertical, 16).frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
+            .background(BeetTheme.readingSurface(appearance))
             .defaultScrollAnchor(.bottom)
+            .defaultScrollAnchor(.top, for: .alignment)
             // Geometry is sampled independently from the scroll phase. The
             // phase tells us whether a change could have come from a finger;
             // without that distinction, every streamed token looks like the
@@ -156,7 +159,7 @@ struct MessageTranscript: View {
                 let shouldAnimate = scrollAnimationRequested
                 scrollAnimationRequested = false
                 if shouldAnimate {
-                    withAnimation(.easeOut(duration: 0.18)) {
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
                         proxy.scrollTo("bottom", anchor: .bottom)
                     }
                 } else {
@@ -184,14 +187,14 @@ struct MessageTranscript: View {
         Button {
             followsLatest = true
             userIsInteracting = false
-            requestScroll(proxy, animated: true, delay: 0)
+            requestScroll(proxy, animated: !reduceMotion, delay: 0)
         } label: {
             Label(detail.isRunning ? "Jump to latest" : "Latest", systemImage: "arrow.down")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(BeetTheme.secondaryText(appearance))
                 .padding(.horizontal, 14)
                 .frame(minHeight: 44)
-                .background(.regularMaterial, in: Capsule())
+                .background(RemoteInstrument.pearl, in: Capsule())
                 .overlay { Capsule().stroke(BeetTheme.line(appearance), lineWidth: 0.75) }
                 .contentShape(Capsule())
         }
@@ -208,19 +211,11 @@ struct MessageBubble: View {
     /// is not running); nil elsewhere, and the checkpoint row hides the button.
     var onRevert: (() -> Void)? = nil
     @Environment(\.remoteAppearance) private var appearance
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     var body: some View {
         if message.role == "user" {
-            HStack(alignment: .top) {
-                Spacer(minLength: 46)
-                VStack(alignment: .trailing, spacing: 6) {
-                    Text("You")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(BeetTheme.accentBright)
-                    MarkdownText(message.content)
-                        .multilineTextAlignment(.trailing)
-                }
-                .frame(maxWidth: 600, alignment: .trailing)
-            }
+            RemoteTranscriptTurn(speaker: "You", text: message.content)
         }
         else if message.role == "toolCall" || message.role == "toolResult" { ToolMessageCard(message: message) }
         // Reasoning is the model's working, not its answer. It used to fall
@@ -259,17 +254,33 @@ struct MessageBubble: View {
             }
         }
         else {
-            HStack(alignment: .top, spacing: 11) {
-                Image(systemName: "sparkles").font(.system(size: 14, weight: .semibold))
-                    .frame(width: 30, height: 30)
-                    .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Vamp Assistant").font(.caption.weight(.semibold)).foregroundStyle(BeetTheme.secondaryText(appearance))
-                    MarkdownText(message.content)
-                }
-                Spacer(minLength: 4)
-            }
+            RemoteTranscriptTurn(speaker: "Vamp", text: message.content)
         }
+    }
+}
+
+/// Shared geometry prevents the answer moving when a stream becomes a message.
+struct RemoteTranscriptTurn: View {
+    let speaker: String
+    let text: String
+    var phase: String? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(speaker).font(.caption.weight(.semibold))
+                if let phase {
+                    ProgressView().controlSize(.mini)
+                    Text(phase.capitalized).font(.caption)
+                }
+            }
+            .foregroundStyle(RemoteInstrument.secondaryInk)
+            if text.isEmpty, phase != nil {
+                Text("Vamp is working…").font(.body).foregroundStyle(RemoteInstrument.secondaryInk)
+            } else { MarkdownText(text) }
+        }
+        .foregroundStyle(RemoteInstrument.ink)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -278,50 +289,39 @@ struct MessageBubble: View {
 struct ReasoningMessageCard: View {
     let message: RemoteMessage
     @Environment(\.remoteAppearance) private var appearance
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var expanded = false
 
-    private var preview: String {
-        message.content
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(.easeOut(duration: 0.16)) { expanded.toggle() }
+                withAnimation(reduceMotion ? nil : RemoteInstrument.motion) { expanded.toggle() }
             } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: "brain")
-                        .font(.caption.weight(.semibold))
-                        .accessibilityHidden(true)
-                    Text("Reasoning")
-                        .font(.caption.weight(.semibold))
-                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                        .font(.caption2.weight(.bold))
-                        .accessibilityHidden(true)
-                    Spacer(minLength: 4)
+                HStack(spacing: 8) {
+                    Image(systemName: "brain").font(.caption)
+                    VampMicroLabel(title: "Reasoning")
+                    Spacer(minLength: 8)
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption2)
                 }
-                .foregroundStyle(BeetTheme.secondaryText(appearance))
-                .frame(minHeight: 30)
+                .foregroundStyle(RemoteInstrument.secondaryInk)
+                .padding(.horizontal, 10)
+                .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RemotePressButtonStyle())
             .accessibilityLabel(expanded ? "Hide reasoning" : "Show reasoning")
-
-            Text(expanded ? message.content : preview)
-                .font(.caption)
-                .italic()
-                .lineSpacing(3)
-                .foregroundStyle(BeetTheme.secondaryText(appearance))
-                .lineLimit(expanded ? nil : 2)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if expanded {
+                VampHairline()
+                Text(LocalizedStringKey(message.content))
+                    .font(.footnote)
+                    .lineSpacing(3)
+                    .foregroundStyle(RemoteInstrument.secondaryInk)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+            }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(BeetTheme.surfaceStrong(appearance).opacity(0.45),
-                    in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .background(expanded ? RemoteInstrument.recess : .clear, in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -342,7 +342,7 @@ struct CheckpointMessageRow: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text("Checkpoint")
-                    .font(.caption2.weight(.bold))
+                    .font(.system(.caption2, design: .monospaced, weight: .medium))
                     .tracking(0.5)
                     .foregroundStyle(BeetTheme.secondaryText(appearance))
                 Text(message.content)
@@ -354,14 +354,14 @@ struct CheckpointMessageRow: View {
             if onRevert != nil {
                 Button("Revert") { confirming = true }
                     .font(.caption.weight(.semibold))
-                    .buttonStyle(.bordered)
+                    .buttonStyle(RemoteSecondaryButtonStyle())
                     .controlSize(.small)
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(BeetTheme.surfaceStrong(appearance).opacity(0.45),
+        .background(BeetTheme.surfaceStrong(appearance),
                     in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .confirmationDialog("Restore this checkpoint?",
                             isPresented: $confirming,
@@ -401,9 +401,9 @@ struct RemoteChatErrorCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(BeetTheme.surfaceStrong(appearance), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(BeetTheme.surfaceStrong(appearance), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(BeetTheme.line(appearance), lineWidth: 0.75)
         }
     }
@@ -412,25 +412,90 @@ struct RemoteChatErrorCard: View {
 struct MarkdownText: View {
     let content: String
     init(_ content: String) { self.content = content }
-    var body: some View { if let value = try? AttributedString(markdown: content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) { Text(value).font(.body).lineSpacing(5).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) } else { Text(content).font(.body).lineSpacing(5).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) } }
+
+    private struct Block {
+        var text: String
+        var heading = 0
+        var isCode = false
+    }
+
+    // Parse only presentation boundaries; preserve incomplete streamed code fences.
+    private var blocks: [Block] {
+        var result: [Block] = []
+        var lines: [String] = []
+        var code = false
+        func flush() {
+            if !lines.isEmpty {
+                result.append(Block(text: lines.joined(separator: "\n"), isCode: code))
+                lines.removeAll(keepingCapacity: true)
+            }
+        }
+        for line in content.components(separatedBy: "\n") {
+            if line.hasPrefix("```") {
+                flush()
+                code.toggle()
+            } else if code {
+                lines.append(line)
+            } else if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                flush()
+            } else {
+                let level = line.prefix(while: { $0 == "#" }).count
+                if (1...6).contains(level), line.dropFirst(level).first == " " {
+                    flush()
+                    result.append(Block(text: String(line.dropFirst(level + 1)), heading: level))
+                } else {
+                    lines.append(line)
+                }
+            }
+        }
+        flush()
+        return result
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                if block.isCode {
+                    ScrollView(.horizontal) {
+                        Text(block.text).font(.callout.monospaced())
+                            .textSelection(.enabled).padding(12)
+                    }
+                    .remoteRecess()
+                } else {
+                    Text((try? AttributedString(markdown: block.text,
+                        options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(block.text))
+                        .font(block.heading == 0 ? .body : .headline)
+                        .lineSpacing(block.heading == 0 ? 5 : 2)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(block.heading == 0 ? [] : .isHeader)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 }
 
 struct ToolMessageCard: View {
     let message: RemoteMessage
     @Environment(\.remoteAppearance) private var appearance
+    @State private var expanded = false
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(displayName, systemImage: symbol)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(message.didFail ? Color.red : BeetTheme.accentBright)
+        DisclosureGroup(isExpanded: $expanded) {
             if !displayContent.isEmpty {
-                Text(displayContent).font(.caption.monospaced()).lineSpacing(3)
-                    .textSelection(.enabled).lineLimit(12)
+                Text(displayContent).font(.callout.monospaced()).lineSpacing(3)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(RemoteInstrument.recess, in: RoundedRectangle(cornerRadius: 8))
             }
+        } label: {
+            Label(displayName, systemImage: symbol)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(message.didFail ? RemoteInstrument.danger : RemoteInstrument.secondaryInk)
+                .frame(minHeight: 44)
         }
-        .padding(13).frame(maxWidth: .infinity, alignment: .leading)
-        .background(BeetTheme.surfaceStrong(appearance).opacity(0.64), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(BeetTheme.line(appearance).opacity(0.7), lineWidth: 0.75) }
+        .tint(RemoteInstrument.secondaryInk)
     }
 
     /// A failed tool used to render with the same checkmark as a successful
@@ -459,8 +524,9 @@ struct ToolMessageCard: View {
 
 struct StreamingBubble: View {
     let text: String, phase: String
-    @Environment(\.remoteAppearance) private var appearance
-    var body: some View { HStack(alignment: .top, spacing: 11) { Color.clear.frame(width: 30, height: 30).accessibilityHidden(true); VStack(alignment: .leading, spacing: 8) { HStack(spacing: 7) { ProgressView().controlSize(.small); Text(phase.capitalized) }.font(.caption.weight(.semibold)).foregroundStyle(BeetTheme.accentBright); if text.isEmpty { Text("Vamp Assistant is working…").foregroundStyle(BeetTheme.secondaryText(appearance)) } else { MarkdownText(text) } }; Spacer(minLength: 4) } }
+    var body: some View {
+        RemoteTranscriptTurn(speaker: "Vamp", text: text, phase: phase)
+    }
 }
 
 struct QueuedFollowUpsView: View {
@@ -491,6 +557,7 @@ struct QueuedFollowUpsView: View {
                         Image(systemName: "xmark")
                             .font(.caption.weight(.bold))
                             .frame(width: 28, height: 28)
+                            .hitTarget(8)
                     }
                     .foregroundStyle(BeetTheme.secondaryText(appearance))
                     .buttonStyle(RemotePressButtonStyle())
@@ -498,15 +565,15 @@ struct QueuedFollowUpsView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .stroke(BeetTheme.line(appearance).opacity(0.9), lineWidth: 0.75)
                 }
             }
         }
         .padding(.horizontal, 12)
-        .frame(maxWidth: 720)
+        .frame(maxWidth: RemoteInstrument.contentWidth)
         .frame(maxWidth: .infinity)
     }
 }

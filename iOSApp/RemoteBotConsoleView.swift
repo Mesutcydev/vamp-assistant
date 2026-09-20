@@ -28,10 +28,9 @@ struct RemoteBotConsoleView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Picker("", selection: $tab) {
-                    ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
+                RemoteInstrumentSegments(selection: $tab,
+                    options: Tab.allCases.map { ($0.rawValue, $0) })
+                    .accessibilityLabel("Console view")
                 .padding(.horizontal)
                 .padding(.bottom, 8)
 
@@ -50,10 +49,12 @@ struct RemoteBotConsoleView: View {
             }
             .navigationTitle(computer.name)
             .navigationBarTitleDisplayMode(.inline)
+            .remoteNavigationChrome()
+            .background(RemoteInstrument.canvas)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
-                }
+                }.vampUtilityAction()
             }
             .task { await loadFiles() }
         }
@@ -67,7 +68,7 @@ struct RemoteBotConsoleView: View {
                          ? "Commands run in /workspace inside this bot's computer."
                          : transcript.joined(separator: "\n"))
                         .font(.system(.footnote, design: .monospaced))
-                        .foregroundStyle(transcript.isEmpty ? .secondary : .primary)
+                        .foregroundStyle(transcript.isEmpty ? RemoteInstrument.secondaryInk : RemoteInstrument.ink)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal)
@@ -93,14 +94,14 @@ struct RemoteBotConsoleView: View {
                 }
             }
             .padding(10)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .modifier(RemoteGlassBackdrop(radius: 10, role: .control))
             .padding(.horizontal)
             .padding(.bottom, 8)
         }
     }
 
     private var files: some View {
-        List {
+        RemoteInstrumentForm {
             if !directory.isEmpty {
                 Button {
                     directory = directory.contains("/")
@@ -115,7 +116,7 @@ struct RemoteBotConsoleView: View {
                 if entries.isEmpty {
                     Text("This folder is empty.")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(RemoteInstrument.secondaryInk)
                 }
                 ForEach(entries) { entry in
                     Button {
@@ -129,7 +130,7 @@ struct RemoteBotConsoleView: View {
                             if !entry.isDirectory {
                                 Text(byteText(entry.byteSize))
                                     .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(RemoteInstrument.secondaryInk)
                             }
                         }
                     }

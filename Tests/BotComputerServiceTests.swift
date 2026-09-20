@@ -2,6 +2,75 @@ import XCTest
 @testable import BeetCode
 
 final class BotComputerServiceTests: XCTestCase {
+    @MainActor
+    func testDraftsSurviveStoreRecreationAndStayPrivate() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("drafts.json")
+        let drafts = BotDraftStore(url: url)
+        drafts.set("Keep this task", for: "builder:task")
+        drafts.set("Research draft", for: "researcher:task")
+        let restored = BotDraftStore(url: url)
+        XCTAssertEqual(restored.value(for: "builder:task"), "Keep this task")
+        XCTAssertEqual(restored.value(for: "researcher:task"), "Research draft")
+        XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber, 0o600)
+    }
+
+    @MainActor
+    func testFailedPersistencePreventsRuntimeStartAndCanRetry() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("blocked".utf8).write(to: root)
+        let coordinator = BotRunCoordinator(store: BotRunStore(root: root))
+        var starts = 0
+        coordinator.startHandler = { _ in starts += 1; return .accepted(UUID()) }
+        _ = try coordinator.start(profileID: "builder", profileName: "Builder", modelID: "api|test", prompt: "Task").get()
+        await settle()
+        XCTAssertEqual(starts, 0)
+        XCTAssertNotNil(coordinator.persistenceError)
+        try FileManager.default.removeItem(at: root)
+        await coordinator.retryPersistence()
+        await settle()
+        XCTAssertEqual(starts, 1)
+        XCTAssertNil(coordinator.persistenceError)
+    }
+
+    @MainActor
+    func testAnswerIsNotDeliveredWhenCommandStorageFails() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = BotRunStore(root: root)
+        var run = BotRunRecord.queued(profileID: "builder", profileName: "Builder", modelID: "api|test", prompt: "Task")
+        run.state = .needsInput
+        run.sessionID = UUID()
+        try await store.save([run])
+        let coordinator = BotRunCoordinator(store: store)
+        await settle()
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("bot-run-commands.json"), withIntermediateDirectories: true)
+        var delivered = false
+        coordinator.answerHandler = { _, _ in delivered = true; return true }
+        let accepted = await coordinator.deliverCommand(runID: run.id, kind: .answer, payload: "Keep my answer")
+        XCTAssertFalse(accepted)
+        XCTAssertFalse(delivered)
+        XCTAssertNotNil(coordinator.run(for: "builder")?.errorMessage)
+    }
+
+    @MainActor
+    func testRejectedAnswerReturnsFalseAndRecordsRejection() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = BotRunStore(root: root)
+        var run = BotRunRecord.queued(profileID: "builder", profileName: "Builder", modelID: "api|test", prompt: "Task")
+        run.state = .needsInput
+        try await store.save([run])
+        let coordinator = BotRunCoordinator(store: store)
+        await settle()
+        coordinator.answerHandler = { _, _ in false }
+        let accepted = await coordinator.deliverCommand(runID: run.id, kind: .answer, payload: "Answer")
+        XCTAssertFalse(accepted)
+        XCTAssertNotNil(coordinator.run(for: "builder")?.errorMessage)
+    }
+
     func testPrepareCreatesPrivateSeparateWorkspaceAndBrowserProfile() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("BeetCodeBotComputerTests-\(UUID().uuidString)")
@@ -123,6 +192,49 @@ final class BotComputerServiceTests: XCTestCase {
         XCTAssertEqual(restored[0].phase, "Recoverable after restart")
     }
 
+    /// Bot prompts and model output are as sensitive as chat content; the
+    /// state files must not be world-readable.
+    func testBotRunStoreHardensFilePermissions() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BeetCodeBotRunPerms-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = BotRunStore(root: root)
+        var run = BotRunRecord.queued(
+            profileID: "builder", profileName: "Builder",
+            modelID: "chatgpt|gpt-5", prompt: "Private plan")
+        run.latestOutput = "private output"
+        try await store.save([run])
+
+        let file = root.appendingPathComponent("bot-runs.json")
+        let fileAttributes = try FileManager.default.attributesOfItem(atPath: file.path)
+        XCTAssertEqual((fileAttributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+        let directoryAttributes = try FileManager.default.attributesOfItem(atPath: root.path)
+        XCTAssertEqual((directoryAttributes[.posixPermissions] as? NSNumber)?.intValue, 0o700)
+    }
+
+    /// A corrupt state file must be preserved for recovery, never replaced by
+    /// the empty snapshot the next persist would otherwise write over it.
+    func testCorruptBotRunFileIsQuarantinedNotOverwritten() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BeetCodeBotRunCorrupt-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let store = BotRunStore(root: root)
+        let file = root.appendingPathComponent("bot-runs.json")
+        try Data("{ this is not valid json".utf8).write(to: file)
+
+        let loaded = await store.loadAll(recoverInterrupted: true)
+        XCTAssertTrue(loaded.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path),
+                       "the unreadable file should be moved aside")
+        let backups = try FileManager.default.contentsOfDirectory(atPath: root.path)
+            .filter { $0.hasPrefix("bot-runs.json.corrupt-") }
+        XCTAssertEqual(backups.count, 1)
+        let preserved = try String(
+            contentsOf: root.appendingPathComponent(backups[0]), encoding: .utf8)
+        XCTAssertTrue(preserved.contains("not valid json"))
+    }
+
     func testBotRunStorePersistsOrderedEventsAndAcknowledgedCommands() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("BeetCodeBotRunHistoryTests-\(UUID().uuidString)")
@@ -217,8 +329,8 @@ final class BotComputerServiceTests: XCTestCase {
             modelID: "local|model-a", prompt: "Build").get()
         let second = try coordinator.start(
             profileID: "reviewer", profileName: "Reviewer",
-            modelID: "local|model-a", prompt: "Review").get()
-        await settle()
+            modelID: "local|model-a", prompt: "Research").get()
+        await waitUntil { started.count == 1 }
 
         XCTAssertEqual(started, [first])
         XCTAssertEqual(coordinator.runs.first(where: { $0.id == second })?.state, .queued)
@@ -226,8 +338,18 @@ final class BotComputerServiceTests: XCTestCase {
 
         coordinator.sync(
             runID: first, phase: .finished, finish: .completed("Done"), output: "Done")
-        await settle()
+        await waitUntil { started.count == 2 }
         XCTAssertEqual(started, [first, second])
+    }
+
+    /// Polls instead of sleeping a fixed interval: run dispatch waits on the
+    /// durable snapshot write, which can exceed any single sleep under load.
+    @MainActor
+    private func waitUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition(), Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
     }
 
     /// The console's file browser takes a path from the paired client, so escaping the

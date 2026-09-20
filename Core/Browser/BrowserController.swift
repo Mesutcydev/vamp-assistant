@@ -135,9 +135,32 @@ final class BrowserController: ObservableObject {
         navigationCount += 1
         isLoading = true
         lastError = nil
-        webView.load(URLRequest(url: url))
+        if url.isFileURL {
+            // `load(URLRequest)` treats a local file as its own opaque origin,
+            // so sibling stylesheets/scripts never load and a generated site
+            // preview renders unstyled. `loadFileURL` grants read access to
+            // the directory that legitimately contains the page.
+            webView.loadFileURL(url, allowingReadAccessTo: readAccessRoot(for: url, policy: filePolicy))
+        } else {
+            webView.load(URLRequest(url: url))
+        }
         currentURL = url
         return url
+    }
+
+    private func readAccessRoot(
+        for fileURL: URL,
+        policy: BrowserURLValidator.FilePolicy
+    ) -> URL {
+        // A page inside the workspace may reference other workspace assets
+        // (stylesheets, scripts, images), so grant the whole workspace when
+        // the confined policy applies to this file. User-approved saved
+        // documents outside the workspace grant only their own directory.
+        if case .confined(let workspace) = policy,
+           (try? workspace.resolve(fileURL.path, access: .read)) != nil {
+            return workspace.root
+        }
+        return fileURL.deletingLastPathComponent()
     }
 
     func back() { webView.goBack() }
@@ -468,6 +491,7 @@ final class BrowserController: ObservableObject {
         if let url = currentURL ?? webView.url { parts.append("url: \(url.absoluteString)") }
         if !title.isEmpty { parts.append("title: \(title)") }
         if isLoading { parts.append("(still loading)") }
+        if let lastError { parts.append("last error: \(lastError)") }
         return parts.joined(separator: " | ")
     }
 
@@ -771,7 +795,8 @@ final class BrowserController: ObservableObject {
     enum BrowserError: Error, LocalizedError {
         case emptyURL
         case invalidURL(String)
-        case fileOutsideWorkspace(String)
+        case navigationFailed(String, reason: String)
+        case fileOutsideWorkspace(String, workspaceRoot: String)
         case scriptFailed(String)
         case noSuchElement(String)
         case staleReference(String)
@@ -784,7 +809,10 @@ final class BrowserController: ObservableObject {
             switch self {
             case .emptyURL: "No URL provided."
             case .invalidURL(let raw): "Invalid or non-http(s) URL: \(raw)"
-            case .fileOutsideWorkspace(let path): "Refused to open '\(path)' — file URLs must stay inside the open workspace."
+            case .navigationFailed(let url, let reason):
+                "Navigation to \(url) failed: \(reason)"
+            case .fileOutsideWorkspace(let path, let root):
+                "Refused to open '\(path)' — local file previews must stay inside the open workspace (\(root)) or be a document saved with save_document."
             case .scriptFailed(let detail): "Page script failed: \(detail)"
             case .noSuchElement(let query): "No element found for: \(query)"
             case .staleReference(let ref): "Element reference '\(ref)' is stale. Call browser_read with what=elements and retry with a fresh ref."
@@ -797,13 +825,50 @@ final class BrowserController: ObservableObject {
     }
 }
 
+/// Documents the user explicitly saved through the native Save panel in this
+/// app session. The in-app browser may preview these exact files even when
+/// they live outside the workspace, because the user chose the destination by
+/// hand — that selection *is* the confinement decision.
+enum SavedDocumentRegistry: Sendable {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var allowedPaths: Set<String> = []
+
+    static func allow(_ url: URL) {
+        let canonical = canonicalPath(url)
+        lock.lock()
+        allowedPaths.insert(canonical)
+        lock.unlock()
+    }
+
+    static func allows(_ url: URL) -> Bool {
+        let canonical = canonicalPath(url)
+        lock.lock()
+        defer { lock.unlock() }
+        return allowedPaths.contains(canonical)
+    }
+
+    static func reset() {
+        lock.lock()
+        allowedPaths.removeAll()
+        lock.unlock()
+    }
+
+    private static func canonicalPath(_ url: URL) -> String {
+        Workspace.resolvingSymlinks(url).standardizedFileURL.path
+    }
+}
+
 /// Scheme + confinement policy for agent and chrome navigations.
 /// `file://` is a workspace-escape if left unrestricted (`file:///etc/passwd`).
+/// Tool callers additionally need to be able to preview pages they just saved
+/// through the native Save panel, so that exact set of user-chosen documents
+/// is allowlisted out of band (see `SavedDocumentRegistry`).
 enum BrowserURLValidator: Sendable {
     enum FilePolicy: Sendable {
         /// User-typed address bar: any local file the user asked to open.
         case allowAny
-        /// Agent tools: `file://` only when the path is inside the workspace.
+        /// Agent tools: `file://` only when the path is inside the workspace
+        /// or was saved by the user through the `save_document` panel.
         case confined(Workspace)
         /// Reject `file://` entirely.
         case refuse
@@ -812,7 +877,31 @@ enum BrowserURLValidator: Sendable {
     static func validatedURL(_ urlString: String, filePolicy: FilePolicy) throws -> URL {
         var raw = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { throw BrowserController.BrowserError.emptyURL }
-        if !raw.contains("://") { raw = "https://" + raw }
+        if !raw.contains("://") {
+            // A generated page is commonly passed as a workspace-relative
+            // path ("index.html", "site/index.html"). Resolve those against
+            // the workspace before falling back to the bare-host shorthand,
+            // otherwise a local preview silently becomes https://index.html.
+            if case .confined(let workspace) = filePolicy,
+               let fileURL = try? workspace.resolve(raw, access: .read).url,
+               FileManager.default.fileExists(atPath: fileURL.path) {
+                return fileURL
+            }
+            // An explicit POSIX path that did not resolve inside the
+            // workspace is a confinement error, not a host to prefix.
+            if raw.hasPrefix("/") || raw.hasPrefix("./") || raw.hasPrefix("../") || raw.hasPrefix("~/") {
+                let workspaceRoot: String
+                if case .confined(let workspace) = filePolicy {
+                    workspaceRoot = workspace.root.path
+                } else {
+                    workspaceRoot = "no workspace is open"
+                }
+                throw BrowserController.BrowserError.fileOutsideWorkspace(
+                    (raw as NSString).expandingTildeInPath,
+                    workspaceRoot: workspaceRoot)
+            }
+            raw = "https://" + raw
+        }
         guard let url = URL(string: raw), let scheme = url.scheme?.lowercased() else {
             throw BrowserController.BrowserError.invalidURL(raw)
         }
@@ -820,6 +909,7 @@ enum BrowserURLValidator: Sendable {
         case "http", "https":
             return url
         case "file":
+            if SavedDocumentRegistry.allows(url) { return url }
             switch filePolicy {
             case .allowAny:
                 return url
@@ -830,7 +920,9 @@ enum BrowserURLValidator: Sendable {
                     _ = try workspace.resolve(url.path, access: .read)
                     return url
                 } catch {
-                    throw BrowserController.BrowserError.fileOutsideWorkspace(url.path)
+                    throw BrowserController.BrowserError.fileOutsideWorkspace(
+                        url.path,
+                        workspaceRoot: workspace.root.path)
                 }
             }
         default:

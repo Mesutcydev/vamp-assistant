@@ -264,6 +264,18 @@ actor MCPConnection: MCPTransport {
             }
         }
 
+        do {
+            return try await handshake()
+        } catch {
+            // A timed-out or malformed handshake must not leak the spawned
+            // server process, its pipes, and the reader task.
+            await disconnect()
+            throw error
+        }
+    }
+
+    /// Initialize + tools/list after the process has been spawned.
+    private func handshake() async throws -> [ToolDefinition] {
         // Initialize handshake (bounded).
         let initParams = LFJSONValue.object([
             "protocolVersion": .string("2024-11-05"),

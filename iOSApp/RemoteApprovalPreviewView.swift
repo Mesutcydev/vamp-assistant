@@ -13,7 +13,10 @@ struct RemoteApprovalPreviewView: View {
     @Environment(\.remoteAppearance) private var appearance
     /// Long diffs start collapsed: an approval card that pushes its own buttons
     /// off screen is worse than one that makes you tap once to see more.
+    @ScaledMetric(relativeTo: .footnote) private var codeFontSize: CGFloat = 13
+    @ScaledMetric(relativeTo: .footnote) private var codeLineHeight: CGFloat = 20
     @State private var expanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private static let collapsedLines = 14
 
@@ -33,26 +36,21 @@ struct RemoteApprovalPreviewView: View {
             VStack(alignment: .leading, spacing: 8) {
                 header
                 lineList
-                if remaining > 0 {
+                if remaining > 0 || (expanded && parsed.shown.count > Self.collapsedLines) {
                     Button {
-                        withAnimation(.easeOut(duration: 0.16)) { expanded.toggle() }
+                        withAnimation(reduceMotion ? nil : RemoteInstrument.motion) { expanded.toggle() }
                     } label: {
                         Text(expanded ? "Show less" : "Show \(remaining) more line\(remaining == 1 ? "" : "s")")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(BeetTheme.accentBright)
-                            .frame(maxWidth: .infinity, minHeight: 34)
+                            .frame(maxWidth: .infinity, minHeight: 44)
                             .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(RemotePressButtonStyle())
                 }
             }
             .padding(11)
-            .background(BeetTheme.surfaceStrong(appearance),
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(BeetTheme.line(appearance).opacity(0.7), lineWidth: 0.75)
-            }
+            .remoteRecess()
         }
     }
 
@@ -82,22 +80,25 @@ struct RemoteApprovalPreviewView: View {
     }
 
     private var lineList: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        ScrollView([.horizontal, .vertical], showsIndicators: true) {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(visibleLines.enumerated()), id: \.offset) { _, line in
                     Text(line.isEmpty ? " " : line)
-                        .font(.system(size: 11.5, design: .monospaced))
+                        .font(.system(size: codeFontSize, design: .monospaced))
+                        .fixedSize(horizontal: true, vertical: false)
+                        .frame(height: codeLineHeight)
                         .foregroundStyle(color(for: line))
                         .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
+
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(background(for: line))
                 }
             }
             .padding(.vertical, 2)
+            .textSelection(.enabled)
         }
-        .frame(maxHeight: expanded ? 420 : .infinity)
-        .accessibilityElement(children: .ignore)
+        .frame(height: min(CGFloat(visibleLines.count) * codeLineHeight + 4, 240))
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(preview.isDiff
                             ? "Diff, \(parsed.shown.count) lines"
                             : "Command: \(preview.content ?? "")")
@@ -105,17 +106,17 @@ struct RemoteApprovalPreviewView: View {
 
     // Diff colouring. Only applied to real diffs — a shell command is one
     // block of text and must not have its leading dashes read as deletions.
-    private static let addedText = Color(red: 0.16, green: 0.55, blue: 0.30)
-    private static let removedText = Color(red: 0.70, green: 0.20, blue: 0.22)
+    private static let addedText = RemoteInstrument.green
+    private static let removedText = RemoteInstrument.danger
 
     private func color(for line: String) -> Color {
-        guard preview.isDiff else { return .primary }
+        guard preview.isDiff else { return RemoteInstrument.ink }
         if line.hasPrefix("+++") || line.hasPrefix("---") || line.hasPrefix("@@") {
             return BeetTheme.secondaryText(appearance)
         }
         if line.hasPrefix("+") { return Self.addedText }
         if line.hasPrefix("-") { return Self.removedText }
-        return .primary
+        return RemoteInstrument.ink
     }
 
     private func background(for line: String) -> Color {

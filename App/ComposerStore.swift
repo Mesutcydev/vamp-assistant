@@ -27,7 +27,17 @@ final class ComposerStore {
     // MARK: Draft (editable)
 
     var prompt: String = "" {
-        didSet { schedulePersist(); recomputeEstimate() }
+        didSet {
+            schedulePersist()
+            // A paste can replace the draft with tens of thousands of
+            // characters in one edit (and some native text paths deliver it
+            // in a burst of edits). Recomputing token telemetry synchronously
+            // makes each edit scan the entire String and briefly starves the
+            // main thread, which presents as a white window. Coalesce the
+            // derived work while the editor is settling; the prompt itself
+            // remains live and editable throughout.
+            scheduleEstimateRefresh()
+        }
     }
     var attachments: [ComposerAttachment] = [] {
         didSet { refreshAvailability(); refreshResolvedFocus() }
@@ -86,6 +96,8 @@ final class ComposerStore {
     private var appState: AppState?
     private var cancellables: Set<AnyCancellable> = []
     private var persistTask: Task<Void, Never>?
+    private var estimateTask: Task<Void, Never>?
+    private nonisolated static let draftWriteQueue = DispatchQueue(label: "com.beetcode.draft-writes", qos: .utility)
     private var workspaceKey: String?
     private var lastEstimateRefresh = Date.distantPast
     private var cachedHistoryTokens = 0
@@ -325,6 +337,19 @@ final class ComposerStore {
             utilization: utilization)
     }
 
+    /// Coalesce prompt-driven telemetry so large pastes never turn a single
+    /// edit into repeated full-string scans on the main actor. Other state
+    /// changes still recompute synchronously; this path is only for typing.
+    private func scheduleEstimateRefresh() {
+        guard estimateTask == nil else { return }
+        estimateTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(80))
+            guard !Task.isCancelled, let self else { return }
+            self.estimateTask = nil
+            self.recomputeEstimate()
+        }
+    }
+
     /// Reads only the persisted continuation record. The active loop owns its
     /// private mutable record; after a run finishes it is persisted and the
     /// controller publishes a change, so the next composer estimate includes
@@ -474,6 +499,9 @@ final class ComposerStore {
     static var overrideDraftsDir: URL?
 
     private var draftFileURL: URL? {
+        // Visual fixtures and UI smoke tests must neither restore nor overwrite
+        // a person's draft. Each preview starts from an in-memory composer.
+        guard !ProcessInfo.processInfo.arguments.contains("--design-preview") else { return nil }
         guard let key = workspaceKey else { return nil }
         let dir: URL
         if let base = Self.overrideDraftsDir {
@@ -499,7 +527,7 @@ final class ComposerStore {
         persistTask = Task {
             try? await Task.sleep(for: .milliseconds(400))
             guard !Task.isCancelled else { return }
-            Self.persist(state, to: url)
+            Self.draftWriteQueue.async { Self.persist(state, to: url) }
             if pendingPersist?.url == url { pendingPersist = nil }
         }
     }
@@ -510,12 +538,12 @@ final class ComposerStore {
         persistTask?.cancel()
         persistTask = nil
         if let pending = pendingPersist {
-            Self.persist(pending.state, to: pending.url)
+            Self.draftWriteQueue.sync { Self.persist(pending.state, to: pending.url) }
             pendingPersist = nil
         }
     }
 
-    private static func persist(_ state: ComposerDraftState, to url: URL) {
+    private nonisolated static func persist(_ state: ComposerDraftState, to url: URL) {
         guard let data = try? JSONEncoder().encode(state) else { return }
         try? data.write(to: url, options: .atomic)
     }

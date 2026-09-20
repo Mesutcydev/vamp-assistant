@@ -113,18 +113,15 @@ struct ContextPacket: Sendable {
 final class ContextCompiler {
 
     private let graph: SymbolGraph
-    private let search: SearchIndex?
     private let knowledge: KnowledgeStore?
     private let capsuleProvider: () throws -> ProjectCapsule
     private let sourceLoader: (String, Int, Int) -> String?
 
     init(graph: SymbolGraph,
-         search: SearchIndex? = nil,
          knowledge: KnowledgeStore? = nil,
          capsuleProvider: @escaping () throws -> ProjectCapsule,
          sourceLoader: @escaping (String, Int, Int) -> String? = { _, _, _ in nil }) {
         self.graph = graph
-        self.search = search
         self.knowledge = knowledge
         self.capsuleProvider = capsuleProvider
         self.sourceLoader = sourceLoader
@@ -194,21 +191,7 @@ final class ContextCompiler {
             }
         }
 
-        // --- Tier 5: lexical retrieval for the task text -----------------
-        if let search, graphSpend < allocation.graph {
-            for hit in try search.search(task.text, kinds: [.symbol], limit: 8) {
-                guard let symbolID = hit.symbolID,
-                      seenSymbols.insert(symbolID).inserted,
-                      let node = try graph.node(id: symbolID) else { continue }
-                symbols.append(SymbolContext(
-                    symbolID: node.id, name: node.name,
-                    kind: node.symbolKind ?? node.kind.rawValue,
-                    path: node.path ?? "", startLine: node.startLine,
-                    endLine: node.endLine, descriptor: node.descriptor ?? ""))
-            }
-        }
-
-        // --- Tier 7: knowledge (trust order: decisions/pitfalls first) ---
+        // --- Knowledge (trust order: decisions/pitfalls first) ---
         if let knowledge {
             var knowledgeSpend = 0
             let all = try knowledge.allRecords()

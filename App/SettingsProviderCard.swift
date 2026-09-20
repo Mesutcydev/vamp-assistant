@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ProviderCard: View {
     let provider: LLMProvider
+    var initiallyExpanded = false
     @ObservedObject private var keyStore = APIKeyStore.shared
     @State private var keyDraft = ""
     @State private var modelDraft = ""
@@ -53,13 +54,13 @@ struct ProviderCard: View {
             HStack(spacing: Spacing.sm) {
                 Image(systemName: provider == .custom ? "server.rack" : "cloud.fill")
                     .accessibilityHidden(true)
-                    .font(.app(size: 12, weight: .semibold, design: .serif))
+                    .font(.app(size: 12, weight: .semibold ))
                     .foregroundStyle(Theme.accentText)
                 Text(provider.displayName)
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(Theme.textPrimary)
                 if hasKey || (provider.keyOptional && provider.openAICompatibleBaseURL != nil) {
-                    badge("Configured", systemImage: "checkmark.seal.fill", tint: Theme.success)
+                    badge("Configured", systemImage: "checkmark.seal.fill", tint: Theme.positive)
                 }
                 if provider.supportsVision {
                     badge("Vision", systemImage: "eye", tint: Theme.info)
@@ -71,7 +72,7 @@ struct ProviderCard: View {
                         keyDraft = ""
                         testState = .idle
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(LFCapsuleButtonStyle())
                     .controlSize(.small)
                 }
                 Button {
@@ -80,7 +81,7 @@ struct ProviderCard: View {
                     Label(isExpanded ? "Hide" : "Configure",
                           systemImage: isExpanded ? "chevron.up" : "chevron.down")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(LFCapsuleButtonStyle())
                 .controlSize(.small)
             }
 
@@ -95,7 +96,7 @@ struct ProviderCard: View {
             if provider == .custom {
                 HStack(spacing: Spacing.sm) {
                     TextField("Base URL — e.g. http://127.0.0.1:11434/v1", text: $baseURDraft)
-                        .textFieldStyle(.roundedBorder)
+                        .vampField()
                         .font(.callout.monospaced())
                         .autocorrectionDisabled()
                     Button("Save URL") {
@@ -104,7 +105,7 @@ struct ProviderCard: View {
                         AppPreferencesStore.shared.save(prefs)
                         testState = .idle
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
                     .tint(Theme.accent)
                     .disabled(baseURDraft.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
@@ -118,9 +119,9 @@ struct ProviderCard: View {
                 SecureField(
                     hasKey ? "API key (replace)" : (keyless ? "API key (optional)" : "API key"),
                     text: $keyDraft)
-                    .textFieldStyle(.roundedBorder)
+                    .vampField()
                     .autocorrectionDisabled()
-                Button("Save") {
+                Button(hasKey ? "Save changes" : "Connect") {
                     let draft = keyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
                     let keyForRefresh: String?
                     if !draft.isEmpty {
@@ -142,7 +143,7 @@ struct ProviderCard: View {
                     // disappear between Save and model discovery.
                     if let keyForRefresh { refreshModels(apiKey: keyForRefresh) }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
                 .tint(Theme.accent)
                 .disabled(keyDraft.trimmingCharacters(in: .whitespaces).isEmpty && modelUnchanged && baseURUnchanged)
             }
@@ -157,7 +158,7 @@ struct ProviderCard: View {
             if let saveMessage {
                 Label(saveMessage, systemImage: saveMessage.hasPrefix("Could") ? "exclamationmark.triangle" : "checkmark.circle")
                     .font(.caption)
-                    .foregroundStyle(saveMessage.hasPrefix("Could") ? Theme.danger : Theme.success)
+                    .foregroundStyle(saveMessage.hasPrefix("Could") ? Theme.negative : Theme.positive)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -198,7 +199,7 @@ struct ProviderCard: View {
 
                 HStack(spacing: Spacing.sm) {
                     TextField("Model id", text: $modelDraft)
-                        .textFieldStyle(.roundedBorder)
+                        .vampField()
                         .font(.callout.monospaced())
 
                     Button {
@@ -210,13 +211,13 @@ struct ProviderCard: View {
                             Image(systemName: "arrow.clockwise")
                         }
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(LFCapsuleButtonStyle())
                     .help("Fetch the provider's live model list")
                     .accessibilityLabel("Refresh \(provider.displayName) model list")
                     .disabled(refreshingModels || (!keyAvailableForUse && !provider.keyOptional))
 
                     Button("Test") { runTest() }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(LFCapsuleButtonStyle())
                         .disabled(testState == .running || (!keyAvailableForUse && !provider.keyOptional))
                 }
 
@@ -258,17 +259,17 @@ struct ProviderCard: View {
                             .foregroundStyle(Theme.textSecondary)
                     case .ok(let detail):
                         Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(Theme.success)
+                            .foregroundStyle(Theme.positive)
                         Text(detail)
                             .font(.caption)
-                            .foregroundStyle(Theme.success)
+                            .foregroundStyle(Theme.positive)
                             .lineLimit(3)
                     case .failed(let detail):
                         Image(systemName: "xmark.octagon.fill")
-                            .foregroundStyle(Theme.danger)
+                            .foregroundStyle(Theme.negative)
                         Text(detail)
                             .font(.caption)
-                            .foregroundStyle(Theme.danger)
+                            .foregroundStyle(Theme.negative)
                             .lineLimit(3)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -276,10 +277,15 @@ struct ProviderCard: View {
             }
             }
         }
-        .padding(Spacing.lg)
+        .padding(.vertical, Chrome.cardVPadding)
+        .padding(.horizontal, Chrome.cardHPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .lfCard()
+        .background(Theme.surface.opacity(0.55),
+                    in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
+            .strokeBorder(Theme.hairline, lineWidth: 0.75))
         .onAppear {
+            if initiallyExpanded { isExpanded = true }
             modelDraft = AppPreferencesStore.shared.current.remoteModel[provider.rawValue]
                 ?? provider.defaultModel
             loadModelOverride()
@@ -415,10 +421,10 @@ struct ProviderCard: View {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 HStack(spacing: Spacing.sm) {
                     TextField("Context window", text: $overrideContextWindow)
-                        .textFieldStyle(.roundedBorder)
+                        .vampField()
                         .font(.caption.monospaced())
                     TextField("Max output", text: $overrideOutputTokens)
-                        .textFieldStyle(.roundedBorder)
+                        .vampField()
                         .font(.caption.monospaced())
                 }
                 capabilityPicker("Tools", selection: $overrideTools)
@@ -435,7 +441,7 @@ struct ProviderCard: View {
                         .foregroundStyle(Theme.textTertiary)
                     Spacer()
                     Button("Save overrides") { saveModelOverride() }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(LFCapsuleButtonStyle())
                         .controlSize(.small)
                 }
             }

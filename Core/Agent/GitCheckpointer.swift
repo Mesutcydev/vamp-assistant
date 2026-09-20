@@ -104,7 +104,84 @@ struct GitCheckpointer {
             id: UUID(),
             treeSHA: treeSHA,
             createdAt: Date(),
-            summary: summary)
+            summary: summary,
+            refName: refName)
+    }
+
+    /// Deletes one checkpoint pin ref. Refuses anything outside the
+    /// `refs/beetcode/checkpoints/` namespace so a crafted session record can
+    /// never delete user branches or tags. Returns false when the ref could
+    /// not be removed (missing repo, moved workspace, git unavailable) —
+    /// pruning is best-effort and never throws.
+    @discardableResult
+    func deletePinRef(_ refName: String) -> Bool {
+        guard Self.isCheckpointRefName(refName) else { return false }
+        operationLock.lock()
+        defer { operationLock.unlock() }
+        guard let result = git(["update-ref", "-d", refName]), result.exitCode == 0 else {
+            return false
+        }
+        return true
+    }
+
+    /// Pin refs under `refs/beetcode/checkpoints/`, keyed by ref name with the
+    /// tree SHA each points at.
+    func pinnedCheckpointRefs() -> [String: String] {
+        operationLock.lock()
+        defer { operationLock.unlock() }
+        guard hasRepository(),
+              let result = git([
+                "for-each-ref", "--format=%(refname) %(objectname)",
+                "refs/beetcode/checkpoints/",
+              ]),
+              result.exitCode == 0
+        else { return [:] }
+        var refs: [String: String] = [:]
+        for line in result.output.split(separator: "\n") {
+            let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
+            guard parts.count == 2, Self.isCheckpointRefName(parts[0]) else { continue }
+            refs[parts[0]] = parts[1]
+        }
+        return refs
+    }
+
+    /// Removes every pin ref recorded by a deleted session's checkpoints.
+    /// Never throws: a moved workspace or unavailable git must not block the
+    /// deletion itself. Legacy checkpoints (nil `refName`) are skipped here;
+    /// their refs are handled by `sweepOrphanedPins`.
+    static func prunePins(checkpoints: [SessionCheckpoint], workspacePath: String) {
+        let refNames = checkpoints.compactMap(\.refName).filter(Self.isCheckpointRefName)
+        guard !refNames.isEmpty, !workspacePath.isEmpty else { return }
+        let checkpointer = GitCheckpointer(
+            workspace: Workspace(root: URL(fileURLWithPath: workspacePath)))
+        for refName in refNames {
+            checkpointer.deletePinRef(refName)
+        }
+    }
+
+    /// Deletes pin refs in `workspacePath` whose tree is not referenced by any
+    /// surviving session. Matching by the pinned tree (not the ref name) keeps
+    /// legacy refs — created before `SessionCheckpoint.refName` existed — as
+    /// long as their session still exists, and cleans up refs left behind by
+    /// crashes between snapshot and session save. Returns the deleted refs.
+    @discardableResult
+    static func sweepOrphanedPins(
+        workspacePath: String,
+        referencedTreeSHAs: Set<String>
+    ) -> [String] {
+        guard !workspacePath.isEmpty else { return [] }
+        let checkpointer = GitCheckpointer(
+            workspace: Workspace(root: URL(fileURLWithPath: workspacePath)))
+        var deleted: [String] = []
+        for (refName, treeSHA) in checkpointer.pinnedCheckpointRefs()
+        where !referencedTreeSHAs.contains(treeSHA) {
+            if checkpointer.deletePinRef(refName) { deleted.append(refName) }
+        }
+        return deleted
+    }
+
+    private static func isCheckpointRefName(_ name: String) -> Bool {
+        name.hasPrefix("refs/beetcode/checkpoints/")
     }
 
     /// Restores the working tree to a checkpoint state. Refuses foreign trees,
@@ -125,13 +202,13 @@ struct GitCheckpointer {
         // 2. Preserve the real index so the user's staged state survives.
         let savedIndex = FileManager.default.temporaryDirectory
             .appendingPathComponent("beetcode-index-backup-\(UUID().uuidString)")
-        var indexWasPreserved = false
         defer { try? FileManager.default.removeItem(at: savedIndex) }
-        if let indexPath = git(["rev-parse", "--git-path", "index"])?.trimmedOutput,
-           !indexPath.isEmpty,
-           FileManager.default.fileExists(atPath: indexPath) {
+        var indexWasPreserved = false
+        let preservedIndexURL = indexPath()
+        if let preservedIndexURL,
+           FileManager.default.fileExists(atPath: preservedIndexURL.path) {
             do {
-                try FileManager.default.copyItem(at: URL(fileURLWithPath: indexPath), to: savedIndex)
+                try FileManager.default.copyItem(at: preservedIndexURL, to: savedIndex)
                 indexWasPreserved = true
             } catch {
                 // Non-fatal: continue without index preservation.
@@ -148,12 +225,9 @@ struct GitCheckpointer {
 
         // 4. Put the prior index back: the worktree now matches the snapshot
         //    while the user's staged changes remain visible as such.
-        if indexWasPreserved {
-            if let indexPath = git(["rev-parse", "--git-path", "index"])?.trimmedOutput,
-               !indexPath.isEmpty {
-                try? FileManager.default.removeItem(atPath: indexPath)
-                try? FileManager.default.copyItem(at: savedIndex, to: URL(fileURLWithPath: indexPath))
-            }
+        if indexWasPreserved, let restoredIndexURL = indexPath() {
+            try? FileManager.default.removeItem(at: restoredIndexURL)
+            try? FileManager.default.copyItem(at: savedIndex, to: restoredIndexURL)
         }
 
         // 5. `read-tree -u` restores tracked files but leaves paths that
@@ -176,6 +250,20 @@ struct GitCheckpointer {
     }
 
     // MARK: Process plumbing
+
+    /// Absolute URL of the repository's index file. `git rev-parse --git-path
+    /// index` prints a path relative to the repository (for example
+    /// `.git/index`), so resolving it against the process cwd would point at
+    /// the wrong repository — or nothing at all when the app is launched from
+    /// Finder. Always anchor it to the workspace root.
+    private func indexPath() -> URL? {
+        guard let raw = git(["rev-parse", "--git-path", "index"])?.trimmedOutput,
+              !raw.isEmpty else { return nil }
+        if raw.hasPrefix("/") {
+            return URL(fileURLWithPath: raw).standardizedFileURL
+        }
+        return URL(fileURLWithPath: raw, relativeTo: workspace.root).standardizedFileURL
+    }
 
     private struct GitResult {
         let exitCode: Int32

@@ -60,15 +60,18 @@ actor EnginePool {
         static func residentSetFits(
             residents: [Resident],
             candidateDiskBytes: Int64,
-            cleanUsableBudget: UInt64
+            cleanUsableBudget: UInt64,
+            candidateFormat: CatalogModel.Format = .mlx
         ) -> Bool {
             let candidate = MemoryAdvisor.projectedFootprint(
-                diskBytes: candidateDiskBytes)
+                diskBytes: candidateDiskBytes,
+                format: candidateFormat)
             let total = residents.reduce(candidate) { partial, resident in
                 let reserved = resident.reservedBytes > 0
                     ? resident.reservedBytes
                     : MemoryAdvisor.projectedFootprint(
-                        diskBytes: resident.diskBytes)
+                        diskBytes: resident.diskBytes,
+                        format: resident.format)
                 let (sum, overflow) = partial.addingReportingOverflow(reserved)
                 return overflow ? UInt64.max : sum
             }
@@ -115,6 +118,11 @@ actor EnginePool {
     nonisolated var sharedGate: GenerationGate { gate }
     private var engines: [String: any LLMEngine] = [:]
     private var residents: [String: Resident] = [:]
+    /// In-flight activations keyed by model ID. Without this, two concurrent
+    /// activations both observed an empty `engines` slot and both loaded; the
+    /// second insert overwrote the first, leaking that engine (and, for GGUF,
+    /// a live llama-server process).
+    private var activations: [String: Task<Void, Error>] = [:]
     private(set) var activeModelID: String?
     private let maxResident: Int
     private var engineFactory: @Sendable (CatalogModel.Format, GenerationGate) -> any LLMEngine
@@ -127,6 +135,9 @@ actor EnginePool {
     /// Test seam: swap the admission authority (tests inject a fixed budget).
     var admitLoad: @Sendable (_ diskBytes: Int64) throws -> Void = { diskBytes in
         try MemoryAdvisor.admitLoad(diskBytes: diskBytes)
+    }
+    private var admitLoadForFormat: @Sendable (_ diskBytes: Int64, _ format: CatalogModel.Format) throws -> Void = { diskBytes, format in
+        try MemoryAdvisor.admitLoad(diskBytes: diskBytes, format: format)
     }
 
     init(gate: GenerationGate = GenerationGate(), maxResident: Int = 4) {
@@ -149,9 +160,14 @@ actor EnginePool {
                     experimentalDFlashEnabled:
                         ExperimentalInferencePreferences.dflashEnabledForNewEngine,
                     experimentalNGramEnabled:
-                        ExperimentalInferencePreferences.ngramEnabledForNewEngine)
+                        ExperimentalInferencePreferences.ngramEnabledForNewEngine,
+                    loraScale:
+                        ExperimentalInferencePreferences.loraScaleForNewEngine)
+            case .qwenStreaming:
+                return QwenStreamingEngine(gate: sharedGate)
             case .coreAI:
-                return CoreAIEngine()
+                return UnsupportedFormatEngine(
+                    reason: "Apple Core AI packs are recognized but not runnable yet. Use an MLX or GGUF model.")
             }
         }
     }
@@ -165,6 +181,7 @@ actor EnginePool {
     /// Test seam: swap the admission authority (actor-safe setter).
     func setAdmitLoad(_ block: @escaping @Sendable (_ diskBytes: Int64) throws -> Void) {
         admitLoad = block
+        admitLoadForFormat = { diskBytes, _ in try block(diskBytes) }
     }
 
     // MARK: Queries
@@ -201,14 +218,41 @@ actor EnginePool {
     ) async throws {
         touch(modelID)
         if engines[modelID] != nil {
-            if activeModelID != modelID {
-                pressureModelID = modelID
-                lastContextPressureLevel = .none
-            }
-            activeModelID = modelID
+            activateResident(modelID)
             return
         }
+        // Join an in-flight load for the same model instead of racing it.
+        if let inFlight = activations[modelID] {
+            try await inFlight.value
+            return
+        }
+        let task = Task {
+            try await self.performActivation(
+                directory: directory, modelID: modelID, diskBytes: diskBytes,
+                format: format, contextSize: contextSize)
+        }
+        activations[modelID] = task
+        defer { activations[modelID] = nil }
+        try await task.value
+    }
 
+    /// Warm switch to an already-resident engine (KV cache survives).
+    private func activateResident(_ modelID: String) {
+        if activeModelID != modelID {
+            pressureModelID = modelID
+            lastContextPressureLevel = .none
+        }
+        activeModelID = modelID
+    }
+
+    private func performActivation(
+        directory: URL, modelID: String, diskBytes: Int64,
+        format: CatalogModel.Format, contextSize: Int?
+    ) async throws {
+        if engines[modelID] != nil {
+            activateResident(modelID)
+            return
+        }
         await refreshExternalReservations()
 
         // Make room: residency cap first, then memory budget. Each eviction
@@ -219,15 +263,16 @@ actor EnginePool {
             || !Planner.residentSetFits(
                 residents: Array(residents.values),
                 candidateDiskBytes: diskBytes,
-                cleanUsableBudget: MemoryAdvisor.cleanUsableBudget)
-            || !admissible(diskBytes: diskBytes) {
+                cleanUsableBudget: MemoryAdvisor.cleanUsableBudget,
+                candidateFormat: format)
+            || !admissible(diskBytes: diskBytes, format: format) {
             guard let victim = Planner.evictionCandidates(
                 residents: Array(residents.values), activeModelID: modelID).first
             else { break }
             await evict(modelID: victim.modelID)
         }
         // Final hard admission — never bypass the advisor's safety stops.
-        try admitLoad(diskBytes)
+        try admitLoadForFormat(diskBytes, format)
 
         let engine = engineFactory(format, gate)
         do {
@@ -245,7 +290,9 @@ actor EnginePool {
             lastUsed: Date(),
             format: format,
             reservedBytes: max(
-                MemoryAdvisor.projectedFootprint(diskBytes: diskBytes),
+                MemoryAdvisor.projectedFootprint(
+                    diskBytes: diskBytes,
+                    format: format),
                 measuredExternal))
         activeModelID = modelID
         pressureModelID = modelID
@@ -254,8 +301,8 @@ actor EnginePool {
     }
 
     /// True when the advisor would admit this load right now.
-    private func admissible(diskBytes: Int64) -> Bool {
-        (try? admitLoad(diskBytes)) != nil
+    private func admissible(diskBytes: Int64, format: CatalogModel.Format) -> Bool {
+        (try? admitLoadForFormat(diskBytes, format)) != nil
     }
 
     /// Unloads and removes one resident engine (LRU eviction path).
@@ -288,7 +335,9 @@ actor EnginePool {
             resident.reservedBytes = max(
                 resident.reservedBytes,
                 max(
-                    MemoryAdvisor.projectedFootprint(diskBytes: resident.diskBytes),
+                    MemoryAdvisor.projectedFootprint(
+                        diskBytes: resident.diskBytes,
+                        format: resident.format),
                     measured))
             residents[modelID] = resident
         }
@@ -393,6 +442,21 @@ actor EnginePool {
         await activeEngine?.loadedModelID
     }
 
+    /// Whether the ACTIVE resident can accept native image content (a GGUF
+    /// model launched with a multimodal projector).
+    func activeSupportsImageInput() async -> Bool {
+        await activeEngine?.supportsImageInput ?? false
+    }
+
+    /// Developer-only access for the Qwen lifecycle oracle. Production UI
+    /// code routes through `stream`; validation needs the accepted explicit
+    /// token fixture after a real pool model switch without exposing a second
+    /// inference API to the app.
+    func debugQwenEngine(modelID: String? = nil) -> QwenStreamingEngine? {
+        let id = modelID ?? activeModelID
+        return id.flatMap { engines[$0] as? QwenStreamingEngine }
+    }
+
     /// The active engine's real context window (GGUF: RAM-fitted launch ctx).
     func activeEffectiveContextWindow() async -> Int? {
         await activeEngine?.effectiveContextWindow
@@ -458,5 +522,34 @@ actor EnginePool {
     /// True when at least one model is resident.
     var hasResidentModels: Bool {
         !residents.isEmpty
+    }
+}
+
+/// Detected Core AI packs must not go to MLX or llama.cpp. No OS 27 runner
+/// ships in this product yet, so load fails with a clear message.
+fileprivate final class UnsupportedFormatEngine: LLMEngine, @unchecked Sendable {
+    private let reason: String
+
+    init(reason: String) {
+        self.reason = reason
+    }
+
+    var loadedModelID: String? { get async { nil } }
+    var stats: EngineStats { get async { EngineStats() } }
+
+    func load(directory: URL, modelID: String, diskBytes: Int64) async throws {
+        throw EngineError.loadFailed(reason)
+    }
+
+    func unload() async {}
+    func reset() async {}
+    func cancelGeneration() async {}
+
+    func stream(
+        adding turns: [ChatTurn],
+        maxTokens: Int?,
+        temperature: Double?
+    ) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { $0.finish(throwing: EngineError.notLoaded) }
     }
 }

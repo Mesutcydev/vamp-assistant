@@ -98,16 +98,67 @@ enum ToolParser {
         var seen = Set<String>()
 
         for candidate in candidates {
-            for call in decodePayload(candidate.payload) where !seen.contains(call.signature) {
-                seen.insert(call.signature)
-                calls.append(
-                    ParsedToolCall(
-                        name: call.name,
-                        arguments: call.arguments,
-                        index: calls.count))
+            for call in decodePayload(candidate.payload) {
+                let parsed = ParsedToolCall(
+                    name: canonicalName(call.name),
+                    arguments: unwrappingCDATA(call.arguments),
+                    index: calls.count)
+                guard !seen.contains(parsed.signature) else { continue }
+                seen.insert(parsed.signature)
+                calls.append(parsed)
             }
         }
         return calls
+    }
+
+    /// Small instruct models abbreviate tool names (`read`, `run`, `write`).
+    /// Map the common short forms onto the canonical registry names. A name
+    /// with no alias is left untouched and fails as an unknown tool exactly
+    /// as before.
+    static func canonicalName(_ name: String) -> String {
+        toolAliases[name.lowercased()] ?? name
+    }
+
+    private static let toolAliases: [String: String] = [
+        "read": "read_file",
+        "readfile": "read_file",
+        "cat": "read_file",
+        "write": "write_file",
+        "writefile": "write_file",
+        "create_file": "write_file",
+        "edit": "apply_patch",
+        "patch": "apply_patch",
+        "replace": "apply_patch",
+        "run": "run_command",
+        "shell": "run_command",
+        "bash": "run_command",
+        "exec": "run_command",
+        "command": "run_command",
+        "ls": "list_directory",
+        "list": "list_directory",
+        "listdir": "list_directory",
+        "grep": "search",
+        "search_files": "search",
+        "find": "find_files",
+    ]
+
+    /// XML-trained chat templates wrap string values in `<![CDATA[ … ]]>`.
+    /// The wrapper is markup, never content: without this, `run_command`
+    /// received the literal CDATA text and every shell call failed.
+    static func unwrappingCDATA(_ value: LFJSONValue) -> LFJSONValue {
+        switch value {
+        case .string(let text):
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.hasPrefix("<![CDATA["), trimmed.hasSuffix("]]>"),
+                  trimmed.count >= 12 else { return value }
+            return .string(String(trimmed.dropFirst(9).dropLast(3)))
+        case .array(let values):
+            return .array(values.map(unwrappingCDATA))
+        case .object(let object):
+            return .object(object.mapValues(unwrappingCDATA))
+        default:
+            return value
+        }
     }
 
     private static func decodePayload(_ payload: String) -> [Shaped] {
@@ -201,7 +252,33 @@ enum ToolParser {
             }
         }
 
-        // 2c. Anthropic-style <invoke name="…"><parameter name="…">…</parameter>
+        // 2c. Function-call XML emitted by several small instruct models:
+        // <function name="read_file"><param name="path">A.swift</param></function>
+        // This is distinct from the llama-style <function=name> wrapper above.
+        if let regex = try? NSRegularExpression(
+            pattern: #"<function\s+name=["']?([A-Za-z0-9_]+)["']?\s*>([\s\S]*?)</function>"#) {
+            let range = NSRange(text.startIndex..., in: text)
+            for match in regex.matches(in: text, range: range) where match.numberOfRanges > 2 {
+                guard let nameRange = Range(match.range(at: 1), in: text),
+                      let bodyRange = Range(match.range(at: 2), in: text) else { continue }
+                let name = String(text[nameRange])
+                let body = String(text[bodyRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let arguments: LFJSONValue
+                if let xml = xmlArguments(body) {
+                    arguments = xml
+                } else if let value = TolerantJSON.value(from: body) {
+                    arguments = coerceArguments(value)
+                } else {
+                    arguments = .object([:])
+                }
+                candidates.append(Candidate(
+                    range: bodyRange,
+                    payload: #"{"name":"\#(name)","arguments":\#(arguments.encoded())}"#,
+                    containerRange: Range(match.range, in: text)))
+            }
+        }
+
+        // 2d. Anthropic-style <invoke name="…"><parameter name="…">…</parameter>
         if let regex = try? NSRegularExpression(
             pattern: #"<invoke\s+name=["']?([A-Za-z0-9_]+)["']?\s*>([\s\S]*?)</invoke>"#) {
             let range = NSRange(text.startIndex..., in: text)
@@ -217,11 +294,25 @@ enum ToolParser {
             }
         }
 
-        // 3/4. Bare balanced JSON objects — only where nothing else claimed the range.
-        candidates.append(contentsOf: bareObjects(in: text, excluding: candidates.map(\.range)))
+        // 3/4. Bare balanced JSON objects — only where nothing that already
+        // decodes claimed the range. A fenced candidate whose captured payload
+        // is truncated (for example, the JSON string argument itself contains
+        // a ``` fence) must not mask the real, larger object behind it.
+        let decodableRanges = candidates
+            .filter { !decodePayload($0.payload).isEmpty }
+            .map(\.range)
+        candidates.append(contentsOf: bareObjects(in: text, excluding: decodableRanges))
 
-        // Order by appearance, drop overlaps (fenced beats bare).
-        candidates.sort { $0.range.lowerBound < $1.range.lowerBound }
+        // Prefer candidates that decode to a real call; among those, first
+        // appearance wins (a fenced wrapper shares its lower bound with the
+        // JSON object it contains, so the wrapper keeps priority for display
+        // stripping).
+        candidates.sort { left, right in
+            let leftDecodes = !decodePayload(left.payload).isEmpty
+            let rightDecodes = !decodePayload(right.payload).isEmpty
+            if leftDecodes != rightDecodes { return leftDecodes }
+            return left.range.lowerBound < right.range.lowerBound
+        }
         var result: [Candidate] = []
         var claimed: [Range<String.Index>] = []
         for candidate in candidates {
@@ -231,6 +322,9 @@ enum ToolParser {
                 claimed.append(candidate.range)
             }
         }
+        // Callers (parse, stripping, display cleanup) consume candidates in
+        // document order.
+        result.sort { $0.range.lowerBound < $1.range.lowerBound }
         return result
     }
 
@@ -360,6 +454,7 @@ enum ToolParser {
         let hasToolTag = lower.contains("<tool_call>")
             || lower.contains("</tool_call>")
             || lower.contains("<function=")
+            || lower.contains("<function name=")
             || lower.contains("<invoke")
         guard hasToolFence || hasToolTag, parse(text).isEmpty else { return nil }
         return "the tool wrapper did not contain a valid name and JSON arguments object"
@@ -458,7 +553,7 @@ enum ToolParser {
     }
 
     private static func xmlArguments(_ body: String) -> LFJSONValue? {
-        if body.contains("<parameter") {
+        if body.contains("<parameter") || body.contains("<param") {
             let encoded = invokeParameters(body)
             if encoded != "{}" { return TolerantJSON.value(from: encoded) }
         }
@@ -480,7 +575,7 @@ enum ToolParser {
 
     private static func invokeParameters(_ body: String) -> String {
         guard let regex = try? NSRegularExpression(
-            pattern: #"<parameter\s+name="([^"]+)">([\s\S]*?)</parameter>"#) else {
+            pattern: #"<(?:parameter|param)\s+name=["']([^"']+)["']>([\s\S]*?)</(?:parameter|param)>"#) else {
             return "{}"
         }
         var object: [String: LFJSONValue] = [:]

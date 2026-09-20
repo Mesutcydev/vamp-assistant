@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Project/user hooks — ZCode-style subprocess JSON, not JS plugins.
@@ -122,6 +123,45 @@ struct HookRunner: Sendable {
 
     // MARK: Subprocess
 
+    /// Ignore SIGPIPE once, process-wide: a hook that exits before its stdin
+    /// is drained makes the write fail with EPIPE, which would otherwise
+    /// terminate the app.
+    private static let sigpipeIgnored: Void = {
+        _ = signal(SIGPIPE, SIG_IGN)
+    }()
+
+    /// Writes the hook payload without ever blocking the caller. The write
+    /// runs on a background queue against a duplicate of the pipe's write fd,
+    /// with a deadline and EPIPE/EAGAIN handling; the duplicate is closed
+    /// afterwards, which gives the hook its EOF.
+    private func writePayload(_ data: Data, to pipe: Pipe, timeout: TimeInterval) {
+        _ = Self.sigpipeIgnored
+        let fd = dup(pipe.fileHandleForWriting.fileDescriptor)
+        guard fd >= 0 else { return }
+        let flags = fcntl(fd, F_GETFL)
+        if flags >= 0 { _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK) }
+        let deadline = Date().addingTimeInterval(timeout)
+        DispatchQueue.global(qos: .userInitiated).async {
+            var offset = 0
+            data.withUnsafeBytes { raw in
+                guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return }
+                while offset < data.count, Date() < deadline {
+                    let written = Darwin.write(fd, base + offset, data.count - offset)
+                    if written > 0 {
+                        offset += written
+                    } else if written < 0, errno == EINTR {
+                        continue
+                    } else if written < 0, errno == EAGAIN || errno == EWOULDBLOCK {
+                        usleep(5_000)
+                    } else {
+                        break  // EPIPE or a closed pipe: fail open.
+                    }
+                }
+            }
+            close(fd)
+        }
+    }
+
     private func invoke(_ hook: HookConfig, payload: LFJSONValue) -> HookDecision {
         guard !hook.command.isEmpty else { return .allow }
         let process = Process()
@@ -140,10 +180,14 @@ struct HookRunner: Sendable {
         } catch {
             return .allow
         }
-        stdin.fileHandleForWriting.write(Data(payload.encoded().utf8))
+        let timeout = min(max(0.2, hook.timeout), 15)
+        // Writing the whole payload before reading any output could block
+        // forever on a hook that never drains stdin, and FileHandle.write
+        // raises an uncatchable exception on EPIPE. Hand the bytes to a
+        // non-blocking writer with its own deadline instead.
+        writePayload(Data(payload.encoded().utf8), to: stdin, timeout: min(timeout, 2))
         try? stdin.fileHandleForWriting.close()
 
-        let timeout = min(max(0.2, hook.timeout), 15)
         let deadline = Date().addingTimeInterval(timeout)
         while process.isRunning, Date() < deadline {
             Thread.sleep(forTimeInterval: 0.02)

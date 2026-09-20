@@ -12,15 +12,16 @@ struct GeneralTab: View {
             SettingsCard(
                 title: "Appearance",
                 icon: "paintbrush",
-                footer: "Every accent is checked for contrast in both light and dark, so no palette makes text harder to read. Typeface changes prose and chrome only — code, diffs, and terminals stay monospaced.") {
+                footer: "Every accent is checked for contrast in both light and dark, so no palette makes text harder to read. Typeface changes reading prose only — controls stay system sans, and code, diffs, and terminals stay monospaced.") {
                 SettingRow(label: "Appearance") {
-                    Picker("Appearance", selection: $settings.appearance) {
-                        ForEach(AppAppearance.allCases) { appearance in
-                            Text(appearance.label).tag(appearance)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
+                    InstrumentSegmentedControl(
+                        // Capture overrides are read-only and must not write
+                        // the user's saved appearance or display a stale choice.
+                        selection: DesignPreview.appearanceOverride.map { .constant($0) }
+                            ?? $settings.appearance,
+                        options: AppAppearance.allCases.map { ($0.label, $0) })
+                    .frame(width: 280)
+                    .accessibilityLabel("Appearance")
                 }
 
                 SettingRow(label: "Accent", value: settings.accentPalette.label) {
@@ -28,37 +29,24 @@ struct GeneralTab: View {
                 }
 
                 SettingRow(label: "Typeface", value: settings.typeface.help) {
-                    Picker("Typeface", selection: $settings.typeface) {
-                        ForEach(AppTypeface.allCases) { face in
-                            Text(face.label).tag(face)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
+                    InstrumentSegmentedControl(
+                        selection: $settings.typeface,
+                        options: AppTypeface.allCases.map { ($0.label, $0) })
                     .frame(width: 280)
+                    .accessibilityLabel("Typeface")
                 }
 
                 SettingRow(label: "Text size", value: settings.textSize.label) {
-                    Picker("Text size", selection: $settings.textSize) {
-                        ForEach(AppTextSize.allCases) { size in
-                            Text(size.label).tag(size)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
+                    InstrumentSegmentedControl(
+                        selection: $settings.textSize,
+                        options: AppTextSize.allCases.map { ($0.label, $0) })
                     .frame(width: 280)
+                    .accessibilityLabel("Text size")
                 }
             }
 
-            SettingsCard(title: "Composer", icon: "text.cursor", footer: "Motion reflects interaction state and automatically stops when Reduce Motion is enabled. Response style controls the agent’s final handoff.") {
-                SettingRow(label: "Border motion", value: settings.composerFlow.help) {
-                    Picker("Border motion", selection: $settings.composerFlow) {
-                        ForEach(ComposerFlow.allCases) { flow in
-                            Text(flow.label).tag(flow)
-                        }
-                    }
-                    .labelsHidden()
-                }
+            SettingsCard(title: "Composer", icon: "text.cursor", footer: "The composer border stays a static hairline. Response style controls the agent’s final handoff.") {
+                SettingToggle(label: "Show homepage suggestions", isOn: $settings.showHomeSuggestions)
                 SettingRow(label: "Response style", value: settings.outputStyle.help) {
                     Picker("Response style", selection: $settings.outputStyle) {
                         ForEach(ProjectPolicy.OutputStyle.allCases) { style in
@@ -67,7 +55,6 @@ struct GeneralTab: View {
                     }
                     .labelsHidden()
                 }
-                SettingToggle(label: "Animate interaction border", isOn: $settings.composerBorderAnimation)
             }
 
             SettingsCard(title: "Keyboard", icon: "keyboard", footer: "Shortcuts accept readable forms such as cmd+return. Esc always stops a running agent, and ⇧⌘M opens Model Manager.") {
@@ -75,7 +62,7 @@ struct GeneralTab: View {
                 Text(settings.enterSends
                      ? "Enter sends the message; Shift+Enter inserts a newline. The configured Send shortcut also works anywhere."
                      : "Enter inserts a newline. Use the configured Send shortcut to send.")
-                    .font(.caption)
+                    .font(.app(size: 11.5 ))
                     .foregroundStyle(Theme.textSecondary)
                 SettingRow(label: "Send shortcut", value: ShortcutBinding(rawValue: settings.sendShortcut).displayValue) {
                     ShortcutEditor(placeholder: "cmd+return", value: $settings.sendShortcut)
@@ -96,6 +83,14 @@ struct GeneralTab: View {
                         preferences.autoResumeDownloads = newValue
                         AppPreferencesStore.shared.save(preferences)
                     }))
+                SettingRow(label: "Updates") {
+                    Button("Check for updates") {
+                        if let url = URL(string: "https://thevamp.app/assistant") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    .buttonStyle(LFCapsuleButtonStyle())
+                }
             }
 
         }

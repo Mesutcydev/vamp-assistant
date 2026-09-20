@@ -2,99 +2,83 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-/// Composer-local materials. The chassis is a machined part docked into the
-/// bottom of the page canvas; tonal steps and seams carry the hierarchy, not
-/// shadows. Light values sit cooler than the warm page canvas; dark values
-/// follow the graphite instrument family so the deck reads as the same object
-/// in another lighting condition.
-private enum VampChassis {
-    // Neutral machine grays. The dark family is deliberately cast-free (equal
-    // R/G/B) so the deck reads as the mac's charcoal instrument, not a
-    // green-ish tint. Light values stay slightly cool against the warm page.
-    static let top = RemoteInstrument.adaptive(0xDFDEDC, 0x313131)
-    static let bottom = RemoteInstrument.adaptive(0xD2D1CE, 0x2A2A2A)
-    // The dark recess is a machined plate, not a deep socket: one subtle step
-    // below the chassis (so the editor reads as set into the deck) but well
-    // above the near-black insert. The border is a hairline engraving, not a
-    // heavy ring, so the plate and chassis read as one component.
-    static let recess = RemoteInstrument.adaptive(0xC7C6C3, 0x2A2A2A)
-    static let recessEdge = RemoteInstrument.adaptive(0xA9A8A5, 0x1C1C1C)
-    static let recessLight = RemoteInstrument.adaptive(0xF5F4F1, 0x3E3E3E)
-    static let key = RemoteInstrument.adaptive(0xE8E7E4, 0x363636)
-    static let insert = RemoteInstrument.adaptive(0x2B2B2A, 0x121212)
-    static let edge = RemoteInstrument.adaptive(0xF8F7F4, 0x4A4A4A)
-    static let seamDark = RemoteInstrument.adaptive(0x9C9B99, 0x151515)
-    static let seamLight = RemoteInstrument.adaptive(0xF4F3F0, 0x4A4A4A)
+/// Composer-local hardware materials. The deck is one machined object rather
+/// than a stack of unrelated rounded controls.
+private enum VampComposerChassis {
+    static let top = RemoteInstrument.adaptive(0xFBF9FB, 0x333333)
+    static let bottom = RemoteInstrument.adaptive(0xE8E5EA, 0x272727)
+    static let recess = RemoteInstrument.adaptive(0xFFFFFF, 0x202020)
+    static let recessEdge = RemoteInstrument.adaptive(0xB5AFB8, 0x0D0D0D)
+    static let recessLight = RemoteInstrument.adaptive(0xFFFFFF, 0x454545)
+    static let seamDark = RemoteInstrument.adaptive(0xA39DA6, 0x111111)
+    static let seamLight = RemoteInstrument.adaptive(0xFFFFFF, 0x484848)
+    static let insert = RemoteInstrument.adaptive(0x232226, 0x0C0C0C)
 
-    static var gradient: LinearGradient {
+    static var face: LinearGradient {
         LinearGradient(colors: [top, bottom], startPoint: .top, endPoint: .bottom)
     }
 }
 
-/// A machined channel between adjacent parts: one dark edge plus one light
-/// edge, so a boundary reads as depth instead of a table divider.
-private struct VampChassisSeam: View {
-    var axis: Axis
+private struct VampComposerSeam: View {
+    let axis: Axis
 
     var body: some View {
-        Group {
-            if axis == .horizontal {
-                VStack(spacing: 0) {
-                    Rectangle().fill(VampChassis.seamDark)
-                    Rectangle().fill(VampChassis.seamLight)
-                }
-                .frame(height: 2)
-            } else {
-                HStack(spacing: 0) {
-                    Rectangle().fill(VampChassis.seamDark)
-                    Rectangle().fill(VampChassis.seamLight)
-                }
-                .frame(width: 2)
+        if axis == .horizontal {
+            VStack(spacing: 0) {
+                Rectangle().fill(VampComposerChassis.seamDark)
+                Rectangle().fill(VampComposerChassis.seamLight)
             }
+            .frame(height: 1.5)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        } else {
+            HStack(spacing: 0) {
+                Rectangle().fill(VampComposerChassis.seamDark)
+                Rectangle().fill(VampComposerChassis.seamLight)
+            }
+            .frame(width: 1.5)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
         }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 }
 
-/// Status LED: a live breathe only while the machine is actually working.
 private struct VampComposerLED: View {
     let color: Color
-    var isActive: Bool
+    let isActive: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var breathing = false
 
-    private var breathes: Bool { isActive && !reduceMotion && scenePhase == .active }
+    private var animates: Bool { isActive && !reduceMotion && scenePhase == .active }
 
     var body: some View {
         Circle()
             .fill(color)
             .frame(width: 5.5, height: 5.5)
-            .opacity(breathes ? (breathing ? 1 : 0.65) : 1)
-            .onAppear { breathing = isActive }
-            .onChange(of: isActive) { _, active in breathing = active }
-            .animation(breathes ? .easeInOut(duration: 1.1).repeatForever(autoreverses: true) : nil,
+            .opacity(animates && breathing ? 0.58 : 1)
+            .onAppear { breathing = true }
+            .animation(animates ? .easeInOut(duration: 1.05).repeatForever(autoreverses: true) : nil,
                        value: breathing)
             .accessibilityHidden(true)
     }
 }
 
-/// Bay press: quick settle down, slightly slower return. Reads as a key.
-private struct VampBayPressStyle: ButtonStyle {
+private struct VampComposerBayStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.982 : 1)
-            .opacity(configuration.isPressed ? 0.82 : 1)
-            .animation(configuration.isPressed ? .easeIn(duration: 0.1) : .easeOut(duration: 0.15),
+            .background(configuration.isPressed ? RemoteInstrument.seam.opacity(0.22) : Color.clear)
+            .offset(y: configuration.isPressed && !reduceMotion ? 1 : 0)
+            .opacity(configuration.isPressed ? 0.78 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: configuration.isPressed ? 0.08 : 0.14),
                        value: configuration.isPressed)
     }
 }
 
-/// The bottom control deck of the Vamp machine: one docked chassis holding a
-/// recessed editor, a bayed control row, and an integrated status strip.
+/// A compact restoration of Vamp's original docked instrument composer. The
+/// editor grows intrinsically while the segmented control deck remains fixed.
 struct RemoteComposer: View {
     @Binding var draft: String
     let isRunning: Bool
@@ -110,404 +94,82 @@ struct RemoteComposer: View {
     var onShare: (() -> Void)? = nil
     var modeName: String? = nil
 
-    @Environment(\.verticalSizeClass) private var verticalSizeClass
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @FocusState private var isComposerFocused: Bool
     @State private var showTools = false
     @State private var showCommandsFallback = false
     @State private var keyboardVisible = false
+    @FocusState private var focused: Bool
 
-    private var isCompact: Bool { verticalSizeClass == .compact }
-    private var isAccessibility: Bool { dynamicTypeSize.isAccessibilitySize }
-    private var hasDraft: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    private var hasDraft: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var unavailable: Bool { !isReachable || isSending || (!isRunning && !hasDraft) }
+    private var primaryLabel: String { isRunning ? (hasDraft ? "Queue follow-up" : "Stop the agent") : "Send" }
+    private var primarySymbol: String { isRunning ? (hasDraft ? "text.badge.plus" : "stop.fill") : "arrow.up" }
+    private var placeholder: String {
+        if !isReachable { return "Draft while reconnecting…" }
+        return isRunning ? "Queue a follow-up or steer…" : "Message Vamp…"
     }
-
-    // Instrument proportions. The chassis extends through the bottom safe
-    // area; the band below the status strip is chassis material, not a gap.
-    private var chassisRadius: CGFloat { 9 }
-    private var editorHeight: CGFloat { isCompact ? 50 : 74 }
-    private var deckHeight: CGFloat { isCompact ? 52 : 56 }
-    private var statusHeight: CGFloat { isCompact ? 20 : 22 }
 
     var body: some View {
-        chassis
-            .buttonStyle(VampBayPressStyle())
-            .foregroundStyle(RemoteInstrument.ink)
-            // The chassis is one full-width instrument. The material bleeds
-            // through the bottom safe area so the deck reaches the physical
-            // screen edge; only the material extends, the controls stay above
-            // the home indicator. When the keyboard is up it already covers
-            // that region, so the bleed is suppressed to keep the deck flush
-            // against the keyboard instead of painting behind it.
-            .background(alignment: .bottom) {
-                Group {
-                    if keyboardVisible {
-                        dockShape.fill(VampChassis.gradient)
-                    } else {
-                        dockShape.fill(VampChassis.gradient).ignoresSafeArea(edges: .bottom)
-                    }
-                }
-            }
-            .overlay(alignment: .bottom) {
-                Group {
-                    if keyboardVisible {
-                        dockShape.strokeBorder(VampChassis.edge, lineWidth: 0.75)
-                    } else {
-                        dockShape.strokeBorder(VampChassis.edge, lineWidth: 0.75)
-                            .ignoresSafeArea(edges: .bottom)
-                    }
-                }
+        VStack(spacing: 0) {
+            RemoteComposerEditor(draft: $draft, placeholder: placeholder, focused: $focused)
+            VampComposerSeam(axis: .horizontal)
+            RemoteComposerDeck(
+                modelName: modelName, modeName: modeName,
+                modelEnabled: onSelectModel != nil && !isRunning && isReachable,
+                shareEnabled: onShare != nil && isReachable,
+                primaryLabel: primaryLabel, primarySymbol: primarySymbol,
+                unavailable: unavailable, isSending: isSending,
+                showsSteer: isRunning && hasDraft, steerEnabled: isReachable && !isSending,
+                onModel: { onSelectModel?() }, onShare: { onShare?() },
+                onTools: { showTools = true }, onPrimary: primaryAction,
+                onSteer: { (onSteer ?? onSend)() })
+            VampComposerSeam(axis: .horizontal)
+            RemoteComposerStatus(
+                title: statusTitle,
+                modeName: modeName,
+                color: statusColor,
+                isActive: isReachable && (isRunning || isSending),
+                hasError: hasError)
+        }
+        .background {
+            UnevenRoundedRectangle(topLeadingRadius: 8, bottomLeadingRadius: 0,
+                                   bottomTrailingRadius: 0, topTrailingRadius: 8)
+                .fill(VampComposerChassis.face)
+                .ignoresSafeArea(.container, edges: keyboardVisible ? [] : .bottom)
+        }
+        .overlay(alignment: .top) {
+            Rectangle().fill(VampComposerChassis.recessLight.opacity(0.8)).frame(height: 0.75)
                 .allowsHitTesting(false)
+        }
+        .frame(maxWidth: RemoteInstrument.composerWidth)
+        .frame(maxWidth: .infinity)
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardVisible = true }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardVisible = false }
+        .sheet(isPresented: $showTools) {
+            RemoteComposerToolsSheet { command in
+                showTools = false
+                choose(command)
             }
-            .padding(.top, 9)
-            .frame(maxWidth: RemoteInstrument.composerWidth)
-            .frame(maxWidth: .infinity)
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
-                keyboardVisible = true
+        }
+        .alert("Commands", isPresented: $showCommandsFallback) {
+            ForEach(RemoteComposerCommand.commands) { command in
+                Button(command.title) { choose(command) }
             }
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-                keyboardVisible = false
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("Choose a prompt to insert into your message.") }
+        .onChange(of: draft) { _, value in
+            if value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "/commands" {
+                draft = ""
+                showCommandsFallback = true
             }
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: isComposerFocused)
-            .sheet(isPresented: $showTools) {
-                RemoteComposerToolsSheet { command in
-                    showTools = false
-                    choose(command)
-                }
-            }
-            .alert("Commands", isPresented: $showCommandsFallback) {
-                ForEach(RemoteComposerCommand.commands) { command in
-                    Button(command.title) { choose(command) }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Choose a prompt to insert into your message.")
-            }
-            .onChange(of: draft) { _, value in
-                if value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "/commands" {
-                    draft = ""
-                    showCommandsFallback = true
-                }
-            }
-    }
-
-    @ViewBuilder private var chassis: some View {
-        if isAccessibility {
-            accessibilityStack
-        } else {
-            standardStack
         }
     }
 
-    private var dockShape: UnevenRoundedRectangle {
-        UnevenRoundedRectangle(
-            topLeadingRadius: chassisRadius,
-            bottomLeadingRadius: 0,
-            bottomTrailingRadius: 0,
-            topTrailingRadius: chassisRadius,
-            style: .continuous)
-    }
-
-    private var standardStack: some View {
-        VStack(spacing: 0) {
-            editorRecess
-            VampChassisSeam(axis: .horizontal)
-            controlDeck
-            VampChassisSeam(axis: .horizontal)
-            statusStrip
+    private func choose(_ command: RemoteComposerCommand) {
+        draft = command.prompt
+        Task { @MainActor in
+            await Task.yield()
+            focused = true
         }
-    }
-
-    private var accessibilityStack: some View {
-        VStack(spacing: 0) {
-            editorRecess
-            VampChassisSeam(axis: .horizontal)
-            modelBay.frame(minHeight: 52)
-            VampChassisSeam(axis: .horizontal)
-            HStack(spacing: 0) {
-                shareBay
-                VampChassisSeam(axis: .vertical)
-                toolsBay
-                VampChassisSeam(axis: .vertical)
-                Group {
-                    if isComposerFocused { keyboardBay } else { modeBay }
-                }
-            }
-            .frame(height: 52)
-            VampChassisSeam(axis: .horizontal)
-            terminalBay(fullWidth: true)
-            VampChassisSeam(axis: .horizontal)
-            statusStrip
-        }
-    }
-
-    private var editorRecess: some View {
-        TextField(placeholder, text: $draft,
-                  prompt: Text(isAccessibility ? "Message…" : placeholder)
-                      .foregroundStyle(RemoteInstrument.secondaryInk),
-                  axis: .vertical)
-            .accessibilityLabel(placeholder)
-            .font(.body)
-            .lineLimit(1...(isCompact ? 3 : 8))
-            .foregroundStyle(RemoteInstrument.ink)
-            .tint(RemoteInstrument.ink)
-            .focused($isComposerFocused)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, minHeight: editorHeight, alignment: .topLeading)
-            .background {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(VampChassis.recess)
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(VampChassis.recessEdge, lineWidth: 1)
-                    .allowsHitTesting(false)
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(VampChassis.recessLight, lineWidth: 0.75)
-                    .offset(y: 0.75)
-                    .opacity(0.55)
-                    .allowsHitTesting(false)
-            }
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(RemoteInstrument.orange)
-                    .frame(width: 2, height: 22)
-                    .padding(.leading, 2)
-                    .opacity(isComposerFocused ? 1 : 0)
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isComposerFocused)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
-            .padding(.horizontal, 6)
-            .padding(.top, 8)
-            .padding(.bottom, 6)
-    }
-
-    private var controlDeck: some View {
-        HStack(spacing: 0) {
-            shareBay.frame(width: 52)
-            VampChassisSeam(axis: .vertical)
-            modelBay
-            VampChassisSeam(axis: .vertical)
-            toolsBay.frame(width: 56)
-            VampChassisSeam(axis: .vertical)
-            Group {
-                if isComposerFocused { keyboardBay } else { modeBay }
-            }
-            .frame(width: 80)
-            VampChassisSeam(axis: .vertical)
-            terminalBay().frame(width: 60)
-        }
-        .frame(height: deckHeight)
-    }
-
-    private var shareBay: some View {
-        Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            onShare?()
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(RemoteInstrument.ink)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(Rectangle())
-        }
-        .disabled(onShare == nil || !isReachable)
-        .accessibilityLabel("Share clipboard or files with Mac")
-    }
-
-    private var toolsBay: some View {
-        Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            showTools = true
-        } label: {
-            Image(systemName: "circle.grid.2x2.fill")
-                .font(.system(size: 22))
-                .foregroundStyle(RemoteInstrument.ink)
-                .overlay(alignment: .topTrailing) {
-                    Circle()
-                        .fill(RemoteInstrument.orange)
-                        .frame(width: 4.5, height: 4.5)
-                        .offset(x: 2, y: -1)
-                        .opacity(0.9)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(Rectangle())
-        }
-        .accessibilityLabel("Tools and context")
-    }
-
-    private var keyboardBay: some View {
-        Button {
-            isComposerFocused = false
-        } label: {
-            Image(systemName: "keyboard.chevron.compact.down")
-                .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(RemoteInstrument.ink)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(Rectangle())
-        }
-        .accessibilityLabel("Hide keyboard")
-    }
-
-    private var modelBay: some View {
-        Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            onSelectModel?()
-        } label: {
-            HStack(spacing: 6) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("MODEL")
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
-                        .tracking(1.2)
-                        .foregroundStyle(RemoteInstrument.secondaryInk)
-                    Text(modelShortName)
-                        .font(isAccessibility ? .body.weight(.medium) : .system(size: 15, weight: .medium))
-                        .lineLimit(isAccessibility ? 2 : 1)
-                        .truncationMode(.tail)
-                        .minimumScaleFactor(0.82)
-                        .foregroundStyle(RemoteInstrument.ink)
-                }
-                Spacer(minLength: 6)
-                if onSelectModel != nil {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(RemoteInstrument.secondaryInk)
-                }
-            }
-            .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .disabled(onSelectModel == nil || isRunning || !isReachable)
-        .accessibilityLabel("Model, \(modelName ?? "not selected")")
-        .accessibilityHint(isRunning ? "Model cannot change during a turn" : "Opens the searchable model list")
-    }
-
-    /// A compact, readable label for the bay. The server sends a provider tag
-    /// in a trailing parenthetical (e.g. "Muse Spark 1.3…(opencode Go)"). That
-    /// tag is what forces the ugly mid-string "…(…)…" collapse in a one-line
-    /// bay, so the bay shows the model core and lets the picker surface the
-    /// provider. Falls back to tail truncation instead of a mid-string cut.
-    private var modelShortName: String {
-        guard let modelName, !modelName.isEmpty else { return "Choose model" }
-        // Drop a trailing "(provider)" tag when present, preserving the core.
-        if let open = modelName.lastIndex(of: "("),
-           open > modelName.startIndex,
-           modelName.hasSuffix(")") {
-            return String(modelName[modelName.startIndex..<open])
-                .trimmingCharacters(in: .whitespaces)
-        }
-        return modelName
-    }
-
-    private var modeBay: some View {
-        Group {
-            if let modeName {
-                Text(modeName.uppercased())
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, minHeight: 34)
-                    .background(VampChassis.insert, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    .overlay(alignment: .bottom) {
-                        Capsule()
-                            .fill(RemoteInstrument.orange)
-                            .frame(width: 12, height: 2)
-                            .padding(.bottom, 3)
-                            .allowsHitTesting(false)
-                    }
-                    .accessibilityLabel("Session mode, \(modeName)")
-            }
-        }
-        .padding(.horizontal, 5)
-        .padding(.vertical, 5)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func terminalBay(fullWidth: Bool = false) -> some View {
-        Button(action: primaryAction) {
-            ZStack(alignment: .center) {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(primaryUnavailable ? VampChassis.key : VampChassis.insert)
-                Image(systemName: primarySymbol)
-                    .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(primaryUnavailable ? RemoteInstrument.secondaryInk : Color.white)
-                    .contentTransition(.symbolEffect(.replace))
-                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: primarySymbol)
-            }
-            .overlay(alignment: .topTrailing) {
-                if isRunning, !hasDraft, !primaryUnavailable {
-                    Circle()
-                        .fill(RemoteInstrument.orange)
-                        .frame(width: 4, height: 4)
-                        .padding(4)
-                        .accessibilityHidden(true)
-                }
-            }
-            .frame(maxWidth: fullWidth ? .infinity : 48,
-                   minHeight: fullWidth ? 48 : deckHeight - 12,
-                   maxHeight: fullWidth ? 48 : nil,
-                   alignment: .center)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 6)
-            .contentShape(Rectangle())
-        }
-        .disabled(primaryUnavailable)
-        .accessibilityLabel(primaryLabel)
-    }
-
-    private var statusStrip: some View {
-        HStack(spacing: 7) {
-            VampComposerLED(color: statusColor, isActive: statusAnimated)
-            Text(statusTitle)
-                .foregroundStyle(hasError ? RemoteInstrument.danger : RemoteInstrument.secondaryInk)
-            if let modeName, !isAccessibility {
-                Text("·")
-                Text(modeName.uppercased())
-            }
-            Spacer(minLength: 8)
-            if isRunning, hasDraft {
-                Button {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    if let onSteer { onSteer() } else { onSend() }
-                } label: {
-                    Text("STEER")
-                        .tracking(1)
-                        .foregroundStyle(RemoteInstrument.orange)
-                        .padding(.horizontal, 8)
-                        .frame(minHeight: 24)
-                        .contentShape(Rectangle())
-                }
-                .disabled(!isReachable || isSending)
-                .accessibilityHint("Redirects the current task instead of waiting")
-            }
-        }
-        .font(.caption2.monospaced().weight(.semibold))
-        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-        .padding(.horizontal, 12)
-        .frame(maxWidth: .infinity, minHeight: statusHeight)
-        .foregroundStyle(RemoteInstrument.secondaryInk)
-    }
-
-    private var primaryUnavailable: Bool {
-        !isReachable || isSending || (!isRunning && !hasDraft)
-    }
-
-    private var primarySymbol: String {
-        if isRunning, hasDraft { return "text.badge.plus" }
-        if isRunning { return "stop.fill" }
-        return "arrow.up"
-    }
-
-    private var primaryLabel: String {
-        if isRunning, hasDraft { return "Queue follow-up" }
-        if isRunning { return "Stop the agent" }
-        return "Send"
     }
 
     private var statusTitle: String {
@@ -525,42 +187,245 @@ struct RemoteComposer: View {
         return RemoteInstrument.green
     }
 
-    private var statusAnimated: Bool {
-        isReachable && (isRunning || isSending)
-    }
-
-    private func choose(_ command: RemoteComposerCommand) {
-        draft = command.prompt
-        Task { @MainActor in
-            await Task.yield()
-            isComposerFocused = true
-        }
-    }
-
-    private var placeholder: String {
-        if !isReachable { return "Draft while reconnecting…" }
-        if isRunning { return "Queue a follow-up or steer…" }
-        return "What’s on your mind?"
-    }
-
     private func primaryAction() {
+        guard !unavailable else { return }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        if isRunning, hasDraft {
-            if let onQueue { onQueue() } else { onSend() }
-        } else if isRunning {
-            onStop()
-        } else {
-            submit()
-        }
+        if isRunning, hasDraft { (onQueue ?? onSend)() }
+        else if isRunning { onStop() }
+        else { onSend() }
     }
 
-    private func submit() {
-        if draft.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "/commands" {
-            draft = ""
-            showCommandsFallback = true
-        } else {
-            onSend()
+}
+
+private struct RemoteComposerStatus: View {
+    let title: String
+    let modeName: String?
+    let color: Color
+    let isActive: Bool
+    let hasError: Bool
+
+    var body: some View {
+        HStack(spacing: 7) {
+            VampComposerLED(color: color, isActive: isActive)
+            Text(title)
+                .foregroundStyle(hasError ? RemoteInstrument.danger : RemoteInstrument.secondaryInk)
+            if let modeName, !modeName.isEmpty {
+                Text("·")
+                Text(modeName.uppercased())
+            }
+            Spacer(minLength: 0)
+            Text("VAMP / REMOTE")
+                .foregroundStyle(RemoteInstrument.secondaryInk.opacity(0.72))
         }
+        .font(.caption2.monospaced().weight(.semibold))
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .tracking(0.5)
+        .padding(.horizontal, 11)
+        .frame(maxWidth: .infinity, minHeight: 20)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct RemoteComposerEditor: View {
+    @Binding var draft: String
+    let placeholder: String
+    var focused: FocusState<Bool>.Binding
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var maximumLines: Int {
+        if dynamicTypeSize.isAccessibilitySize { return verticalSizeClass == .compact ? 1 : 3 }
+        return verticalSizeClass == .compact ? 3 : 6
+    }
+
+    var body: some View {
+        TextField("", text: $draft, axis: .vertical)
+            .font(.body)
+            .lineLimit(1...maximumLines)
+            .fixedSize(horizontal: false, vertical: true)
+            .focused(focused)
+            .foregroundStyle(RemoteInstrument.ink)
+            .tint(RemoteInstrument.ink)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
+            // ponytail: SwiftUI truncates a `prompt` to one line on a
+            // vertical-axis field, so at accessibility sizes this read
+            // "Queue a follow-u…". An overlay scales to fit instead. Held to
+            // one line on purpose: the empty field is one line tall and the
+            // canonical composer capture measures that geometry.
+            .overlay(alignment: .leading) {
+                if draft.isEmpty {
+                    Text(placeholder)
+                        .font(.body)
+                        .foregroundStyle(RemoteInstrument.secondaryInk)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .padding(.horizontal, 12)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
+            .background(VampComposerChassis.recess, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(VampComposerChassis.recessEdge, lineWidth: focused.wrappedValue ? 1 : 0.75)
+                    .allowsHitTesting(false)
+            }
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(VampComposerChassis.recessLight.opacity(focused.wrappedValue ? 0.72 : 0.42))
+                    .frame(height: 0.75)
+                    .padding(.horizontal, 7)
+                    .allowsHitTesting(false)
+            }
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(RemoteInstrument.orange)
+                    .frame(width: 2, height: 21)
+                    .padding(.leading, 1)
+                    .opacity(focused.wrappedValue ? 1 : 0)
+                    .allowsHitTesting(false)
+            }
+            .padding(.horizontal, 6)
+            .padding(.top, 7)
+            .padding(.bottom, 6)
+            .accessibilityLabel("Message")
+            .accessibilityIdentifier("remote.composer.editor")
+    }
+}
+
+private struct RemoteComposerDeck: View {
+    let modelName: String?
+    let modeName: String?
+    let modelEnabled: Bool
+    let shareEnabled: Bool
+    let primaryLabel: String
+    let primarySymbol: String
+    let unavailable: Bool
+    let isSending: Bool
+    let showsSteer: Bool
+    let steerEnabled: Bool
+    let onModel: () -> Void
+    let onShare: () -> Void
+    let onTools: () -> Void
+    let onPrimary: () -> Void
+    let onSteer: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    private var stacksControls: Bool { dynamicTypeSize.isAccessibilitySize && verticalSizeClass != .compact }
+
+    private var modelTitle: String {
+        guard let modelName, !modelName.isEmpty else { return "Choose model" }
+        if let open = modelName.lastIndex(of: "("), open > modelName.startIndex, modelName.hasSuffix(")") {
+            return String(modelName[..<open]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return modelName
+    }
+
+    var body: some View {
+        let layout = stacksControls
+            ? AnyLayout(VStackLayout(spacing: 0))
+            : AnyLayout(HStackLayout(spacing: 0))
+        layout {
+            if !stacksControls {
+                share.frame(width: 50)
+                VampComposerSeam(axis: .vertical)
+            }
+            Button(action: onModel) {
+                HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("MODEL")
+                            .font(.system(size: 8, weight: .medium, design: .monospaced))
+                            .tracking(1.25)
+                            .foregroundStyle(RemoteInstrument.secondaryInk)
+                        Text(modelTitle)
+                            .font(.subheadline.weight(.medium))
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                            .truncationMode(.tail)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.down").font(.caption2.weight(.semibold))
+                        .foregroundStyle(RemoteInstrument.secondaryInk)
+                }
+                .padding(.horizontal, 11)
+                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(VampComposerBayStyle())
+            .disabled(!modelEnabled)
+            .accessibilityLabel("Model, \(modelName ?? "not selected")")
+            .accessibilityValue(modeName ?? "")
+            .accessibilityIdentifier("remote.composer.model")
+            if !stacksControls { VampComposerSeam(axis: .vertical) }
+            HStack(spacing: 0) {
+                if stacksControls {
+                    share
+                    VampComposerSeam(axis: .vertical)
+                }
+                Button(action: onTools) {
+                    Image(systemName: "circle.grid.2x2.fill")
+                        .font(.system(size: 20))
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .overlay(alignment: .topTrailing) {
+                            Circle().fill(RemoteInstrument.orange)
+                                .frame(width: 4, height: 4)
+                                .padding(11)
+                        }
+                }
+                .buttonStyle(VampComposerBayStyle())
+                .frame(width: stacksControls ? nil : 52)
+                .accessibilityLabel("Tools and context")
+                if showsSteer {
+                    VampComposerSeam(axis: .vertical)
+                    Button(action: onSteer) {
+                        VStack(spacing: 2) {
+                            Text("STEER")
+                                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                .tracking(0.9)
+                            Rectangle().fill(RemoteInstrument.orange).frame(width: 13, height: 2)
+                        }
+                        .padding(.horizontal, 8)
+                        .frame(minWidth: 58, minHeight: 48)
+                    }
+                    .buttonStyle(VampComposerBayStyle())
+                    .disabled(!steerEnabled)
+                    .accessibilityLabel("Steer")
+                    .accessibilityHint("Redirects the current task instead of waiting")
+                }
+                VampComposerSeam(axis: .vertical)
+                Button(action: onPrimary) {
+                    ZStack {
+                        if isSending { ProgressView().tint(.white) }
+                        else { Image(systemName: primarySymbol).font(.system(size: 18, weight: .semibold)) }
+                    }
+                    .foregroundStyle(unavailable ? RemoteInstrument.secondaryInk : Color.white)
+                    .frame(width: stacksControls ? nil : 54, height: 36)
+                    .frame(maxWidth: stacksControls ? .infinity : nil, minHeight: 48)
+                    .background(unavailable ? VampComposerChassis.recess : VampComposerChassis.insert,
+                                in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .padding(.horizontal, 6)
+                }
+                .buttonStyle(VampComposerBayStyle())
+                .disabled(unavailable)
+                .keyboardShortcut(.return, modifiers: .command)
+                .accessibilityLabel(isSending ? "Sending" : primaryLabel)
+                .accessibilityIdentifier("remote.composer.primary")
+            }
+            .frame(minHeight: 48)
+        }
+        .frame(height: stacksControls ? 96 : 48)
+    }
+
+    private var share: some View {
+        Button(action: onShare) {
+            Image(systemName: "plus")
+                .font(.system(size: 19, weight: .medium))
+                .frame(maxWidth: .infinity, minHeight: 48)
+        }
+        .buttonStyle(VampComposerBayStyle())
+        .disabled(!shareEnabled)
+        .accessibilityLabel("Share clipboard or files with Mac")
     }
 }
 
@@ -711,84 +576,66 @@ import SwiftUI
 /// path (backdrop, transcript, `safeAreaInset(edge: .bottom)`) so docking and
 /// keyboard avoidance can be verified without a live Mac session.
 struct RemoteComposerFixture: View {
-    @Environment(\.remoteAppearance) private var appearance
     @State private var draft = ""
-    @State private var running = false
-    @State private var reachable = true
-    @State private var model = "Muse Spark 1.3…(opencode Go)"
-    @State private var mode = "Code"
-
-    private var fixtureEnum: String? {
-        ProcessInfo.processInfo.environment["VAMP_REMOTE_FIXTURE"]
-    }
+    @State private var state = "Ready"
+    @State private var lastAction = "None"
+    @State private var model = "Claude Sonnet · Personal workspace"
+    @State private var selectedPreview = false
 
     var body: some View {
-        ZStack {
-            RemoteBackdrop()
-            VStack(spacing: 0) {
-                HStack(spacing: 6) {
-                    Circle().fill(running ? RemoteInstrument.orange : RemoteInstrument.green)
-                        .frame(width: 6, height: 6)
-                    Text(running ? "ACTIVE · CODE" : "READY · CODE")
-                        .font(.caption2.monospaced().weight(.semibold))
-                        .foregroundStyle(RemoteInstrument.secondaryInk)
-                    Spacer()
-                }
-                .padding(.horizontal, 14)
-                .padding(.top, 8)
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 10) {
-                        ForEach(0..<8, id: \.self) { i in
-                            Text(i.isMultiple(of: 2)
-                                 ? "Docked chassis fixture line \(i + 1). The composer must sit flush above the keyboard."
-                                 : "Transcript sample. Verify the gap between the last message and the deck.")
-                                .font(.body)
-                                .foregroundStyle(RemoteInstrument.ink)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    HStack {
+                        Picker("Preview state", selection: $state) {
+                            ForEach(["Ready", "Running", "Offline", "Sending"], id: \.self) { Text($0) }
                         }
+                        .accessibilityIdentifier("fixture.state")
+                        Spacer()
+                        Text(lastAction).font(.caption).accessibilityIdentifier("fixture.lastAction")
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+                    RemoteTranscriptTurn(speaker: "You", text: "Make the workspace feel calmer and more precise.")
+                    RemoteTranscriptTurn(speaker: "Vamp", text: "Start with the essentials.\n\n**A little more room to think.**\nThe conversation stays open, with clear typography and controls that feel deliberate.\n\nThe composer grows only when your message needs it.")
+                    HStack(spacing: 8) {
+                        Button {} label: {
+                            Text("Press and hold").padding(.horizontal, 12).frame(minHeight: 44)
+                        }.buttonStyle(RemoteKeyButtonStyle())
+                        Button { selectedPreview.toggle() } label: {
+                            Text("Selected").padding(.horizontal, 12).frame(minHeight: 44)
+                        }.buttonStyle(RemoteKeyButtonStyle(isSelected: selectedPreview))
+                            .accessibilityAddTraits(selectedPreview ? .isSelected : [])
+                    }
+                    .frame(minHeight: 44)
+                    .font(.subheadline)
+                    if state == "Running" {
+                        RemoteTranscriptTurn(speaker: "Vamp", text: "Reviewing the layout and controls…", phase: "Working")
+                    }
                 }
+                .padding(16)
             }
-
-            VStack(spacing: 8) {
-                HStack(spacing: 10) {
-                    Toggle("Running", isOn: $running)
-                    Toggle("Reachable", isOn: $reachable)
-                }
-                .font(.caption2.monospaced())
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(RemoteInstrument.panel, in: RoundedRectangle(cornerRadius: 8))
-                Spacer()
+            .background(RemoteInstrument.reading)
+            .navigationTitle("A quieter workspace")
+            .navigationBarTitleDisplayMode(.inline)
+            .keyboardDismissToolbar()
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                RemoteComposer(draft: $draft, isRunning: state == "Running",
+                    isReachable: state != "Offline", isSending: state == "Sending",
+                    onSend: { lastAction = "Send"; draft = "" },
+                    onQueue: { lastAction = "Queue"; draft = "" },
+                    onSteer: { lastAction = "Steer"; draft = "" },
+                    onStop: { lastAction = "Stop"; state = "Ready" },
+                    modelName: model, onSelectModel: { model = "GPT-5 Codex" },
+                    onShare: { lastAction = "Share" }, modeName: "Code")
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 40)
-            .frame(maxHeight: .infinity, alignment: .top)
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            RemoteComposer(
-                draft: $draft,
-                isRunning: running,
-                isReachable: reachable,
-                onSend: { draft = "" },
-                onQueue: { draft = "" },
-                onSteer: { draft = "" },
-                onStop: { running = false },
-                modelName: model,
-                onSelectModel: { model = "GPT-5 Codex" },
-                modeName: mode)
-        }
-        .environment(\.remoteAppearance, appearance)
         .onAppear {
-            if fixtureEnum == "focused" {
-                draft = "Keyboard open alignment check…"
-            } else if fixtureEnum == "running" {
-                running = true
-                draft = "Queued a follow-up while the agent works…"
-            } else if fixtureEnum == "offline" {
-                reachable = false
+            let env = ProcessInfo.processInfo.environment
+            switch env["VAMP_REMOTE_FIXTURE"] {
+            case "running": state = "Running"
+            case "offline": state = "Offline"
+            case "sending": state = "Sending"
+            case "multiline": draft = "One\nTwo\nThree\nFour\nFive\nSix\nSeven\nEight"
+            default: break
             }
         }
     }
@@ -797,36 +644,16 @@ struct RemoteComposerFixture: View {
 
 /// Local visual fixture; no network requests or session mutations.
 struct RemoteComposerDesignPreview: View {
-    @State private var draft = ""
-    @State private var running = false
-
-    var body: some View {
-        ZStack {
-            RemoteBackdrop()
-            VStack(spacing: 20) {
-                Spacer()
-                Image(systemName: "building.columns.fill").font(.largeTitle)
-                Text("VAMP ASSISTANT")
-                    .font(.title.weight(.semibold)).fontDesign(.default)
-                Text("Your Mac. In your pocket.")
-                    .font(.subheadline).foregroundStyle(RemoteInstrument.secondaryInk)
-                Spacer()
-                Toggle("Preview running task", isOn: $running)
-                    .font(.caption.monospaced())
-                    .padding(.horizontal, 24)
-                RemoteComposer(draft: $draft, isRunning: running,
-                               onSend: { draft = "" }, onQueue: { draft = "" },
-                               onSteer: { draft = "" }, onStop: { running = false })
-            }
-        }
-        .environment(\.remoteAppearance, .dark)
-        .preferredColorScheme(.dark)
-    }
+    var body: some View { RemoteComposerFixture() }
 }
 
-#Preview("Instrument composer") {
-    RemoteComposerDesignPreview()
+#Preview("Silver composer") {
+    RemoteComposerFixture().environment(\.remoteAppearance, .light).preferredColorScheme(.light)
 }
+#Preview("Graphite composer") {
+    RemoteComposerFixture().environment(\.remoteAppearance, .dark).preferredColorScheme(.dark)
+}
+
 #endif
 
 struct RemoteComposerToolsSheet: View {

@@ -18,6 +18,9 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
         case serverBinaryMissing(String)
         case serverFailedToStart(String)
         case notLoaded
+        /// An image turn arrived while the resident server has no multimodal
+        /// projector loaded.
+        case imageInputUnavailable
 
         var errorDescription: String? {
             switch self {
@@ -29,6 +32,12 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
                 return "llama-server failed to start: \(detail)"
             case .notLoaded:
                 return "No GGUF model is loaded."
+            case .imageInputUnavailable:
+                return """
+                This model has no vision projector, so it cannot see the attached image. \
+                Put the matching mmproj .gguf next to the weights in this model's folder \
+                (then reload the model), or remove the image.
+                """
             }
         }
     }
@@ -121,14 +130,75 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
             ].contains(where: normalized.contains)
         }
 
+        /// A multimodal projector is a GGUF too, and its file name is usually
+        /// LONGER than the weights it belongs to ("…-mmproj-Q8_0.gguf" beats
+        /// "…-PQ2_0.gguf"), so it must be excluded before the longest-name
+        /// heuristic runs — otherwise the server is launched on a projector.
+        static func isProjectorFile(_ fileName: String) -> Bool {
+            let lower = fileName.lowercased()
+            guard lower.hasSuffix(".gguf") else { return false }
+            return ["mmproj", "mm-proj", "projector", "-clip", "clip-"].contains { lower.contains($0) }
+        }
+
         /// The weight file to serve: the LARGEST `.gguf` in the directory
         /// (multi-file splits are rare; the biggest shard is the real model).
+        /// Projectors and LoRA adapters are never weights.
         static func selectGGUF(named fileNames: [String]) -> String? {
-            let candidates = fileNames.filter { $0.lowercased().hasSuffix(".gguf") }
+            let candidates = fileNames.filter {
+                $0.lowercased().hasSuffix(".gguf") && !isProjectorFile($0) && !isLoraFile($0)
+            }
             return candidates.max { a, b in
                 if a.count != b.count { return a.count < b.count }
                 return quantizationLevel(a) < quantizationLevel(b)
             }
+        }
+
+        /// A LoRA adapter is also a `.gguf`. llama.cpp builds it into the graph
+        /// as extra matmuls (`--lora`), so it must never be served as the base
+        /// model — and a model folder may hold several `.gguf` files.
+        static func isLoraFile(_ fileName: String) -> Bool {
+            let lower = fileName.lowercased()
+            guard lower.hasSuffix(".gguf") else { return false }
+            return lower.contains("lora") || lower.contains("abliterate")
+        }
+
+        /// The adapter staged next to the weights, if any. Same ranking idea as
+        /// the projector: a name sharing the model's tokens wins.
+        static func loraFile(named fileNames: [String], modelID: String? = nil) -> String? {
+            let adapters = fileNames.filter(isLoraFile)
+            guard !adapters.isEmpty else { return nil }
+            let tokens = (modelID ?? "").lowercased()
+                .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+                .filter { $0.count > 3 }
+            func score(_ name: String) -> Int {
+                let lower = name.lowercased()
+                var value = 0
+                if !tokens.isEmpty, tokens.contains(where: { lower.contains($0) }) { value += 4 }
+                if lower.contains("lora") { value += 2 }
+                return value
+            }
+            return adapters.max { score($0) < score($1) }
+        }
+
+        /// The multimodal projector staged next to the weights, if any.
+        /// Ranking prefers a projector whose name shares the model's own
+        /// tokens (several models can live in one imported folder), then the
+        /// Q8_0 shipping pack over the BF16 reference.
+        static func projectorFile(named fileNames: [String], modelID: String? = nil) -> String? {
+            let projectors = fileNames.filter(isProjectorFile)
+            guard !projectors.isEmpty else { return nil }
+            let tokens = (modelID ?? "").lowercased()
+                .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+                .filter { $0.count > 3 }
+            func score(_ name: String) -> Int {
+                let lower = name.lowercased()
+                var value = 0
+                if !tokens.isEmpty, tokens.contains(where: { lower.contains($0) }) { value += 4 }
+                if lower.contains("q8") { value += 2 }
+                if lower.contains("bf16") || lower.contains("f16") || lower.contains("fp16") { value += 1 }
+                return value
+            }
+            return projectors.max { score($0) < score($1) }
         }
 
         /// Numeric -q<digits> marker ("model-q8.gguf" -> 8); 0 when absent.
@@ -147,10 +217,15 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
         /// Speculation is explicit and mutually exclusive. DFlash takes a
         /// separate 4-bit draft checkpoint; MTP uses next-token tensors
         /// embedded in the target GGUF. The ordinary launch remains the
-        /// default and contains no experimental flags.
+        /// default and contains no experimental flags. `mmprojPath` is added
+        /// only when the model folder actually ships a projector — a text-only
+        /// launch must never pay for (or fail on) a vision tower.
         static func serverArguments(modelPath: String, port: Int, contextSize: Int = defaultContextSize,
                                     speculation: Speculation = .none,
-                                    performanceProfile: PerformanceProfile? = nil) -> [String] {
+                                    performanceProfile: PerformanceProfile? = nil,
+                                    mmprojPath: String? = nil,
+                                    loraPath: String? = nil,
+                                    loraScale: Double = 1.0) -> [String] {
             var args = [
                 "--model", modelPath,
                 "--host", "127.0.0.1",
@@ -172,6 +247,20 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
                 "--alias", "beetcode",
                 "--no-webui",
             ]
+            if let mmprojPath, !mmprojPath.isEmpty {
+                // Multimodal projector: image input only. Explicit and
+                // eager-disabled — the vision tower must not auto-resolve
+                // some other file, and text-only turns must stay exact.
+                args += ["--mmproj", mmprojPath]
+            }
+            if let loraPath, !loraPath.isEmpty, loraScale > 0 {
+                // Adapter staged beside the weights. llama.cpp builds a LoRA
+                // into the graph as extra matmuls instead of merging it, so
+                // the published weights stay byte-identical and the scale is a
+                // live knob (`loraScale == 0` means the adapter is not loaded
+                // at all).
+                args += ["--lora-scaled", "\(loraPath):\(loraScaleArgument(loraScale))"]
+            }
             if let performanceProfile {
                 args += [
                     "--batch-size", String(performanceProfile.batchSize),
@@ -197,6 +286,12 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
                 args += ["--spec-type", "ngram-mod"]
             }
             return args
+        }
+
+        /// llama.cpp parses `FILE:SCALE`. Plain `%g` keeps "1" rather than
+        /// "1.000000" so a launch line stays readable in logs.
+        static func loraScaleArgument(_ scale: Double) -> String {
+            String(format: "%g", scale)
         }
 
         /// The first experimental pairing is intentionally narrow. The
@@ -326,16 +421,28 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
     /// llama-server slots are not guaranteed across requests, so every call
     /// sends the full conversation.
     private var accumulated: [ChatTurn] = []
+    /// Runtime truth: this resident server was launched with a multimodal
+    /// projector, so it can accept image content parts. Cleared on unload.
+    private var hasProjector = false
+    /// Absolute path of the projector the resident server was launched with.
+    private var projectorPath: String?
+    /// Absolute path of the LoRA adapter the resident server was launched with.
+    private var appliedLoraPath: String?
 
     private let experimentalDFlashEnabled: Bool
     private let experimentalNGramEnabled: Bool
+    /// Strength for a LoRA adapter staged beside the weights. 0 disables the
+    /// adapter without deleting it.
+    private let loraScale: Double
 
     init(
         experimentalDFlashEnabled: Bool = false,
-        experimentalNGramEnabled: Bool = false
+        experimentalNGramEnabled: Bool = false,
+        loraScale: Double = 1.0
     ) {
         self.experimentalDFlashEnabled = experimentalDFlashEnabled
         self.experimentalNGramEnabled = experimentalNGramEnabled
+        self.loraScale = loraScale
     }
 
     var loadedModelID: String? {
@@ -379,13 +486,27 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
         }
         // Same admission authority as every other engine: the GGUF weights
         // inflate the child's footprint just like MLX's mmap does.
-        try MemoryAdvisor.admitLoad(diskBytes: diskBytes)
+        try MemoryAdvisor.admitLoad(diskBytes: diskBytes, format: .gguf)
 
         let fileNames = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
         guard let ggufName = Planner.selectGGUF(named: fileNames) else {
             throw GGUFError.noGGUFFile
         }
         let modelPath = directory.appendingPathComponent(ggufName).path
+        // Vision: a projector staged beside the weights turns this server into
+        // a multimodal one. Absent → image turns are refused with an explicit
+        // error instead of being silently dropped, and the caller keeps its
+        // described-image fallback.
+        let mmprojPath = Planner.projectorFile(named: fileNames, modelID: modelID)
+            .map { directory.appendingPathComponent($0).path }
+        // A LoRA adapter staged beside the weights is built into the graph by
+        // llama.cpp at load time, never merged into them — so an ablation
+        // adapter rides on the published pack. Scale 0 keeps it on disk but
+        // unloaded, which is the A/B switch.
+        let loraPath = loraScale > 0
+            ? Planner.loraFile(named: fileNames, modelID: modelID)
+                .map { directory.appendingPathComponent($0).path }
+            : nil
         let binary = try Self.resolveServerBinary()
 
         // RAM-honest context sizing: sniff the transformer dims from the GGUF
@@ -398,7 +519,8 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
         let dflashDraft: Planner.DFlashDraft?
         if let candidateDraft,
            (try? MemoryAdvisor.admitLoad(
-                diskBytes: diskBytes + candidateDraft.diskBytes)) != nil {
+                diskBytes: diskBytes + candidateDraft.diskBytes,
+                format: .gguf)) != nil {
             dflashDraft = candidateDraft
         } else {
             dflashDraft = nil
@@ -408,7 +530,7 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
             }
         }
         let reservedDraftBytes = dflashDraft.map {
-            MemoryAdvisor.projectedFootprint(diskBytes: $0.diskBytes)
+            MemoryAdvisor.projectedFootprint(diskBytes: $0.diskBytes, format: .gguf)
         } ?? 0
         let contextBudget = MemoryAdvisor.availableBudget > reservedDraftBytes
             ? MemoryAdvisor.availableBudget - reservedDraftBytes
@@ -416,7 +538,9 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
         let chosenContext = Planner.chooseContextSize(
             requested: contextSize ?? Planner.defaultContextSize,
             kvBytesPerToken: sniffed.flatMap(Planner.kvBytesPerToken),
-            projectedWeights: MemoryAdvisor.projectedFootprint(diskBytes: diskBytes),
+            projectedWeights: MemoryAdvisor.projectedFootprint(
+                diskBytes: diskBytes,
+                format: .gguf),
             availableBudget: contextBudget)
 
         // Experimental DFlash gets the first attempt only for the exact
@@ -440,6 +564,8 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
                 attempt = try await launchServer(
                     binary: binary, modelPath: modelPath,
                     contextSize: chosenContext, speculation: mode,
+                    mmprojPath: mmprojPath,
+                    loraPath: loraPath,
                     timeout: 180)
                 if attempt != nil {
                     usedSpeculation = mode
@@ -456,7 +582,9 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
             let mode = fallbackSpeculation
             attempt = try await launchServer(
                 binary: binary, modelPath: modelPath,
-                contextSize: chosenContext, speculation: mode)
+                contextSize: chosenContext, speculation: mode,
+                mmprojPath: mmprojPath,
+                loraPath: loraPath)
             if attempt != nil {
                 usedSpeculation = mode
             } else {
@@ -468,7 +596,9 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
             usedSpeculation = .none
             attempt = try await launchServer(
                 binary: binary, modelPath: modelPath,
-                contextSize: chosenContext, speculation: .none)
+                contextSize: chosenContext, speculation: .none,
+                mmprojPath: mmprojPath,
+                loraPath: loraPath)
         }
         guard let (child, watchdog, serverPort) = attempt else {
             throw GGUFError.serverFailedToStart(
@@ -482,6 +612,9 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
             self.loadedID = modelID
             self.launchedContextSize = chosenContext
             self.statsState = EngineStats(acceleration: usedSpeculation.acceleration)
+            self.hasProjector = mmprojPath != nil
+            self.projectorPath = mmprojPath
+            self.appliedLoraPath = loraPath
             self.accumulated.removeAll()
         }
         child.terminationHandler = { [weak self] _ in
@@ -508,6 +641,9 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
             loadedID = nil
             launchedContextSize = nil
             statsState = EngineStats()
+            hasProjector = false
+            projectorPath = nil
+            appliedLoraPath = nil
             accumulated.removeAll()
             return (p, j, generation)
         }
@@ -553,6 +689,15 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
         maxTokens: Int?,
         temperature: Double?
     ) -> AsyncThrowingStream<String, Error> {
+        // An image turn on a server with no projector must fail loudly: a model
+        // that cannot see would otherwise answer about a picture it never
+        // received, and the user would believe it looked.
+        let carriesImages = turns.contains { !$0.images.isEmpty }
+        if carriesImages, !withLock({ hasProjector }) {
+            return AsyncThrowingStream { continuation in
+                continuation.finish(throwing: GGUFError.imageInputUnavailable)
+            }
+        }
         let allTurns = withLock { () -> [ChatTurn] in
             accumulated.append(contentsOf: turns)
             return accumulated
@@ -621,32 +766,40 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
     }
 
     func streamReplay(_ turns: [ChatTurn], maxTokens: Int?, temperature: Double?) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                let saved = self.withLock { () -> [ChatTurn] in
+        IsolatedTranscriptReplay.stream(
+            turns,
+            maxTokens: maxTokens,
+            temperature: temperature,
+            swapOut: {
+                self.withLock {
                     let old = self.accumulated
                     self.accumulated = []
                     return old
                 }
-                defer { self.withLock { self.accumulated = saved } }
-                let inner = self.stream(adding: turns, maxTokens: maxTokens, temperature: temperature)
-                do {
-                    for try await chunk in inner {
-                        if Task.isCancelled { break }
-                        continuation.yield(chunk)
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
+            },
+            swapIn: { saved in self.withLock { self.accumulated = saved } },
+            generate: { self.stream(adding: $0, maxTokens: $1, temperature: $2) })
     }
 
     func cancelGeneration() async {
         let task = withLock { generationTask }
         task?.cancel()
+    }
+
+    /// True when the resident server was launched with a multimodal projector
+    /// and can therefore decode image content parts.
+    var supportsImageInput: Bool {
+        get async { withLock { hasProjector } }
+    }
+
+    /// Path of the projector the resident server is using, for diagnostics.
+    var loadedProjectorPath: String? {
+        get async { withLock { projectorPath } }
+    }
+
+    /// Path of the LoRA adapter the resident server is using, for diagnostics.
+    var loadedLoraPath: String? {
+        get async { withLock { appliedLoraPath } }
     }
 
     /// llama-server supplies exact usage in its final SSE frame. Prefer that
@@ -772,6 +925,8 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
     private func launchServer(
         binary: URL, modelPath: String,
         contextSize: Int, speculation: Planner.Speculation,
+        mmprojPath: String? = nil,
+        loraPath: String? = nil,
         timeout: TimeInterval = 120
     ) async throws -> (child: Process, watchdog: Process, port: Int)? {
         let serverPort = Self.freePort()
@@ -781,7 +936,10 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
             modelPath: modelPath, port: serverPort,
             contextSize: contextSize, speculation: speculation,
             performanceProfile: Planner.PerformanceProfile.recommended(
-                for: DeviceProfile.current()))
+                for: DeviceProfile.current()),
+            mmprojPath: mmprojPath,
+            loraPath: loraPath,
+            loraScale: loraScale)
         child.environment = ShellRunner.sanitizedEnvironment()
         child.standardOutput = FileHandle.nullDevice
         child.standardError = FileHandle.nullDevice

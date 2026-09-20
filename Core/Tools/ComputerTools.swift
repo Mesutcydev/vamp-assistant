@@ -670,6 +670,92 @@ struct ComputerScreenshotTool: AgentTool {
     }
 }
 
+/// Picks the current app bundle when Launch Services has several copies of
+/// the same identifier — leftover `Name.before-*.app` backups in
+/// /Applications otherwise steal `open -a` / `urlForApplication`.
+enum ApplicationLaunchResolver {
+    static func isBackupAppName(_ fileName: String) -> Bool {
+        let name = fileName.lowercased()
+        return name.contains(".before")
+            || name.contains(".previous")
+            || name.contains("replaced ")
+    }
+
+    static func preferredURL(appName: String?, candidates: [URL]) -> URL? {
+        let unique = Array(Set(candidates.map { $0.standardizedFileURL }))
+        return unique.max { lhs, rhs in
+            let left = score(lhs, appName: appName)
+            let right = score(rhs, appName: appName)
+            if left != right { return left < right }
+            return lhs.path < rhs.path
+        }
+    }
+
+    static func score(_ url: URL, appName: String?) -> Int {
+        let name = url.deletingPathExtension().lastPathComponent
+        var value = 0
+        if let appName,
+           name.compare(appName, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame {
+            value += 100
+        }
+        if isBackupAppName(name) { value -= 100 }
+        let parent = url.deletingLastPathComponent().path
+        if parent == "/Applications"
+            || parent == (NSHomeDirectory() as NSString).appendingPathComponent("Applications") {
+            value += 10
+        }
+        return value
+    }
+
+    static func applicationDirectoryCandidates(appName: String) -> [URL] {
+        [
+            URL(fileURLWithPath: "/Applications", isDirectory: true),
+            URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+                .appendingPathComponent("Applications", isDirectory: true),
+        ].map { $0.appendingPathComponent("\(appName).app") }
+    }
+
+    static func installedApps(matchingBundleID bundleID: String) -> [URL] {
+        let directories = [
+            URL(fileURLWithPath: "/Applications", isDirectory: true),
+            URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+                .appendingPathComponent("Applications", isDirectory: true),
+        ]
+        var matches: [URL] = []
+        for directory in directories {
+            guard let children = try? FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+            for child in children where child.pathExtension.lowercased() == "app" {
+                let plist = child.appendingPathComponent("Contents/Info.plist")
+                let identifier = NSDictionary(contentsOf: plist)?["CFBundleIdentifier"] as? String
+                if identifier == bundleID { matches.append(child) }
+            }
+        }
+        return matches
+    }
+
+    static func resolveLaunchURL(appName: String?, bundleID: String?) -> URL? {
+        var candidates: [URL] = []
+        if let appName, !appName.isEmpty {
+            candidates.append(contentsOf: applicationDirectoryCandidates(appName: appName)
+                .filter { FileManager.default.fileExists(atPath: $0.path) })
+        }
+        if let bundleID, !bundleID.isEmpty {
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+                candidates.append(url)
+            }
+            candidates.append(contentsOf: installedApps(matchingBundleID: bundleID))
+            for running in NSRunningApplication.runningApplications(withBundleIdentifier: bundleID) {
+                if let url = running.bundleURL { candidates.append(url) }
+            }
+        }
+        return preferredURL(appName: appName, candidates: candidates)
+    }
+}
+
 struct ComputerActivateAppTool: AgentTool {
     let name = "computer_activate_app"
     let summary = "Open or activate a Mac app directly; optionally open a trusted system-settings or web URL"
@@ -716,21 +802,31 @@ struct ComputerActivateAppTool: AgentTool {
 
     @MainActor
     private static func activate(appName: String?, bundleID: String?) async throws {
-        if let running = NSWorkspace.shared.runningApplications.first(where: { app in
-            (bundleID != nil && app.bundleIdentifier == bundleID)
-                || (appName != nil && app.localizedName?.localizedCaseInsensitiveCompare(appName!) == .orderedSame)
+        guard let url = ApplicationLaunchResolver.resolveLaunchURL(appName: appName, bundleID: bundleID) else {
+            throw ToolError.commandFailed(exitCode: 1)
+        }
+        let preferred = url.standardizedFileURL
+        let selfPID = ProcessInfo.processInfo.processIdentifier
+        if let bundleID {
+            for running in NSRunningApplication.runningApplications(withBundleIdentifier: bundleID) {
+                guard running.processIdentifier != selfPID,
+                      let runningURL = running.bundleURL?.standardizedFileURL,
+                      runningURL != preferred,
+                      ApplicationLaunchResolver.isBackupAppName(
+                        runningURL.deletingPathExtension().lastPathComponent)
+                else { continue }
+                running.terminate()
+            }
+        }
+        if let running = NSWorkspace.shared.runningApplications.first(where: {
+            $0.bundleURL?.standardizedFileURL == preferred
         }) {
             running.activate(options: [.activateAllWindows])
             return
         }
-        let url: URL? = bundleID.flatMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }
-            ?? appName.flatMap { name in
-                NSWorkspace.shared.fullPath(forApplication: name).map(URL.init(fileURLWithPath:))
-            }
-        guard let url else { throw ToolError.commandFailed(exitCode: 1) }
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
-        _ = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+        _ = try await NSWorkspace.shared.openApplication(at: preferred, configuration: configuration)
     }
 }
 

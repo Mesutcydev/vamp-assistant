@@ -93,26 +93,54 @@ struct ToolExecutor {
                     ? .timeout
                     : (result.exitCode != 0 ? .commandFailed(result.exitCode) : nil)
                 return Outcome(
-                    output: Self.prefix(failure, context.truncate(RunCommandTool.render(result))),
+                    output: Self.addingPrivacyHint(
+                        Self.prefix(failure, context.truncate(RunCommandTool.render(result))),
+                        failed: result.failed),
                     failed: result.failed,
                     exitCode: result.exitCode,
                     failure: failure)
             }
             let output = try await tool.execute(call, in: context)
-            return Outcome(output: context.truncate(output), failed: false)
+            // Several tools report failure by returning an "error: …" string
+            // rather than throwing. Trusting only `failed: false` there made a
+            // refused move or failed build count as a successful action (and
+            // as a successful workspace mutation) in the loop.
+            let rendered = context.truncate(output)
+            let failed = tool.treatsErrorPrefixAsFailure
+                && rendered.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("error:")
+            return Outcome(
+                output: Self.addingPrivacyHint(rendered, failed: failed),
+                failed: failed,
+                failure: failed ? .other(rendered) : nil)
         } catch let error as ToolError {
             let failure: ToolFailure = Self.classify(error)
             return Outcome(
-                output: Self.prefix(failure, "error: \(error.localizedDescription)"),
+                output: Self.addingPrivacyHint(
+                    Self.prefix(failure, "error: \(error.localizedDescription)"),
+                    failed: true),
                 failed: true,
                 failure: failure)
         } catch {
             let failure = ToolFailure.other(error.localizedDescription)
             return Outcome(
-                output: Self.prefix(failure, "error: \(error.localizedDescription)"),
+                output: Self.addingPrivacyHint(
+                    Self.prefix(failure, "error: \(error.localizedDescription)"),
+                    failed: true),
                 failed: true,
                 failure: failure)
         }
+    }
+
+    /// A macOS privacy (TCC) denial surfaces as a POSIX/cocoa permission error
+    /// buried in a tool's output. Translate it once so the model can tell the
+    /// user how to fix it instead of retrying the same failing command.
+    private static func addingPrivacyHint(_ output: String, failed: Bool) -> String {
+        guard failed else { return output }
+        let lower = output.lowercased()
+        guard lower.contains("operation not permitted")
+            || lower.contains("don't have permission")
+            || lower.contains("you don’t have permission") else { return output }
+        return output + "\n\nNote for the user: macOS privacy settings are blocking access to this folder. Re-open the project with Open Project so macOS grants access, or enable it in System Settings → Privacy & Security → Files and Folders."
     }
 
     /// Builds the action fingerprint for cacheable tools. Returns nil when the
@@ -134,6 +162,7 @@ struct ToolExecutor {
         case .timeout: .timeout
         case .commandFailed(let code): .commandFailed(Int32(code))
         case .missingArgument(let name): .invalidArguments(name)
+        case .invalidArguments, .scaffoldWouldOverwrite: .invalidArguments(error.localizedDescription)
         case .contentTooLarge: .invalidArguments(error.localizedDescription)
         case .invalidWorkspaceRoot, .pathOutsideWorkspace, .notPreviouslyRead,
              .binaryFile, .fileNotFound, .fileTooLarge:

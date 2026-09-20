@@ -201,10 +201,13 @@ actor BotRunStore {
     }
 
     func loadAll(recoverInterrupted: Bool = false) -> [BotRunRecord] {
-        guard let data = try? Data(contentsOf: url) else { return [] }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard var records = try? decoder.decode([BotRunRecord].self, from: data) else { return [] }
+        guard var records: [BotRunRecord] = decodeFile(url) else {
+            // A missing file legitimately means “no runs yet”. A file that
+            // exists but cannot decode has already been quarantined by
+            // decodeFile, so the next persist cannot silently replace it with
+            // an empty array.
+            return []
+        }
 
         if recoverInterrupted {
             var changed = false
@@ -228,6 +231,7 @@ actor BotRunStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         try encoder.encode(records).write(to: url, options: .atomic)
+        Self.harden(url, fileManager: fileManager)
     }
 
     func loadEvents(runID: UUID? = nil) -> [BotRunEvent] {
@@ -285,7 +289,21 @@ actor BotRunStore {
         guard let data = try? Data(contentsOf: file) else { return nil }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try? decoder.decode(Value.self, from: data)
+        if let value = try? decoder.decode(Value.self, from: data) {
+            return value
+        }
+        quarantine(file)
+        return nil
+    }
+
+    /// Preserves an unreadable state file instead of letting a later persist
+    /// overwrite it with an empty snapshot. The backup keeps the raw bytes for
+    /// manual recovery.
+    private func quarantine(_ file: URL) {
+        let stamp = ISO8601DateFormatter().string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+        let backup = file.appendingPathExtension("corrupt-\(stamp)")
+        try? fileManager.moveItem(at: file, to: backup)
     }
 
     private func encodeFile<Value: Encodable>(_ value: Value, to file: URL) throws {
@@ -295,5 +313,17 @@ actor BotRunStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         try encoder.encode(value).write(to: file, options: .atomic)
+        Self.harden(file, fileManager: fileManager)
+    }
+
+    /// Bot prompts and model output are as sensitive as chat content; the
+    /// other stores already restrict access to the owning user. Match that
+    /// hardening (0600 files / 0700 directory) for the bot run state.
+    private static func harden(_ file: URL, fileManager: FileManager) {
+        try? fileManager.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: file.path)
+        try? fileManager.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: file.deletingLastPathComponent().path)
     }
 }

@@ -57,8 +57,12 @@ struct SimulatorPanelView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        // Theme surface, not .bar material: Beet mode must tint this too.
-        .background(.thinMaterial)
+        // Fixed silver header band: the docked panel belongs to the same
+        // instrument family as the rest of the shell.
+        .background(Theme.headerSurface)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.hairline).frame(height: 1)
+        }
     }
 
     /// The device list lives in a menu: in a 380–560 pt docked column a
@@ -146,7 +150,7 @@ struct SimulatorPanelView: View {
     private var installRow: some View {
         HStack(spacing: 8) {
             TextField("bundle id", text: $bundleID)
-                .textFieldStyle(.roundedBorder)
+                .vampField()
                 .font(.caption)
                 .frame(minWidth: 80, maxWidth: 140)
             Button("Install…") { showInstaller = true }
@@ -166,7 +170,7 @@ struct SimulatorPanelView: View {
             } else {
                 VStack(spacing: 8) {
                     Image(systemName: "iphone")
-                        .font(.app(size: 40, design: .serif))
+                        .font(.app(size: 40 ))
                         .foregroundStyle(.tertiary)
                     Text("Boot a device to stream its screen.")
                         .font(.callout)

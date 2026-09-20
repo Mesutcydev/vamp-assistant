@@ -27,7 +27,8 @@ enum PromptBuilder {
                 tools: tools.filter { isChatOnlyTool($0.name) },
                 outputStyle: outputStyle,
                 contextWindowTokens: contextWindowTokens,
-                responseReserveTokens: responseReserveTokens)
+                responseReserveTokens: responseReserveTokens,
+                leanPrompt: leanPrompt)
         }
 
         var sections: [String] = []
@@ -226,9 +227,22 @@ enum PromptBuilder {
         tools: [any AgentTool],
         outputStyle: ProjectPolicy.OutputStyle,
         contextWindowTokens: Int?,
-        responseReserveTokens: Int
+        responseReserveTokens: Int,
+        leanPrompt: Bool
     ) -> String {
-        var assistantBoundary = """
+        // A constrained local text backend has no tools or project context.
+        // Keeping that contract short matters because this system message is
+        // still prefetched through every streamed expert layer. The ordinary
+        // chat-only prompt below remains unchanged for API and larger local
+        // models.
+        var assistantBoundary = leanPrompt
+            ? """
+            You are Vamp Assistant. Answer the user's request directly and
+            concisely. No project folder is connected: you cannot read or change
+            project files, run shell commands, or use project memory. Preserve
+            exact text, whitespace, and line breaks when the user asks for them.
+            """
+            : """
             You are Vamp Assistant in project-free assistant mode. Have a helpful, direct
             conversation with the user. No project folder is connected. You
             cannot inspect or change project files, run shell commands, use
@@ -244,10 +258,12 @@ enum PromptBuilder {
             content, use that tool instead of claiming you cannot create files.
             """
         }
-        var sections = [
-            assistantBoundary,
-            outputStylePrompt(outputStyle),
-        ]
+        var sections = [assistantBoundary]
+        if leanPrompt {
+            sections.append("Use short readable Markdown when it helps; do not add a preamble to an exact-text request.")
+        } else {
+            sections.append(outputStylePrompt(outputStyle))
+        }
         if tools.isEmpty {
             sections.append("No tools are available in this chat.")
         } else {
@@ -421,7 +437,7 @@ enum PromptBuilder {
         add("In-app browser",
             tools: ["browser_navigate", "browser_read", "browser_click", "browser_type", "browser_scroll", "browser_eval", "browser_screenshot", "browser_download"],
             guidance: names.contains("browser_navigate") && names.contains("browser_read")
-                ? "For web UI, navigate → browser_read what=elements → act with a fresh ref. Actions capture a bounded fresh observation by default; never reuse a ref after it changes. For an explicit download, read the page's links, pass the direct http(s) href (not a page or binary navigation click) to browser_download, and wait for its saved path and byte count before claiming success."
+                ? "For web UI, navigate → browser_read what=elements → act with a fresh ref. Actions capture a bounded fresh observation by default; never reuse a ref after it changes. For an explicit download, read the page's links, pass the direct http(s) href (not a page or binary navigation click) to browser_download, and wait for its saved path and byte count before claiming success. To preview a page you generated, save it inside the project and pass its path (for example `index.html`) to browser_navigate; when no project is open, save it with save_document first and open that returned path."
                 : "Use only the listed browser operations and observe again after any interaction.")
         add("Built-in iOS Simulator",
             tools: ["sim_build_run", "sim_list_devices", "sim_boot_device", "sim_launch_app", "sim_tap", "sim_swipe", "sim_type", "sim_describe", "sim_screenshot"],

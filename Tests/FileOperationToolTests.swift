@@ -57,6 +57,24 @@ final class FileOperationToolTests: XCTestCase {
         XCTAssertTrue(output.contains("file not found"), output)
     }
 
+    /// Tools that report failure via an "error:" string must not be recorded
+    /// as successful actions (which previously also counted as a successful
+    /// workspace mutation and entered duplicate suppression).
+    func testMoveFailureIsClassifiedAsFailedByExecutor() async throws {
+        let context = ToolContext(workspace: workspace)
+        let executor = ToolExecutor(tools: [MoveFileTool()], context: context)
+        let outcome = await executor.execute(
+            call("move_file", ["from": .string("nope.swift"), "to": .string("x.swift")]))
+        XCTAssertTrue(outcome.failed)
+        XCTAssertTrue(outcome.output.hasPrefix("error:"), outcome.output)
+
+        // A real move is still a success.
+        try "content".write(to: tempDir.appendingPathComponent("real.swift"), atomically: true, encoding: .utf8)
+        let moved = await executor.execute(
+            call("move_file", ["from": .string("real.swift"), "to": .string("moved.swift")]))
+        XCTAssertFalse(moved.failed)
+    }
+
     func testMoveOutsideWorkspaceIsRefused() async throws {
         try "secret".write(to: tempDir.appendingPathComponent("in.swift"), atomically: true, encoding: .utf8)
         let context = ToolContext(workspace: workspace)

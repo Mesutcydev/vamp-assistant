@@ -54,6 +54,19 @@ content; these are the explicit trust boundaries and where each is enforced.
     lock, force-quit, and `cmd+q` are hard-blocked. `AXSecureTextField`
     values are redacted before they enter the model context. Coordinates
     stay in Quartz/AX space (top-left of the main display).
+14. **Remote content reaching the model** (opt-in, TypeSafe guardrails) —
+    tools that return content from outside the workspace declare
+    `AgentTool.untrustedOutput` (`browser_read`, `browser_eval`). Such
+    observations are screened before they enter the model context:
+    `PromptInjectionSanitizer` is the deterministic floor, and TypeSafe
+    system-one questions (`agent_instructions`, `credential_exfiltration`)
+    are the semantic layer on top. A flagged observation is *labeled*
+    (`<untrusted_content>`) and its instruction-like lines are redacted;
+    unflagged observations pass through untouched. The screen can only ADD
+    caution: it never suppresses a tool result, never approves anything, and
+    every failure path (no key, offline, rate limited, unreadable answer)
+    returns "no verdict" and leaves the previous behavior in place. Details:
+    `docs/TYPESAFE-GUARDRAILS.md`.
 
 ## Failure principle
 

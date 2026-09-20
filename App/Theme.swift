@@ -1,20 +1,30 @@
 import AppKit
 import SwiftUI
 
+@Observable
+private final class ThemeAppearanceState: @unchecked Sendable {
+    var appearance: AppAppearance = .system
+}
+
 /// Vamp Assistant's single source of truth for color. Every surface, text tier and
 /// status color resolves through here so light and dark stay coherent by
 /// construction instead of per-view `colorScheme ? … : …` guesses.
 ///
-/// Aesthetic: neutral gray surfaces carrying one user-chosen accent.
+/// Aesthetic: pearl light surfaces or graphite dark surfaces carrying one
+/// user-chosen accent.
 enum Theme {
     // Read at DRAW time (colors) or body-evaluation time (fonts), so a change
     // takes effect live without recreating the type. All four are mirrored
     // from SettingsStore by `ThemeSync` in BeetCodeApp, on the main actor,
     // before any view below it resolves a color or a font.
     nonisolated(unsafe) static var currentPalette: AccentPalette = .graphite
-    nonisolated(unsafe) static var currentAppearance: AppAppearance = .system
+    private static let appearanceState = ThemeAppearanceState()
+    static var currentAppearance: AppAppearance {
+        get { appearanceState.appearance }
+        set { appearanceState.appearance = newValue }
+    }
     nonisolated(unsafe) static var currentTextSize: AppTextSize = .comfortable
-    nonisolated(unsafe) static var currentTypeface: AppTypeface = .serif
+    nonisolated(unsafe) static var currentTypeface: AppTypeface = .sans
 
     /// Palette-driven dynamic color: resolves the CURRENT palette's hex
     // pair for the active appearance on every draw.
@@ -33,41 +43,70 @@ enum Theme {
         })
     }
 
-    // Neutrals — one cohesive cool-slate hue, deepest (bg) to raised (inset).
-    // Dark steps carry real separation: the window bg sits deep so cards
-    // visibly lift off it, and inset wells/chips lift off cards — without
-    // these steps, dark mode reads as one flat sheet. Light inset is one
-    // full step darker than the page so inset wells + chips keep visible
-    // separation (U9).
+    // MARK: Window surfaces — the system's, not painted ones.
     //
-    // The legacy `beet` arguments are decode-only compatibility values and
-    // intentionally resolve to the same neutral ramp as native dark mode.
-    static let bg           = Color.dynamic(light: 0xF5F5F5, dark: 0x000000, beet: 0x000000)
-    static let surface      = Color.dynamic(light: 0xFFFFFF, dark: 0x0A0A0A, beet: 0x0A0A0A)
-    static let surfaceInset = Color.dynamic(light: 0xECECEC, dark: 0x151515, beet: 0x151515)
-    // Card edges were 1.14–1.46:1 against the surfaces they sit on — present
-    // in the code, barely present on screen. Lifted to ~1.5–1.9:1: still a
-    // hairline, but one you can actually see the card end at.
-    static let hairline     = Color.dynamic(light: 0xC9C9C9, dark: 0x3A3A3A, beet: 0x3A3A3A)
+    // These used to be hand-mixed pearl/graphite hexes so the app could read
+    // as one machined object. It now reads as a Mac app: every surface and ink
+    // resolves through AppKit's semantic colors, which already answer light,
+    // dark, increased contrast, and inactive windows correctly.
+    static var workspaceCanvas: Color { systemSurface(.windowBackgroundColor) }
+    static var navigationSurface: Color { systemSurface(.controlBackgroundColor) }
+    static var headerSurface: Color { systemSurface(.windowBackgroundColor) }
+    static var readingSurface: Color { systemSurface(.textBackgroundColor) }
 
-    // Text tiers. Dark secondary/tertiary sit a touch brighter than the
-    // neutrals around them so captions stay legible on the lifted surfaces.
-    static let textPrimary   = Color.dynamic(light: 0x181818, dark: 0xF2F2F2, beet: 0xF2F2F2)
-    static let textSecondary = Color.dynamic(light: 0x585858, dark: 0xB0B0B0, beet: 0xB0B0B0)
-    // Tertiary text still carries actionable metadata and must remain readable
-    // at caption sizes, so it must clear AA on the WORST surface it lands on —
-    // surfaceInset, not just the page. Light was 0x707070: 4.95 on surface but
-    // 4.19 on an inset well. 0x6A6A6A clears 4.5 on all three in both modes.
-    static let textTertiary  = Color.dynamic(light: 0x6A6A6A, dark: 0x969696, beet: 0x969696)
-    static let rose          = Color.dynamic(light: 0x303030, dark: 0xC8C8C8, beet: 0xC8C8C8)
+    /// A system surface that still honours the OLED appearance. AppKit has no
+    /// true-black variant, and OLED is a real setting in this app — reading
+    /// `currentAppearance` here also keeps these surfaces observable, so a
+    /// theme switch invalidates the views that drew with them.
+    private static func systemSurface(_ nsColor: NSColor) -> Color {
+        guard currentAppearance == .oled else { return Color(nsColor: nsColor) }
+        return Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                ? .black
+                : nsColor
+        })
+    }
+    static let textOnSilver = Color(nsColor: .labelColor)
+    static let secondaryOnSilver = Color(nsColor: .secondaryLabelColor)
+    static let placeholderOnSilver = Color(nsColor: .placeholderTextColor)
+    /// Selected / primary control fill: the system accent, with the text color
+    /// AppKit pairs with it.
+    static let controlInsert = Color(nsColor: .controlAccentColor)
+    static let textOnControlInsert = Color.white
+    static let structuralDivider = Color(nsColor: .separatorColor)
 
-    /// Elevation shadow: a whisper in light mode, much deeper in dark —
-    /// after the surface lift above, the shadow is what separates a card
-    /// from the window chrome around it.
-    static let cardShadow = Color(nsColor: NSColor(name: nil) { appearance in
-        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            ? NSColor.black.withAlphaComponent(0.45)
-            : NSColor.black.withAlphaComponent(0.12)
+    // Shared neutral aliases used by reading, settings, and transient surfaces.
+    static var bg: Color { workspaceCanvas }
+    static var surface     : Color { Color(nsColor: .controlBackgroundColor) }
+    /// Code, diff, and log bodies sit on the text surface. (`underPageBackground`
+    /// is the desktop's dark "behind the page" texture — as a card fill it
+    /// turned every diff into a grey slab.)
+    static var surfaceInset: Color { Color(nsColor: .textBackgroundColor) }
+    static let hairline = Color(nsColor: .separatorColor)
+    static let composerStroke = Color(nsColor: .separatorColor)
+    static let sidebarWash = Color.clear
+    static var librarySurface: Color { Color(nsColor: .controlBackgroundColor) }
+    static let libraryTextPrimary = textOnSilver
+    static let libraryTextSecondary = secondaryOnSilver
+    static let libraryRowHover = Color.primary.opacity(0.06)
+    static let libraryRowSelected = Color(nsColor: .selectedContentBackgroundColor)
+    static let chromeWash = Color.clear
+
+    // Text tiers resolve alongside their surface, including native controls.
+    static let textPrimary   = Color(nsColor: .labelColor)
+    static let textSecondary = Color(nsColor: .secondaryLabelColor)
+    static let textTertiary  = Color(nsColor: .tertiaryLabelColor)
+    static let rose          = Color.dynamic(light: 0x913E58, dark: 0xD68CA4)
+
+    // Semantic ink, not decorative fills. Signal LEDs use Instrument tokens.
+    static let positive      = Color.dynamic(light: 0x255B34, dark: 0x7FCA92)
+    static let negative      = Color.dynamic(light: 0x8E352F, dark: 0xED958B)
+    static let controlStrong = Color.fixed(0x686868)
+    static let statusNeutral = Color.fixed(0x8E8E93)
+
+    /// Elevation shadow: a whisper on the silver shell, always.
+    static let cardShadow = Color(nsColor: NSColor(name: nil) { _ in
+        NSColor.black.withAlphaComponent(0.12)
     })
 
     // Accent — resolved live from the user's palette choice.
@@ -80,11 +119,10 @@ enum Theme {
     static var accentText: Color { paletteColor(light: \.accentLight, dark: \.brightDark) }
     static var accentSoft: Color { accent.opacity(0.14) }
 
-    // Status — tuned per mode so they never blow out on the deep dark.
-    static let success = Color.dynamic(light: 0x404040, dark: 0xD8D8D8)
-    static let warning = Color.dynamic(light: 0x555555, dark: 0xC4C4C4)
-    static let danger  = Color.dynamic(light: 0x202020, dark: 0xEEEEEE)
-    static let info    = Color.dynamic(light: 0x686868, dark: 0xB8B8B8)
+    static let success = positive
+    static let warning = Color.dynamic(light: 0x72490F, dark: 0xDEB570)
+    static let danger  = negative
+    static let info    = Color.dynamic(light: 0x2A5578, dark: 0x8AB8DA)
 
     // Tint washes — the ONLY opacities views may use for tinted fills and
     // borders, so "washed" surfaces read identically everywhere in the app.
@@ -104,57 +142,149 @@ enum Theme {
     /// Keep AppKit's app-wide appearance in lockstep with the user's setting so
     /// the dynamic `NSColor` providers above resolve to the *forced* scheme —
     /// not merely the OS one — matching SwiftUI's `preferredColorScheme`.
-    /// Beet mode forces dark AppKit chrome; its plum neutrals come from the
-    /// `beet:` hexes, which read `currentAppearance` at draw time.
     @MainActor static func applyAppearance(_ appearance: AppAppearance) {
         currentAppearance = appearance
         NSApplication.shared.appearance = switch appearance {
         case .system: nil
         case .light:  NSAppearance(named: .aqua)
-        case .dark, .beet: NSAppearance(named: .darkAqua)
+        case .dark, .oled: NSAppearance(named: .darkAqua)
         }
-        // NavigationSplitView's unused trailing gutter is the window
-        // background — leave it themed, never default black.
-        let fill = NSColor(Theme.bg)
+        // The window keeps AppKit's own background. Forcing a custom
+        // `backgroundColor` here opted the window out of the standard titlebar
+        // material, so the transcript stayed legible straight through the
+        // toolbar (and over the traffic lights) as it scrolled under it.
         for window in NSApplication.shared.windows {
-            window.backgroundColor = fill
+            configureTitlebar(of: window)
         }
+    }
+
+    /// The window's content must start BELOW the title band. SwiftUI gives a
+    /// toolbar window a full-size content view, and on this macOS the toolbar
+    /// draws its items as floating glass with no band material behind them —
+    /// so the transcript was legible through the titlebar and across the
+    /// traffic lights. A standard (non-full-size) content view is the native
+    /// arrangement for an app whose main surface is not a scrolling page.
+    @MainActor static func configureTitlebar(of window: NSWindow) {
+        guard window.styleMask.contains(.titled) else { return }
+        window.styleMask.remove(.fullSizeContentView)
+        window.titlebarAppearsTransparent = false
     }
 }
 
 /// Corner radii — one scale, used everywhere for a consistent silhouette.
 enum Radius {
-    static let sm: CGFloat = 7
-    static let md: CGFloat = 11
-    static let lg: CGFloat = 15
-    static let xl: CGFloat = 20
+    static let sm: CGFloat = 6
+    static let md: CGFloat = 8
+    static let lg: CGFloat = 10
+    static let xl: CGFloat = 12
+    // Reference-export cards and controls keep their own steps so the
+    // transcript surfaces stay distinct from general window chrome.
+    static let card: CGFloat = 8
+    static let bubble: CGFloat = 12
+    static let control: CGFloat = 6
+}
+
+/// Window chrome + control geometry exported by the reference artboard.
+/// One place so the toolbar, status strip, composer, and every settings
+/// control repeat the same heights, insets, and gaps instead of drifting
+/// per screen.
+enum Chrome {
+    /// Combined top chrome band (titlebar + toolbar) at reference size.
+    static let topBandHeight: CGFloat = 52
+    /// Trailing toolbar buttons: 28 high, 8 radius, solid control fill.
+    static let toolbarButtonHeight: CGFloat = 28
+    static let toolbarButtonRadius: CGFloat = Radius.control
+    static let toolbarIcon: CGFloat = 16
+    /// Composer chips and quiet pills: 26 high, 13 radius, 10 side padding.
+    static let chipHeight: CGFloat = 26
+    static let chipRadius: CGFloat = 13
+    static let chipHPadding: CGFloat = 10
+    /// Action buttons (approval, settings, cards): 28 high, 8 radius.
+    static let buttonHeight: CGFloat = 28
+    static let buttonRadius: CGFloat = Radius.control
+    static let buttonHPadding: CGFloat = 14
+    /// Status strip above the composer.
+    static let statusHeight: CGFloat = 30
+    static let statusHPadding: CGFloat = 22
+    static let statusItemGap: CGFloat = 18
+    /// Composer outer / inner padding and circular send control.
+    static let composerOuterTop: CGFloat = 12
+    static let composerOuterHPadding: CGFloat = 22
+    static let composerOuterBottom: CGFloat = 16
+    static let composerInnerTop: CGFloat = 12
+    static let composerInnerHPadding: CGFloat = 14
+    static let composerInnerBottom: CGFloat = 10
+    static let sendSize: CGFloat = 28
+    /// Search fields (sidebar, model filter): 32 high, 8 radius.
+    static let searchHeight: CGFloat = 34
+    static let searchRadius: CGFloat = Radius.control
+    /// Settings / dashboard content column and page padding.
+    static let pageMaxWidth: CGFloat = 800
+    static let pageHPadding: CGFloat = 24
+    static let pageTopPadding: CGFloat = 24
+    static let pageBottomPadding: CGFloat = 28
+    static let sectionGap: CGFloat = 16
+    /// Outline card padding (settings groups, bot cards).
+    static let cardVPadding: CGFloat = 12
+    static let cardHPadding: CGFloat = 14
+    /// Bottom-dock composer: maximum width, workspace gutter, bottom inset,
+    /// and the gap between suggestions/status and the chassis.
+    static let composerMaxWidth: CGFloat = 960
+    static let composerGutter: CGFloat = 24
+    // The chassis is the bottom edge of the product, like the approved
+    // hardware reference. Extra safe-area space belongs inside the chassis,
+    // never as a floating gap beneath it.
+    static let composerBottomGap: CGFloat = 0
+    static let dockGap: CGFloat = 12
 }
 
 /// The centered reading column shared by the transcript and the composer.
-/// Fluid up to a wide cap: narrow windows use nearly the full width, and
-/// only very wide windows see side margins — never a skinny 760pt strip
-/// floating in dead space.
+/// The reference artboard runs the conversation in a 700pt column centered
+/// in the main pane; the composer deliberately spans wider (22pt side
+/// insets) and does not use this cap.
 enum ContentColumn {
-    static let maxWidth: CGFloat = 1100
+    static let maxWidth: CGFloat = 800
 }
 
-/// App typography. The composer is human language first, so it uses the
-/// native proportional face; code, diffs, and diagnostics keep monospaced
-/// typography in their dedicated surfaces.
+/// One mathematical control scale shared by every surface. Everything steps
+/// on the same 4pt grid: the frame bars are 46, keybed controls are 34,
+/// frameless marks are 28 (control minus one step and a half), and glyphs
+/// step 12 / 14 / 16. A control is always `mark + 6`; a bar is always
+/// `control + 12`.
+enum InstrumentScale {
+    static let grid: CGFloat = 4
+    /// Frame bar thickness (rail, tab strip, control column, bottom bar).
+    static let bar: CGFloat = 46
+    /// Keybed control height — moulded keys and the send cap.
+    static let control: CGFloat = 34
+    /// Frameless mark: the hit target for a printed icon on any surface.
+    static let mark: CGFloat = 28
+    /// Glyphs: dense rows, marks, and the toolbar bar.
+    static let microGlyph: CGFloat = 12
+    static let markGlyph: CGFloat = 14
+    static let barGlyph: CGFloat = 16
+    /// One corner step for marks.
+    static let markRadius: CGFloat = 5
+}
+
+/// App typography. The instrument system uses clean engineered sans for all
+/// controls and prose. Code, diffs, and technical values stay monospaced at
+/// the call site.
 enum AppFont {
-    /// Prose and chrome. Every token asks for `.serif`, which `Font.app`
-    /// resolves against the user's Typeface setting (Serif is the default).
-    /// Code, diffs, and pairing tokens stay monospaced at the call site.
-    static var chatBody: Font { .app(size: 16, design: .serif) }
-    static var chatHeading: Font { .app(size: 18, weight: .semibold, design: .serif) }
+    /// Prose: the user's chosen reading family at answer body size.
+    static var chatBody: Font { .appProse(size: 14.5) }
+    /// User prose: 14pt, one step quieter than answers.
+    static var chatUserBody: Font { .appProse(size: 14.5) }
+    static var chatHeading: Font { .appProse(size: 18, weight: .semibold) }
     /// Folder / project group in the sidebar — parent of chat rows.
-    static var navigationGroup: Font { .app(size: 13.5, weight: .semibold, design: .serif) }
+    static var navigationGroup: Font { .appUI(size: 13.5, weight: .semibold) }
     /// Chat title inside a group — child of `navigationGroup`.
-    static var navigationTitle: Font { .app(size: 12, weight: .medium, design: .serif) }
-    static var navigationMeta: Font { .app(size: 11.5, design: .serif) }
-    static var editor: Font { .app(size: 15.5, design: .serif) }
-    static var homeWordmark: Font { .app(size: 80, weight: .bold, design: .serif) }
-    static var homeInvitation: Font { .app(size: 15, design: .serif) }
+    static var navigationTitle: Font { .appUI(size: 13, weight: .medium) }
+    static var navigationMeta: Font { .appUI(size: 11) }
+    static var editor: Font { .appUI(size: 14) }
+    /// Compact engineered brand lockup used on the welcome screen.
+    static var homeWordmark: Font { .appUI(size: 25, weight: .semibold) }
+    static var homeInvitation: Font { .appUI(size: 13.5) }
 }
 
 /// Spacing — 4pt grid. Use these instead of ad-hoc padding literals.
@@ -167,19 +297,18 @@ enum Spacing {
 }
 
 extension Color {
+    /// An appearance-independent color for invariant inserts and signal marks.
+    static func fixed(_ hex: UInt32) -> Color {
+        Color(hex: hex)
+    }
+
     /// A color that resolves light/dark from a hex pair with no intermediate
-    /// `Color`→`NSColor` round-trip (keeps the sRGB values exact). `beet`
-    /// overrides the dark value while Beet mode is active — Beet is a dark
-    /// appearance, so callers that don't pass it fall through to `dark`.
-    static func dynamic(light: UInt32, dark: UInt32, beet: UInt32? = nil) -> Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
+    /// `Color`→`NSColor` round-trip (keeps the sRGB values exact).
+    static func dynamic(light: UInt32, dark: UInt32, oled: UInt32? = nil) -> Color {
+        let resolvedDark = Theme.currentAppearance == .oled ? (oled ?? dark) : dark
+        return Color(nsColor: NSColor(name: nil) { appearance in
             let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            let hex: UInt32
-            if isDark, Theme.currentAppearance == .beet, let beet {
-                hex = beet
-            } else {
-                hex = isDark ? dark : light
-            }
+            let hex = isDark ? resolvedDark : light
             return NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
                            green:   CGFloat((hex >> 8) & 0xFF) / 255,
                            blue:    CGFloat(hex & 0xFF) / 255,
@@ -198,6 +327,15 @@ extension Color {
 }
 
 extension Font {
+    /// Product identity is independent of the user-selected prose typeface.
+    static func brandWordmark(compact: Bool) -> Font {
+        .system(size: compact ? 25 : 30, weight: .semibold, design: .default)
+    }
+
+    static func brandMicroLabel(compact: Bool) -> Font {
+        .system(size: compact ? 8.5 : 9.5, weight: .medium, design: .monospaced)
+    }
+
     /// App text that honours the user's Text Size setting.
     ///
     /// `.system(size:)` is a fixed point size, so every literal call site
@@ -215,9 +353,33 @@ extension Font {
                 design: resolvedDesign(design))
     }
 
+    /// Engineered UI text: clean system sans at every call site — controls,
+    /// labels, chrome, settings rows. NEVER follows the Typeface preference;
+    /// controls stay identical no matter what family the user reads prose in.
+    static func appUI(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        .system(size: size * CGFloat(Theme.currentTextSize.scale),
+                weight: weight,
+                design: .default)
+    }
+
+    /// Reading prose (transcript answers, long-form copy): resolves through
+    /// the user's Typeface preference — Serif / Sans / Rounded / Mono.
+    static func appProse(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        .system(size: size * CGFloat(Theme.currentTextSize.scale),
+                weight: weight,
+                design: resolvedDesign(.serif))
+    }
+
+    /// Technical text: monospaced, still honoring Text Size.
+    static func appMono(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        .system(size: size * CGFloat(Theme.currentTextSize.scale),
+                weight: weight,
+                design: .monospaced)
+    }
+
     /// Maps a requested design onto the user's Typeface setting. `.serif` is
-    /// the app's "this is prose/chrome" request, so it becomes whatever the
-    /// user picked; anything else (explicit `.default`, monospaced code) is a
+    /// the app's "this is prose" request, so it becomes whatever the user
+    /// picked; anything else (explicit `.default`, monospaced code) is a
     /// deliberate non-prose choice and is passed through untouched.
     static func resolvedDesign(_ requested: Font.Design) -> Font.Design {
         guard requested == .serif else { return requested }
@@ -231,9 +393,9 @@ extension Font {
 }
 
 extension View {
-    /// Standard elevated card: raised surface + hairline border.
+    /// Standard elevated card: silver faceplate with engraved seam.
     func lfCard(radius: CGFloat = Radius.lg) -> some View {
-        lfGlass(radius: radius, contentLegibility: true)
+        instrumentFaceplate(radius: radius, shadow: false)
     }
 
     /// Cursor/ChatGPT-style hover affordance for small chips and accessory
@@ -257,12 +419,8 @@ extension View {
                 .strokeBorder(Theme.washBorder(tint), lineWidth: 1))
     }
 
-    /// Native Liquid Glass surface, ported from the Vamp Mac client recipe
-    /// (MacClient/Sources/MacBrand.swift): geometry-locked glass background
-    /// that never steals clicks, `.regular` glass for content-bearing
-    /// surfaces (legible over busy content), `.clear` for chrome, material
-    /// fallbacks on pre-macOS 26, opaque fallback for Reduce Transparency.
-    /// Pass `hovering` for the +0.025 brightness lift Vamp's BrandCard uses.
+    /// Compatibility entry point for older panels; renders the shared opaque
+    /// silver surface while preserving callers and native interaction.
     func lfGlass(
         radius: CGFloat = Radius.lg,
         contentLegibility: Bool = true,
@@ -278,40 +436,15 @@ extension View {
     }
 }
 
-/// Vamp-style availability-gated glass fill. Kept out of `lfGlass` so the
-/// #available dance lives in exactly one place.
+/// Opaque silver replacement for the legacy glass presentation.
 private struct LFGlassModifier<S: InsettableShape>: ViewModifier {
     let shape: S
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
-    @ViewBuilder
     func body(content: Content) -> some View {
-        if reduceTransparency {
-            content
-                .background(Theme.surface, in: shape)
-                .overlay(shape.strokeBorder(Theme.hairline, lineWidth: 1))
-        } else {
-#if swift(>=6.2)
-            if #available(macOS 26.0, *) {
-                content.background {
-                    GeometryReader { proxy in
-                        Color.clear
-                            .frame(width: proxy.size.width, height: proxy.size.height)
-                            .glassEffect(.clear, in: shape)
-                            .allowsHitTesting(false)
-                    }
-                }
-            } else {
-                content.background(
-                    AnyShapeStyle(.ultraThinMaterial),
-                    in: shape)
-            }
-#else
-            content.background(
-                AnyShapeStyle(.ultraThinMaterial),
-                in: shape)
-#endif
-        }
+        content
+            .background(LinearGradient(
+                colors: [Instrument.silverTop, Instrument.silverLow],
+                startPoint: .top, endPoint: .bottom), in: shape)
+            .overlay(shape.strokeBorder(Instrument.seam, lineWidth: 0.75))
     }
 }
 
@@ -353,53 +486,74 @@ enum LFButtonTone {
 
     var foreground: Color {
         switch self {
-        case .secondary: Theme.textSecondary
+        case .secondary: Instrument.ink
         case .primary: .white
-        // Danger reverses from a dark fill in light mode to a near-white fill
-        // in dark mode. Theme.bg provides the matching high-contrast inverse.
-        case .destructive: Theme.bg
+        case .destructive: Theme.negative
         }
     }
 
     var fill: Color {
         switch self {
-        case .secondary: Theme.surfaceInset
-        case .primary: Theme.accent
-        case .destructive: Theme.danger
+        case .secondary: Instrument.silverMid
+        case .primary: Instrument.darkInsert
+        case .destructive: Instrument.silverMid
         }
     }
 
     var border: Color {
         switch self {
-        case .secondary: Theme.hairline
-        case .primary: Theme.accentBright.opacity(0.45)
-        case .destructive: Color.white.opacity(0.16)
+        case .secondary: Instrument.seam
+        case .primary: Color.clear
+        case .destructive: Theme.negative.opacity(0.5)
         }
     }
 }
 
+/// Instrument button: a moulded key in the deck's one material, primary in the
+/// dark tone. 28pt high, 6pt radius, and a real 1pt travel on press.
 struct LFCapsuleButtonStyle: ButtonStyle {
     var tone: LFButtonTone = .secondary
+    var height: CGFloat = Chrome.buttonHeight
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: Chrome.buttonRadius, style: .continuous)
+    }
+
+    /// The app's button face, in system parts: a prominent accent fill for the
+    /// primary action, the standard control face otherwise, with destructive
+    /// intent carried by the label's colour the way AppKit does it.
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.app(size: 11, weight: .semibold, design: .serif))
-            .foregroundStyle(isEnabled ? tone.foreground : Theme.textSecondary)
-            .padding(.horizontal, 12)
-            .frame(minHeight: 30)
-            .background(isEnabled ? tone.fill : Theme.surfaceInset.opacity(0.55), in: Capsule())
-            .overlay(Capsule().strokeBorder(tone.border, lineWidth: 1))
-            .contentShape(Capsule())
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
-            .brightness(configuration.isPressed ? -0.035 : 0)
-            .opacity(isEnabled ? 1 : 0.88)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.12),
-                       value: configuration.isPressed)
+        let down = configuration.isPressed
+        let primary = tone == .primary
+        return configuration.label
+            .font(.system(size: 13, weight: primary ? .semibold : .regular))
+            .foregroundStyle(foreground)
+            .padding(.horizontal, Chrome.buttonHPadding)
+            .frame(minHeight: height)
+            .background(shape.fill(primary
+                                   ? Color(nsColor: .controlAccentColor)
+                                   : Color(nsColor: .controlColor)))
+            .overlay(shape.strokeBorder(primary ? .clear : Color(nsColor: .separatorColor),
+                                        lineWidth: 1))
+            .contentShape(shape)
+            .brightness(down ? -0.06 : 0)
+            .opacity(isEnabled ? 1 : 0.45)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: down)
+    }
+
+    private var foreground: Color {
+        switch tone {
+        case .primary: Color.white
+        case .destructive: Theme.negative
+        default: Color(nsColor: .labelColor)
+        }
     }
 }
 
+/// Circular moulded cap. Same construction as the rectangular key; only the
+/// silhouette differs.
 struct LFIconButtonStyle: ButtonStyle {
     var tone: LFButtonTone = .secondary
     var size: CGFloat = 28
@@ -407,17 +561,18 @@ struct LFIconButtonStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(isEnabled ? tone.foreground : Theme.textSecondary)
+        let down = configuration.isPressed
+        return configuration.label
+            .foregroundStyle(isEnabled
+                             ? (tone == .primary ? Color.white : Instrument.ink)
+                             : Instrument.inkSecondary)
             .frame(width: size, height: size)
-            .background(isEnabled ? tone.fill : Theme.surfaceInset.opacity(0.55), in: Circle())
-            .overlay(Circle().strokeBorder(tone.border, lineWidth: 1))
+            .environment(\.instrumentPressed, down)
+            .instrumentKey(Circle(), tone: tone == .primary ? .dark : .silver)
             .contentShape(Circle())
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
-            .brightness(configuration.isPressed ? -0.04 : 0)
-            .opacity(isEnabled ? 1 : 0.88)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.12),
-                       value: configuration.isPressed)
+            .animation(reduceMotion ? nil
+                       : (down ? .easeOut(duration: 0.045) : .easeOut(duration: 0.16)),
+                       value: down)
     }
 }
 
@@ -428,7 +583,7 @@ struct PanelCloseButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "xmark")
-                .font(.app(size: 11, weight: .semibold, design: .serif))
+                .font(.app(size: 11, weight: .semibold ))
         }
         .buttonStyle(LFIconButtonStyle(size: 26))
         .lfHoverLift()

@@ -38,7 +38,9 @@ final class SessionStoreTests: XCTestCase {
                 SessionMessage(role: .toolCall, content: "{\"command\": \"swift build\"}", toolName: "run_command", timestamp: Date()),
                 SessionMessage(role: .toolResult, content: "Build succeeded", toolName: "run_command", timestamp: Date()),
             ],
-            checkpoints: [SessionCheckpoint(id: UUID(), treeSHA: "abc", createdAt: Date(), summary: "before")],
+            checkpoints: [SessionCheckpoint(
+                id: UUID(), treeSHA: "abc", createdAt: Date(), summary: "before",
+                refName: "refs/beetcode/checkpoints/abc")],
             schemaVersion: nil)
 
         store.save(record)
@@ -48,12 +50,24 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(loaded?.messages.count, record.messages.count)
         XCTAssertEqual(loaded?.messages[1].answerMetrics, record.messages[1].answerMetrics)
         XCTAssertEqual(loaded?.checkpoints.count, 1)
+        XCTAssertEqual(loaded?.checkpoints.first?.refName, "refs/beetcode/checkpoints/abc")
         // Schema version is stamped on save.
         XCTAssertEqual(loaded?.schemaVersion, SessionRecord.currentSchemaVersion)
         // loadAll returns it sorted.
         XCTAssertEqual(store.loadAll().map(\.id), [record.id])
         store.delete(record)
         XCTAssertNil(store.load(id: record.id))
+    }
+
+    /// Records written before `SessionCheckpoint.refName` existed must still
+    /// decode — the field is optional at the persistence boundary.
+    func testCheckpointDecodesWithoutRefName() throws {
+        let json = """
+        {"id":"\(UUID().uuidString)","treeSHA":"abc","createdAt":0,"summary":"old"}
+        """
+        let decoded = try JSONDecoder().decode(
+            SessionCheckpoint.self, from: Data(json.utf8))
+        XCTAssertNil(decoded.refName)
     }
 
     func testProjectFreeChatBindingIsValidWithoutAFolder() {
@@ -114,6 +128,17 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertNotNil(SessionCrypto.decrypt(data), "payload must use the session cipher")
     }
 
+    /// A truncated or bit-rotted file must fail closed. The old length guard
+    /// only covered the nonce, so a 17–31 byte LFS1 payload trapped on an
+    /// invalid slice range and could crash the app at launch.
+    func testTruncatedCiphertextFailsClosedWithoutTrapping() {
+        for extra in 0...40 {
+            var data = Data("LFS1".utf8)
+            data.append(Data(repeating: 0xAB, count: extra))
+            XCTAssertNil(SessionCrypto.decrypt(data), "byte count \(data.count)")
+        }
+    }
+
     func testFailedSaveIsReportedAndCanBeRetried() throws {
         let store = SessionStore()
         let temp = FileManager.default.temporaryDirectory
@@ -155,6 +180,38 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.pendingSaveCount, 0)
         XCTAssertEqual(store.load(id: record.id)?.messages.first?.content, "do not lose this")
     }
+
+    func testDeleteCancelsPendingSave() throws {
+        let store = SessionStore()
+        let temp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lf-session-delete-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temp) }
+
+        let invalidDirectory = temp.appendingPathComponent("not-a-directory")
+        try Data("occupied".utf8).write(to: invalidDirectory)
+        store.overrideSessionsDir = invalidDirectory
+
+        let record = SessionRecord(
+            id: UUID(),
+            title: "delete me",
+            createdAt: Date(),
+            updatedAt: Date(),
+            workspacePath: "/tmp",
+            modelID: "m",
+            messages: [SessionMessage(
+                role: .user, content: "gone", toolName: nil, timestamp: Date())],
+            checkpoints: [])
+        _ = store.save(record)
+        XCTAssertEqual(store.pendingSaveCount, 1)
+        store.delete(record)
+        XCTAssertEqual(store.pendingSaveCount, 0)
+
+        let validDirectory = temp.appendingPathComponent("sessions", isDirectory: true)
+        store.overrideSessionsDir = validDirectory
+        _ = store.retryPendingSaves()
+        XCTAssertNil(store.load(id: record.id))
+    }
 }
 
 @MainActor
@@ -166,6 +223,18 @@ final class SettingsStoreTests: XCTestCase {
         defaults.removeVolatileDomain(forName: UserDefaults.registrationDomain)
         defaults.removePersistentDomain(forName: suite)
         return (defaults, suite)
+    }
+
+    func testHomeSuggestionsVisibilityPersistsAndCanBeRestored() {
+        let (defaults, suite) = isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SettingsStore(defaults: defaults)
+        XCTAssertTrue(store.showHomeSuggestions)
+        store.showHomeSuggestions = false
+        let reopened = SettingsStore(defaults: defaults)
+        XCTAssertFalse(reopened.showHomeSuggestions)
+        reopened.showHomeSuggestions = true
+        XCTAssertTrue(SettingsStore(defaults: defaults).showHomeSuggestions)
     }
 
     func testNewStoreDefaultsToDark() {
@@ -261,15 +330,17 @@ final class SettingsStoreTests: XCTestCase {
     func testLegacyBeetAppearanceMigratesToDarkOnce() {
         let (defaults, suite) = isolatedDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }
-        defaults.set(AppAppearance.beet.rawValue, forKey: "appearance")
+        defaults.set("beet", forKey: "appearance")
 
         let migrated = SettingsStore(defaults: defaults)
         XCTAssertEqual(migrated.appearance, .dark)
 
-        migrated.appearance = .beet
+        defaults.set("beet", forKey: "appearance")
         let reopened = SettingsStore(defaults: defaults)
         XCTAssertEqual(reopened.appearance, .dark)
-        XCTAssertFalse(AppAppearance.allCases.contains(.beet))
+        XCTAssertEqual(
+            AppAppearance.allCases, [.system, .light, .dark, .oled],
+            "case list guard — add the new case here when the appearance enum grows")
     }
 
     func testExperimentalDFlashPreferencePersistsWithoutChangingItsDefault() {
@@ -329,6 +400,8 @@ final class AppPreferencesTests: XCTestCase {
         var preferences = AppPreferences()
         preferences.lastWorkspacePath = temp.path
         preferences.lastModelID = "qwen-3-4b"
+        preferences.lastEngineKind = "chatgpt"
+        preferences.lastCodexModelID = "gpt-6-astra"
         preferences.autoResumeDownloads = true
         preferences.hasCompletedWelcome = true
 
@@ -336,6 +409,8 @@ final class AppPreferencesTests: XCTestCase {
         let reloaded = store.current
         XCTAssertEqual(reloaded.lastWorkspacePath, temp.path)
         XCTAssertEqual(reloaded.lastModelID, "qwen-3-4b")
+        XCTAssertEqual(reloaded.lastEngineKind, "chatgpt")
+        XCTAssertEqual(reloaded.lastCodexModelID, "gpt-6-astra")
         XCTAssertTrue(reloaded.autoResumeDownloads)
         XCTAssertTrue(reloaded.hasCompletedWelcome)
 

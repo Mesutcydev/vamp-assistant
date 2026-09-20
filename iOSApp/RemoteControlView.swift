@@ -52,8 +52,9 @@ private struct RemoteStreamGeometryReader<Content: View>: View {
     }
 }
 
-private struct RemoteControlUnavailableState: View {
+struct RemoteControlUnavailableState: View {
     @Environment(\.remoteAppearance) private var appearance
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     let title: String
     let message: String
     let status: String
@@ -73,38 +74,40 @@ private struct RemoteControlUnavailableState: View {
                 // than every other screen. One backdrop, one look.
                 RemoteBackdrop()
 
+                ScrollView {
                 VStack(spacing: 0) {
                 HStack {
                     Button(action: dismiss) {
                         Image(systemName: "xmark")
                             .font(.system(size: 14, weight: .semibold))
                             .frame(width: 44, height: 44)
-                            .background(.thinMaterial, in: Circle())
-                            .overlay(Circle().stroke(BeetTheme.line(appearance), lineWidth: 0.75))
+                            .background(RemoteInstrument.pearl, in: RoundedRectangle(cornerRadius: 8))
+                            .foregroundStyle(RemoteInstrument.ink)
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(BeetTheme.line(appearance), lineWidth: 0.75))
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Close remote control")
                     Spacer()
                 }
                 .padding(.horizontal, 18)
-                .padding(.top, max(topInset + 8, 58))
+                .padding(.top, max(topInset + 8, verticalSizeClass == .compact ? 16 : 58))
 
                 Spacer(minLength: 28)
 
-                VStack(spacing: 18) {
+                VStack(spacing: 12) {
                     ZStack {
-                        Circle()
+                        RoundedRectangle(cornerRadius: 8)
                             .fill(BeetTheme.surfaceStrong(appearance))
-                            .frame(width: 76, height: 76)
-                        Circle()
+                            .frame(width: 48, height: 48)
+                        RoundedRectangle(cornerRadius: 8)
                             .stroke(BeetTheme.line(appearance), lineWidth: 0.75)
-                            .frame(width: 76, height: 76)
+                            .frame(width: 48, height: 48)
                         if isWorking {
-                            ProgressView().controlSize(.large).tint(BeetTheme.accentBright)
+                            ProgressView().controlSize(.large).tint(RemoteInstrument.orange)
                         } else {
                             Image(systemName: symbol)
-                                .font(.system(size: 28, weight: .medium))
-                                .foregroundStyle(BeetTheme.accentBright)
+                                .font(.system(size: 22, weight: .medium))
+                                .foregroundStyle(RemoteInstrument.orange)
                         }
                     }
 
@@ -115,7 +118,7 @@ private struct RemoteControlUnavailableState: View {
                             .foregroundStyle(BeetTheme.secondaryText(appearance))
                         Text(title)
                             .font(.title2.weight(.semibold))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(RemoteInstrument.ink)
                         Text(message)
                             .font(.subheadline)
                             .foregroundStyle(BeetTheme.secondaryText(appearance))
@@ -131,34 +134,33 @@ private struct RemoteControlUnavailableState: View {
                                     .font(.headline)
                                     .frame(maxWidth: .infinity, minHeight: 48)
                             }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(RemotePrimaryButtonStyle())
                             .tint(Color(white: 0.28))
                             .disabled(isWorking)
                         }
-                        Button("Back to Vamp Assistant", action: dismiss)
+                        // Names where dismiss actually lands (the SESSIONS list
+                        // behind this fullScreenCover) instead of naming the app
+                        // the user is already inside.
+                        Button("Back to sessions", action: dismiss)
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.76))
-                            .frame(minHeight: 44)
+                            .foregroundStyle(RemoteInstrument.secondaryInk)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            // ponytail: .frame alone sizes the button but not its
+                            // hit shape — a plain Button only accepts taps on the
+                            // text, which measured 18pt against the 44pt minimum.
+                            .contentShape(Rectangle())
                     }
                 }
                     .frame(maxWidth: 340)
-                    .padding(24)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 26, style: .continuous)
-                            .stroke(
-                                LinearGradient(
-                                    colors: [.white.opacity(0.22), .white.opacity(0.07)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing),
-                                lineWidth: 0.75)
-                    }
-                    .shadow(color: .black.opacity(0.4), radius: 28, y: 16)
+                    .padding(20)
                     .padding(.horizontal, 20)
 
                     Spacer(minLength: max(bottomInset, 16) + 20)
                 }
-                .frame(width: proxy.size.width, height: proxy.size.height)
+                .frame(width: proxy.size.width)
+                .frame(minHeight: proxy.size.height)
+                }
+                .scrollBounceBehavior(.basedOnSize)
             }
         }
         .ignoresSafeArea()
@@ -189,7 +191,8 @@ private struct RemoteMacUnlockState: View {
                             Image(systemName: "xmark")
                                 .font(.system(size: 14, weight: .semibold))
                                 .frame(width: 44, height: 44)
-                                .background(.thinMaterial, in: Circle())
+                                .background(RemoteInstrument.pearl, in: Circle())
+                            .foregroundStyle(RemoteInstrument.ink)
                                 .overlay(Circle().stroke(BeetTheme.line(appearance), lineWidth: 0.75))
                         }
                         .buttonStyle(.plain)
@@ -221,7 +224,7 @@ private struct RemoteMacUnlockState: View {
                                 .foregroundStyle(BeetTheme.secondaryText(appearance))
                             Text("Mac is locked")
                                 .font(.title2.weight(.semibold))
-                                .foregroundStyle(.primary)
+                                .foregroundStyle(RemoteInstrument.ink)
                             Text(message)
                                 .font(.subheadline)
                                 .foregroundStyle(BeetTheme.secondaryText(appearance))
@@ -241,7 +244,7 @@ private struct RemoteMacUnlockState: View {
                             .disabled(isSubmitting)
                             .padding(.horizontal, 14)
                             .frame(minHeight: 48)
-                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .modifier(RemoteGlassBackdrop(radius: 12, role: .control))
                             .overlay {
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                                     .stroke(BeetTheme.line(appearance), lineWidth: 0.75)
@@ -255,7 +258,7 @@ private struct RemoteMacUnlockState: View {
                             .font(.headline)
                             .frame(maxWidth: .infinity, minHeight: 48)
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(RemotePrimaryButtonStyle())
                         .tint(Color(white: 0.28))
                         .disabled(password.isEmpty || password.count > 256 || isSubmitting)
 
@@ -264,7 +267,7 @@ private struct RemoteMacUnlockState: View {
                                 .font(.caption)
                                 .foregroundStyle(feedback.hasPrefix("Unlock request sent")
                                     ? BeetTheme.secondaryText(appearance)
-                                    : Color.orange)
+                                    : RemoteInstrument.orange)
                                 .multilineTextAlignment(.center)
                                 .frame(maxWidth: .infinity)
                         }
@@ -277,17 +280,7 @@ private struct RemoteMacUnlockState: View {
                     }
                     .frame(maxWidth: 360)
                     .padding(24)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 26, style: .continuous)
-                            .stroke(
-                                LinearGradient(
-                                    colors: [.white.opacity(0.22), .white.opacity(0.07)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing),
-                                lineWidth: 0.75)
-                    }
-                    .shadow(color: .black.opacity(0.4), radius: 28, y: 16)
+                    .remoteFaceplate()
                     .padding(.horizontal, 20)
 
                     Spacer(minLength: max(bottomInset, 16) + 20)
@@ -357,6 +350,7 @@ struct RemoteControlView: View {
     @StateObject private var audioPlayer = RemoteAudioPlayer()
     @StateObject private var videoBinder = RemoteVideoSurfaceBinder()
     @StateObject private var streamRestart = RemoteStreamRestart()
+    @StateObject private var cursorModel = LocalCursorModel()
     @StateObject private var markup = RemoteMarkupStore()
     private let diagnostics = RemoteControlDiagnostics.shared
     @State private var decoder = RemoteH264Decoder()
@@ -369,6 +363,11 @@ struct RemoteControlView: View {
     @State private var selectedWindowID: Int?
     @State private var launchingApplicationID: String?
     @State private var viewportAspect = 9.0 / 16.0
+    /// Viewport shape the Mac window was last fitted to. A later viewport change (rotation, or
+    /// the keyboard shrinking the surface) re-asserts it, so a window shaped for one orientation
+    /// is never left letterboxed in another.
+    @State private var assertedViewportAspect: Double?
+    @State private var viewportResizeTask: Task<Void, Never>?
     @State private var showStats = true
     @State private var fpsText = "—"
     @State private var bitrateText = "—"
@@ -501,7 +500,7 @@ struct RemoteControlView: View {
                             .foregroundStyle(.white)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
-                            .background(.orange.opacity(0.85), in: Capsule())
+                            .background(RemoteInstrument.orange.opacity(0.85), in: Capsule())
                             .padding(.top, max(proxy.safeAreaInsets.top, 12) + 8)
                         Spacer()
                     }
@@ -658,6 +657,11 @@ struct RemoteControlView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .animation(reduceMotion ? nil : .interactiveSpring(response: 0.15, dampingFraction: 0.9), value: zoom)
                 .animation(reduceMotion ? nil : .interactiveSpring(response: 0.15, dampingFraction: 0.9), value: offset)
+                // Placing the local cursor publishes state, so it belongs in a lifecycle hook
+                // rather than the builder: a publish during a view update re-runs the body and
+                // wedges the app in an update loop.
+                .onAppear { cursorModel.setSurface(contentRect: placed) }
+                .onChange(of: placed) { _, rect in cursorModel.setSurface(contentRect: rect) }
 
             if let geometry {
             RemoteScreenGestureSurface(
@@ -665,26 +669,31 @@ struct RemoteControlView: View {
                 offset: offset,
                 viewSize: geo.size,
                 onTap: { point in
+                    cursorModel.place(at: point)
                     guard let mappedPoint = mapped(point, placed: placed, geometry: geometry) else { return }
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     enqueue(.click(x: mappedPoint.x, y: mappedPoint.y, button: "left", count: 1))
                 },
                 onDoubleTap: { point in
+                    cursorModel.place(at: point)
                     guard let mappedPoint = mapped(point, placed: placed, geometry: geometry) else { return }
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     enqueue(.click(x: mappedPoint.x, y: mappedPoint.y, button: "left", count: 2))
                 },
                 onRightClick: { point in
+                    cursorModel.place(at: point)
                     guard let mappedPoint = mapped(point, placed: placed, geometry: geometry) else { return }
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     enqueue(.click(x: mappedPoint.x, y: mappedPoint.y, button: "right", count: 1))
                 },
                 onMiddleClick: { point in
+                    cursorModel.place(at: point)
                     guard let mappedPoint = mapped(point, placed: placed, geometry: geometry) else { return }
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     enqueue(.click(x: mappedPoint.x, y: mappedPoint.y, button: "middle", count: 1))
                 },
                 onPointerMove: { point in
+                    cursorModel.place(at: point)
                     guard let mappedPoint = mapped(point, placed: placed, geometry: geometry, clampToContent: true) else { return }
                     enqueue(.move(x: mappedPoint.x, y: mappedPoint.y))
                 },
@@ -737,25 +746,33 @@ struct RemoteControlView: View {
                     }
                 },
                 onLongPress: { point in
+                    cursorModel.place(at: point)
                     if let mappedPoint = mapped(point, placed: placed, geometry: geometry, clampToContent: true) {
                         enqueue(.move(x: mappedPoint.x, y: mappedPoint.y))
                     }
                     toggleDragLock()
                 },
                 onHoverDelta: { dx, dy in
-                    let scaled = RemoteDisplayMapping.scaleViewDeltaToDisplay(
-                        dx: dx,
-                        dy: dy,
-                        contentWidth: Double(placed.width),
-                        contentHeight: Double(placed.height),
-                        displayWidth: geometry.displayWidth,
-                        displayHeight: geometry.displayHeight)
-                    let accel = RemoteDisplayMapping.accelerated(dx: scaled.dx, dy: scaled.dy)
+                    let accel = RemoteDisplayMapping.hoverDelta(dx: dx, dy: dy)
                     enqueue(.relative(dx: accel.dx, dy: accel.dy))
+                    if geometry.displayWidth > 0 {
+                        cursorModel.moveRelative(
+                            dx: accel.dx, dy: accel.dy,
+                            viewPointsPerDesktopPoint: placed.width / geometry.displayWidth)
+                    }
                 }
             )
             .frame(width: geo.size.width, height: geo.size.height)
             .allowsHitTesting(isInputAvailable)
+            .overlay {
+                // The stream is requested with `cursor=0`, so the pointer is drawn here
+                // at the touch/hover positions the input pipeline maps — zero-round-trip
+                // hover feedback. The overlay carries the viewport's zoom/pan to stay
+                // glued to the content when the picture is magnified.
+                 LocalCursorOverlay(cursor: cursorModel, contentZoom: zoom)
+                    .scaleEffect(zoom, anchor: .center)
+                    .offset(offset)
+            }
             }
         }
         .clipped()
@@ -771,9 +788,9 @@ struct RemoteControlView: View {
                 .frame(width: fitted.width, height: fitted.height)
                 .scaleEffect(previewZoom)
                 .offset(previewOffset)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
                 )
                 .gesture(
@@ -820,7 +837,8 @@ struct RemoteControlView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(Color.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(.white.opacity(0.2), lineWidth: 0.75) }
+        .background(Color.black.opacity(0.76), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         .padding(.leading, 28)
         .padding(.bottom, 104)
@@ -836,23 +854,30 @@ struct RemoteControlView: View {
     }
 
     private func classicBottomChrome(bottomInset: CGFloat) -> some View {
-        HStack(spacing: 0) {
-            classicIconButton(systemName: "xmark", destructive: true) { dismiss() }
+        ScrollView(.horizontal) {
+        HStack(spacing: 4) {
+            classicIconButton(systemName: "xmark", accessibilityLabel: "Close remote control", destructive: true) { dismiss() }
             classicIconButton(
                 systemName: markup.isVisible ? "pencil.slash" : "pencil.tip",
+                accessibilityLabel: "Markup",
+                accessibilityValue: markup.isVisible ? "On" : "Off",
                 active: markup.isVisible
             ) {
                 markup.isVisible.toggle()
             }
             classicIconButton(
                 systemName: showKeyboard ? "keyboard.chevron.compact.down" : "keyboard",
+                accessibilityLabel: showKeyboard ? "Hide remote keyboard" : "Show remote keyboard",
+                accessibilityValue: showKeyboard ? "Visible" : "Hidden",
                 active: showKeyboard
             ) {
                 showKeyboard.toggle()
             }
-            classicIconButton(systemName: "terminal") { showTerminal = true }
+            classicIconButton(systemName: "terminal", accessibilityLabel: "Open terminal") { showTerminal = true }
             classicIconButton(
                 systemName: audioPlayer.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
+                accessibilityLabel: audioPlayer.isMuted ? "Unmute Mac audio" : "Mute Mac audio",
+                accessibilityValue: audioPlayer.isMuted ? "Muted" : "Playing",
                 active: audioPlayer.isActive && !audioPlayer.isMuted
             ) {
                 audioPlayer.isMuted.toggle()
@@ -863,7 +888,7 @@ struct RemoteControlView: View {
                 }
             }
             if sourceMode == .display, let displays = status?.displays, displays.count > 1 {
-                classicIconButton(systemName: "rectangle.on.rectangle.angled") {
+                classicIconButton(systemName: "rectangle.on.rectangle.angled", accessibilityLabel: "Switch display") {
                     cycleDisplay(in: displays)
                 }
                 Menu {
@@ -884,7 +909,7 @@ struct RemoteControlView: View {
                 } label: {
                     classicIconLabel(systemName: "display.2", active: false)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RemoteKeyButtonStyle())
             }
             if sourceMode == .application {
                 Menu {
@@ -918,7 +943,7 @@ struct RemoteControlView: View {
                 } label: {
                     classicIconLabel(systemName: "macwindow.on.rectangle", active: selectedWindowID != nil)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RemoteKeyButtonStyle())
                 .accessibilityLabel("Choose streamed application")
             }
             Menu {
@@ -953,28 +978,34 @@ struct RemoteControlView: View {
             } label: {
                 classicIconLabel(systemName: fillScreen ? "rectangle.arrowtriangle.2.outward" : "ellipsis", active: fillScreen)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RemoteKeyButtonStyle())
 
             Rectangle()
                 .fill(Color.white.opacity(0.18))
                 .frame(width: 1, height: 22)
                 .padding(.horizontal, 2)
 
-            classicIconButton(systemName: "eye.slash", dimmed: true) {
+            classicIconButton(systemName: "eye.slash", accessibilityLabel: "Hide controls", dimmed: true) {
                 withAnimation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.82)) { hideChrome = true }
             }
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 4)
-        .background(Self.panel.opacity(0.94), in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
-        .shadow(color: .black.opacity(0.42), radius: 14, y: 7)
+        }
+        .scrollIndicators(.hidden)
+        .frame(height: 54)
+        .frame(maxWidth: 520)
+        .background(RemoteInstrument.pearl, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(RemoteInstrument.edge, lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.34), radius: 12, y: 6)
         .padding(.horizontal, 10)
         .padding(.bottom, bottomInset + 8)
     }
 
     private func classicIconButton(
         systemName: String,
+        accessibilityLabel: String,
+        accessibilityValue: String? = nil,
         active: Bool = false,
         dimmed: Bool = false,
         destructive: Bool = false,
@@ -986,7 +1017,10 @@ struct RemoteControlView: View {
         } label: {
             classicIconLabel(systemName: systemName, active: active, dimmed: dimmed, destructive: destructive)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RemoteKeyButtonStyle(prominent: destructive, isSelected: active))
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue(accessibilityValue ?? "")
+        .accessibilityAddTraits(active ? .isSelected : [])
     }
 
     private func classicIconLabel(
@@ -996,17 +1030,14 @@ struct RemoteControlView: View {
         destructive: Bool = false
     ) -> some View {
         ZStack {
-            if destructive {
-                Circle().fill(Color(white: 0.34).opacity(0.95)).frame(width: 30, height: 30)
-            }
             Image(systemName: systemName)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(
-                    destructive ? .white : active ? Self.accent : dimmed ? .white.opacity(0.38) : .white.opacity(0.82)
+                    destructive || active ? .white : dimmed ? RemoteInstrument.secondaryInk : RemoteInstrument.ink
                 )
         }
-        .frame(width: 38, height: 38)
-        .contentShape(Circle())
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
     }
 
     private func revealButton(bottomInset: CGFloat) -> some View {
@@ -1018,7 +1049,7 @@ struct RemoteControlView: View {
                 Image(systemName: "eye")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.55))
-                    .frame(width: 32, height: 32)
+                    .frame(width: 44, height: 44)
                     .background(Color.black.opacity(0.22), in: Capsule())
                     .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.7))
                     .accessibilityLabel("Show the controls")
@@ -1250,6 +1281,7 @@ struct RemoteControlView: View {
                 throw RemoteClientError.server("The application did not open a streamable window.")
             }
             selectedWindowID = windowID
+            assertedViewportAspect = viewportAspect
             reconnectBanner = nil
             errorText = nil
         } catch is CancellationError {
@@ -1280,6 +1312,32 @@ struct RemoteControlView: View {
         ) else { return }
         stableViewportSize = size
         viewportAspect = min(max(Double(size.width / size.height), 0.25), 4)
+        scheduleWindowShapeAssertion()
+    }
+
+    /// The Mac window is fitted to this phone when it opens. Nothing re-fitted it afterwards, so
+    /// rotating the phone — or letting the keyboard take a bite out of the surface — left the
+    /// window at the old shape and the phone letterboxed it. Re-assert the measured shape once
+    /// the viewport settles; a window that cannot take it (a minimum size, or Accessibility not
+    /// granted) keeps its own and the stream carries on.
+    private func scheduleWindowShapeAssertion() {
+        guard isControlAvailable, let windowID = activeWindowID else { return }
+        let aspect = viewportAspect
+        if let asserted = assertedViewportAspect, abs(asserted - aspect) < 0.01 { return }
+        viewportResizeTask?.cancel()
+        viewportResizeTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled, isControlAvailable, activeWindowID == windowID else { return }
+            do {
+                let resized = try await store.resizeMacControlApplication(
+                    windowID: windowID,
+                    viewportAspect: aspect)
+                assertedViewportAspect = aspect
+                replaceApplication(resized)
+            } catch {
+                diagnostics.noteError("window resize: \(error.localizedDescription)")
+            }
+        }
     }
 
     private func enqueue(_ command: RemoteInputSender.Command) {

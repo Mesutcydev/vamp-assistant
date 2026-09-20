@@ -40,6 +40,7 @@ struct AppleShipTool: AgentTool {
     let name = "apple_ship"
     let summary = "Verify and package a macOS or iOS release with logs and a delivery report"
     let risk = ToolRisk.execute
+    let treatsErrorPrefixAsFailure = true
 
     let schemaText = """
         {"type":"object","properties":{

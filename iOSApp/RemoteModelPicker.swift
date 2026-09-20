@@ -10,6 +10,7 @@ import SwiftUI
 /// searchable, sectioned, counted list instead, presented as a sheet from both.
 struct RemoteModelPickerSheet: View {
     let models: [RemoteStartModelOption]
+    var modeName: String? = nil
     @Binding var source: String
     @Binding var selectedModelID: String
     /// Called with the chosen model so callers can also apply its default
@@ -60,13 +61,26 @@ struct RemoteModelPickerSheet: View {
     /// API models come from many providers at once; grouping by `detail` keeps
     /// each provider's models together instead of interleaving them.
     private var groups: [(title: String, models: [RemoteStartModelOption])] {
+        if source == "chatgpt" {
+            let latest = filtered.filter(\.isLatest)
+            let rest = filtered.filter { !$0.isLatest }
+            var sections: [(String, [RemoteStartModelOption])] = []
+            if !latest.isEmpty { sections.append(("Latest", latest)) }
+            if !rest.isEmpty {
+                sections.append((latest.isEmpty ? "ChatGPT" : "More", rest))
+            }
+            return sections
+        }
         guard source == "api" else {
             return filtered.isEmpty ? [] : [(Self.sourceLabel(source), filtered)]
         }
         let byProvider = Dictionary(grouping: filtered, by: \.detail)
         return byProvider.keys
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-            .map { ($0, byProvider[$0]!.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) }
+            .map { ($0, byProvider[$0]!.sorted { lhs, rhs in
+                if lhs.isLatest != rhs.isLatest { return lhs.isLatest }
+                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+            }) }
     }
 
     private var emptyDescription: String {
@@ -82,14 +96,20 @@ struct RemoteModelPickerSheet: View {
             ZStack {
                 RemoteBackdrop()
                 VStack(spacing: 0) {
-                    Picker("Model source", selection: $source) {
-                        ForEach(Self.sources, id: \.self) { option in
-                            let count = models.filter { $0.source == option }.count
-                            Text(count > 0 ? "\(Self.sourceLabel(option)) \(count)" : Self.sourceLabel(option))
-                                .tag(option)
-                        }
+                    if let modeName {
+                        Text("Conversation mode: \(modeName)")
+                            .font(.subheadline).foregroundStyle(RemoteInstrument.secondaryInk)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16).padding(.bottom, 12)
                     }
-                    .pickerStyle(.segmented)
+                    SearchField(text: $query, placeholder: "Search name, id, or provider")
+                        .padding(.horizontal, 18)
+                        .padding(.bottom, 12)
+                    RemoteInstrumentSegments(selection: $source, options: Self.sources.map { option in
+                        let count = models.filter { $0.source == option }.count
+                        return (count > 0 ? "\(Self.sourceLabel(option)) \(count)" : Self.sourceLabel(option), option)
+                    })
+                    .accessibilityLabel("Model source")
                     .padding(.horizontal, 18)
                     .padding(.bottom, 12)
 
@@ -103,7 +123,7 @@ struct RemoteModelPickerSheet: View {
                         ContentUnavailableView.search(text: query)
                             .frame(maxHeight: .infinity)
                     } else {
-                        List {
+                        RemoteInstrumentForm {
                             ForEach(groups, id: \.title) { group in
                                 Section {
                                     ForEach(group.models) { model in
@@ -118,7 +138,6 @@ struct RemoteModelPickerSheet: View {
                                 .listRowBackground(BeetTheme.surface(appearance))
                             }
                         }
-                        .listStyle(.insetGrouped)
                         .scrollContentBackground(.hidden)
                         .refreshable { await onRefresh?() }
                     }
@@ -127,10 +146,9 @@ struct RemoteModelPickerSheet: View {
             }
             .navigationTitle("Model")
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
-                        prompt: "Search name, id, or provider")
+            .remoteNavigationChrome()
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }.vampUtilityAction()
             }
             .toolbarBackground(BeetTheme.background(appearance).opacity(0.94), for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
@@ -147,21 +165,33 @@ struct RemoteModelPickerSheet: View {
                 Image(systemName: selectedModelID == model.id
                       ? "checkmark.circle.fill" : Self.sourceIcon(model.source))
                     .foregroundStyle(selectedModelID == model.id
-                                     ? BeetTheme.accentBright : BeetTheme.secondaryText(appearance))
+                                     ? RemoteInstrument.green : BeetTheme.secondaryText(appearance))
                     .frame(width: 24)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(model.name).font(.body.weight(.semibold))
+                    HStack(spacing: 6) {
+                        Text(model.name).font(.body.weight(.semibold))
+                        if model.isLatest {
+                            Text("LATEST")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(BeetTheme.accentBright)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(BeetTheme.accentBright.opacity(0.14), in: Capsule())
+                                .accessibilityLabel("Latest model")
+                        }
+                    }
                     Text(model.detail)
                         .font(.caption)
                         .foregroundStyle(BeetTheme.secondaryText(appearance))
                 }
                 Spacer(minLength: 0)
             }
+            .frame(minHeight: RemoteInstrument.controlHeight)
             .contentShape(Rectangle())
             .accessibilityAddTraits(selectedModelID == model.id ? .isSelected : [])
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RemotePressButtonStyle())
     }
 }
 
@@ -188,7 +218,7 @@ struct RemoteModelSummaryRow: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(selected?.name ?? "Choose a model")
                         .font(.body.weight(.semibold))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(RemoteInstrument.ink)
                     Text(selected?.detail ?? "\(models.count) available")
                         .font(.caption)
                         .foregroundStyle(BeetTheme.secondaryText(appearance))
@@ -203,8 +233,8 @@ struct RemoteModelSummaryRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 16))
-        .overlay { RoundedRectangle(cornerRadius: 16).stroke(BeetTheme.line(appearance)) }
+        .background(BeetTheme.surface(appearance), in: RoundedRectangle(cornerRadius: 10))
+        .overlay { RoundedRectangle(cornerRadius: 10).stroke(BeetTheme.line(appearance)) }
         .accessibilityLabel("Model, \(selected?.name ?? "none chosen")")
         .accessibilityHint("Opens the searchable model list")
     }

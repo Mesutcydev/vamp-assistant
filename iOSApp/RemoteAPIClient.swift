@@ -226,7 +226,11 @@ struct RemoteAPIClient {
     func controlScreenStream(
         displayID: UInt32? = nil,
         windowID: UInt32? = nil,
-        resolution: RemoteStreamResolution = .high
+        resolution: RemoteStreamResolution = .high,
+        // The client draws a local cursor overlay (LocalCursorOverlay), so the host
+        // omits the macOS cursor from the captured frames: pointer feedback becomes
+        // zero-round-trip instead of waiting for the video.
+        showsCursor: Bool = false
     ) -> AsyncThrowingStream<RemoteMacControlFrame, Error> {
         var queryItems = [URLQueryItem(name: "resolution", value: resolution.rawValue)]
         if let displayID {
@@ -234,6 +238,9 @@ struct RemoteAPIClient {
         }
         if let windowID {
             queryItems.append(URLQueryItem(name: "window", value: String(windowID)))
+        }
+        if !showsCursor {
+            queryItems.append(URLQueryItem(name: "cursor", value: "0"))
         }
         return avcStream(path: "api/control/screen/stream", queryItems: queryItems)
     }
@@ -738,9 +745,11 @@ struct RemoteAPIClient {
     }
 
     func downloadFile(named name: String) async throws -> Data {
-        let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
-        let request = try authorizedRequest(url: baseURL.appending(path: "api/files/\(encoded)"), method: "GET")
-        let (data, response) = try await Self.apiSession.data(for: request)
+        guard !name.isEmpty, name == URL(fileURLWithPath: name).lastPathComponent,
+              name != ".", name != ".." else { throw RemoteClientError.invalidResponse }
+        // URL encodes the path itself; pre-encoding turns spaces into literal "%20" names.
+        let request = try authorizedRequest(url: baseURL.appending(path: "api/files/\(name)"), method: "GET")
+        let (data, response) = try await (session ?? Self.apiSession).data(for: request)
         guard let http = response as? HTTPURLResponse else { throw RemoteClientError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
             throw Self.responseError(statusCode: http.statusCode, data: data)

@@ -1,0 +1,5 @@
+# Development-only environment for the independent Qwen3.5 K=8 oracle.
+# Do not install these packages into Vampire Assistant or the target Mac's
+# application environment.
+mlx==0.32.2
+mlx-lm==0.31.1

@@ -3,7 +3,6 @@ import UIKit
 
 /// Relative trackpad: 1-finger move, tap/double/right/middle click, 2-finger scroll, long-press drag-lock.
 struct RemoteTrackpadView: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var onMove: (Double, Double) -> Void
     var onClick: () -> Void
     var onDoubleClick: () -> Void
@@ -13,30 +12,23 @@ struct RemoteTrackpadView: View {
     var onDragLockToggle: () -> Void
 
     @State private var isTouching = false
-    @State private var pulse = false
 
     private static let accent = Color(white: 0.72)
     private static let surface = Color(white: 0.07)
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Self.surface)
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .strokeBorder(
                     isTouching ? Self.accent.opacity(0.45) : Color.white.opacity(0.07),
                     lineWidth: isTouching ? 1.4 : 1)
 
             Circle()
-                .fill(Self.accent.opacity(0.18))
-                .frame(width: pulse ? 84 : 60, height: pulse ? 84 : 60)
-                .blur(radius: 18)
-            Circle()
                 .fill(Self.accent)
-                .frame(width: 18, height: 18)
-                .shadow(color: Self.accent.opacity(0.9), radius: pulse ? 22 : 9)
-                .scaleEffect(pulse ? 1.3 : 0.9)
-                .opacity(isTouching ? 1 : 0.9)
+                .frame(width: 6, height: 6)
+                .opacity(isTouching ? 1 : 0.4)
 
             VStack {
                 Spacer()
@@ -57,24 +49,7 @@ struct RemoteTrackpadView: View {
                 onTouchActive: { isTouching = $0 }
             )
         }
-        .contentShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .onAppear {
-            updatePulse(for: reduceMotion)
-        }
-        .onChange(of: reduceMotion) { _, reduced in
-            updatePulse(for: reduced)
-        }
-    }
-
-    private func updatePulse(for reduced: Bool) {
-        if reduced {
-            withAnimation(nil) { pulse = false }
-        } else {
-            pulse = false
-            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
-                pulse = true
-            }
-        }
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 

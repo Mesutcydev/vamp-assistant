@@ -2,6 +2,25 @@ import XCTest
 @testable import BeetCode
 
 final class RemoteAPIModelCatalogTests: XCTestCase {
+    func testOpenCodeRestoredModelUsesItsOwnWireProtocol() throws {
+        for provider in [LLMProvider.openCode, .openCodeGo] {
+            for model in ["muse-spark-1.3-contributor", "muse-spark-1.2-contributor", "grok-4.6", "gpt-5.6-luna"] {
+                let stale = RemoteEndpoint(provider: provider, model: model, apiProtocol: .openAIChatCompletions)
+                let restored = try JSONDecoder().decode(RemoteEndpoint.self, from: JSONEncoder().encode(stale))
+                XCTAssertEqual(restored.effectiveProtocol, .openAIResponses, model)
+            }
+            XCTAssertEqual(RemoteEndpoint(provider: provider, model: "deepseek-v4-flash", apiProtocol: .openAIResponses).effectiveProtocol, .openAIChatCompletions)
+            // The gateways route MiniMax per plan: Go serves it through
+            // Anthropic Messages, Zen's paid models through chat completions
+            // (opencode.ai/docs/zen and /docs/go).
+            XCTAssertEqual(
+                RemoteEndpoint(provider: provider, model: "minimax-m3", apiProtocol: .openAIResponses).effectiveProtocol,
+                provider == .openCodeGo ? .anthropicMessages : .openAIChatCompletions,
+                "minimax-m3 on \(provider.rawValue)")
+        }
+        XCTAssertEqual(RemoteEndpoint(provider: .custom, model: "muse-spark-1.3-contributor", apiProtocol: .openAIChatCompletions).effectiveProtocol, .openAIChatCompletions)
+    }
+
 
     func testConfiguredProviderPublishesEveryCatalogModel() {
         let profiles = RemoteAPIModelCatalog.profiles(
@@ -79,6 +98,18 @@ final class RemoteAPIModelCatalogTests: XCTestCase {
         XCTAssertEqual(
             RemoteAPIModelCatalog.profile(matchingStartModelID: "api|work-gateway|gpt-4o", in: profiles)?.baseURL,
             "https://gateway.example/v1")
+    }
+
+    func testFirstClassNVIDIADoesNotDuplicateTheCompatiblePreset() {
+        let profiles = RemoteAPIModelCatalog.profiles(
+            configuredProviders: [.nvidia],
+            selectedModelByProvider: [:],
+            savedProfiles: [],
+            hasKeyForProviderID: { $0 == "nvidia" })
+
+        let nvidia = profiles.filter { $0.provider == .nvidia }
+        XCTAssertTrue(nvidia.contains { $0.model == LLMProvider.nvidia.defaultModel })
+        XCTAssertTrue(profiles.filter { $0.providerKey == "nvidia" }.isEmpty)
     }
 
     func testUnconfiguredProviderProfilesAreHidden() {

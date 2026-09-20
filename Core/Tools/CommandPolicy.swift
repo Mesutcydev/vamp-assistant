@@ -72,11 +72,22 @@ struct CommandPolicy: Sendable {
 
         // Path arguments must resolve inside the workspace — absolute paths,
         // relative traversals (`../`), dot paths, and any path-looking token.
+        // Quotes and backslashes are removed by the shell before the path
+        // reaches the command, so validate the unquoted token: otherwise
+        // `cat "/etc/passwd"` looks like a relative in-workspace path while
+        // reading an absolute one. Escapes are refused outright — decoding
+        // them by hand is how validation drifts from the shell.
         for argument in parts.dropFirst() {
-            let looksLikePath = argument.hasPrefix("/") || argument.hasPrefix("./")
-                || argument == "." || argument == ".." || argument.contains("/")
+            if argument.contains("\\") {
+                return Decision(safeForAutoApproval: false, reason: "escaped characters are not auto-approved")
+            }
+            let unquoted = argument
+                .replacingOccurrences(of: "'", with: "")
+                .replacingOccurrences(of: "\"", with: "")
+            let looksLikePath = unquoted.hasPrefix("/") || unquoted.hasPrefix("./")
+                || unquoted == "." || unquoted == ".." || unquoted.contains("/")
             if looksLikePath {
-                guard (try? workspace.resolve(argument, access: .read)) != nil else {
+                guard (try? workspace.resolve(unquoted, access: .read)) != nil else {
                     return Decision(safeForAutoApproval: false, reason: "path is outside the workspace")
                 }
             }

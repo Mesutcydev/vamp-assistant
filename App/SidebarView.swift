@@ -5,11 +5,13 @@ import UniformTypeIdentifiers
 struct SidebarView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var sessions: AgentSessionController
-    @Environment(\.dismiss) private var dismiss
     @Binding var showRemoteAccess: Bool
-    /// The compact portrait sidebar is presented as a sheet, so it must offer
-    /// an explicit escape hatch in addition to Escape and the window chrome.
-    var showsCloseButton: Bool = false
+    let onClose: () -> Void
+    /// The window owns the query: the toolbar's search field edits it and the
+    /// list below filters from it, so both always agree.
+    @Binding var historySearch: String
+    /// Separate a conversation into its own window, from the row's menu.
+    var onOpenInNewWindow: (UUID) -> Void = { _ in }
     // Sessions are decrypted OFF the main thread: loadAll() does Keychain +
     // AES-GCM per file, which blocked body evaluation (and hung the app when
     // the ad-hoc build raised a Keychain prompt). The list renders from
@@ -33,7 +35,6 @@ struct SidebarView: View {
     /// Live parser feedback while an import runs (source + file + count).
     @State private var importStatus: String?
     @State private var hasAutoImported = false
-    @State private var historySearch = ""
     @State private var pinnedSessionIDs: Set<UUID> = []
 
     private enum TaskStatus: Equatable {
@@ -46,16 +47,6 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SidebarPrimaryDestinations(
-                onAssistant: {
-                    NotificationCenter.default.post(name: .openAssistantHome, object: nil)
-                    if showsCloseButton { dismiss() }
-                },
-                onBots: {
-                    NotificationCenter.default.post(name: .openBotsDashboard, object: nil)
-                    if showsCloseButton { dismiss() }
-                })
-            SidebarDivider()
             SidebarHeaderView(
                 workspaceURL: sessions.workspaceURL,
                 sidebarTab: sidebarTab,
@@ -63,47 +54,38 @@ struct SidebarView: View {
                 queuedTasks: pendingQueueTasks,
                 isImporting: isImporting,
                 isImportingBundle: isImportingBundle,
-                showsCloseButton: showsCloseButton,
                 onChooseWorkspace: chooseWorkspace,
+                onNewChat: startNewChatInProject,
                 onChatOnly: startChatOnly,
                 onImport: runImport,
                 onImportTaskBundle: runTaskBundleImport,
                 onRefresh: { Task { await reloadSessions() } },
-                onNewSession: {
-                    sessions.newSession()
-                    selectedSessionID = nil
-                    sidebarTab = .sessions
-                },
                 onSelectTab: { sidebarTab = $0 },
                 onRunNext: { appState.drainTaskQueue() },
                 onRemoveQueuedTask: { appState.removeQueuedTask($0) },
-                onClose: { dismiss() }
+                onClose: onClose
             )
-            SidebarDivider()
-            List(selection: $selectedSessionID) {
+            List {
                 if sidebarTab == .sessions {
                     ownSections
                 } else {
                     importedSections
                 }
             }
-            // NavigationSplitView already owns the sidebar silhouette. A
-            // nested `.sidebar` list adds its own inset border and rounded
-            // bottom corners on current macOS, which leaves a doubled frame
-            // that cannot follow the window corners. Plain keeps native list
-            // selection and keyboard behavior without introducing a second
-            // container shape.
-            .listStyle(.plain)
-            // Let the window atmosphere show through the single native
-            // NavigationSplitView sidebar surface.
-            .scrollContentBackground(.hidden)
-            .background(Color.clear)
-            sidebarFooter
-        }
-        .sidebarSurface()
-        .onExitCommand {
-            guard showsCloseButton else { return }
-            dismiss()
+            // The system sidebar list: NavigationSplitView owns the column's
+            // material, so the list draws native rows, selection, and inset
+            // grouping on top of it rather than a painted surface of its own.
+            .listStyle(.sidebar)
+            // Scoped to the list itself: an identifier on the whole sidebar
+            // propagates into every descendant and stomps their own — the
+            // search field arrived as "conversation-browser" in the AX tree.
+            .accessibilityIdentifier("conversation-browser")
+            // Keep the last history row above the fixed navigation tools. A
+            // sibling footer lets AppKit's scroll view draw underneath it,
+            // which clipped the final message count in the drawer.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                sidebarFooter
+            }
         }
         // Selection IS the restore: picking a tagged row switches to that
         // session (and reports why when it can't — no more silent no-ops).
@@ -132,12 +114,11 @@ struct SidebarView: View {
             }
             Task { await reloadSessions() }
         }
-        .onReceive(sessions.objectWillChange) { _ in
-            // Throttled: objectWillChange also fires per streamed token, and
-            // a full decrypt-all pass per token would melt the disk.
-            let now = Date()
-            guard now.timeIntervalSince(lastSessionReload) > 2 else { return }
-            lastSessionReload = now
+        .onChange(of: sessions.isRunning) { _, running in
+            guard !running else { return }
+            Task { await reloadSessions() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .sessionTitleChanged)) { _ in
             Task { await reloadSessions() }
         }
     }
@@ -151,28 +132,107 @@ struct SidebarView: View {
     /// The sidebar footer is intentionally limited to destinations that
     /// belong to navigation. Browser, Simulator and Diagnostics live in the
     /// window toolbar.
+    /// Bottom drawer status: a connection dot + label on the left (like the
+    /// reference client's "Codex · connected"). Settings is owned by the
+    /// permanent spine, so the drawer does not duplicate its button.
     private var sidebarFooter: some View {
-        HStack(spacing: 4) {
-            footerTool("Models", icon: "cpu", isActive: false) {
+        HStack(spacing: Spacing.sm) {
+            connectionMenu
+            Spacer(minLength: 4)
+        }
+        .padding(.horizontal, SidebarMetrics.inset)
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity)
+        // The footer sits on the sidebar's own material, closed by a system
+        // separator — not a contrasting painted strip.
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
+        .zIndex(1)
+    }
+
+    /// One connection indicator with a readable label; secondary services
+    /// (remote sessions, models) live in the disclosure popover, preserving
+    /// their real actions without crowding the strip.
+    private var connectionMenu: some View {
+        InstrumentMenu(menuWidth: 240) {
+            // The drawer's base reads as the machine's status strip: a lamp in
+            // a bore and an engraved legend, the same pair the composer's
+            // endcap uses — not a dot and a sentence.
+            // Content-sized, not a full-width bar: this is a readout, and
+            // stretching it to the drawer's edge left the chevron stranded a
+            // hundred points from the text it belongs to. The 8pt engraved
+            // panel legend is for four-character endcap marks — at sentence
+            // length it just sprawled, so this keeps a compact mono readout.
+            HStack(spacing: 7) {
+                InstrumentLamp(color: connectionColor, bore: 9, live: connectionIsLive)
+                Text(connectionLabel)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .tracking(0.4)
+                    .foregroundStyle(Instrument.inkSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(Instrument.inkSecondary)
+            }
+            .padding(.horizontal, 8)
+            .frame(height: SidebarMetrics.connectionRailHeight)
+            .contentShape(Rectangle())
+        } options: {
+            InstrumentMenuRow(title: "Connection: \(connectionLabel)",
+                              systemImage: "circle.fill",
+                              isSelected: false,
+                              help: "Current engine state") {}
+            InstrumentMenuRow(
+                title: appState.remoteSessionRunning
+                    ? "Remote sessions — running" : "Remote sessions…",
+                systemImage: "antenna.radiowaves.left.and.right") {
+                showRemoteAccess = true
+            }
+            InstrumentMenuRow(title: "Models…", systemImage: "cpu") {
                 NotificationCenter.default.post(name: .openModelManager, object: nil)
             }
-            footerTool("Settings", icon: "gearshape", isActive: false) {
-                NotificationCenter.default.post(name: .openAppSettings, object: nil)
-            }
         }
-        .padding(SidebarMetrics.inset)
-        .background(Color.clear)
-        .overlay(alignment: .top) { SidebarDivider() }
+        .fixedSize(horizontal: true, vertical: false)
+        .help("\(connectionLabel) — Connection and services")
+        .accessibilityLabel("Connection: \(connectionLabel). Menu shows remote sessions and models.")
     }
+
+    /// The lamp only breathes while the engine is actually doing something.
+    private var connectionIsLive: Bool {
+        if case .loading = appState.enginePhase { return true }
+        return false
+    }
+
+    /// Engine connection state for the footer status line.
+    private var connectionColor: Color {
+        switch appState.enginePhase {
+        case .ready: Theme.positive
+        case .loading: Theme.warning
+        case .failed: Theme.danger
+        case .idle: Theme.statusNeutral
+        }
+    }
+
+    private var connectionLabel: String {
+        switch appState.enginePhase {
+        case .ready(let name): return "\(name) · connected"
+        case .loading(let name): return "Loading \(name)…"
+        case .failed: return "Model failed"
+        case .idle:
+            return appState.remoteSessionRunning ? "Remote · connected" : "No model"
+        }
+    }
+
 
     private func footerTool(_ title: String, icon: String, isActive: Bool,
                             action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: SidebarMetrics.iconGap) {
                 Image(systemName: icon)
-                    .font(.app(size: 12, weight: .semibold, design: .serif))
+                    .font(.app(size: 12, weight: .semibold ))
                 Text(title)
-                    .font(.app(size: 12, weight: .medium, design: .serif))
+                    .font(.app(size: 12, weight: .medium ))
                     .lineLimit(1)
             }
             .foregroundStyle(isActive ? Theme.rose : Theme.textSecondary)
@@ -219,6 +279,34 @@ struct SidebarView: View {
 
         if sessions.workspaceURL != nil {
             Section {
+                // A command row, not a call to action: transparent at rest,
+                // surface only on hover, so the accent stays for selection.
+                Button(action: startNewChatInProject) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Theme.accentText)
+                            .frame(width: SidebarMetrics.iconWidth, alignment: .leading)
+                        Text("New chat")
+                            .font(.app(size: 12.5, weight: .medium))
+                            .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, SidebarMetrics.rowPadding)
+                    .frame(maxWidth: .infinity,
+                           minHeight: SidebarMetrics.commandRowHeight,
+                           alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(SidebarCommandRowStyle())
+                .help("Start a new chat in this project")
+                .accessibilityLabel("New chat in \(sessions.workspaceURL?.lastPathComponent ?? "project")")
+                .listRowInsets(EdgeInsets(top: 1, leading: SidebarMetrics.inset,
+                                          bottom: 1, trailing: SidebarMetrics.inset))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+
                 if let output = sessions.gitOutput {
                     ScrollView {
                         Text(output)
@@ -242,7 +330,39 @@ struct SidebarView: View {
         let own = visibleOwnSessions
         if own.isEmpty, !needsKeychainUnlock {
             Section {
-                ownHistoryEmptyState
+                if historySearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    ownHistoryEmptyState
+                } else {
+                    // A search that matches nothing says so: the "no
+                    // conversations yet" copy would be a lie while filtering.
+                    emptySearchState("No chats match “\(historySearch)”.")
+                }
+            }
+        } else if historySearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // Reference-client history: flat date sections (TODAY /
+            // YESTERDAY / EARLIER), newest first — not project folders.
+            ForEach(dateSections(own), id: \.title) { section in
+                Section {
+                    ForEach(sortedTasks(section.records)) { record in
+                        sessionRow(record, subtitle: workspaceSubtitle(for: record))
+                    }
+                } header: {
+                    // A tiny organisational label on the conversation text
+                    // axis, with a hairline running out to the drawer edge.
+                    HStack(spacing: 6) {
+                        Text(section.title.uppercased())
+                            .font(.appUI(size: SidebarMetrics.sectionHeaderText, weight: .medium))
+                            .tracking(SidebarMetrics.sectionHeaderTracking)
+                            .foregroundStyle(Instrument.engraved)
+                        Rectangle()
+                            .fill(Instrument.seam.opacity(0.35))
+                            .frame(height: 0.75)
+                    }
+                    .frame(height: SidebarMetrics.sectionHeaderHeight, alignment: .bottom)
+                    .padding(.leading, SidebarMetrics.rowPadding)
+                    .padding(.top, 5)
+                    .padding(.bottom, 1)
+                }
             }
         } else {
             ForEach(projectGroups(own)) { group in
@@ -254,24 +374,49 @@ struct SidebarView: View {
 
     }
 
+    /// Short workspace name used as the history row subtitle, so each chat
+    /// reads like the reference client ("vamp-assistant · 14 messages").
+    private func workspaceSubtitle(for record: SessionRecord) -> String? {
+        guard !record.workspacePath.isEmpty else { return nil }
+        return URL(fileURLWithPath: record.workspacePath).lastPathComponent
+    }
+
+    /// Splits history into TODAY / YESTERDAY / EARLIER by last activity.
+    private func dateSections(_ records: [SessionRecord]) -> [(title: String, records: [SessionRecord])] {
+        let calendar = Calendar.current
+        var today: [SessionRecord] = []
+        var yesterday: [SessionRecord] = []
+        var earlier: [SessionRecord] = []
+        for record in records {
+            if calendar.isDateInToday(record.updatedAt) {
+                today.append(record)
+            } else if calendar.isDateInYesterday(record.updatedAt) {
+                yesterday.append(record)
+            } else {
+                earlier.append(record)
+            }
+        }
+        var sections: [(title: String, records: [SessionRecord])] = []
+        if !today.isEmpty { sections.append((title: "Today", records: today)) }
+        if !yesterday.isEmpty { sections.append((title: "Yesterday", records: yesterday)) }
+        if !earlier.isEmpty { sections.append((title: "Earlier", records: earlier)) }
+        return sections
+    }
+
+    /// An empty library is a sentence, not a card: a bordered panel inset
+    /// inside a sidebar column reads as a second container and never lines up
+    /// with the rows it replaces.
     private var ownHistoryEmptyState: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            Image(systemName: "bubble.left.and.bubble.right")
-                .font(.app(size: 18, weight: .medium, design: .serif))
-                .foregroundStyle(Theme.accentText)
-            Text("Your work will stay close")
-                .font(.app(size: 12, weight: .semibold, design: .serif))
-                .foregroundStyle(Theme.textPrimary)
+        VStack(alignment: .leading, spacing: 4) {
+            Text("No conversations yet")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color(nsColor: .labelColor))
             Text("Chats are saved locally and grouped by project as soon as you start a task.")
-                .font(.app(size: 11, design: .serif))
-                .foregroundStyle(Theme.textSecondary)
+                .font(.system(size: 11))
+                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-            .strokeBorder(Theme.hairline, lineWidth: 1))
         .listRowInsets(EdgeInsets(top: Spacing.sm, leading: SidebarMetrics.inset, bottom: Spacing.sm, trailing: SidebarMetrics.inset))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
@@ -405,7 +550,7 @@ struct SidebarView: View {
                     ProgressView()
                         .controlSize(.small)
                     Text(importStatus)
-                        .font(.app(size: 11, weight: .medium, design: .serif))
+                        .font(.app(size: 11, weight: .medium ))
                         .foregroundStyle(Theme.textSecondary)
                         .lineLimit(2)
                         .truncationMode(.middle)
@@ -471,20 +616,20 @@ struct SidebarView: View {
         VStack(alignment: .leading, spacing: 8) {
             Image(systemName: "arrow.down.doc")
                 .accessibilityHidden(true)
-                .font(.app(size: 18, weight: .medium, design: .serif))
+                .font(.app(size: 18, weight: .medium ))
                 .foregroundStyle(Theme.accentText)
             Text("Continue work from other tools")
-                .font(.app(size: 12, weight: .semibold, design: .serif))
+                .font(.app(size: 12, weight: .semibold ))
                 .foregroundStyle(Theme.textPrimary)
             Text("Find Claude, Codex, and Cursor chats, then organize them by project. Everything stays on this Mac.")
-                .font(.app(size: 11, design: .serif))
+                .font(.app(size: 11 ))
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             Button {
                 runImport()
             } label: {
                 Label("Scan for chats", systemImage: "arrow.clockwise")
-                    .font(.app(size: 11, weight: .semibold, design: .serif))
+                    .font(.app(size: 11, weight: .semibold ))
             }
             .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
             .disabled(isImporting)
@@ -504,7 +649,7 @@ struct SidebarView: View {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(Theme.textTertiary)
             Text(message)
-                .font(.app(size: 11, weight: .medium, design: .serif))
+                .font(.app(size: 11, weight: .medium ))
                 .foregroundStyle(Theme.textSecondary)
         }
         .padding(.vertical, 8)
@@ -680,6 +825,10 @@ struct SidebarView: View {
     private func sessionRow(_ record: SessionRecord, subtitle: String?) -> some View {
         let status = taskStatus(for: record)
         let workspaceAvailable = SessionStore.shared.validateWorkspaceBinding(record)
+        let statusIsLive: Bool = {
+            if case .running = status { return true }
+            return false
+        }()
         return SessionHistoryRow(
             record: record,
             subtitle: subtitle,
@@ -689,13 +838,19 @@ struct SidebarView: View {
             statusTitle: taskStatusTitle(status),
             statusIcon: taskStatusIcon(status),
             statusColor: taskStatusColor(status),
+            statusLive: statusIsLive,
             workspaceAvailable: workspaceAvailable,
             workspaceLabel: workspacePathLabel(record.workspacePath),
             onTogglePinned: { togglePinned(record) },
+            onSelect: {
+                NotificationCenter.default.post(name: .openAssistantHome, object: nil)
+                selectedSessionID = record.id
+            },
             onRename: { renameSession(record) },
             onDelete: { deleteSession(record) },
             onExport: { export(record, format: $0) },
-            onExportTaskBundle: { exportTaskBundleFile(for: record) }
+            onExportTaskBundle: { exportTaskBundleFile(for: record) },
+            onOpenInNewWindow: { onOpenInNewWindow(record.id) }
         )
     }
 
@@ -917,20 +1072,24 @@ struct SidebarView: View {
         }
     }
 
-    @State private var lastSessionReload = Date.distantPast
     @State private var needsKeychainUnlock = false
 
     private func reloadSessions() async {
         // More than the visible ten: the Imported tab browses the same cache.
         let loaded = await Task.detached(priority: .utility) {
-            Array(SessionStore.shared.loadAll().prefix(400))
+            // recent(limit:) orders by file date and decrypts ONLY what it
+            // returns; the previous loadAll() decrypted the entire library
+            // (13k+ records) and then discarded all but 400 of them.
+            SessionStore.shared.recent(limit: 400)
         }.value
         needsKeychainUnlock = SessionCrypto.needsInteractiveUnlock
         pinnedSessionIDs = Set(AppPreferencesStore.shared.current.pinnedSessionIDs)
         recentSessions = loaded
         // Keep the highlight honest: the controller owns the active session;
         // a restore (or a run) elsewhere should show up here too.
-        if let active = sessions.activeSessionID, selectedSessionID != active,
+        if sessions.activeSessionID == nil {
+            selectedSessionID = nil
+        } else if let active = sessions.activeSessionID, selectedSessionID != active,
            recentSessions.contains(where: { $0.id == active }) {
             selectedSessionID = active
         }
@@ -1049,33 +1208,33 @@ struct SidebarView: View {
             AppPreferencesStore.shared.save(preferences)
         }
     }
+
+    private func startNewChatInProject() {
+        guard sessions.workspaceURL != nil else { return }
+        Task {
+            if sessions.isRunning {
+                await sessions.stopAndWait()
+            }
+            selectedSessionID = nil
+            sessions.newSession()
+        }
+    }
 }
 
-private struct SidebarPrimaryDestinations: View {
-    let onAssistant: () -> Void
-    let onBots: () -> Void
+/// Collapsed chat navigation: a permanent 58-point silver utility rail with
+/// 42-point interaction slots for New chat, Search, History/Expand, Bots,
+/// device pairing, and Settings. Names appear beside icons on hover/focus as
+/// overlays — the rail never expands on pointer entry and never pushes
+/// content.
+struct SidebarCommandRowStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
 
-    var body: some View {
-        HStack(spacing: Spacing.sm) {
-            destination("Assistant", icon: "sparkles", action: onAssistant)
-            destination("Bots", icon: "person.3.sequence.fill", action: onBots)
-        }
-        .padding(SidebarMetrics.inset)
-        .background(Color.clear)
-    }
-
-    private func destination(
-        _ title: LocalizedStringKey,
-        icon: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: icon)
-                .font(.callout.weight(.semibold))
-                .frame(maxWidth: .infinity, minHeight: 32)
-                .background(Theme.surfaceInset.opacity(0.5), in: RoundedRectangle(cornerRadius: Radius.md))
-        }
-        .buttonStyle(.plain)
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .environment(\.instrumentPressed, configuration.isPressed)
+            .instrumentKey(RoundedRectangle(cornerRadius: 5, style: .continuous),
+                           elevation: 0.7)
+            .opacity(isEnabled ? 1 : 0.55)
     }
 }
 
@@ -1090,110 +1249,147 @@ struct SessionHistoryRow: View {
     let statusTitle: String?
     let statusIcon: String
     let statusColor: Color
+    /// True while the row's task is actively running — the lamp breathes.
+    let statusLive: Bool
     let workspaceAvailable: Bool
     let workspaceLabel: String
     let onTogglePinned: () -> Void
+    let onSelect: () -> Void
     let onRename: () -> Void
     let onDelete: () -> Void
     let onExport: (SessionExporter.Format) -> Void
     let onExportTaskBundle: () -> Void
+    /// Dragging a tab out of a strip used to be the only way to separate a
+    /// conversation. The strip is gone; the row carries the action now.
+    var onOpenInNewWindow: () -> Void = {}
     @State private var isHovered = false
+    @FocusState private var actionsFocused: Bool
 
-    private var sourceIcon: String {
-        switch record.source {
-        case .app: "bubble.left.fill"
-        case .claude: "sparkles"
-        case .codex: "terminal.fill"
-        case .cursor: "cursorarrow.rays"
-        case .bundle: "shippingbox.fill"
-        }
+    /// Metadata stays reachable (context menu, ellipsis, tooltip) but never
+    /// competes with the title on every row. Compact instrument form: the
+    /// engraved line fits the row without truncating the age.
+    private var metadataLine: String {
+        var parts: [String] = []
+        if let subtitle { parts.append(subtitle) }
+        parts.append("\(record.messages.count) MSG")
+        parts.append(SessionTitle.compactAge(record.updatedAt))
+        return parts.joined(separator: " · ")
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
+        Button(action: onSelect) {
+            HStack(spacing: 8) {
+                // Status lamp seated in its bore on the row's leading edge —
+                // the same readout language as the composer's endcap.
+                InstrumentLamp(color: statusColor, bore: 9, live: statusLive)
+
+                VStack(alignment: .leading, spacing: 1) {
                     Text(SessionTitle.display(for: record))
-                        .font(AppFont.navigationTitle)
-                        .foregroundStyle(workspaceAvailable ? Theme.textPrimary : Theme.textTertiary)
+                        .font(.appUI(size: 12.5, weight: selected ? .semibold : .regular))
+                        .foregroundStyle(workspaceAvailable
+                                         ? Instrument.ink : Instrument.inkSecondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
-                    Spacer(minLength: 4)
-                    Text(SessionTitle.compactAge(record.updatedAt))
-                        .font(AppFont.navigationMeta)
-                        .monospacedDigit()
-                        .foregroundStyle(Theme.textTertiary)
+
+                    // Engraved micro metadata: message count and age on their
+                    // own baseline, never competing with the title.
+                    Text(metadataLine.uppercased())
+                        .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                        .tracking(1.1)
+                        .foregroundStyle(Instrument.engraved)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
+
+                Spacer(minLength: 4)
+
+                // Reserved trailing slot: pin and the ellipsis that appears on
+                // hover/focus. Space is always reserved so titles never reflow.
                 HStack(spacing: 5) {
-                    if let subtitle {
-                        Text(subtitle)
-                            .font(AppFont.navigationMeta.weight(.medium))
-                            .foregroundStyle(Theme.textSecondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    Text("\(record.messages.count) messages")
-                        .monospacedDigit()
                     if pinned {
                         Image(systemName: "pin.fill")
-                            .font(.app(size: 8, weight: .semibold, design: .serif))
-                            .foregroundStyle(Theme.accentText)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(Instrument.inkSecondary)
                             .accessibilityLabel("Pinned")
                     }
-                    if statusTitle != nil {
-                        Text("·")
-                            .foregroundStyle(Theme.textTertiary)
+                    Menu {
+                        rowMenu
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: SidebarMetrics.rowActionIcon, weight: .medium))
+                            .foregroundStyle(Instrument.inkSecondary)
+                            .frame(width: SidebarMetrics.rowActionHit,
+                                   height: SidebarMetrics.rowActionHit)
+                            .contentShape(Rectangle())
                     }
-                    if let statusTitle {
-                        HStack(spacing: 3) {
-                            Image(systemName: statusIcon)
-                                .font(.app(size: 8, weight: .semibold, design: .serif))
-                            Text(statusTitle)
-                                .lineLimit(1)
-                        }
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(statusColor)
-                        .accessibilityLabel(statusTitle)
-                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .focused($actionsFocused)
+                    .opacity(isHovered || selected || actionsFocused ? 1 : 0)
+                    .accessibilityLabel("Conversation actions")
                 }
-                .font(AppFont.navigationMeta)
-                .foregroundStyle(Theme.textTertiary)
+                .frame(width: SidebarMetrics.rowActionSlot, alignment: .trailing)
             }
+            .padding(.horizontal, SidebarMetrics.rowPadding)
+            .frame(minHeight: 38)
+            // One row component: rest is bare deck, hover is a whisper of
+            // surface, selection is a shallow latched cavity plus the single
+            // accent edge — the row has gone INTO the panel.
+            .background(
+                selected ? Instrument.recessFill
+                    : isHovered ? Theme.libraryRowHover : Color.clear,
+                in: RoundedRectangle(cornerRadius: SidebarMetrics.selectionRadius,
+                                     style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: SidebarMetrics.selectionRadius,
+                                 style: .continuous)
+                    .strokeBorder(selected ? Instrument.seam.opacity(0.7) : Color.clear,
+                                  lineWidth: 1))
+            .overlay(alignment: .leading) {
+                if selected {
+                    Capsule()
+                        .fill(TERail.accent)
+                        .frame(width: 2, height: 16)
+                        .padding(.leading, 1)
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: SidebarMetrics.selectionRadius,
+                                           style: .continuous))
         }
-        .padding(.horizontal, SidebarMetrics.rowPadding)
-        .padding(.vertical, Spacing.sm)
-        .background(
-            selected
-                ? Theme.washStrong(Theme.accent)
-                : isHovered ? Theme.surfaceInset.opacity(0.42) : Color.clear,
-            in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .strokeBorder(Color.clear, lineWidth: 1))
-        .contentShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-        .onHover { isHovered = $0 }
+        .buttonStyle(.plain)
+        // Hover and selection ease in; the whole row never scales or bounces.
         .animation(.easeOut(duration: 0.12), value: isHovered)
-        .tag(record.id)
+        .animation(.easeOut(duration: 0.15), value: selected)
+        .onHover { isHovered = $0 }
+        .accessibilityAddTraits(selected ? .isSelected : [])
         .contextMenu {
-            Button(pinned ? "Unpin task" : "Pin task", action: onTogglePinned)
-            Button("Rename chat…", action: onRename)
-            Divider()
-            Button("Export as Markdown…") { onExport(.markdown) }
-            Button("Export as JSON…") { onExport(.json) }
-            Button("Export task bundle…", action: onExportTaskBundle)
-            Divider()
-            Button("Delete chat", role: .destructive, action: onDelete)
+            rowMenu
         }
-        .listRowInsets(EdgeInsets(top: 1, leading: SidebarMetrics.inset,
-                                  bottom: 1, trailing: SidebarMetrics.inset))
+        .listRowInsets(EdgeInsets(top: 0.5, leading: SidebarMetrics.inset,
+                                  bottom: 0.5, trailing: SidebarMetrics.inset))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
         .disabled(!workspaceAvailable)
         .help(workspaceAvailable
-            ? "Restore this session"
+            ? "\(SessionTitle.display(for: record)) — \(metadataLine)"
             : "Project folder missing: \(record.workspacePath)")
         .accessibilityValue(
-            "\(pinned ? "Pinned. " : "")\(statusTitle ?? "Completed"). Workspace: \(workspaceLabel)")
+            "\(pinned ? "Pinned. " : "")\(statusTitle ?? "Completed"). \(metadataLine)")
+    }
+
+    @ViewBuilder
+    private var rowMenu: some View {
+        Button("Open in New Window", action: onOpenInNewWindow)
+        Divider()
+        Button(pinned ? "Unpin task" : "Pin task", action: onTogglePinned)
+        Button("Rename chat…", action: onRename)
+        Divider()
+        Button("Export as Markdown…") { onExport(.markdown) }
+        Button("Export as JSON…") { onExport(.json) }
+        Button("Export task bundle…", action: onExportTaskBundle)
+        Divider()
+        Button("Delete chat", role: .destructive, action: onDelete)
     }
 }
 
@@ -1207,137 +1403,144 @@ struct SidebarHeaderView: View {
     let queuedTasks: [QueuedAgentTask]
     let isImporting: Bool
     let isImportingBundle: Bool
-    let showsCloseButton: Bool
     let onChooseWorkspace: () -> Void
+    let onNewChat: () -> Void
     let onChatOnly: () -> Void
     let onImport: () -> Void
     let onImportTaskBundle: () -> Void
     let onRefresh: () -> Void
-    let onNewSession: () -> Void
     let onSelectTab: (SidebarHistoryTab) -> Void
     let onRunNext: () -> Void
     let onRemoveQueuedTask: (UUID) -> Void
     let onClose: () -> Void
-    @FocusState private var searchFocused: Bool
-    @State private var searchPresented = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.md) {
-            identityRow
-            primaryActions
-            quietNavigation
-            if searchPresented || !historySearch.isEmpty {
-                searchField
-            }
+        // No title band and no search field of its own: the window's toolbar
+        // owns the search, and the sidebar is already labelled by the
+        // destination above it. What stays is the project the chats belong to.
+        VStack(alignment: .leading, spacing: 0) {
+            workspaceSelector
             if !queuedTasks.isEmpty {
                 queueSummary
+                    .padding(.top, 6)
             }
         }
         .padding(.horizontal, SidebarMetrics.inset)
-        .padding(.top, Spacing.md)
-        .padding(.bottom, Spacing.md)
+        .padding(.top, 6)
+        .padding(.bottom, 6)
         .background(Color.clear)
-        .onReceive(NotificationCenter.default.publisher(for: .focusChatSearch)) { _ in
-            presentSearch()
+        .onExitCommand {
+            if !historySearch.isEmpty {
+                historySearch = ""
+            } else {
+                onClose()
+            }
         }
     }
 
-    private var identityRow: some View {
-        HStack(spacing: Spacing.sm) {
-            workspaceMark
-            VStack(alignment: .leading, spacing: 2) {
-                Text("WORKSPACE")
-                    .font(.app(size: 9, weight: .bold, design: .serif))
-                    .tracking(0.8)
-                    .foregroundStyle(Theme.textTertiary)
-                Text(workspaceURL?.lastPathComponent ?? "Chat only")
-                    .font(.app(size: 13.5, weight: .semibold, design: .serif))
-                    .foregroundStyle(Theme.textPrimary)
+    /// Title band. Top-level navigation belongs to the rail, so this carries
+    /// only the drawer's name and its two controls.
+    private var headerRow: some View {
+        HStack(spacing: 6) {
+            Text("CHATS")
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .tracking(1.6)
+                .foregroundStyle(Instrument.engraved)
+            Spacer(minLength: 0)
+            importFilterButton
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Instrument.inkSecondary)
+                    .frame(width: 24, height: 22)
+                    .environment(\.instrumentPressed, false)
+                    .instrumentKey(RoundedRectangle(cornerRadius: 4, style: .continuous),
+                                   elevation: 0.6)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(InstrumentPressStyle())
+            .help("Close history")
+            .accessibilityLabel("Close history")
+        }
+        .frame(height: SidebarMetrics.headerHeight)
+    }
+
+    /// The workspace is a location control, not a card: one compact row that
+    /// shares the conversation text axis.
+    private var workspaceSelector: some View {
+        Menu {
+            if workspaceURL != nil {
+                Button("New chat in this project", action: onNewChat)
+            }
+            Button("Open project…", action: onChooseWorkspace)
+            Button("Chat without a project", action: onChatOnly)
+            Divider()
+            Button("Import conversations…", action: onImport)
+                .disabled(isImporting)
+            Button("Import task bundle…", action: onImportTaskBundle)
+                .disabled(isImportingBundle)
+            Button("Refresh history", action: onRefresh)
+        } label: {
+            HStack(spacing: 6) {
+                workspaceMark
+                Text(workspaceURL?.lastPathComponent ?? "No project")
+                    .font(.appUI(size: 13, weight: .semibold))
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .foregroundStyle(Instrument.ink)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(Instrument.inkSecondary)
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 4)
-            Button(action: onChooseWorkspace) {
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.caption2.weight(.bold))
-            }
-            .buttonStyle(LFIconButtonStyle(size: 26))
-            .lfHoverLift()
-            .help("Switch workspace")
-            .accessibilityLabel("Switch workspace")
-
-            if showsCloseButton {
-                PanelCloseButton(action: onClose)
-            }
-        }
-        .padding(.horizontal, Spacing.md)
-        .padding(.vertical, Spacing.sm)
-        .background(Theme.surface.opacity(0.72),
-                    in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-            .strokeBorder(Theme.hairline.opacity(0.62), lineWidth: 1))
-    }
-
-    private var primaryActions: some View {
-        Button(action: onNewSession) {
-            Label("New chat", systemImage: "square.and.pencil")
-                .font(.app(size: 13.5, weight: .semibold, design: .serif))
-                .foregroundStyle(Theme.bg)
-                .frame(maxWidth: .infinity, minHeight: 36)
-                .background(Theme.textPrimary,
-                            in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-        }
-        .buttonStyle(LFPlainPressButtonStyle())
-        .shadow(color: Theme.cardShadow.opacity(0.5), radius: 6, y: 2)
-        .help("Start a new chat")
-    }
-
-    private var quietNavigation: some View {
-        VStack(spacing: 2) {
-            quietNavigationRow("Search", icon: "magnifyingglass", trailing: "⌘F") {
-                presentSearch()
-            }
-            quietNavigationRow(
-                sidebarTab == .imported ? "My chats" : "Imported",
-                icon: sidebarTab == .imported ? "bubble.left.and.bubble.right" : "tray.and.arrow.down",
-                trailing: nil
-            ) {
-                onSelectTab(sidebarTab == .imported ? .sessions : .imported)
-            }
-        }
-    }
-
-    private func quietNavigationRow(
-        _ title: String,
-        icon: String,
-        trailing: String?,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: SidebarMetrics.iconGap) {
-                Image(systemName: icon)
-                    .accessibilityHidden(true)
-                    .font(.app(size: 12.5, weight: .medium, design: .serif))
-                    .frame(width: SidebarMetrics.iconWidth)
-                Text(title).font(.app(size: 13, design: .serif))
-                Spacer()
-                if let trailing {
-                    Text(trailing)
-                        .font(.app(size: 10.5, design: .monospaced))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .overlay(RoundedRectangle(cornerRadius: Radius.sm)
-                            .strokeBorder(Theme.hairline, lineWidth: 1))
-                }
-            }
-            .foregroundStyle(Theme.textSecondary)
-            .padding(.horizontal, SidebarMetrics.rowPadding)
-            .frame(height: SidebarMetrics.rowHeight)
+            .frame(height: SidebarMetrics.workspaceRowHeight)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .background(Theme.surfaceInset.opacity(0.001), in: RoundedRectangle(cornerRadius: Radius.sm))
-        .lfHoverLift()
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        // A borderless menu centres its label; the project this library
+        // belongs to has to sit on the same text axis as the chats below it.
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .help(workspaceURL?.path ?? "Conversation workspace and import actions")
+        .accessibilityLabel("Workspace: \(workspaceURL?.lastPathComponent ?? "Chat only")")
+    }
+
+    /// Imported conversations live behind a compact filter toggle (the
+    /// control selects the imported library; the import command itself stays
+    /// in the workspace menu / empty states). Active state is visible.
+    private var importFilterButton: some View {
+        Button {
+            onSelectTab(sidebarTab == .imported ? .sessions : .imported)
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: sidebarTab == .imported
+                      ? "line.3.horizontal.decrease.circle.fill"
+                      : "line.3.horizontal.decrease.circle")
+                    .font(.system(size: 11, weight: .medium))
+                if sidebarTab == .imported {
+                    Text("IMPORTED")
+                        .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                        .tracking(0.9)
+                }
+            }
+            .foregroundStyle(sidebarTab == .imported
+                             ? Instrument.ink : Instrument.inkSecondary)
+            .frame(height: 22)
+            .padding(.horizontal, 7)
+            .environment(\.instrumentPressed, sidebarTab == .imported)
+            .instrumentKey(RoundedRectangle(cornerRadius: 4, style: .continuous),
+                           tone: sidebarTab == .imported ? .dark : .silver,
+                           elevation: 0.6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(InstrumentPressStyle())
+        .environment(\.instrumentLatched, sidebarTab == .imported)
+        .help(sidebarTab == .imported
+              ? "Showing imported conversations — click to return to your chats"
+              : "Filter to imported conversations")
+        .accessibilityLabel(sidebarTab == .imported
+                            ? "Imported filter active" : "Show imported conversations")
     }
 
     private var workspaceMark: some View {
@@ -1347,111 +1550,30 @@ struct SidebarHeaderView: View {
                     .resizable()
                     .interpolation(.high)
                     .aspectRatio(contentMode: .fit)
+                    .frame(width: 13, height: 13)
+                    .clipShape(RoundedRectangle(cornerRadius: 2.5, style: .continuous))
             } else {
-                Image(systemName: workspaceURL == nil ? "bubble.left.and.bubble.right.fill" : "folder.fill")
-                    .font(.app(size: 13, weight: .medium, design: .serif))
-                    .foregroundStyle(Theme.textSecondary)
+                Image(systemName: workspaceURL == nil ? "bubble.left.and.bubble.right" : "folder")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Instrument.inkSecondary)
             }
         }
-        .frame(width: 28, height: 28)
-        .background(Theme.rose.opacity(0.14), in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-        .foregroundStyle(Theme.rose)
+        .frame(width: 22, height: 20)
+        .environment(\.instrumentPressed, false)
+        .instrumentKey(RoundedRectangle(cornerRadius: 4.5, style: .continuous), elevation: 0.7)
         .accessibilityHidden(true)
     }
 
-    private var historyModeBar: some View {
-        HStack(spacing: Spacing.xs) {
-            historyModeButton(.sessions, title: "My chats", icon: "bubble.left.and.bubble.right")
-            historyModeButton(.imported, title: "Other tools", icon: "arrow.down.doc")
-        }
-        .padding(4)
-        .background(Theme.surfaceInset.opacity(0.52),
-                    in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-            .strokeBorder(Theme.hairline.opacity(0.75), lineWidth: 1))
-    }
-
-    private func historyModeButton(
-        _ mode: SidebarHistoryTab,
-        title: String,
-        icon: String,
-        count: Int? = nil
-    ) -> some View {
-        let active = sidebarTab == mode
-        return Button {
-            onSelectTab(mode)
-        } label: {
-            HStack(spacing: SidebarMetrics.iconGap) {
-                Image(systemName: icon)
-                    .accessibilityHidden(true)
-                    .font(.app(size: 12, weight: .semibold, design: .serif))
-                Text(title)
-                    .font(.app(size: 13, weight: active ? .semibold : .medium, design: .serif))
-                if let count, count > 0 {
-                    Text("\(min(count, 99))")
-                        .font(.caption2.weight(.bold))
-                        .monospacedDigit()
-                        .foregroundStyle(active ? Theme.textPrimary : Theme.textTertiary)
-                }
-            }
-            .foregroundStyle(active ? Theme.textPrimary : Theme.textSecondary)
-            .frame(maxWidth: .infinity, minHeight: SidebarMetrics.rowHeight)
-            .background(active ? Theme.surface : Color.clear,
-                        in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).strokeBorder(
-                active ? Theme.hairline : Color.clear, lineWidth: 1))
-            .shadow(color: active ? Theme.cardShadow.opacity(0.45) : .clear, radius: 2, y: 1)
-        }
-        .buttonStyle(.plain)
-        .animation(.easeOut(duration: 0.14), value: active)
-        .accessibilityAddTraits(active ? [.isSelected] : [])
-    }
-
-    private var searchField: some View {
-        HStack(spacing: Spacing.sm) {
-            Image(systemName: "magnifyingglass")
-                .font(.app(size: 12, weight: .semibold, design: .serif))
-                .foregroundStyle(Theme.textTertiary)
-                .accessibilityHidden(true)
-            TextField("Search all history", text: $historySearch)
-                .textFieldStyle(.plain)
-                .font(.app(size: 13, design: .serif))
-                .focused($searchFocused)
-            if !historySearch.isEmpty {
-                Button { historySearch = "" } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.app(size: 11, design: .serif))
-                        .foregroundStyle(Theme.textTertiary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear search")
-            }
-        }
-        .padding(.horizontal, 9)
-        .frame(height: 34)
-        .background(Theme.surfaceInset.opacity(0.65), in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-            .strokeBorder(Theme.hairline.opacity(0.8), lineWidth: 1))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Search chat history")
-    }
-
-    private func presentSearch() {
-        searchPresented = true
-        DispatchQueue.main.async {
-            searchFocused = true
-        }
-    }
 
     private var queueSummary: some View {
         let first = queuedTasks[0]
         return VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 7) {
                 Image(systemName: "clock.arrow.circlepath")
-                    .font(.app(size: 11, weight: .semibold, design: .serif))
+                    .font(.app(size: 11, weight: .semibold ))
                     .foregroundStyle(Theme.info)
                 Text(queuedTasks.count == 1 ? "1 task in queue" : "\(queuedTasks.count) tasks in queue")
-                    .font(.app(size: 11, weight: .semibold, design: .serif))
+                    .font(.app(size: 11, weight: .semibold ))
                     .foregroundStyle(Theme.textPrimary)
                 Spacer(minLength: 4)
                 Button("Run next", action: onRunNext)

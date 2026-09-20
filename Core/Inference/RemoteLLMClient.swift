@@ -5,6 +5,10 @@ enum RemoteLLMError: Error, LocalizedError, Equatable {
     case invalidConfiguration(String)
     case transport(String)
     case badStatus(Int, String)
+    /// The provider reported an error inside a 200 SSE stream (rate limit,
+    /// overloaded, moderation, …). Treated as a failure so a truncated reply
+    /// is never presented as a successful completion.
+    case providerError(String)
     case cancelled
 
     var errorDescription: String? {
@@ -17,6 +21,8 @@ enum RemoteLLMError: Error, LocalizedError, Equatable {
             return "Network error: \(detail)"
         case .badStatus(let code, let body):
             return "Provider returned HTTP \(code): \(String(body.prefix(300)))"
+        case .providerError(let detail):
+            return "Provider error: \(String(detail.prefix(300)))"
         case .cancelled:
             return "Generation cancelled."
         }
@@ -30,9 +36,74 @@ enum RemoteLLMClient {
 
     // MARK: Wire types (OpenAI)
 
+    /// An OpenAI-compatible chat message. `content` stays a plain string
+    /// unless the turn carries images, in which case it is encoded as the
+    /// standard content-part array (text + `image_url`) — a provider that
+    /// never sees an image receives a byte-identical payload to before.
+    /// Decoding accepts both forms so a round-trip through the local API
+    /// server preserves what a client sent.
     struct OpenAIMessage: Codable, Sendable, Equatable {
         var role: String
         var content: String
+        /// Native image parts. Empty → `content` encodes as a string.
+        var images: [ChatImage] = []
+
+        init(role: String, content: String, images: [ChatImage] = []) {
+            self.role = role
+            self.content = content
+            self.images = images
+        }
+
+        struct ContentPart: Codable, Sendable, Equatable {
+            struct ImageURL: Codable, Sendable, Equatable { var url: String }
+            var type: String
+            var text: String?
+            var image_url: ImageURL?
+
+            init(text: String) {
+                self.type = "text"
+                self.text = text
+                self.image_url = nil
+            }
+
+            init(imageURL: String) {
+                self.type = "image_url"
+                self.text = nil
+                self.image_url = ImageURL(url: imageURL)
+            }
+        }
+
+        private enum CodingKeys: String, CodingKey { case role, content }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            role = try container.decode(String.self, forKey: .role)
+            if let plain = try? container.decode(String.self, forKey: .content) {
+                content = plain
+                images = []
+                return
+            }
+            let parts = (try? container.decode([ContentPart].self, forKey: .content)) ?? []
+            content = parts.compactMap { $0.type == "text" ? $0.text : nil }.joined()
+            images = parts.compactMap { part in
+                guard part.type == "image_url", let url = part.image_url?.url, !url.isEmpty
+                else { return nil }
+                return ChatImage(dataURL: url)
+            }
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(role, forKey: .role)
+            guard !images.isEmpty else {
+                try container.encode(content, forKey: .content)
+                return
+            }
+            var parts: [ContentPart] = []
+            if !content.isEmpty { parts.append(ContentPart(text: content)) }
+            parts.append(contentsOf: images.map { ContentPart(imageURL: $0.dataURL) })
+            try container.encode(parts, forKey: .content)
+        }
     }
 
     struct OpenAIRequest: Encodable, Sendable {
@@ -289,9 +360,14 @@ enum RemoteLLMClient {
         turns.map { turn in
             switch turn.role {
             case .tool:
-                OpenAIMessage(role: "user", content: "[tool result] " + turn.content)
+                // Tool results never carry images; a projector only ever sees
+                // what the user attached.
+                return OpenAIMessage(role: "user", content: "[tool result] " + turn.content)
             default:
-                OpenAIMessage(role: turn.role.rawValue, content: turn.content)
+                return OpenAIMessage(
+                    role: turn.role.rawValue,
+                    content: turn.content,
+                    images: turn.images)
             }
         }
     }
@@ -406,8 +482,10 @@ enum RemoteLLMClient {
     /// o-series and gpt-5-era models reject `max_tokens`.
     static func usesMaxCompletionTokens(_ model: String) -> Bool {
         let m = model.lowercased()
-        return m.hasPrefix("o1") || m.hasPrefix("o3") || m.hasPrefix("o4")
-            || m.hasPrefix("gpt-5") || m.hasPrefix("codex-")
+        let leaf = m.split(separator: "/").last.map(String.init) ?? m
+        return leaf.hasPrefix("o1") || leaf.hasPrefix("o3") || leaf.hasPrefix("o4")
+            || leaf.hasPrefix("gpt-5") || leaf.hasPrefix("gpt-6") || m.contains("astra")
+            || leaf.hasPrefix("codex-")
     }
 
     /// Models that reject an explicit `temperature` (o-series wants the
@@ -440,7 +518,12 @@ enum RemoteLLMClient {
 
     private static func apply(_ headers: [String: String], to request: inout URLRequest) {
         for (name, value) in headers where !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            request.setValue(value, forHTTPHeaderField: name)
+            // Imported OpenCode headers keep `{env:}`/`{file:}` references in
+            // persisted state; resolve them here, at the only point where the
+            // value is actually needed.
+            request.setValue(
+                OpenCodeCompatibility.resolvedHeaderValue(value),
+                forHTTPHeaderField: name)
         }
     }
 
@@ -918,7 +1001,11 @@ enum RemoteLLMClient {
         if effort.rawValue == "none" { return nil }
         let level: String
         switch effort.rawValue {
-        case "minimal", "low", "medium": level = effort.rawValue
+        case "minimal":
+            // Gemini 3.7+ returns an API validation error for MINIMAL; clamp
+            // it to LOW rather than failing the request.
+            level = RemoteModelCatalog.geminiSupportsMinimalThinking(model) ? "minimal" : "low"
+        case "low", "medium": level = effort.rawValue
         case "high", "xhigh", "max": level = "high"
         default: return nil
         }
@@ -1182,7 +1269,9 @@ enum RemoteLLMClient {
                 var profile = profile
                 profile.providerKey = endpoint.providerID
                 profile.providerDisplayName = endpoint.effectiveDisplayName
-                profile.apiProtocol = endpoint.effectiveProtocol
+                profile.apiProtocol = (endpoint.provider == .openCode || endpoint.provider == .openCodeGo)
+                    ? endpoint.provider.remoteAPIProtocol(for: profile.model)
+                    : endpoint.effectiveProtocol
                 profile.baseURL = base.absoluteString
                 profile.headers = endpoint.headers
                 profile.apiKey = apiKey
@@ -1504,6 +1593,9 @@ enum RemoteLLMClient {
             index: Int,
             name: String?,
             arguments: String?)
+        /// A provider error delivered inside a 200 SSE stream. The consumer
+        /// throws so a truncated answer is never treated as success.
+        case serverError(String)
     }
 
     /// Token usage reported by the provider (OpenAI `usage` with
@@ -1533,9 +1625,14 @@ enum RemoteLLMClient {
         while let l = payload.last, l == 0x20 { payload = payload.dropLast() }
         guard !payload.isEmpty else { return .none }
         if payload.elementsEqual([0x5B, 0x44, 0x4F, 0x4E, 0x45, 0x5D]) { return .done }  // "[DONE]"
-        guard let data = Data(payload) as Data?,
-              let extracted = extract(from: data)
-        else { return .none }
+        guard let data = Data(payload) as Data? else { return .none }
+        // Gateways can report failures inside a 200 stream. Those envelopes
+        // carry none of the delta keys, so without this check the stream
+        // simply ends and the caller reports a successful (truncated) answer.
+        if let message = providerErrorMessage(in: data) {
+            return .serverError(message)
+        }
+        guard let extracted = extract(from: data) else { return .none }
         if let fragment = extracted.tool {
             if let text = extracted.text, !text.isEmpty {
                 return .textAndToolFragment(
@@ -1682,6 +1779,8 @@ enum RemoteLLMClient {
                             toolAcc[index] = current
                             emitAskUserProgress()
                         }
+                    case .serverError(let message):
+                        throw RemoteLLMError.providerError(message)
                     case .none: break
                     }
                     line.removeAll(keepingCapacity: true)
@@ -1711,6 +1810,8 @@ enum RemoteLLMClient {
                 if let arguments { current.arguments += arguments }
                 toolAcc[index] = current
                 emitAskUserProgress()
+            case .serverError(let message):
+                throw RemoteLLMError.providerError(message)
             case .none: break
             }
         }
@@ -1746,6 +1847,35 @@ enum RemoteLLMClient {
         if let parts = try? container.decode([OpenAITextPart].self, forKey: key) {
             let text = parts.compactMap(\.text).joined()
             return text.isEmpty ? nil : text
+        }
+        return nil
+    }
+
+    /// Detects an error envelope inside a 200 SSE payload. Covers
+    /// OpenAI/OpenRouter/Gemini `{"error":{…}}`, Anthropic
+    /// `{"type":"error","error":{…}}`, and Responses `response.failed`.
+    /// Returns nil for ordinary delta chunks.
+    static func providerErrorMessage(in data: Data) -> String? {
+        guard let topLevel = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return nil
+        }
+        if let error = topLevel["error"] {
+            if let object = error as? [String: Any] {
+                if let message = object["message"] as? String, !message.isEmpty { return message }
+                if let type = object["type"] as? String, !type.isEmpty { return type }
+            }
+            if let message = error as? String, !message.isEmpty { return message }
+            return "the provider reported an error"
+        }
+        if let type = topLevel["type"] as? String {
+            if type == "error" {
+                return "the provider reported an error"
+            }
+            if type == "response.failed" {
+                let response = topLevel["response"] as? [String: Any]
+                let error = response?["error"] as? [String: Any]
+                return (error?["message"] as? String) ?? "the response failed"
+            }
         }
         return nil
     }

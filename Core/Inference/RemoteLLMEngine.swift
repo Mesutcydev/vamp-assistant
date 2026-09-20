@@ -156,27 +156,19 @@ final class RemoteLLMEngine: LLMEngine, NativeToolConfigurable, @unchecked Senda
     }
 
     func streamReplay(_ turns: [ChatTurn], maxTokens: Int?, temperature: Double?) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                let saved = self.withLock { () -> [ChatTurn] in
+        IsolatedTranscriptReplay.stream(
+            turns,
+            maxTokens: maxTokens,
+            temperature: temperature,
+            swapOut: {
+                self.withLock {
                     let old = self.accumulated
                     self.accumulated = []
                     return old
                 }
-                defer { self.withLock { self.accumulated = saved } }
-                let inner = self.stream(adding: turns, maxTokens: maxTokens, temperature: temperature)
-                do {
-                    for try await chunk in inner {
-                        if Task.isCancelled { break }
-                        continuation.yield(chunk)
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
+            },
+            swapIn: { saved in self.withLock { self.accumulated = saved } },
+            generate: { self.stream(adding: $0, maxTokens: $1, temperature: $2) })
     }
 
     /// Real usage accounting (P9): the provider reports completion tokens;
@@ -306,6 +298,17 @@ final class EngineRouter: LLMEngine, NativeToolConfigurable, @unchecked Sendable
             if withLock({ currentRemote }) != nil { return nil }
             if let pool { return await pool.activeEffectiveContextWindow() }
             return await local.effectiveContextWindow
+        }
+    }
+
+    /// Runtime truth about the resident LOCAL model: true only for a GGUF
+    /// server launched with a multimodal projector. Remote/BYOK engines keep
+    /// their own described-image path, so they report false here.
+    var supportsImageInput: Bool {
+        get async {
+            if withLock({ currentRemote }) != nil { return false }
+            if let pool { return await pool.activeSupportsImageInput() }
+            return await local.supportsImageInput
         }
     }
 

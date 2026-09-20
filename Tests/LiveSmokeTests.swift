@@ -1,4 +1,5 @@
 import XCTest
+import AppKit
 @testable import BeetCode
 
 /// LIVE end-to-end smoke test — NOT part of the hermetic suite contract.
@@ -593,4 +594,127 @@ private actor Milestones {
     func mark(_ value: String) { list.append(value) }
     func seen(_ prefix: String) -> Bool { list.contains { $0.hasPrefix(prefix) } }
     var all: [String] { list }
+}
+
+/// LIVE end-to-end check for native image input: the real Bonsai 2 27B GGUF
+/// plus its mmproj projector, through the exact app path
+/// (GGUFEngine → RemoteLLMClient content parts → llama-server /v1).
+/// Opt-in — needs the 7.2 GB model installed:
+///   BEETCODE_LIVE_BONSAI_VISION=1 xcodebuild test -scheme BeetCode \
+///     -only-testing:BeetCodeTests/LiveGGUFVisionTests
+final class LiveGGUFVisionTests: XCTestCase {
+
+    private static let modelID = "Ternary-Bonsai-2-27B-PQ2_0"
+    private static let projectorName = "Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf"
+
+    func testBonsaiProjectorReadsAnImageEndToEnd() async throws {
+        guard ProcessInfo.processInfo.environment["BEETCODE_LIVE_BONSAI_VISION"] == "1" else {
+            throw XCTSkip("Bonsai vision smoke is opt-in (BEETCODE_LIVE_BONSAI_VISION=1)")
+        }
+        let modelDir = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(
+                "Library/Application Support/BeetCode/Models/\(Self.modelID)")
+        let weightsName = "\(Self.modelID).gguf"
+        let weights = modelDir.appendingPathComponent(weightsName)
+        guard FileManager.default.fileExists(atPath: weights.path),
+              FileManager.default.fileExists(
+                atPath: modelDir.appendingPathComponent(Self.projectorName).path)
+        else {
+            throw XCTSkip("Bonsai PQ2_0 weights + mmproj are not installed")
+        }
+
+        let image = try Self.renderedTextImage("BONSAI 42")
+        let diskBytes = Int64(
+            (try FileManager.default.attributesOfItem(atPath: weights.path)[.size]
+                as? NSNumber)?.int64Value ?? 0)
+
+        let engine = GGUFEngine()
+        try await engine.load(
+            directory: modelDir,
+            modelID: Self.modelID,
+            diskBytes: diskBytes,
+            contextSize: 8_192)
+        defer { Task { await engine.unload() } }
+
+        // 1. Projector staged beside the weights is loaded…
+        let capable = await engine.supportsImageInput
+        XCTAssertTrue(capable, "the mmproj beside the weights must be loaded")
+        let projectorPath = await engine.loadedProjectorPath
+        XCTAssertEqual(
+            projectorPath.map { URL(fileURLWithPath: $0).lastPathComponent },
+            Self.projectorName)
+
+        // 2. …and the LIVE child process proves the launch flags: the weights
+        //    are served, the projector is only a projector.
+        let commandLine = Self.llamaServerCommandLine()
+        XCTAssertFalse(commandLine.isEmpty, "no live llama-server found")
+        XCTAssertTrue(commandLine.contains("--mmproj"), commandLine)
+        XCTAssertTrue(commandLine.contains(weightsName), commandLine)
+
+        // 3. The model must actually READ the image, not guess at it.
+        var answer = ""
+        for try await chunk in engine.stream(
+            adding: [
+                ChatTurn(
+                    role: .system,
+                    content: "You read text out of images. Answer with only the text you see."),
+                ChatTurn(
+                    role: .user,
+                    content: "What text is written in this image? Reply with just that text.",
+                    images: [image]),
+            ],
+            maxTokens: 512,
+            temperature: 0)
+        {
+            answer += chunk
+        }
+        print("[bonsai-vision] answer: \(answer)")
+        let upper = answer.uppercased()
+        XCTAssertTrue(upper.contains("BONSAI"), "model did not read the image: \(answer)")
+        XCTAssertTrue(answer.contains("42"), "model did not read the digits: \(answer)")
+    }
+
+    /// Renders black text on white — a real PNG the projector has to decode.
+    private static func renderedTextImage(_ text: String) throws -> ChatImage {
+        let size = NSSize(width: 720, height: 240)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        NSColor.white.setFill()
+        NSRect(origin: .zero, size: size).fill()
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 110, weight: .bold),
+            .foregroundColor: NSColor.black,
+        ]
+        (text as NSString).draw(in: NSRect(x: 40, y: 60, width: 640, height: 140),
+                                withAttributes: attributes)
+        image.unlockFocus()
+
+        guard let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:])
+        else {
+            throw XCTSkip("could not render the test image")
+        }
+        // A blank canvas compresses to a few hundred bytes; refuse to test
+        // against a silently empty image.
+        XCTAssertGreaterThan(png.count, 3_000, "rendered image looks blank")
+        return ChatImage(data: png, mimeType: "image/png", name: "bonsai-vision-test.png")
+    }
+
+    /// The live llama-server command line this test host launched.
+    private static func llamaServerCommandLine() -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/ps")
+        process.arguments = ["-ax", "-o", "command"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { return "" }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let lines = String(decoding: data, as: UTF8.self)
+            .split(separator: "\n")
+            .map(String.init)
+        return lines.first { $0.contains("llama-server") && $0.contains("--model") } ?? ""
+    }
 }

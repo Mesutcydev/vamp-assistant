@@ -11,46 +11,27 @@ import SwiftUI
 struct ModelSelectionPill: View {
     @EnvironmentObject private var appState: AppState
     @State private var showPopover = false
+    /// Caps only the label's width, so a fixed-bay composer can truncate a long
+    /// model name without the pill claiming the rest of the strip.
+    var maxLabelWidth: CGFloat?
+    /// The instrument composer presents the model as a raised control in the same
+    /// family as Tools, because it sits in a labelled control row. The classic
+    /// composer keeps the flat command-line treatment it was designed around.
+    var prominent = false
+    /// Toolbar face: the same content as the composer key but wearing the
+    /// window bar's moulded-cap material, for the top bar.
+    var toolbarStyle = false
+    /// Page-text face: no button chrome at all — a faded line of text resting
+    /// on the page, with one faint rule underneath.
+    var plainStyle = false
 
     var body: some View {
         Button {
             showPopover = true
         } label: {
-            HStack(spacing: 6) {
-                // A status dot before the icon: engine health is glanceable
-                // even when the icon itself only says local vs remote.
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 6, height: 6)
-                Image(systemName: icon)
-                    .font(.app(size: 11, weight: .medium, design: .serif))
-                    .foregroundStyle(iconColor)
-                Text(label)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .layoutPriority(1)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.app(size: 8, weight: .semibold, design: .serif))
-                    .foregroundStyle(Theme.textTertiary)
-            }
-            // Model identity is a text control in the command line, not a
-            // competing badge. The status dot carries readiness at a glance.
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(Theme.textPrimary)
-            .padding(.horizontal, 7)
-            .frame(minHeight: 26)
-            .background(showPopover ? Theme.washStrong(Theme.accent) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-            .overlay(alignment: .bottom) {
-                if case .ready = appState.enginePhase {
-                    Capsule()
-                        .fill(borderColor)
-                        .frame(width: 20, height: 2)
-                }
-            }
-            .lfHoverLift()
+            face
         }
-        .buttonStyle(.plain)
+        .buttonStyle(InstrumentPressStyle())
         .help(tooltip)
         .accessibilityLabel("Active model: \(label)")
         .popover(isPresented: $showPopover, arrowEdge: .top) {
@@ -59,8 +40,122 @@ struct ModelSelectionPill: View {
                 // A fixed box, not a content-sized one: with a few hundred
                 // gateway models the popover used to grow to the full screen
                 // height and push its own search field off the top.
-                .frame(width: 400, height: 520)
+                .frame(width: 460, height: 560)
         }
+    }
+
+    /// On the rail the whole key IS this button — legend and value share one
+    /// pressable surface, with no nested rounded rectangle inside a section.
+    /// The classic composer keeps the flat command-line treatment.
+    @ViewBuilder
+    private var face: some View {
+        if plainStyle {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 5, height: 5)
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(iconColor.opacity(0.75))
+                Text(label)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Instrument.inkSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: maxLabelWidth, alignment: .leading)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 7.5, weight: .semibold))
+                    .foregroundStyle(Instrument.engraved)
+            }
+            .opacity(0.72)
+            .padding(.bottom, 3)
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(Instrument.seam.opacity(0.35))
+                    .frame(height: 0.75)
+            }
+        } else if toolbarStyle {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 5, height: 5)
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(iconColor)
+                Text(label)
+                    .font(.app(size: 12, weight: .medium))
+                    .foregroundStyle(Instrument.ink)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: maxLabelWidth, alignment: .leading)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(Instrument.inkSecondary)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 28)
+            .environment(\.instrumentPressed, false)
+            .instrumentKey(RoundedRectangle(cornerRadius: 5, style: .continuous),
+                           elevation: 0.8)
+        } else if prominent {
+            TEKeyContent(label: "MODEL") {
+                HStack(spacing: 6) {
+                    // A status lamp before the mark: engine health is glanceable
+                    // even when the mark itself only says local vs remote.
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 5, height: 5)
+                    Image(systemName: icon)
+                        .font(.system(size: TE.microGlyph + 2, weight: .medium))
+                        .foregroundStyle(iconColor)
+                    Text(label)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .layoutPriority(1)
+                        .frame(maxWidth: maxLabelWidth, alignment: .leading)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: TE.microGlyph, weight: .semibold))
+                        .opacity(0.55)
+                }
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .teKeyFace(.light)
+        } else {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 6, height: 6)
+                Image(systemName: icon)
+                    .font(.app(size: 11, weight: .medium ))
+                    .foregroundStyle(iconColor)
+                Text(label)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .layoutPriority(1)
+                    .frame(maxWidth: maxLabelWidth, alignment: .leading)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.app(size: 8, weight: .semibold ))
+                    .foregroundStyle(Theme.textTertiary)
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(Theme.textPrimary)
+            .padding(.horizontal, 7)
+            .frame(minHeight: 26)
+            .background(pillShape.fill(showPopover ? Theme.washStrong(Theme.accent) : Color.clear))
+            .overlay(alignment: .bottom) {
+                if case .ready = appState.enginePhase {
+                    Capsule()
+                        .fill(borderColor)
+                        .frame(width: 20, height: 2)
+                }
+            }
+        }
+    }
+
+    private var pillShape: RoundedRectangle {
+        RoundedRectangle(
+            cornerRadius: prominent ? Instrument.Control.modelRadius : Radius.sm,
+            style: .continuous)
     }
 
     // MARK: Derived state — one canonical source (AppState/engine)
@@ -126,16 +221,17 @@ struct ModelSelectionPill: View {
 /// Designed popup: installed local models first (Load / active), then
 /// configured BYOK providers, then management entries. Selecting anything
 /// here performs the real switch — no decorative rows.
-private struct ModelPickerPopover: View {
+struct ModelPickerPopover: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var keyStore = APIKeyStore.shared
     @ObservedObject private var codexAccount = CodexAccountStore.shared
     private enum Source: String, CaseIterable, Identifiable {
-        case local, api, account
+        case all, local, api, account
         var id: String { rawValue }
         var label: String {
             switch self {
+            case .all: "All models"
             case .local: "Local models"
             case .api: "API models"
             case .account: "OpenAI account"
@@ -146,17 +242,21 @@ private struct ModelPickerPopover: View {
         /// segment also carries a count.
         var shortLabel: String {
             switch self {
+            case .all: "All"
             case .local: "Local"
             case .api: "API"
             case .account: "Account"
             }
         }
     }
-    @State private var source: Source = .local
+    @State private var source: Source = .all
     @State private var reasoningEffort: String?
     @State private var query = ""
+    @State private var selectedProvider: String?
+    @State private var alphabetical = false
     @State private var allRemoteModels: [RemoteModelProfile] = []
     @State private var refreshingCatalog = false
+    @State private var showHiddenAccountModels = false
     @State private var refreshMessage: String?
     @FocusState private var searchFocused: Bool
 
@@ -205,19 +305,33 @@ private struct ModelPickerPopover: View {
     }
 
     private var remoteModels: [RemoteModelProfile] {
-        allRemoteModels.filter { matches($0.displayName, $0.model, $0.displayProviderName) }
+        let filtered = allRemoteModels.filter {
+            (selectedProvider == nil || ($0.providerKey ?? $0.provider.rawValue) == selectedProvider)
+                && matches($0.displayName, $0.model, $0.displayProviderName)
+        }
+        return alphabetical ? filtered.sorted { ($0.displayName ?? $0.model).localizedStandardCompare($1.displayName ?? $1.model) == .orderedAscending } : filtered
     }
 
     private var allAccountModels: [CodexModelProfile] { codexAccount.models }
 
     private var accountModels: [CodexModelProfile] {
-        allAccountModels.filter { matches($0.displayName, $0.id) }
+        allAccountModels.filter { model in
+            guard matches(model.displayName, model.id) else { return false }
+            if model.hidden,
+               !CodexAccountCatalog.isLatest(modelID: model.id),
+               !showHiddenAccountModels,
+               query.isEmpty {
+                return false
+            }
+            return true
+        }
     }
 
     /// Unfiltered totals, shown on the source picker so the size of each list
     /// is visible before you switch to it.
     private func total(for source: Source) -> Int {
         switch source {
+        case .all: allInstalledModels.count + allRemoteModels.count + allAccountModels.count
         case .local: allInstalledModels.count
         case .api: allRemoteModels.count
         case .account: allAccountModels.count
@@ -226,6 +340,7 @@ private struct ModelPickerPopover: View {
 
     private var visibleCount: Int {
         switch source {
+        case .all: installedModels.count + remoteModels.count + accountModels.count
         case .local: installedModels.count
         case .api: remoteModels.count
         case .account: accountModels.count
@@ -251,6 +366,20 @@ private struct ModelPickerPopover: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 searchField
+                if source == .api || source == .all {
+                    ProviderFilterButtons(models: allRemoteModels, selection: $selectedProvider)
+                        .onChange(of: selectedProvider) { _, value in
+                            if value != nil { source = .api }
+                        }
+                    HStack {
+                        Text("\(remoteModels.count) API models").font(.caption).foregroundStyle(Theme.textSecondary)
+                        Spacer()
+                        Button(alphabetical ? "Name A–Z" : "Provider order") { alphabetical.toggle() }
+                            .font(.caption)
+                            .buttonStyle(.borderless)
+                            .help("Change model sort order")
+                    }
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -258,7 +387,11 @@ private struct ModelPickerPopover: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
-                    if source == .local {
+                    if source == .all {
+                        accountSection
+                        apiSection
+                        localSection
+                    } else if source == .local {
                         localSection
                     } else if source == .api {
                         apiSection
@@ -270,6 +403,11 @@ private struct ModelPickerPopover: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxHeight: .infinity)
+            // Identity deliberately excludes `query`: embedding the live search
+            // text meant every keystroke tore down and rebuilt this whole list
+            // (losing scroll position and per-row state) instead of letting the
+            // LazyVStack diff rows.
+            .id("\(source.rawValue)-\(selectedProvider ?? "all")")
 
             if hasReasoningControl {
                 Divider()
@@ -284,24 +422,31 @@ private struct ModelPickerPopover: View {
         // gray in Beet mode while everything around it goes plum.
         .background(Theme.surface)
         .task {
-            await codexAccount.refresh()
-            if appState.isCodexActive {
-                source = .account
-            } else if appState.isRemoteActive {
-                source = .api
-            } else {
-                source = .local
-            }
             allRemoteModels = buildRemoteModels()
+            if appState.isRemoteActive, let endpoint = appState.engine.activeRemoteEndpoint {
+                source = .api
+                selectedProvider = endpoint.effectiveProviderKey
+            } else if appState.isCodexActive {
+                source = .account
+            }
             loadReasoningEffort()
             searchFocused = true
         }
+        .task { await codexAccount.refresh() }
+
         // A key saved elsewhere while this popover is open changes what is
         // usable, so rebuild rather than showing a stale catalog.
         .onReceive(keyStore.objectWillChange) { _ in
-            allRemoteModels = buildRemoteModels()
+            Task { @MainActor in allRemoteModels = buildRemoteModels() }
         }
-        .onChange(of: source) { _, _ in loadReasoningEffort() }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("VampModelPreferencesChanged"))) { _ in
+            allRemoteModels = buildRemoteModels()
+            loadReasoningEffort()
+        }
+        .onChange(of: source) { _, value in
+            if value == .all { selectedProvider = nil }
+            loadReasoningEffort()
+        }
         .onChange(of: appState.activeCodexModelID) { _, _ in loadReasoningEffort() }
         .onChange(of: appState.engine.activeRemoteEndpoint) { _, _ in loadReasoningEffort() }
     }
@@ -309,10 +454,10 @@ private struct ModelPickerPopover: View {
     /// Whether `activeReasoningControl` will render anything — checked before
     /// drawing its divider so an empty control never leaves a stray hairline.
     private var hasReasoningControl: Bool {
-        if source == .api, let profile = activeRemoteReasoningProfile {
+        if (source == .api || source == .all), let profile = activeRemoteReasoningProfile {
             return !profile.effectiveReasoningEfforts.isEmpty
         }
-        if source == .account, let model = activeCodexReasoningModel {
+        if (source == .account || source == .all), let model = activeCodexReasoningModel {
             return !model.supportedReasoningEfforts.isEmpty
         }
         return false
@@ -320,7 +465,7 @@ private struct ModelPickerPopover: View {
 
     @ViewBuilder
     private var activeReasoningControl: some View {
-        if source == .api, let profile = activeRemoteReasoningProfile,
+        if (source == .api || source == .all), let profile = activeRemoteReasoningProfile,
            !profile.effectiveReasoningEfforts.isEmpty {
             ReasoningModelControl(
                 modelName: profile.displayName ?? profile.model,
@@ -328,7 +473,7 @@ private struct ModelPickerPopover: View {
                 defaultEffort: profile.effectiveDefaultReasoningEffort,
                 selection: $reasoningEffort,
                 onSelect: { saveRemoteReasoningEffort($0, profile: profile) })
-        } else if source == .account, let model = activeCodexReasoningModel,
+        } else if (source == .account || source == .all), let model = activeCodexReasoningModel,
                   !model.supportedReasoningEfforts.isEmpty {
             ReasoningModelControl(
                 modelName: model.displayName,
@@ -354,10 +499,10 @@ private struct ModelPickerPopover: View {
     }
 
     private func loadReasoningEffort() {
-        if source == .api, let profile = activeRemoteReasoningProfile {
+        if (source == .api || source == .all), let profile = activeRemoteReasoningProfile {
             reasoningEffort = AppPreferencesStore.shared
                 .remoteModelOverride(endpoint: profile.endpoint())?.reasoningEffort
-        } else if source == .account, let model = activeCodexReasoningModel {
+        } else if (source == .account || source == .all), let model = activeCodexReasoningModel {
             reasoningEffort = AppPreferencesStore.shared.codexReasoningEffort(modelID: model.id)
         } else {
             reasoningEffort = nil
@@ -377,7 +522,7 @@ private struct ModelPickerPopover: View {
             Image(systemName: "cpu.fill")
                 .foregroundStyle(Theme.accentText)
             Text(activeModelLabel)
-                .font(.app(size: 13, weight: .semibold, design: .serif))
+                .font(.app(size: 13, weight: .semibold ))
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -409,7 +554,7 @@ private struct ModelPickerPopover: View {
 
     private func statusBadge(_ text: String, color: Color, icon: String) -> some View {
         Label(text, systemImage: icon)
-            .font(.app(size: 11, weight: .medium, design: .serif))
+            .font(.app(size: 11, weight: .medium ))
             .foregroundStyle(color)
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
@@ -497,12 +642,12 @@ private struct ModelPickerPopover: View {
             HStack(spacing: 8) {
                 Image(systemName: isActive ? "checkmark.circle.fill" : "cpu")
                     .accessibilityHidden(true)
-                    .font(.app(size: 13, design: .serif))
+                    .font(.app(size: 13 ))
                     .foregroundStyle(isActive ? Theme.success : Theme.textSecondary)
                     .frame(width: 16)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(model.displayName)
-                        .font(.app(size: 12.5, weight: isActive ? .semibold : .regular, design: .serif))
+                        .font(.app(size: 12.5, weight: isActive ? .semibold : .regular ))
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
                     Text("\(model.parameters) · \(model.quantization) · \(isActive ? "active" : budgetHint(budget))")
@@ -554,7 +699,7 @@ private struct ModelPickerPopover: View {
                     .foregroundStyle(Theme.textSecondary)
                 Button("Add provider…") {
                     dismiss()
-                    NotificationCenter.default.post(name: .openAppSettings, object: nil)
+                    NotificationCenter.default.post(name: .openProviderSettings, object: nil)
                 }
                 .font(.caption.weight(.medium))
                 .buttonStyle(.borderless)
@@ -570,41 +715,84 @@ private struct ModelPickerPopover: View {
 
     @ViewBuilder
     private var accountSection: some View {
-        sectionLabel("ChatGPT account models")
         if !codexAccount.isAvailable {
+            sectionLabel("ChatGPT account models")
             Text("Codex CLI is not available on this Mac. Install Codex, then reopen Vamp Assistant.")
                 .font(.caption)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         } else if !codexAccount.isSignedIn {
+            sectionLabel("ChatGPT account models")
             VStack(alignment: .leading, spacing: 8) {
-                Text("Use OpenAI models with your ChatGPT account. API keys are not required for this mode.")
+                Text("Use GPT-6 Astra and other OpenAI models with your ChatGPT account. No API key required.")
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("Sign in with ChatGPT…") {
                     Task { await codexAccount.signInWithBrowser() }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
                 .tint(Theme.accent)
                 .controlSize(.small)
+                .disabled(codexAccount.browserLogin != nil || codexAccount.deviceCodeLogin != nil)
+                if let deviceCode = codexAccount.deviceCodeLogin {
+                    Text("Enter \(deviceCode.userCode) at the opened page.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                        .textSelection(.enabled)
+                } else if codexAccount.browserLogin != nil {
+                    Text("Finish sign-in in your browser.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                if codexAccount.browserLogin != nil || codexAccount.deviceCodeLogin != nil {
+                    Button("Cancel") { Task { await codexAccount.cancelLogin() } }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                }
             }
-        } else if codexAccount.models.isEmpty {
+        } else if allAccountModels.isEmpty {
+            sectionLabel("ChatGPT account models")
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
                 Text("Loading account models…")
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
                 Spacer()
-                Button("Refresh") { Task { await codexAccount.refreshModels() } }
+                refreshAccountModelsButton
+            }
+        } else if accountModels.isEmpty {
+            sectionLabel("ChatGPT account models")
+            noMatches
+            refreshAccountModelsButton
+        } else {
+            let latest = accountModels.filter { CodexAccountCatalog.isLatest(modelID: $0.id) }
+            let rest = accountModels.filter { !CodexAccountCatalog.isLatest(modelID: $0.id) }
+            if !latest.isEmpty {
+                sectionLabel("Latest")
+                ForEach(latest) { model in
+                    codexModelRow(model)
+                }
+            }
+            if !rest.isEmpty {
+                sectionLabel(latest.isEmpty ? "ChatGPT account models" : "More account models")
+                ForEach(rest) { model in
+                    codexModelRow(model)
+                }
+            }
+            if !showHiddenAccountModels,
+               allAccountModels.contains(where: { $0.hidden && !CodexAccountCatalog.isLatest(modelID: $0.id) }) {
+                Button("Show older models") { showHiddenAccountModels = true }
+                    .font(.caption.weight(.medium))
                     .buttonStyle(.borderless)
                     .foregroundStyle(Theme.accentText)
             }
-        } else if accountModels.isEmpty {
-            noMatches
-        } else {
-            ForEach(accountModels) { model in
-                codexModelRow(model)
+            HStack {
+                Spacer()
+                if codexAccount.isRefreshing {
+                    ProgressView().controlSize(.small)
+                }
+                refreshAccountModelsButton
             }
         }
         if let error = codexAccount.errorMessage {
@@ -613,6 +801,14 @@ private struct ModelPickerPopover: View {
                 .foregroundStyle(Theme.danger)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private var refreshAccountModelsButton: some View {
+        Button("Refresh") { Task { await codexAccount.refreshModels() } }
+            .buttonStyle(.borderless)
+            .foregroundStyle(Theme.accentText)
+            .disabled(codexAccount.isRefreshing)
+            .accessibilityLabel("Refresh ChatGPT account models")
     }
 
     private func codexModelRow(_ model: CodexModelProfile) -> some View {
@@ -625,14 +821,19 @@ private struct ModelPickerPopover: View {
             HStack(spacing: 8) {
                 Image(systemName: isActive ? "checkmark.circle.fill" : "person.crop.circle")
                     .accessibilityHidden(true)
-                    .font(.app(size: 13, design: .serif))
+                    .font(.app(size: 13 ))
                     .foregroundStyle(isActive ? Theme.success : Theme.textSecondary)
                     .frame(width: 16)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(model.displayName)
-                        .font(.app(size: 12.5, weight: isActive ? .semibold : .regular, design: .serif))
-                        .foregroundStyle(Theme.textPrimary)
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(model.displayName)
+                            .font(.app(size: 12.5, weight: isActive ? .semibold : .regular ))
+                            .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(1)
+                        if CodexAccountCatalog.isLatest(modelID: model.id) {
+                            latestBadge
+                        }
+                    }
                     Text(model.id)
                         .font(.caption2.monospaced())
                         .foregroundStyle(Theme.textTertiary)
@@ -640,6 +841,11 @@ private struct ModelPickerPopover: View {
                         .truncationMode(.middle)
                     if !model.description.isEmpty {
                         Text(model.description)
+                            .font(.caption2)
+                            .foregroundStyle(Theme.textTertiary)
+                            .lineLimit(1)
+                    } else if model.hidden {
+                        Text("Older catalog entry")
                             .font(.caption2)
                             .foregroundStyle(Theme.textTertiary)
                             .lineLimit(1)
@@ -679,23 +885,25 @@ private struct ModelPickerPopover: View {
             HStack(spacing: 8) {
                 Image(systemName: isActive ? "checkmark.circle.fill" : "cloud")
                     .accessibilityHidden(true)
-                    .font(.app(size: 13, design: .serif))
+                    .font(.app(size: 13 ))
                     .foregroundStyle(isActive ? Theme.success : Theme.textSecondary)
                     .frame(width: 16)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(profile.displayName ?? profile.model)
-                        .font(.app(size: 12.5, weight: isActive ? .semibold : .regular, design: .serif))
-                        .foregroundStyle(Theme.textPrimary)
-                        .lineLimit(1)
-                    Text("\(profile.displayProviderName) · \(profile.model)")
+                    HStack(spacing: 6) {
+                        Text(profile.displayName ?? profile.model)
+                            .font(.app(size: 12.5, weight: isActive ? .semibold : .regular ))
+                            .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(1)
+                        if source == .account, CodexAccountCatalog.isLatest(modelID: profile.model) {
+                            latestBadge
+                        }
+                    }
+                    Text(profile.displayName == nil || profile.displayName == profile.model ? profile.displayProviderName : "\(profile.displayProviderName) · \(profile.model)")
                         .font(.caption2.monospaced())
                         .foregroundStyle(Theme.textTertiary)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    Text(profileMetadataSummary(profile))
-                        .font(.caption2)
-                        .foregroundStyle(Theme.textTertiary)
-                        .lineLimit(1)
+
                 }
                 Spacer()
                 if isActive {
@@ -736,7 +944,7 @@ private struct ModelPickerPopover: View {
                     Task { await appState.deactivate() }
                 } label: {
                     Label("Unload", systemImage: "eject")
-                        .font(.app(size: 12, design: .serif))
+                        .font(.app(size: 12 ))
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(Theme.textSecondary)
@@ -748,7 +956,7 @@ private struct ModelPickerPopover: View {
                 } else {
                     Button(action: refreshRemoteCatalog) {
                         Label("Refresh", systemImage: "arrow.clockwise")
-                            .font(.app(size: 12, design: .serif))
+                            .font(.app(size: 12 ))
                     }
                     .buttonStyle(.borderless)
                     .foregroundStyle(Theme.textSecondary)
@@ -768,18 +976,15 @@ private struct ModelPickerPopover: View {
             Spacer(minLength: 8)
             Button {
                 dismiss()
-                if source == .account {
-                    NotificationCenter.default.post(name: .openAppSettings, object: nil)
-                    DispatchQueue.main.async {
-                        NotificationCenter.default.post(name: .openProviderSettings, object: nil)
-                    }
-                } else {
+                if source == .local {
                     NotificationCenter.default.post(name: .openModelManager, object: nil)
+                } else {
+                    NotificationCenter.default.post(name: .openProviderSettings, object: nil)
                 }
             } label: {
-                    Label(source == .local ? "Model Manager…" : source == .api ? "Manage API models…" : "Manage account…",
+                    Label(source == .all ? "Manage providers…" : source == .local ? "Model Manager…" : source == .api ? "Manage API models…" : "Manage account…",
                           systemImage: source == .local ? "square.and.arrow.down.on.square" : source == .api ? "key" : "person.crop.circle")
-                    .font(.app(size: 12, design: .serif))
+                    .font(.app(size: 12 ))
             }
             .buttonStyle(.borderless)
             .foregroundStyle(Theme.accentText)
@@ -812,7 +1017,7 @@ private struct ModelPickerPopover: View {
                     failures += 1
                 }
             }
-            for known in KnownRemoteProvider.all {
+            for known in KnownRemoteProvider.compatiblePresets {
                 guard let key = keyStore.key(forProviderID: known.id), !key.isEmpty else { continue }
                 do {
                     let profiles = try await RemoteLLMClient.fetchModelProfiles(
@@ -837,12 +1042,19 @@ private struct ModelPickerPopover: View {
             .foregroundStyle(Theme.textTertiary)
             .padding(.bottom, 4)
     }
+
+    private var latestBadge: some View {
+        Text("Latest")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(Theme.accentText)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(Theme.wash(Theme.accent), in: Capsule())
+            .accessibilityLabel("Latest model")
+    }
 }
 
-/// Compact, model-aware reasoning selector shown beside the model list. The
-/// control is deliberately visible (rather than buried in Settings) because
-/// reasoning effort changes latency, token use, and answer depth for the very
-/// next turn.
+/// Compact reasoning selector beside the model list.
 private struct ReasoningModelControl: View {
     let modelName: String
     let options: [String]
@@ -851,67 +1063,31 @@ private struct ReasoningModelControl: View {
     let onSelect: (String?) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 6) {
-                Image(systemName: "brain.head.profile")
-                    .accessibilityHidden(true)
-                    .foregroundStyle(Theme.accentText)
-                Text("Reasoning")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                Spacer()
-                Text(selection?.capitalized ?? "Auto")
-                    .font(.caption2.weight(.semibold).monospaced())
-                    .foregroundStyle(Theme.accentText)
-            }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 5) {
-                    effortButton(title: "Auto", value: nil)
-                    ForEach(normalizedOptions, id: \.self) { effort in
-                        effortButton(title: effort.capitalized, value: effort)
-                    }
+        HStack {
+            Text("Reasoning")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.textPrimary)
+            Spacer()
+            Picker("Reasoning", selection: $selection) {
+                Text("Auto").tag(Optional<String>.none)
+                ForEach(normalizedOptions, id: \.self) { effort in
+                    Text(effort.capitalized).tag(Optional(effort))
                 }
             }
-
-            Text("For \(modelName) · Auto uses \((defaultEffort ?? "the model default").lowercased())")
-                .font(.caption2)
-                .foregroundStyle(Theme.textTertiary)
-                .lineLimit(1)
-                .truncationMode(.middle)
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .controlSize(.small)
+            .onChange(of: selection) { _, value in
+                onSelect(value)
+            }
+            .help("For \(modelName). Auto uses \((defaultEffort ?? "the model default").lowercased()).")
         }
-        .padding(9)
-        .background(Theme.surfaceInset.opacity(0.62), in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                .strokeBorder(Theme.hairline, lineWidth: 1)
-        }
-        .padding(.vertical, 2)
+        .accessibilityLabel("Reasoning effort")
     }
 
     private var normalizedOptions: [String] {
         var seen = Set<String>()
         return options.map { $0.lowercased() }.filter { !$0.isEmpty && seen.insert($0).inserted }
-    }
-
-    private func effortButton(title: String, value: String?) -> some View {
-        let selected = selection == value
-        return Button {
-            selection = value
-            onSelect(value)
-        } label: {
-            Text(title)
-                .font(.caption2.weight(selected ? .semibold : .medium))
-                .foregroundStyle(selected ? Theme.accentText : Theme.textSecondary)
-                .padding(.horizontal, 9)
-                .frame(minHeight: 25)
-                .background(selected ? Theme.washStrong(Theme.accent) : Color.clear, in: Capsule())
-                .overlay(Capsule().strokeBorder(selected ? Theme.washBorder(Theme.accent) : Theme.hairline, lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-        .help(value == nil ? "Use the model's default reasoning effort" : "Use \(title) reasoning for the next turn")
-        .accessibilityLabel("Reasoning effort \(title)")
-        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
@@ -920,5 +1096,46 @@ private struct ReasoningModelControl: View {
 private extension MemoryAdvisor.Budget {
     var helpText: String {
         "Projected peak memory: \(ByteFormatter.bytes(projectedFootprint))"
+    }
+}
+
+private struct ProviderFilterButtons: View {
+    let models: [RemoteModelProfile]
+    @Binding var selection: String?
+
+    private var groups: [(key: String, name: String, count: Int)] {
+        Dictionary(grouping: models, by: { $0.providerKey ?? $0.provider.rawValue })
+            .map { (key: $0.key, name: $0.value.first?.displayProviderName ?? $0.key, count: $0.value.count) }
+            .sorted { $0.name < $1.name }
+    }
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: true) {
+            HStack(spacing: 6) {
+                filter("All providers", key: nil, count: models.count)
+                ForEach(groups, id: \.key) { group in
+                    filter(group.name, key: group.key, count: group.count)
+                }
+            }
+            .padding(.vertical, 3)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func filter(_ name: String, key: String?, count: Int) -> some View {
+        Button { selection = key } label: {
+            HStack(spacing: 5) {
+                if selection == key { Circle().fill(Instrument.accentOrange).frame(width: 5, height: 5) }
+                Text(name).font(.caption.weight(.medium))
+                Text("\(count)").font(.caption2.monospacedDigit()).foregroundStyle(Theme.textSecondary)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
+            .background(selection == key ? Theme.surfaceInset : Theme.surface, in: Capsule())
+            .overlay(Capsule().strokeBorder(selection == key ? Instrument.accentOrange : Theme.hairline, lineWidth: 0.75))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(name), \(count) models")
+        .accessibilityAddTraits(selection == key ? .isSelected : [])
     }
 }
