@@ -3,27 +3,34 @@ import SwiftUI
 /// Application delegate for lifecycle events SwiftUI's `App` can't express.
 @MainActor
 final class BeetCodeAppDelegate: NSObject, NSApplicationDelegate {
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        // SwiftUI can restore a previous "all windows closed" state and leave
-        // this regular GUI app running with only its menu bar. Defer one turn
-        // so WindowGroup gets the first chance to create its scene, then use
-        // the scene's own New Window command when no window exists.
-        DispatchQueue.main.async {
-            Self.openMainWindowIfNeeded(in: NSApplication.shared)
-        }
-    }
-
-    func applicationDidBecomeActive(_ notification: Notification) {
-        Self.openMainWindowIfNeeded(in: NSApplication.shared)
-    }
+    /// One "New Window" request at a time: the menu action opens its window
+    /// asynchronously, so a second request before the first lands would stack
+    /// a second window on top.
+    private var windowRequestInFlight = false
+    /// Guards the post-reopen verification below the same way.
+    private var reopenVerificationScheduled = false
 
     func applicationShouldHandleReopen(
         _ sender: NSApplication,
         hasVisibleWindows flag: Bool
     ) -> Bool {
-        if !flag {
-            Self.openMainWindowIfNeeded(in: sender)
+        // Clicking the dock icon asks for "the window". A minimized window
+        // reports isVisible=false *and* canBecomeMain=false (measured live) —
+        // and meanwhile still counts as "visible" for `flag` per AppKit — so
+        // it has to be matched by its title bar and brought back, not be
+        // joined by a second window the way it used to be.
+        if let existing = Self.appWindow(in: sender) {
+            sender.unhide(nil)
+            sender.activate(ignoringOtherApps: true)
+            if existing.isMiniaturized { existing.deminiaturize(nil) }
+            existing.makeKeyAndOrderFront(nil)
+            return false
         }
+        // No window at all: let the standard reopen try first and verify a
+        // moment later. Asking for a window immediately raced slow launches
+        // (measured: the WindowGroup window can take seconds on a loaded
+        // machine), which is how a pair of windows appeared.
+        verifyReopenCreatesWindow()
         return true
     }
 
@@ -34,13 +41,35 @@ final class BeetCodeAppDelegate: NSObject, NSApplicationDelegate {
         ChildProcessRegistry.terminateAll()
     }
 
-    private static func openMainWindowIfNeeded(in application: NSApplication) {
-        guard !application.windows.contains(where: { $0.isVisible && $0.canBecomeMain }),
-              let item = newWindowItem(in: application.mainMenu),
-              let action = item.action else { return }
-        application.sendAction(action, to: item.target, from: item)
-        application.activate(ignoringOtherApps: true)
+    /// Falls back to the "New Window" menu command only if the app is still
+    /// windowless a beat after a reopen — by then a WindowGroup window would
+    /// exist if one were coming, so this cannot duplicate it.
+    private func verifyReopenCreatesWindow() {
+        guard !reopenVerificationScheduled else { return }
+        reopenVerificationScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self else { return }
+            self.reopenVerificationScheduled = false
+            let application = NSApplication.shared
+            guard Self.appWindow(in: application) == nil,
+                  !self.windowRequestInFlight,
+                  let item = Self.newWindowItem(in: application.mainMenu),
+                  let action = item.action else { return }
+            self.windowRequestInFlight = true
+            application.sendAction(action, to: item.target, from: item)
+            application.activate(ignoringOtherApps: true)
+        }
     }
+
+    /// The app's own window(s): the main window or a detached chat. Matched
+    /// on the title bar because a minimized window reports isVisible=false
+    /// *and* canBecomeMain=false (measured live) — the old on-screen-only
+    /// test saw a minimized app as windowless, which is exactly how a dock
+    /// click used to end up opening a second window beside it.
+    private static func appWindow(in application: NSApplication) -> NSWindow? {
+        application.windows.first { $0.styleMask.contains(.titled) }
+    }
+
     static func newWindowItem(in menu: NSMenu?) -> NSMenuItem? {
         for item in menu?.items ?? [] {
             if item.title == "New Window", item.action != nil { return item }
