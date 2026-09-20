@@ -34,6 +34,22 @@ mkdir -p "$DIST" "$STAGE"
 ditto "$APP" "$STAGE/Vamp Assistant.app"
 ln -s /Applications "$STAGE/Applications"
 
+# A Release build made with CODE_SIGNING_ALLOWED=NO keeps only the linker's
+# ad-hoc stub: no Contents/_CodeSignature, Info.plist unbound, so Gatekeeper
+# rejects a downloaded copy as "damaged" ("code has no resources but signature
+# indicates they must be present"). Never package an app in that state.
+if ! codesign --verify --strict "$STAGE/Vamp Assistant.app" >/dev/null 2>&1; then
+  cat >&2 <<'MSG'
+error: "Vamp Assistant.app" has no valid code signature — a downloaded copy would
+be rejected by Gatekeeper as "damaged". Build the Release app with signing
+enabled (do NOT pass CODE_SIGNING_ALLOWED=NO), or re-sign the app first:
+  codesign --force --deep --options runtime --timestamp=none \
+    --sign "Apple Development" "/path/to/Vamp Assistant.app"
+MSG
+  exit 1
+fi
+codesign --verify --deep --strict "$STAGE/Vamp Assistant.app" >/dev/null
+
 DMG="${DIST}/${NAME}.dmg"
 [[ ! -e "$DMG" ]] || { echo "Artifact already exists: $DMG. Choose a new build number." >&2; exit 1; }
 hdiutil create \
@@ -41,6 +57,7 @@ hdiutil create \
   -srcfolder "$STAGE" \
   -ov -format UDZO \
   "$DMG" >/dev/null
+hdiutil verify "$DMG" >/dev/null
 
 shasum -a 256 "$DMG" | awk '{print $1}' > "${DMG}.sha256"
 echo "$DMG"

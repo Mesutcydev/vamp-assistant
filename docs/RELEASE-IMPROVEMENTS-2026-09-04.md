@@ -101,3 +101,20 @@ The user subsequently requested publication of the latest builds and updates to 
 Downloads:
 - https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.29/Vamp-Assistant-0.10.29-build-82-preview.dmg
 - https://github.com/Mesutcydev/vamp-assistant/releases/download/ios-v0.1.36/Vamp-Assistant-iOS-0.1.36-build-58-unsigned.ipa
+
+## Fix — 2026-09-20: macOS 0.10.37 (116) DMG republished with a valid signature
+
+The first upload of `Vamp-Assistant-0.10.37-build-116-preview.dmg` came from a Release build made with
+signing disabled, so the app carried only the linker's ad-hoc stub (no `Contents/_CodeSignature`,
+Info.plist unbound). Gatekeeper therefore rejected a downloaded copy as **damaged**
+("code has no resources but signature indicates they must be present") and the app could not be opened.
+
+- Re-signed the shipped app with the project's Apple Development identity (hardened runtime, team
+  `438VSM6P5L`) — the same signature class as the 0.10.35 preview — rebuilt the DMG, and re-uploaded it
+  under the same asset name (all site links unchanged). New SHA-256:
+  `3f68dd3d75a6d6edb1ce1ef25f77d6284ecab9e1e1661371070854841212a8ca`.
+- `scripts/package-beetcode-dmg.sh` now refuses to package an app whose `codesign --verify --strict`
+  fails (with the re-sign command in the error), and validates the finished image with `hdiutil verify`.
+- Verification on the re-downloaded public DMG: `codesign --verify --deep --strict` passes, Gatekeeper
+  class matches the 0.10.35 preview (`rejected, origin=Apple Development`, not "damaged"), and the app
+  launches from the mounted DMG and from `/Applications` after clearing download quarantine.
