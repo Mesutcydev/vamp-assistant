@@ -541,7 +541,7 @@ private struct WelcomeIdentityView: View {
                 } label: {
                     Label("Choose a model", systemImage: "cpu")
                 }
-                .buttonStyle(.borderedProminent)
+                .glassButton(prominent: true)
                 .controlSize(.large)
                 .help("Pick the model that runs your next message")
                 .padding(.top, 18)

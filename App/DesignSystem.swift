@@ -236,37 +236,70 @@ struct InstrumentMenuRow: View {
 }
 
 extension View {
-    /// Silver faceplate: vertical metal gradient, bright top edge, dark
-    /// bottom edge, fine seam outline, shallow directional shadow.
+    /// Apple's glass button where the system has it, the app's own bordered
+    /// face otherwise. macOS 26 ships `.glass`/`.glassProminent`; the
+    /// deployment target is older, so this is the availability gate in one
+    /// place rather than at every call site.
+    @ViewBuilder
+    func glassButton(prominent: Bool = false) -> some View {
+        if #available(macOS 26.0, *) {
+            if prominent {
+                self.buttonStyle(.glassProminent)
+            } else {
+                self.buttonStyle(.glass)
+            }
+        } else {
+            self.buttonStyle(.bordered)
+        }
+    }
+}
+
+extension View {
+    /// Glass faceplate: the app's card material.
+    ///
+    /// Apple's glass, not painted silver. The system draws its own chrome from
+    /// a translucent material that picks up whatever is behind it, and a card
+    /// built from opaque greys reads as a flat slab sitting next to it. This is
+    /// a vibrancy material with a whisper of tint, a specular top edge and a
+    /// soft shadow, so cards sit *in* the window's light instead of on top of
+    /// it. The names survive because the app's controls are built from them.
     func instrumentFaceplate(radius: CGFloat = 8,
                              shadow: Bool = true) -> some View {
-        self
-            .background(
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .fill(LinearGradient(
-                        colors: [Instrument.silverTop, Instrument.silverMid, Instrument.silverLow],
-                        startPoint: .top, endPoint: .bottom)))
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        return self
+            .background {
+                shape.fill(.regularMaterial)
+                // A whisper of cast, so a card never reads as plain system grey.
+                shape.fill(LinearGradient(
+                    colors: [Color.white.opacity(0.05),
+                             Color.white.opacity(0.015),
+                             Color.black.opacity(0.06)],
+                    startPoint: .top, endPoint: .bottom))
+            }
             .overlay(
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(colors: [Instrument.seamLight, Instrument.seam,
-                                                Instrument.silverEdgeDark],
-                                       startPoint: .top, endPoint: .bottom),
-                        lineWidth: 1))
+                // Specular edge: bright where the light lands and fading round
+                // the sides. The highlight is what makes glass read as glass.
+                shape.strokeBorder(
+                    LinearGradient(colors: [Color.white.opacity(0.22),
+                                            Color.white.opacity(0.06),
+                                            Color.white.opacity(0.02)],
+                                   startPoint: .top, endPoint: .bottom),
+                    lineWidth: 0.75))
             .shadow(color: shadow ? Theme.cardShadow : .clear,
-                    radius: shadow ? 3 : 0, y: shadow ? 1 : 0)
+                    radius: shadow ? 10 : 0, y: shadow ? 3 : 0)
     }
 
-    /// Recessed working well: gray cavity with inset shading, for editors,
-    /// search, fields, code, and console bodies.
+    /// Recessed glass well: a translucent cavity for editors, search, fields,
+    /// code and console bodies — darker than the card it sits in, so it still
+    /// reads as a recess rather than as a second card.
     func instrumentRecess(radius: CGFloat = 6) -> some View {
-        self
-            .background(
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .fill(Instrument.recessFill))
-            .overlay(
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(Instrument.seam.opacity(0.8), lineWidth: 1))
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        return self
+            .background {
+                shape.fill(.ultraThinMaterial)
+                shape.fill(Color.black.opacity(0.18))
+            }
+            .overlay(shape.strokeBorder(Color.white.opacity(0.07), lineWidth: 0.75))
     }
 
     /// Dark inserted control surface (selected capsules, primary actions).
