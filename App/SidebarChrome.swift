@@ -247,6 +247,16 @@ struct SidebarNavRow: View {
 /// panel itself is untouched; outside it the window shows navigation surface
 /// rather than a shadow on black.
 struct SidebarCornerPatch: View {
+    /// Which of the panel's leading corners this patch covers. macOS 26 rounds
+    /// the column at every corner, and the window shows through outside each
+    /// arc, so both leading corners need the same treatment.
+    enum Corner {
+        case topLeading
+        case bottomLeading
+    }
+
+    var corner: Corner = .topLeading
+
     /// How much of the corner is repainted. Large enough to swallow the
     /// shadow, still short of the first row (which starts at x=8, y=8 of the
     /// content area).
@@ -256,13 +266,13 @@ struct SidebarCornerPatch: View {
     static let arc: CGFloat = 22
 
     var body: some View {
-        Theme.navigationTop
+        (corner == .topLeading ? Theme.navigationTop : Theme.navigationBottom)
             .mask {
                 Rectangle()
-                    .overlay(alignment: .bottomTrailing) {
+                    .overlay(alignment: corner == .topLeading ? .bottomTrailing : .topTrailing) {
                         Circle()
                             .frame(width: Self.arc * 2, height: Self.arc * 2)
-                            .offset(x: Self.arc, y: Self.arc)
+                            .offset(x: Self.arc, y: corner == .topLeading ? Self.arc : -Self.arc)
                             .blendMode(.destinationOut)
                     }
                     .compositingGroup()

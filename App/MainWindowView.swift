@@ -148,11 +148,15 @@ struct MainWindowView: View {
             }
 
             // Painted last, above the split view, so it can cover the shadow the
-            // system draws around the sidebar panel's rounded top-left corner.
+            // system draws around the sidebar panel's rounded leading corners.
             if sidebarOnScreen, !showSettings {
                 SidebarCornerPatch()
                     .frame(width: SidebarCornerPatch.size, height: SidebarCornerPatch.size)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .allowsHitTesting(false)
+                SidebarCornerPatch(corner: .bottomLeading)
+                    .frame(width: SidebarCornerPatch.size, height: SidebarCornerPatch.size)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     .allowsHitTesting(false)
             }
         }
