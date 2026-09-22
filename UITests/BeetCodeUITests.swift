@@ -79,9 +79,14 @@ final class BeetCodeUITests: XCTestCase {
         let library = app.descendants(matching: .any)
             .matching(identifier: "conversation-browser").firstMatch
         XCTAssertTrue(library.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Conversations"].exists)
-        XCTAssertTrue(app.staticTexts["Bots"].exists)
-        XCTAssertTrue(app.staticTexts["Devices"].exists)
+        // The destinations are drawn rows (buttons) on the column's own
+        // surface, not system list cells: the label is the contract, not the
+        // element role.
+        for destination in ["Conversations", "Bots", "Devices"] {
+            XCTAssertTrue(app.staticTexts[destination].exists
+                          || app.buttons[destination].exists,
+                          "Sidebar destination missing a label: \(destination)")
+        }
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(
             format: "label BEGINSWITH %@", "Project:")).firstMatch.exists)
     }
@@ -254,9 +259,15 @@ final class BeetCodeUITests: XCTestCase {
         XCTAssertTrue(composer(in: app).waitForExistence(timeout: 10))
         XCTAssertFalse(editor.exists)
 
-        // Bots is a sidebar destination now, not a toolbar toggle.
-        app.staticTexts["Bots"].firstMatch
-            .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+        // Bots is a sidebar destination now, not a toolbar toggle — a drawn
+        // row (button) on the column's own surface.
+        let botsDestination = app.buttons["Bots"].firstMatch
+        if botsDestination.exists {
+            botsDestination.click()
+        } else {
+            app.staticTexts["Bots"].firstMatch
+                .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+        }
         XCTAssertTrue(editor.waitForExistence(timeout: 5))
     }
 

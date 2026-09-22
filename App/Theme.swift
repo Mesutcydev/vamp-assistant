@@ -54,6 +54,22 @@ enum Theme {
     static var headerSurface: Color { systemSurface(.windowBackgroundColor) }
     static var readingSurface: Color { systemSurface(.textBackgroundColor) }
 
+    // MARK: Navigation column
+    //
+    // One designed plane for the whole leading column, flush with the window
+    // mask. A flat system slab reads as a card; a whisper of vertical depth
+    // plus a hairline seam reads as part of the window. The OLED steps keep
+    // the column darker than any panel but still visibly above a true-black
+    // canvas, which is the whole point of the appearance.
+    static var navigationTop: Color { Color.dynamic(light: 0xF7F7F8, dark: 0x1E1E20, oled: 0x131315) }
+    static var navigationBottom: Color { Color.dynamic(light: 0xEEEEF0, dark: 0x171719, oled: 0x0B0B0D) }
+    /// The window's top chrome band. Same material family as the navigation
+    /// column, so the window's top-left corner reads as one continuous plane
+    /// instead of three unrelated greys.
+    static var chromeBar: Color { Color.dynamic(light: 0xF3F3F5, dark: 0x1B1B1D, oled: 0x131315) }
+    /// Row/selection wash on the navigation surface.
+    static var navigationRowHover: Color { Color.primary.opacity(0.05) }
+
     /// A system surface that still honours the OLED appearance. AppKit has no
     /// true-black variant, and OLED is a real setting in this app — reading
     /// `currentAppearance` here also keeps these surfaces observable, so a

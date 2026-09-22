@@ -56,6 +56,20 @@ enum SidebarMetrics {
     static let inset: CGFloat = 12
     /// Row background edge → icon/title anchor.
     static let rowPadding: CGFloat = 8
+
+    // MARK: Navigation rows
+    //
+    // One alignment grid for every row in the column. The workspace selector
+    // already puts its label on 40 (12 inset + 22 mark + 6 gap), so the
+    // destination and Settings rows are built to land on exactly the same
+    // axis: 8 fill inset + 12 content inset + 14 glyph column + 6 gap.
+    static let navRowFillInset: CGFloat = 8
+    static let navRowContentInset: CGFloat = 12
+    static let navGlyphColumn: CGFloat = 14
+    static let navGlyphGap: CGFloat = 6
+    /// Where every navigation label starts, measured from the column's edge.
+    static let navLabelAxis: CGFloat = navRowFillInset + navRowContentInset
+        + navGlyphColumn + navGlyphGap
     /// One conversation row. The drawer is information, not hardware: it is
     /// dense so more history is visible without reading smaller type.
     static let rowHeight: CGFloat = 30
@@ -97,16 +111,14 @@ enum SidebarMetrics {
 }
 
 extension View {
-    /// The one sidebar surface. It extends through the split view's top,
-    /// leading, and bottom container inset so the material runs underneath
-    /// the titlebar and into the window's corner mask — no inner rounded
-    /// rectangle, no second border parallel to the window edge.
-    /// The sidebar is a silver side module in the navigation-surface family.
+    /// The one sidebar surface: a full-height navigation plane that runs to the
+    /// window's leading, top and bottom edges. The system's macOS 26 floating
+    /// panel appearance is off (see `BeetCodeAppDelegate`), so this surface
+    /// owns the column — no inner rounded rectangle and no second border
+    /// parallel to the window edge.
     func sidebarSurface() -> some View {
         background {
-            LinearGradient(colors: [Instrument.silverTop,
-                                    Theme.navigationSurface,
-                                    Instrument.silverLow.opacity(0.92)],
+            LinearGradient(colors: [Theme.navigationTop, Theme.navigationBottom],
                            startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea(.container, edges: [.top, .leading, .bottom])
         }
@@ -162,5 +174,52 @@ struct SidebarDivider: View {
             .fill(Instrument.seam.opacity(0.6))
             .frame(height: 1)
             .padding(.horizontal, inset)
+    }
+}
+
+/// One navigation row on the sidebar surface: glyph on the column's icon axis,
+/// label on its text axis, and a fill that belongs to the surface rather than a
+/// panel inside it. Selection is a soft neutral lift with the accent on the
+/// glyph — the same language the destination column and the Settings row share.
+struct SidebarNavRow: View {
+    let title: String
+    let systemImage: String
+    var isSelected: Bool = false
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: SidebarMetrics.navGlyphGap) {
+                Image(systemName: systemImage)
+                    .font(.appUI(size: 13, weight: isSelected ? .semibold : .regular))
+                    .foregroundStyle(isSelected ? Theme.accentText : Theme.textSecondary)
+                    .frame(width: SidebarMetrics.navGlyphColumn, alignment: .leading)
+                Text(title)
+                    .font(.appUI(size: 13, weight: isSelected ? .semibold : .regular))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, SidebarMetrics.navRowContentInset)
+            .frame(maxWidth: .infinity,
+                   minHeight: SidebarMetrics.rowHeight,
+                   alignment: .leading)
+            .background(fill, in: RoundedRectangle(cornerRadius: SidebarMetrics.selectionRadius,
+                                                   style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, SidebarMetrics.navRowFillInset)
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovering)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+
+    private var fill: Color {
+        if isSelected { return Theme.washStrong(Theme.accent) }
+        return hovering ? Theme.navigationRowHover : .clear
     }
 }

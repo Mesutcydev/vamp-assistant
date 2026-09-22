@@ -205,8 +205,10 @@ struct MainWindowView: View {
             // The unified window lets content scroll under the titlebar, so the
             // toolbar must carry its own material — without it the transcript
             // was legible straight through the title band and over the traffic
-            // lights at small window sizes.
-            .toolbarBackground(.visible, for: .windowToolbar)
+            // lights at small window sizes. It carries the chrome band's
+            // material rather than the system default, so the title band and
+            // the navigation column beside it read as one plane.
+            .toolbarBackground(Theme.chromeBar, for: .windowToolbar)
             .background(Theme.bg)
     }
 

@@ -34,6 +34,23 @@ final class BeetCodeAppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    /// The sidebar is the window's leading edge, not a card floating over it.
+    ///
+    /// macOS 26 draws a split-view sidebar as an inset rounded panel over the
+    /// window background. With a dark or OLED canvas that leaves black gutters
+    /// between the navigation column and the window's own edges — the column
+    /// reads as a detached slab with a border of its own. This app's navigation
+    /// column is a full-height surface flush with the window mask, so the
+    /// floating appearance is switched off before any window exists.
+    ///
+    /// Registered rather than written: a user who prefers the floating panel
+    /// can still set the same key in the global domain and win.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        UserDefaults.standard.register(defaults: [
+            "NSSplitViewItemSidebarDefaultsToFloatingAppearance": false,
+        ])
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         // Synchronous best-effort: engines' async unload path can't run on
         // the way out, so registered child processes (llama-server) get a

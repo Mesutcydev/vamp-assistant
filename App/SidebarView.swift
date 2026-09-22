@@ -76,6 +76,10 @@ struct SidebarView: View {
             // material, so the list draws native rows, selection, and inset
             // grouping on top of it rather than a painted surface of its own.
             .listStyle(.sidebar)
+            // The column's own surface (Theme.navigation*) is the material
+            // here. A sidebar list paints a second, flatter slab over it, so
+            // the list runs transparent and the column reads as one plane.
+            .scrollContentBackground(.hidden)
             // Scoped to the list itself: an identifier on the whole sidebar
             // propagates into every descendant and stomps their own — the
             // search field arrived as "conversation-browser" in the AX tree.
@@ -140,13 +144,14 @@ struct SidebarView: View {
             connectionMenu
             Spacer(minLength: 4)
         }
-        .padding(.horizontal, SidebarMetrics.inset)
+        .padding(.horizontal, SidebarMetrics.navRowFillInset)
         .padding(.vertical, 5)
         .frame(maxWidth: .infinity)
-        // The footer sits on the sidebar's own material, closed by a system
-        // separator — not a contrasting painted strip.
-        .background(.bar)
-        .overlay(alignment: .top) { Divider() }
+        // The footer is the last band of the column's own surface — closed by
+        // the same hairline the rows above it use, not a contrasting strip of
+        // `.bar` material that read as a third grey panel.
+        .background(Theme.navigationBottom)
+        .overlay(alignment: .top) { SidebarDivider(inset: 0) }
         .zIndex(1)
     }
 
@@ -163,8 +168,9 @@ struct SidebarView: View {
             // hundred points from the text it belongs to. The 8pt engraved
             // panel legend is for four-character endcap marks — at sentence
             // length it just sprawled, so this keeps a compact mono readout.
-            HStack(spacing: 7) {
+            HStack(spacing: SidebarMetrics.navGlyphGap) {
                 InstrumentLamp(color: connectionColor, bore: 9, live: connectionIsLive)
+                    .frame(width: SidebarMetrics.navGlyphColumn, alignment: .leading)
                 Text(connectionLabel)
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .tracking(0.4)
@@ -175,7 +181,7 @@ struct SidebarView: View {
                     .font(.system(size: 8, weight: .semibold))
                     .foregroundStyle(Instrument.inkSecondary)
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, SidebarMetrics.navRowContentInset)
             .frame(height: SidebarMetrics.connectionRailHeight)
             .contentShape(Rectangle())
         } options: {
@@ -403,21 +409,41 @@ struct SidebarView: View {
         return sections
     }
 
-    /// An empty library is a sentence, not a card: a bordered panel inset
-    /// inside a sidebar column reads as a second container and never lines up
-    /// with the rows it replaces.
+    /// An empty library is a designed block on the column's own surface: a
+    /// glyph, a title, and a sentence that WRAPS. The copy used to be clipped
+    /// to one line ("…saved locally and grou…"), which is the kind of detail
+    /// that makes a whole column read as unfinished.
     private var ownHistoryEmptyState: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("No conversations yet")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color(nsColor: .labelColor))
-            Text("Chats are saved locally and grouped by project as soon as you start a task.")
-                .font(.system(size: 11))
-                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 10) {
+            ZStack {
+                // A drawn chip, not a wash: at 10 % of a neutral accent the
+                // circle measured within 3 points of the surface and read as a
+                // hole rather than an object.
+                Circle()
+                    .fill(Theme.washStrong(Theme.accent))
+                    .overlay(Circle().strokeBorder(Theme.washBorder(Theme.accent), lineWidth: 1))
+                    .frame(width: 32, height: 32)
+                Image(systemName: "bubble.left.and.bubble.right")
+                    .font(.appUI(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.accentText)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text("No conversations yet")
+                    .font(.appUI(size: 12.5, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text("Chats are saved locally and grouped by project as soon as you start a task.")
+                    .font(.appUI(size: 11.5))
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .listRowInsets(EdgeInsets(top: Spacing.sm, leading: SidebarMetrics.inset, bottom: Spacing.sm, trailing: SidebarMetrics.inset))
+        .padding(.top, 14)
+        // Indented past the label axis: the empty library belongs to the
+        // project row above it, and a half-step indent read as an accident.
+        .listRowInsets(EdgeInsets(top: 0, leading: SidebarMetrics.navLabelAxis + Spacing.sm,
+                                  bottom: 0, trailing: SidebarMetrics.inset))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
     }
@@ -1467,27 +1493,20 @@ struct SidebarHeaderView: View {
 
     /// The workspace is a location control, not a card: one compact row that
     /// shares the conversation text axis.
+    ///
+    /// It is the app's own menu — the same construction as the connection
+    /// readout below it — rather than a system `Menu`: a borderless menu draws
+    /// its title in a dimmed style, which made the project row the quietest
+    /// text in the column (~40 % ink, measured).
     private var workspaceSelector: some View {
-        Menu {
-            if workspaceURL != nil {
-                Button("New chat in this project", action: onNewChat)
-            }
-            Button("Open project…", action: onChooseWorkspace)
-            Button("Chat without a project", action: onChatOnly)
-            Divider()
-            Button("Import conversations…", action: onImport)
-                .disabled(isImporting)
-            Button("Import task bundle…", action: onImportTaskBundle)
-                .disabled(isImportingBundle)
-            Button("Refresh history", action: onRefresh)
-        } label: {
-            HStack(spacing: 6) {
+        InstrumentMenu(menuWidth: 240) {
+            HStack(spacing: SidebarMetrics.navGlyphGap) {
                 workspaceMark
                 Text(workspaceURL?.lastPathComponent ?? "No project")
                     .font(.appUI(size: 13, weight: .semibold))
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .foregroundStyle(Instrument.ink)
+                    .foregroundStyle(Theme.textPrimary)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .semibold))
                     .foregroundStyle(Instrument.inkSecondary)
@@ -1496,12 +1515,25 @@ struct SidebarHeaderView: View {
             .frame(height: SidebarMetrics.workspaceRowHeight)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
+        } options: {
+            if workspaceURL != nil {
+                InstrumentMenuRow(title: "New chat in this project",
+                                  systemImage: "plus") { onNewChat() }
+            }
+            InstrumentMenuRow(title: "Open project…", systemImage: "folder") {
+                onChooseWorkspace()
+            }
+            InstrumentMenuRow(title: "Chat without a project",
+                              systemImage: "bubble.left") { onChatOnly() }
+            Divider().padding(.vertical, 3)
+            InstrumentMenuRow(title: "Import conversations…",
+                              systemImage: "square.and.arrow.down",
+                              isDisabled: isImporting) { onImport() }
+            InstrumentMenuRow(title: "Import task bundle…", systemImage: "shippingbox",
+                              isDisabled: isImportingBundle) { onImportTaskBundle() }
+            InstrumentMenuRow(title: "Refresh history",
+                              systemImage: "arrow.clockwise") { onRefresh() }
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        // A borderless menu centres its label; the project this library
-        // belongs to has to sit on the same text axis as the chats below it.
-        .frame(maxWidth: .infinity, alignment: .leading)
         .help(workspaceURL?.path ?? "Conversation workspace and import actions")
         .accessibilityLabel("Workspace: \(workspaceURL?.lastPathComponent ?? "Chat only")")
     }

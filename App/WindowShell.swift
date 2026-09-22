@@ -45,19 +45,8 @@ struct ShellSidebar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            List(selection: $destination) {
-                ForEach(ShellDestination.allCases) { item in
-                    Label(item.title, systemImage: item.symbol)
-                        .tag(item)
-                }
-            }
-            .listStyle(.sidebar)
-            .scrollDisabled(true)
-            .frame(height: CGFloat(ShellDestination.allCases.count) * 28 + 24)
-            .accessibilityLabel("Destinations")
-
-            Divider()
-
+            destinations
+            SidebarDivider(inset: SidebarMetrics.inset)
             if destination == .conversations {
                 SidebarView(showRemoteAccess: $showRemoteAccess,
                             onClose: {},
@@ -67,16 +56,34 @@ struct ShellSidebar: View {
                 Spacer(minLength: 0)
             }
         }
+        // One plane for the whole column, flush with the window's leading,
+        // top and bottom edges — the library below is a region of it, not a
+        // panel of its own.
+        .sidebarSurface()
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            Button(action: onSettings) {
-                Label("Settings", systemImage: "gearshape")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+            SidebarNavRow(title: "Settings", systemImage: "gearshape", action: onSettings)
+                .padding(.bottom, 6)
         }
+    }
+
+    /// The fixed destinations. Rows are drawn on the column's own surface
+    /// instead of by a nested sidebar `List`: the system's selection slab put a
+    /// second grey panel inside the column, and its rows did not share the
+    /// workspace row's text axis.
+    private var destinations: some View {
+        VStack(spacing: 1) {
+            ForEach(ShellDestination.allCases) { item in
+                SidebarNavRow(title: item.title,
+                              systemImage: item.symbol,
+                              isSelected: destination == item) {
+                    destination = item
+                }
+            }
+        }
+        .padding(.top, 8)
+        .padding(.bottom, 6)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Destinations")
     }
 }
 
