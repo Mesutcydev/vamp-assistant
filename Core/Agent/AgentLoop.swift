@@ -405,11 +405,17 @@ actor AgentLoop {
 
         pendingSteer = pendingSteer.map { $0 + "\n\n" + trimmed } ?? trimmed
         eventContinuation?.yield(.userSteered(trimmed))
+
+        // A pending approval means no stream is in flight, so there is nothing
+        // to drop. Cancelling anyway lands on whatever generates next — the
+        // reply this very steer asked for — and the run ends as a terminal
+        // CancellationError instead of continuing with the redirect.
         if case .approval(_, let continuation) = pending {
             pending = nil
             continuation.resume(returning: false)
+        } else {
+            engineCancelTask = Task { await engine.cancelGeneration() }
         }
-        engineCancelTask = Task { await engine.cancelGeneration() }
         return true
     }
 
