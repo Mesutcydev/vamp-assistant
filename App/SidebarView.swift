@@ -434,15 +434,17 @@ struct SidebarView: View {
                 Text("Chats are saved locally and grouped by project as soon as you start a task.")
                     .font(.appUI(size: 11.5))
                     .foregroundStyle(Theme.textSecondary)
-                    .lineLimit(3)
+                    // No line cap: at this column width the sentence needs five
+                    // lines, and clamping it to three ellipsised the last words.
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 14)
-        // Indented past the label axis: the empty library belongs to the
-        // project row above it, and a half-step indent read as an accident.
-        .listRowInsets(EdgeInsets(top: 0, leading: SidebarMetrics.navLabelAxis + Spacing.sm,
+        // On the navigation label axis, with the project row's own label above
+        // it: an extra half-step indent read as a mistake rather than as
+        // hierarchy.
+        .listRowInsets(EdgeInsets(top: 0, leading: SidebarMetrics.navLabelAxis,
                                   bottom: 0, trailing: SidebarMetrics.inset))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)

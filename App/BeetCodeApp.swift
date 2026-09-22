@@ -70,9 +70,9 @@ final class BeetCodeAppDelegate: NSObject, NSApplicationDelegate {
         verifyReopenCreatesWindow(after: 5.0)
     }
 
-    /// Falls back to the "New Window" menu command only if the app is still
-    /// windowless a beat after a reopen — by then a WindowGroup window would
-    /// exist if one were coming, so this cannot duplicate it.
+    /// Falls back to opening a window only if the app is still windowless a
+    /// beat after a reopen — by then a WindowGroup window would exist if one
+    /// were coming, so this cannot duplicate it.
     private func verifyReopenCreatesWindow(after delay: TimeInterval = 2.0) {
         guard !reopenVerificationScheduled else { return }
         reopenVerificationScheduled = true
@@ -81,12 +81,23 @@ final class BeetCodeAppDelegate: NSObject, NSApplicationDelegate {
             self.reopenVerificationScheduled = false
             let application = NSApplication.shared
             guard Self.appWindow(in: application) == nil,
-                  !self.windowRequestInFlight,
-                  let item = Self.newWindowItem(in: application.mainMenu),
-                  let action = item.action else { return }
+                  !self.windowRequestInFlight else { return }
             self.windowRequestInFlight = true
-            application.sendAction(action, to: item.target, from: item)
+            // Ask AppKit's own route first: SwiftUI's WindowGroup answers
+            // `newWindowForTab:` with a window. Matching a menu item titled
+            // "New Window" — what this used to do — silently did nothing here,
+            // because the app replaces the standard new-item group, so a
+            // windowless launch stayed windowless.
+            let opened = application.sendAction(Selector(("newWindowForTab:")), to: nil, from: nil)
+            var route = "newWindowForTab"
+            if !opened, let item = Self.newWindowItem(in: application.mainMenu), let action = item.action {
+                application.sendAction(action, to: item.target, from: item)
+                route = "menu item \(item.title)"
+            }
             application.activate(ignoringOtherApps: true)
+            DiagnosticsCenter.shared.record(
+                .system, opened ? "Opened a window that was missing" : "Window recovery: no route",
+                detail: "via \(route)")
         }
     }
 

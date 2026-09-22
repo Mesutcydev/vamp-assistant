@@ -266,16 +266,25 @@ struct SidebarCornerPatch: View {
     static let arc: CGFloat = 22
 
     var body: some View {
-        (corner == .topLeading ? Theme.navigationTop : Theme.navigationBottom)
-            .mask {
-                Rectangle()
-                    .overlay(alignment: corner == .topLeading ? .bottomTrailing : .topTrailing) {
-                        Circle()
-                            .frame(width: Self.arc * 2, height: Self.arc * 2)
-                            .offset(x: Self.arc, y: corner == .topLeading ? Self.arc : -Self.arc)
-                            .blendMode(.destinationOut)
-                    }
-                    .compositingGroup()
-            }
+        ZStack(alignment: .leading) {
+            (corner == .topLeading ? Theme.navigationTop : Theme.navigationBottom)
+                .mask {
+                    Rectangle()
+                        .overlay(alignment: corner == .topLeading ? .bottomTrailing : .topTrailing) {
+                            Circle()
+                                .frame(width: Self.arc * 2, height: Self.arc * 2)
+                                .offset(x: Self.arc, y: corner == .topLeading ? Self.arc : -Self.arc)
+                                .blendMode(.destinationOut)
+                        }
+                        .compositingGroup()
+                }
+            // The column's own edge line runs down its leading edge, and this
+            // patch paints over the span beside the corner — which cut the line
+            // off exactly where the eye is looking. Redraw that span so the
+            // edge runs unbroken into the window's corner.
+            Rectangle()
+                .fill(Instrument.seam)
+                .frame(width: 1)
+        }
     }
 }
