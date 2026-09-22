@@ -448,20 +448,14 @@ struct MainWindowView: View {
         // hug the field but moves the field 120pt right of the window's
         // middle — the centring is worth more than the capsule's width, and
         // this is the arrangement the app shipped with.
-        HStack(spacing: 0) {
-            ToolbarSearchField(text: $historySearch,
-                               placeholder: "Search conversations",
-                               onCommit: revealSearchResults)
-                .frame(width: Self.searchFieldWidth)
-                // Without this the field stretches to whatever the item is
-                // given, so the spacer would widen the field instead of
-                // moving it. AppKit still has the last word, which is why the
-                // item itself is pinned in `pinSearchFieldWidth()`.
-                .fixedSize(horizontal: true, vertical: false)
-            Color.clear
-                .frame(width: toolbarCenteringInset)
-        }
-            .fixedSize(horizontal: true, vertical: false)
+        // The field FILLS its item — it is not left-aligned inside a wider
+        // one. That was the bug behind "a pill inside the pill": the system
+        // capsule is drawn around the ITEM, so a 380pt field sitting in a
+        // 620pt item showed its own focus ring as a second, smaller pill the
+        // moment it was clicked. One field, one pill, one focus ring.
+        ToolbarSearchField(text: $historySearch,
+                           placeholder: "Search conversations",
+                           onCommit: revealSearchResults)
             .accessibilityIdentifier("conversation-search")
             .onChange(of: historySearch) { _, value in
                 guard !value.isEmpty else { return }
