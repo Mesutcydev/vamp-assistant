@@ -58,13 +58,25 @@ final class BeetCodeAppDelegate: NSObject, NSApplicationDelegate {
         ChildProcessRegistry.terminateAll()
     }
 
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // A state restoration that comes back empty leaves the app with no
+        // window at all: AppKit asks SwiftUI's restorer for the saved window,
+        // gets nothing (logged as `window=0x0`), and no window is ever
+        // created — the app runs invisibly, which reads as "the app didn't
+        // open". The reopen path above recovers a windowless app, so launch
+        // gets the same net, later: a slow launch can legitimately take
+        // seconds to put its window up, and acting too early is how a pair of
+        // windows appears.
+        verifyReopenCreatesWindow(after: 5.0)
+    }
+
     /// Falls back to the "New Window" menu command only if the app is still
     /// windowless a beat after a reopen — by then a WindowGroup window would
     /// exist if one were coming, so this cannot duplicate it.
-    private func verifyReopenCreatesWindow() {
+    private func verifyReopenCreatesWindow(after delay: TimeInterval = 2.0) {
         guard !reopenVerificationScheduled else { return }
         reopenVerificationScheduled = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self else { return }
             self.reopenVerificationScheduled = false
             let application = NSApplication.shared
