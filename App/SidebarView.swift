@@ -1514,6 +1514,12 @@ struct SidebarHeaderView: View {
             }
             .frame(height: SidebarMetrics.workspaceRowHeight)
             .frame(maxWidth: .infinity, alignment: .leading)
+            // The header insets its contents by `SidebarMetrics.inset`; the
+            // selector carries the row's own fill + content inset on top of it
+            // so its mark and label land on the SAME axes as the destination
+            // rows above it (8 + 10 from the column's edge).
+            .padding(.horizontal, SidebarMetrics.navRowFillInset
+                     + SidebarMetrics.navRowContentInset - SidebarMetrics.inset)
             .contentShape(Rectangle())
         } options: {
             if workspaceURL != nil {
@@ -1590,7 +1596,7 @@ struct SidebarHeaderView: View {
                     .foregroundStyle(Instrument.inkSecondary)
             }
         }
-        .frame(width: 22, height: 20)
+        .frame(width: SidebarMetrics.navGlyphColumn, height: 20)
         .environment(\.instrumentPressed, false)
         .instrumentKey(RoundedRectangle(cornerRadius: 4.5, style: .continuous), elevation: 0.7)
         .accessibilityHidden(true)

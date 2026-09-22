@@ -50,19 +50,15 @@ enum Instrument {
     static var endcapFraction: CGFloat { 0.08 }
     static var faceplateFraction: CGFloat { 0.39 }
 
-    // Sampled reference anchors (REFERENCE_GEOMETRY.json): pearl light
-    // editor area, endcap/faceplate region, dark inserts. Local shading and
-    // edges complete the finish — these are anchors, not flat fills.
-    // The machined-silver palette is retired: these names still exist because
-    // the app's controls are built from them, but every one now resolves to an
-    // AppKit semantic color. A "gradient" of three identical window colors is
-    // a flat native surface — which is the point.
-    static var silverTop: Color { Color(nsColor: .windowBackgroundColor) }
-    static var silverMid: Color { Color(nsColor: .windowBackgroundColor) }
-    static var silverLow: Color { Color(nsColor: .windowBackgroundColor) }
-    static var faceplate: Color { Color(nsColor: .controlBackgroundColor) }
-    static let silverEdgeDark = Color(nsColor: .separatorColor)
-    static let recessFill = Color(nsColor: .textBackgroundColor)
+    // Designed card material: a raised face that steps top-to-bottom and
+    // carries a real edge, instead of three identical window colours. The
+    // names survive because the app's controls are built from them.
+    static var silverTop: Color { Theme.sectionSurfaceTop }
+    static var silverMid: Color { Theme.sectionSurface }
+    static var silverLow: Color { Theme.sectionSurfaceBottom }
+    static var faceplate: Color { Theme.sectionSurface }
+    static let silverEdgeDark = Theme.sectionStrokeStrong
+    static let recessFill = Theme.wellSurface
     /// The bright edge of raised controls, paired with their body material.
     static let controlHighlight = Color(nsColor: .separatorColor)
 

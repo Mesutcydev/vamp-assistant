@@ -436,7 +436,10 @@ private struct BotSpecialistCard: View {
                 TextEditor(text: $prompt)
                     .font(.app(size: 13 ))
                     .foregroundStyle(Theme.textPrimary)
-                    .frame(minHeight: 160, maxHeight: .infinity)
+                    // A bounded task composer, not a page-filling void: it
+                    // starts at a real working height and grows with the task,
+                    // then scrolls internally instead of eating the page.
+                    .frame(minHeight: 160, maxHeight: 320)
                     .scrollContentBackground(.hidden)
                     .padding(6)
                     .background(Theme.surfaceInset.opacity(0.7),
@@ -672,24 +675,37 @@ private struct BotSelectorKey: View {
 
     var body: some View {
         Button(action: onSelect) {
-            HStack(spacing: 10) {
-                Image(systemName: specialist.symbol).font(.system(size: 16, weight: .medium))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(specialist.name).font(.appUI(size: 13, weight: .semibold))
+            HStack(spacing: 9) {
+                Image(systemName: specialist.symbol)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(isSelected ? Theme.tintCoding : Theme.textSecondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    // The role name is the whole point of this control: it never
+                    // truncates at a normal width.
+                    Text(specialist.name)
+                        .font(.appUI(size: 13, weight: .semibold))
+                        .lineLimit(1)
                     Text(run?.phase ?? "Ready for a task")
-                        .font(.appMono(size: 10)).opacity(0.75).lineLimit(1)
+                        .font(.app(size: 11))
+                        .foregroundStyle(isSelected ? Theme.textSecondary : Theme.textTertiary)
+                        .lineLimit(1)
                 }
                 Spacer(minLength: 4)
-                Circle().fill(run.map { $0.state.isTerminal ? Theme.statusNeutral : Theme.positive }
-                              ?? Theme.statusNeutral).frame(width: 5, height: 5)
+                Circle()
+                    .fill(run.map { $0.state.isTerminal ? Theme.statusNeutral : Theme.positive }
+                          ?? Theme.statusNeutral)
+                    .frame(width: 6, height: 6)
             }
-            .foregroundStyle(isSelected ? Color.white : Instrument.ink)
-            .padding(.horizontal, 14).frame(width: 176, height: 56)
-            .background(isSelected ? Instrument.darkInsert : Instrument.silverTop)
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(isSelected ? Instrument.accentOrange : Instrument.seam)
-                    .frame(height: 2)
-            }
+            .foregroundStyle(isSelected ? Theme.textPrimary : Theme.textSecondary)
+            .padding(.horizontal, 12)
+            .frame(minWidth: 132, maxWidth: 190, minHeight: 44)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
+                    .fill(isSelected ? Theme.sectionSurfaceTop : Theme.sectionSurfaceBottom))
+            .overlay(
+                RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
+                    .strokeBorder(isSelected ? Theme.tintCoding.opacity(0.55) : Theme.sectionStroke,
+                                  lineWidth: isSelected ? 1.25 : 1))
             .brightness(hovering && !isSelected ? 0.035 : 0)
             .contentShape(Rectangle())
         }

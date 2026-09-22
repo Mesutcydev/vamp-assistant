@@ -62,7 +62,7 @@ struct ShellSidebar: View {
         .sidebarSurface()
         .safeAreaInset(edge: .bottom, spacing: 0) {
             SidebarNavRow(title: "Settings", systemImage: "gearshape", action: onSettings)
-                .padding(.bottom, 6)
+                .padding(.bottom, SidebarMetrics.navRowsBottomInset)
         }
     }
 
@@ -71,7 +71,7 @@ struct ShellSidebar: View {
     /// second grey panel inside the column, and its rows did not share the
     /// workspace row's text axis.
     private var destinations: some View {
-        VStack(spacing: 1) {
+        VStack(spacing: SidebarMetrics.navRowSpacing) {
             ForEach(ShellDestination.allCases) { item in
                 SidebarNavRow(title: item.title,
                               systemImage: item.symbol,
@@ -80,8 +80,8 @@ struct ShellSidebar: View {
                 }
             }
         }
-        .padding(.top, 8)
-        .padding(.bottom, 6)
+        .padding(.top, SidebarMetrics.navRowsTopInset)
+        .padding(.bottom, SidebarMetrics.navRowsBottomInset)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Destinations")
     }

@@ -59,25 +59,34 @@ enum SidebarMetrics {
 
     // MARK: Navigation rows
     //
-    // One alignment grid for every row in the column. The workspace selector
-    // already puts its label on 40 (12 inset + 22 mark + 6 gap), so the
-    // destination and Settings rows are built to land on exactly the same
-    // axis: 8 fill inset + 12 content inset + 14 glyph column + 6 gap.
+    // One alignment grid for every row in the column, on a 4pt scale. The
+    // glyph column has to be wider than the glyphs it holds: at 14 the 13pt
+    // conversational symbols (bubble.left.and.bubble.right is ~18pt wide) burst
+    // their frame, swallowed the gap and collided with the label, which also
+    // left every label optically off its axis. 20pt centres every symbol with
+    // slack to spare, and the label axis lands on 48:
+    //   fill 8 + content 10 + glyph 20 + gap 10 = 48.
     static let navRowFillInset: CGFloat = 8
-    static let navRowContentInset: CGFloat = 12
-    static let navGlyphColumn: CGFloat = 14
-    static let navGlyphGap: CGFloat = 6
+    static let navRowContentInset: CGFloat = 10
+    static let navGlyphColumn: CGFloat = 20
+    static let navGlyphGap: CGFloat = 10
     /// Where every navigation label starts, measured from the column's edge.
     static let navLabelAxis: CGFloat = navRowFillInset + navRowContentInset
         + navGlyphColumn + navGlyphGap
+    /// Vertical rhythm between navigation rows: a 32pt row every 36pt, so the
+    /// rows read as a list instead of a stack of touching bars.
+    static let navRowSpacing: CGFloat = 4
+    /// Breathing room above the first row and below the last.
+    static let navRowsTopInset: CGFloat = 8
+    static let navRowsBottomInset: CGFloat = 8
     /// One conversation row. The drawer is information, not hardware: it is
     /// dense so more history is visible without reading smaller type.
-    static let rowHeight: CGFloat = 30
+    static let rowHeight: CGFloat = 32
     static let iconWidth: CGFloat = 18
     static let iconGap: CGFloat = Spacing.sm
     /// Selected rows stay deliberately tighter than the window/sidebar
     /// geometry above them — a card-sized radius reads as a nested panel.
-    static let selectionRadius: CGFloat = 5
+    static let selectionRadius: CGFloat = 6
 
     // MARK: History drawer
     //
@@ -86,8 +95,9 @@ enum SidebarMetrics {
     // below is intrinsically sized and shares the row's text axis.
     /// Header title band.
     static let headerHeight: CGFloat = 36
-    /// Workspace selector row.
-    static let workspaceRowHeight: CGFloat = 29
+    /// Workspace selector row. Matches the navigation rows' height so the
+    /// project control sits in the same rhythm as the destinations.
+    static let workspaceRowHeight: CGFloat = 32
     /// Search field.
     static let searchHeight: CGFloat = 30
     static let searchRadius: CGFloat = 7
@@ -195,7 +205,9 @@ struct SidebarNavRow: View {
                 Image(systemName: systemImage)
                     .font(.appUI(size: 13, weight: isSelected ? .semibold : .regular))
                     .foregroundStyle(isSelected ? Theme.accentText : Theme.textSecondary)
-                    .frame(width: SidebarMetrics.navGlyphColumn, alignment: .leading)
+                    // Centred in the column, so symbols of different widths
+                    // share one optical axis and every label starts together.
+                    .frame(width: SidebarMetrics.navGlyphColumn, alignment: .center)
                 Text(title)
                     .font(.appUI(size: 13, weight: isSelected ? .semibold : .regular))
                     .foregroundStyle(Theme.textPrimary)
@@ -221,5 +233,39 @@ struct SidebarNavRow: View {
     private var fill: Color {
         if isSelected { return Theme.washStrong(Theme.accent) }
         return hovering ? Theme.navigationRowHover : .clear
+    }
+}
+
+/// macOS 26 draws the sidebar column as a panel with a rounded top-left corner
+/// and a shadow around it. A shadow falls *over* whatever is painted behind it,
+/// which is why the navigation surface painted there still came out black in
+/// OLED: the window behind the panel is pure black, the shadow deepens it, and
+/// the corner reads as a dark notch bitten out of the column.
+///
+/// So the corner is painted *on top* instead: the navigation plane masked to the
+/// little corner square that lies outside the panel's arc. Inside the arc the
+/// panel itself is untouched; outside it the window shows navigation surface
+/// rather than a shadow on black.
+struct SidebarCornerPatch: View {
+    /// How much of the corner is repainted. Large enough to swallow the
+    /// shadow, still short of the first row (which starts at x=8, y=8 of the
+    /// content area).
+    static let size: CGFloat = 24
+    /// The system's own arc is about 20; matching it means the mask boundary
+    /// falls inside the panel, where repainting the same plane is invisible.
+    static let arc: CGFloat = 22
+
+    var body: some View {
+        Theme.navigationTop
+            .mask {
+                Rectangle()
+                    .overlay(alignment: .bottomTrailing) {
+                        Circle()
+                            .frame(width: Self.arc * 2, height: Self.arc * 2)
+                            .offset(x: Self.arc, y: Self.arc)
+                            .blendMode(.destinationOut)
+                    }
+                    .compositingGroup()
+            }
     }
 }

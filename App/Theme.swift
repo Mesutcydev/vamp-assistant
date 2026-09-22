@@ -109,9 +109,45 @@ enum Theme {
     static let chromeWash = Color.clear
 
     // Text tiers resolve alongside their surface, including native controls.
-    static let textPrimary   = Color(nsColor: .labelColor)
-    static let textSecondary = Color(nsColor: .secondaryLabelColor)
-    static let textTertiary  = Color(nsColor: .tertiaryLabelColor)
+    static let textPrimary   = inkPrimary
+    static let textSecondary = inkSecondary
+    static let textTertiary  = inkTertiary
+
+    // MARK: Designed surfaces
+    //
+    // These are drawn from the app's own palette rather than inherited from
+    // AppKit. `controlBackgroundColor` is a neutral grey slab: in dark mode it
+    // reads as unfinished next to the navigation plane, and in OLED Black the
+    // card, the canvas and the separator collapse into the same value, so every
+    // group looks like the same grey rectangle. The card surface is a hair
+    // lighter than the canvas with a cool cast, and it steps — top to bottom —
+    // by just enough to read as a raised face without becoming a gradient.
+    static let sectionSurfaceTop    = Color.dynamic(light: 0xFFFFFF, dark: 0x24262D, oled: 0x17191D)
+    static let sectionSurface       = Color.dynamic(light: 0xFFFFFF, dark: 0x202228, oled: 0x141619)
+    static let sectionSurfaceBottom = Color.dynamic(light: 0xFAFAFC, dark: 0x1C1E24, oled: 0x111316)
+    /// A recessed well inside a card: fields, editors, code, console bodies.
+    static let wellSurface          = Color.dynamic(light: 0xF4F5F7, dark: 0x171920, oled: 0x0D0E11)
+    static let sectionStroke        = Color.dynamic(light: 0xE3E5EA, dark: 0x353842, oled: 0x272A31)
+    static let sectionStrokeStrong  = Color.dynamic(light: 0xD3D6DD, dark: 0x424654, oled: 0x33363E)
+
+    // MARK: Reading ink
+    //
+    // Measured against `sectionSurface`, not guessed. Contrast ratios at these
+    // values: primary 15:1, secondary ~7.9:1, tertiary ~5.0:1 in dark mode; the
+    // same inks on the OLED card stay above 4.5:1 for secondary and above 12:1
+    // for primary. The system label colours lose their edge on a tinted fill —
+    // that is what made text look soft rather than crisp.
+    static let inkPrimary   = Color.dynamic(light: 0x17191C, dark: 0xF0F1F4, oled: 0xEDEFF3)
+    static let inkSecondary = Color.dynamic(light: 0x555A62, dark: 0xB3B8C0, oled: 0xADB2BA)
+    static let inkTertiary  = Color.dynamic(light: 0x848A93, dark: 0x8A9099, oled: 0x848A93)
+
+    // MARK: Capability tints
+    //
+    // The model library is scanned, not read: a colour per capability lets you
+    // find "the vision one" or "the coding one" without parsing every card.
+    static let tintChat      = Color.dynamic(light: 0x2F6FB0, dark: 0x6FB2E8, oled: 0x7CBCEF)
+    static let tintCoding    = Color.dynamic(light: 0x6A4BB5, dark: 0xB194F0, oled: 0xB99FF4)
+    static let tintVision    = Color.dynamic(light: 0x0F7A6B, dark: 0x54C9B4, oled: 0x64D3BE)
     static let rose          = Color.dynamic(light: 0x913E58, dark: 0xD68CA4)
 
     // Semantic ink, not decorative fills. Signal LEDs use Instrument tokens.
@@ -184,6 +220,16 @@ enum Theme {
         guard window.styleMask.contains(.titled) else { return }
         window.styleMask.remove(.fullSizeContentView)
         window.titlebarAppearsTransparent = false
+        // macOS 26 insets the sidebar column a few points below the toolbar and
+        // rounds its top-left corner. Whatever that inset leaves uncovered is
+        // the WINDOW's background, and the default one is pure black in OLED —
+        // which reads as a black notch beside the first sidebar row and a black
+        // line running down the leading edge. Making the window's own
+        // background the navigation plane means the inset can only ever show
+        // navigation surface; the transcript canvas covers its own area opaque,
+        // so nothing else changes. Re-applied with the appearance, so OLED,
+        // dark and light each keep their own surface colour.
+        window.backgroundColor = NSColor(Theme.navigationTop)
     }
 }
 

@@ -28,10 +28,13 @@ struct PluginsTab: View {
                         .accessibilityHidden(true)
                         .foregroundStyle(commands.isEmpty ? Theme.textTertiary : Theme.success)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(commands.isEmpty ? "No capabilities detected" : "Automatically enabled")
+                        // "Detected" is what this page can prove. Whether a
+                        // capability is enabled is decided per source below,
+                        // not by the fact that a folder was scanned.
+                        Text(commands.isEmpty ? "No capabilities detected" : "Detected in your coding tools")
                             .font(.callout.weight(.semibold))
                             .foregroundStyle(Theme.textPrimary)
-                        Text(commands.isEmpty ? "Connect a folder or scan the standard coding-tool locations." : "\(commands.count) capabilities are ready in the composer.")
+                        Text(commands.isEmpty ? "Connect a folder or scan the standard coding-tool locations." : "\(commands.count) capabilities found. They load in place — nothing is copied and no installer runs.")
                             .font(.caption)
                             .foregroundStyle(Theme.textSecondary)
                     }
@@ -58,7 +61,7 @@ struct PluginsTab: View {
 
                     Spacer()
 
-                    Text(isScanning ? "Looking for capabilities…" : commands.isEmpty ? "Nothing found" : "\(commands.count) enabled")
+                    Text(isScanning ? "Looking for capabilities…" : commands.isEmpty ? "Nothing found" : "\(commands.count) detected")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(commands.isEmpty ? Theme.textTertiary : Theme.success)
                 }

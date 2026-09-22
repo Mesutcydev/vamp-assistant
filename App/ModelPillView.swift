@@ -53,21 +53,26 @@ struct ModelSelectionPill: View {
             HStack(spacing: 5) {
                 Circle()
                     .fill(statusColor)
-                    .frame(width: 5, height: 5)
+                    .frame(width: 6, height: 6)
                 Image(systemName: icon)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(iconColor.opacity(0.75))
-                Text(label)
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Instrument.inkSecondary)
+                    .foregroundStyle(iconColor.opacity(0.9))
+                Text(label)
+                    // 11 pt at 72% opacity read as disabled metadata rather
+                    // than the control that decides what runs your message.
+                    // While nothing is loaded this label IS the action, so it
+                    // carries primary ink; once a model is running it steps
+                    // back to secondary.
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(appState.isModelReady ? Instrument.inkSecondary
+                                                           : Instrument.ink)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .frame(maxWidth: maxLabelWidth, alignment: .leading)
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 7.5, weight: .semibold))
+                    .font(.system(size: 8, weight: .semibold))
                     .foregroundStyle(Instrument.engraved)
             }
-            .opacity(0.72)
             .padding(.bottom, 3)
             .overlay(alignment: .bottom) {
                 Rectangle()

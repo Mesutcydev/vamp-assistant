@@ -10,6 +10,11 @@ struct RemoteAccessView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var settings = SettingsStore.shared
+    /// True when hosted in a sheet (pairing from the sidebar or first run).
+    /// False when this is the Devices destination, which is a page: a page has
+    /// nothing to dismiss, so Done/close chrome there is a modal's control
+    /// stranded on a normal screen.
+    var presentedAsSheet: Bool = true
     @State private var copied = false
     @State private var accessibilityGranted = false
     @State private var screenRecordingGranted = false
@@ -19,6 +24,30 @@ struct RemoteAccessView: View {
     @State private var requestedScreenRecording = false
 
     var body: some View {
+        Group {
+            if presentedAsSheet {
+                content
+            } else {
+                // A page scrolls: pairing, permissions and sessions are taller
+                // than one pane, and a page must never clip its own actions.
+                ScrollView { content }
+            }
+        }
+        .padding(24)
+        // A sheet needs a floor; a page has to fit whatever the pane gives it.
+        .frame(minWidth: presentedAsSheet ? 560 : 0,
+               minHeight: presentedAsSheet ? 560 : 0)
+        .background { Theme.workspaceCanvas }
+        .task {
+            while !Task.isCancelled {
+                appState.refreshRemoteSessionStatus()
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+        .onExitCommand { if presentedAsSheet { dismiss() } }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
             header
             if !settings.remoteSessionEnabled {
@@ -35,16 +64,7 @@ struct RemoteAccessView: View {
                 }
             }
         }
-        .padding(24)
-        .frame(minWidth: 560, minHeight: 560)
-        .background { Theme.workspaceCanvas }
-        .task {
-            while !Task.isCancelled {
-                appState.refreshRemoteSessionStatus()
-                try? await Task.sleep(for: .seconds(2))
-            }
-        }
-        .onExitCommand { dismiss() }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var header: some View {
@@ -65,24 +85,30 @@ struct RemoteAccessView: View {
                     .offset(x: 9, y: 9)
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text("Remote Vamp Assistant sessions")
-                    .font(.title3.weight(.semibold))
+                Text(presentedAsSheet ? "Remote Vamp Assistant sessions" : "Devices")
+                    .font(presentedAsSheet
+                          ? .title3.weight(.semibold)
+                          : .app(size: 22, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
-                Text("Scan once, then continue the same coding sessions from a phone or tablet.")
+                Text(presentedAsSheet
+                     ? "Scan once, then continue the same coding sessions from a phone or tablet."
+                     : "Pair a device to continue this Mac's sessions from a phone or tablet, and choose what it may share or control.")
                     .font(.callout)
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
-            Button {
-                dismiss()
-            } label: {
-                Label("Done", systemImage: "xmark")
+            if presentedAsSheet {
+                Button {
+                    dismiss()
+                } label: {
+                    Label("Done", systemImage: "xmark")
+                }
+                .buttonStyle(LFCapsuleButtonStyle())
+                .keyboardShortcut(.cancelAction)
+                .help("Close remote sessions")
+                .accessibilityLabel("Close remote sessions")
             }
-            .buttonStyle(LFCapsuleButtonStyle())
-            .keyboardShortcut(.cancelAction)
-            .help("Close remote sessions")
-            .accessibilityLabel("Close remote sessions")
         }
     }
 

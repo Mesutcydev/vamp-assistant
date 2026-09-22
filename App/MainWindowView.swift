@@ -77,6 +77,12 @@ struct MainWindowView: View {
     /// The toolbar's search field and the sidebar's conversation list share
     /// this query: typing in the toolbar filters the library.
     @State private var historySearch = ""
+    /// Kept so the window-update observer that drops macOS 26's duplicate
+    /// sidebar-toggle item can be torn down when the view goes away.
+    @State private var updateObserver: NSObjectProtocol?
+    /// True while the navigation column is on screen, so the corner patch that
+    /// masks the system panel's shadow is only drawn when there is a panel.
+    @State private var sidebarOnScreen = false
     /// One draft shared by the middle's writing well and the bottom key bar.
     @State private var composerStore = ComposerStore()
     @State private var composerDockHeight: CGFloat = ComposerDockHeightKey.defaultValue
@@ -140,14 +146,39 @@ struct MainWindowView: View {
                     responsiveLayout
                 }
             }
+
+            // Painted last, above the split view, so it can cover the shadow the
+            // system draws around the sidebar panel's rounded top-left corner.
+            if sidebarOnScreen, !showSettings {
+                SidebarCornerPatch()
+                    .frame(width: SidebarCornerPatch.size, height: SidebarCornerPatch.size)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .allowsHitTesting(false)
+            }
         }
             .navigationTitle(windowTitle)
             .toolbar(removing: .title)
+            // The system's own sidebar toggle lands at the sidebar's trailing
+            // edge (~148 pt right of the traffic lights, hugging the seam),
+            // which reads as a stray control floating over the column instead
+            // of the window's top-left corner. The app draws that button now.
+            .toolbar(removing: .sidebarToggle)
             // Browser grammar in SYSTEM parts: each ToolbarItemGroup is one
             // capsule the way Safari groups sidebar+chevron and back/forward,
             // and the OS draws every face, hover, and press.
             .toolbar {
                 if !showSettings {
+                    // Leading edge, next to the traffic lights: show/hide the
+                    // conversation library. One item, native rendering.
+                    ToolbarItem(placement: .navigation) {
+                        Button {
+                            sidebarVisibility = sidebarVisibility == .detailOnly ? .all : .detailOnly
+                        } label: {
+                            Label("Toggle sidebar", systemImage: "sidebar.left")
+                        }
+                        .help(sidebarVisibility == .detailOnly ? "Show sidebar" : "Hide sidebar")
+                        .accessibilityIdentifier("sidebar-toggle")
+                    }
                     // Centre: one real search field over the conversation
                     // library. It navigates only — it never submits a prompt.
                     ToolbarItem(placement: .principal) {
@@ -189,6 +220,31 @@ struct MainWindowView: View {
                 }
             }
             .onAppear(perform: applyDesignPreview)
+            .onAppear {
+                // macOS 26 keeps injecting its own sidebar-toggle toolbar item
+                // even after `.toolbar(removing: .sidebarToggle)`, and that
+                // item lands at the sidebar's trailing edge — a second toggle
+                // hovering over the seam. The app draws its own; the system's
+                // duplicate is removed once the toolbar exists.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    adoptOwnSidebarToggle()
+                }
+                // `Theme.applyAppearance` configures whatever windows exist
+                // when the appearance is applied, which loses a window that the
+                // system restores afterwards: that window keeps AppKit's default
+                // background, so the sidebar's inset shows black. Configure the
+                // window from its own lifecycle instead.
+                if let window = NSApp.windows.first(where: { $0.isMainWindow })
+                    ?? NSApp.windows.first(where: { $0.isVisible }) {
+                    Theme.configureTitlebar(of: window)
+                }
+            }
+            .onDisappear {
+                if let updateObserver {
+                    NotificationCenter.default.removeObserver(updateObserver)
+                    self.updateObserver = nil
+                }
+            }
             .onChange(of: appState.enginePhase) { _, phase in
                 switch phase {
                 case .idle:
@@ -212,6 +268,60 @@ struct MainWindowView: View {
             .background(Theme.bg)
     }
 
+    /// Removes the system's own sidebar-toggle toolbar item. macOS 26 adds it
+    /// regardless of `.toolbar(removing: .sidebarToggle)`, and it sits at the
+    /// sidebar's trailing edge rather than the window's corner.
+    private func removeSystemSidebarToggle() {
+        dropSystemSidebarToggle()
+    }
+
+    /// Drops SwiftUI's own sidebar-toggle item. `removeItem` alone is undone —
+    /// SwiftUI re-inserts the item on its next toolbar pass, ten times in half a
+    /// minute in practice — so the item and its view are hidden instead, which
+    /// leaves the toolbar's item list alone and therefore sticks.
+    private func dropSystemSidebarToggle() {
+        let window = NSApp.windows.first(where: { $0.isMainWindow })
+            ?? NSApp.windows.first(where: { $0.isVisible })
+        guard let toolbar = window?.toolbar else { return }
+        // SwiftUI's own item: 'com.apple.SwiftUI.navigationSplitView.toggleSidebar',
+        // labelled "Hide Sidebar"/"Show Sidebar" — it sits at the sidebar's
+        // trailing edge, not the window's corner, so the app draws its own and
+        // this one is taken out.
+        guard let item = toolbar.items.first(where: { item in
+            item.itemIdentifier.rawValue == "com.apple.SwiftUI.navigationSplitView.toggleSidebar"
+                || item.label == "Hide Sidebar"
+                || item.label == "Show Sidebar"
+        }) else { return }
+        if !item.isHidden { item.isHidden = true }
+        if let view = item.view, !view.isHidden { view.isHidden = true }
+    }
+
+    /// macOS 26's split view keeps the toggle item alive, so it is re-checked
+    /// while the window settles and again whenever the window updates.
+    private func adoptOwnSidebarToggle() {
+        guard let window = NSApp.windows.first(where: { $0.isMainWindow })
+            ?? NSApp.windows.first(where: { $0.isVisible }) else { return }
+        dropSystemSidebarToggle()
+        updateObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didUpdateNotification,
+            object: window,
+            queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                removeSystemSidebarToggle()
+                // Same reason as the toggle: the window's own setup can land
+                // before the window that finally stays on screen exists, so it
+                // is re-applied as the window updates.
+                Theme.configureTitlebar(of: window)
+            }
+        }
+        for step in 0..<20 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5 * Double(step)) {
+                removeSystemSidebarToggle()
+            }
+        }
+    }
+
     /// Window title follows the active chat (like the reference client),
     /// falling back to the workspace name when there is no saved chat yet.
     private var windowTitle: String {
@@ -226,18 +336,33 @@ struct MainWindowView: View {
     }
 
     /// Search travels in the middle of the WINDOW, the way Safari composes
-    /// its address field. A `.principal` item centres on the detail pane, so
-    /// it is shifted back by half of whatever the sidebar takes — measured
-    /// live from the sidebar, not guessed.
+    /// its address field. A `.principal` item is centred on the detail pane,
+    /// so the field is pulled back by half of whatever the sidebar takes:
+    /// the item gets trailing padding, which widens it without drawing
+    /// anything, and the system's centring then lands the visible field on the
+    /// window's middle. (An `.offset` here does nothing — AppKit owns toolbar
+    /// item placement and ignores it.)
     private var searchFieldItem: some View {
         // The field keeps its own toolbar item: anything sharing an item with
         // it is drawn inside one merged capsule, and the search field loses
-        // its bezel.
-        ToolbarSearchField(text: $historySearch,
-                           placeholder: "Search conversations",
-                           onCommit: revealSearchResults)
-            .frame(width: 380)
-            .offset(x: toolbarCenteringShift)
+        // its bezel. The clear spacer widens the ITEM (never the field) so the
+        // system's centring lands the field on the window's middle.
+        HStack(spacing: 0) {
+            ToolbarSearchField(text: $historySearch,
+                               placeholder: "Search conversations",
+                               onCommit: revealSearchResults)
+                .frame(width: 380)
+                // Without this the field stretches to whatever the item is
+                // given, so the spacer below widened the field instead of
+                // moving it.
+                .fixedSize(horizontal: true, vertical: false)
+            Color.clear
+                .frame(width: toolbarCenteringInset)
+        }
+            // Without this the toolbar stretches the whole item to fill the
+            // space left of the trailing controls, which drags the field right
+            // of the window's middle; a fixed-size item is centred instead.
+            .fixedSize(horizontal: true, vertical: false)
             .accessibilityIdentifier("conversation-search")
             .onChange(of: historySearch) { _, value in
                 guard !value.isEmpty else { return }
@@ -245,15 +370,17 @@ struct MainWindowView: View {
             }
     }
 
+    /// Half the sidebar, expressed as trailing padding on the principal item.
+    private var toolbarCenteringInset: CGFloat {
+        guard sidebarVisibility != .detailOnly else { return 0 }
+        return min(sidebarWidth, Self.maximumToolbarShift * 2)
+    }
+
     /// The `.principal` slot centres on the space the other items leave over,
     /// which sits half a sidebar right of the window's middle whenever the
     /// sidebar is open. (The inspector does not move it: it lives inside the
     /// detail column, so the slot never sees it.) With the sidebar collapsed
     /// the system's own placement stands.
-    private var toolbarCenteringShift: CGFloat {
-        guard sidebarVisibility != .detailOnly else { return 0 }
-        return -min(sidebarWidth, Self.maximumToolbarShift * 2) / 2
-    }
 
     /// Searching filters the conversation library in the sidebar, so a search
     /// has to bring that column back into view. The field itself takes first
@@ -709,11 +836,16 @@ struct MainWindowView: View {
                 .environmentObject(appState)
                 .environmentObject(sessions)
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { sidebarWidth = $0 }
+                .onAppear { sidebarOnScreen = true }
+                .onDisappear { sidebarOnScreen = false }
                 .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 320)
         } detail: {
             detailPane(compact: compact)
         }
         .navigationSplitViewStyle(.balanced)
+        // Belt and braces: the removal has to be in scope of the split view
+        // itself, not only of the window content that wraps it.
+        .toolbar(removing: .sidebarToggle)
         .inspector(isPresented: $showInspector) {
             ShellInspector()
                 .environmentObject(appState)
@@ -738,7 +870,7 @@ struct MainWindowView: View {
                 .environmentObject(sessions)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .devices:
-            RemoteAccessView()
+            RemoteAccessView(presentedAsSheet: false)
                 .environmentObject(appState)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .conversations:

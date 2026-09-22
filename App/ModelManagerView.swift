@@ -572,23 +572,41 @@ private struct ModelCard: View {
 
     private var isActive: Bool { appState.activeModelID == model.id }
 
+    /// One colour per capability, so the library can be scanned by what a model
+    /// is for instead of read card by card.
+    private var capabilityTint: Color {
+        if model.role == .vision { return Theme.tintVision }
+        return model.kind == .coding ? Theme.tintCoding : Theme.tintChat
+    }
+
+    private var capabilityLabel: String {
+        if model.role == .vision { return "Vision sidecar" }
+        return model.kind == .coding ? "Coding" : "General chat"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top) {
-                ModelGlyph(format: model.format, isActive: isActive)
-                if isRecommended {
-                    Text("Recommended").font(.caption.weight(.medium))
-                        .foregroundStyle(Theme.textSecondary)
+            HStack(alignment: .top, spacing: 10) {
+                ModelGlyph(format: model.format, isActive: isActive, tint: capabilityTint)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(capabilityLabel)
+                        .font(.app(size: 11, weight: .semibold))
+                        .foregroundStyle(capabilityTint)
+                    if isRecommended {
+                        Text("Recommended for this Mac")
+                            .font(.app(size: 10.5))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
                 }
-                Spacer()
+                Spacer(minLength: 0)
                 VerdictBadge(verdict: isActive ? .fits : budget.verdict, projectedFootprint: budget.projectedFootprint)
             }
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text(model.displayName)
                     .font(.app(size: 16, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(2)
-                sizeLine
+                sizeChips
             }
             Text(model.notes)
                 .font(.callout)
@@ -602,7 +620,7 @@ private struct ModelCard: View {
                     Text(reason).font(.caption).foregroundStyle(Theme.danger)
                 }
             }
-            Divider()
+            Divider().overlay(Theme.hairline)
             HStack {
                 Button(showDetails ? "Less" : "Details") { showDetails.toggle() }
                     .buttonStyle(.borderless)
@@ -612,24 +630,35 @@ private struct ModelCard: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(isActive ? Theme.positive : Theme.hairline, lineWidth: isActive ? 1.5 : 0.75))
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(LinearGradient(
+                    colors: [Theme.sectionSurfaceTop, Theme.sectionSurface, Theme.sectionSurfaceBottom],
+                    startPoint: .top, endPoint: .bottom)))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(isActive ? Theme.positive : Theme.sectionStroke,
+                              lineWidth: isActive ? 1.5 : 1))
+        .shadow(color: Theme.cardShadow, radius: 6, y: 2)
     }
 
-    /// Parameters · quantization · size. Installed rows use the measured
-    /// on-disk size; the catalog estimate (~) only labels pending downloads.
-    @ViewBuilder
-    private var sizeLine: some View {
-        if let installed = appState.modelStore.installedModel(id: model.id),
-           appState.modelStore.isInstalled(catalogModel: model) {
-            Text("\(model.parameters) · \(model.quantization) · \(ByteFormatter.bytes(installed.sizeBytes))")
-                .font(.app(size: 11.5 ))
-                .foregroundStyle(Theme.textSecondary)
-        } else {
-            Text(model.subtitle)
-                .font(.app(size: 11.5 ))
-                .foregroundStyle(Theme.textSecondary)
+    /// Parameters, precision and size as scannable chips rather than one run-on
+    /// sentence. Installed rows use the measured on-disk size; the catalog
+    /// estimate (~) only labels models that are not here yet.
+    private var sizeChips: some View {
+        HStack(spacing: 6) {
+            SpecChip(text: model.parameters)
+            SpecChip(text: model.quantization)
+            if let installed = appState.modelStore.installedModel(id: model.id),
+               appState.modelStore.isInstalled(catalogModel: model) {
+                SpecChip(text: ByteFormatter.bytes(installed.sizeBytes))
+            } else {
+                // Catalog size is an estimate, so it is labelled as one.
+                SpecChip(text: "~" + ByteFormatter.bytes(model.diskBytes))
+            }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(model.parameters), \(model.quantization), \(model.subtitle)")
     }
 
     private var specReadout: some View {
@@ -657,13 +686,17 @@ private struct ModelCard: View {
 private struct ModelGlyph: View {
     let format: CatalogModel.Format
     let isActive: Bool
+    var tint: Color = Instrument.accentOrange
 
     var body: some View {
+        let mark = isActive ? Theme.positive : tint
         Image(systemName: format == .gguf ? "shippingbox" : (format == .coreAI ? "apple.intelligence" : "cpu"))
             .font(.system(size: 14, weight: .medium))
-            .foregroundStyle(isActive ? Theme.positive : Instrument.accentOrange)
+            .foregroundStyle(mark)
             .frame(width: 32, height: 32)
-            .background((isActive ? Instrument.signalGreen : Instrument.accentOrange).opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            .background(mark.opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(mark.opacity(0.28), lineWidth: 0.75))
     }
 }
 

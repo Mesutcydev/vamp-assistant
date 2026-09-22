@@ -228,7 +228,13 @@ struct ChatInputWell: View {
         // "Describe the task first" is simply the resting state of an empty
         // composer, so it gets no caption; a missing or still-loading model is
         // exactly what the user needs to hear.
-        return blocker == "Describe the task first" ? nil : blocker
+        if blocker == "Describe the task first" { return nil }
+        // The model pill on this same row already reads "Choose Model" when
+        // nothing is selected, and the empty-state hero offers the same action.
+        // Repeating it here as an orange warning made three competing versions
+        // of one message on the home screen.
+        if blocker == "Choose a model to run", !appState.isModelReady { return nil }
+        return blocker
     }
 
     private var composerNoteIsFault: Bool {

@@ -39,8 +39,7 @@ struct ChatView: View {
             if isEmptyConversation {
                 WelcomeIdentityView(status: homeStatus,
                                     statusTint: homeStatusTint,
-                                    statusIsLive: homeStatusIsLive,
-                                    remoteAvailable: appState.remoteSessionRunning)
+                                    statusIsLive: homeStatusIsLive)
             } else {
                 transcript
                 if hasPendingGate {
@@ -475,7 +474,6 @@ private struct WelcomeIdentityView: View {
     let status: String
     let statusTint: Color
     let statusIsLive: Bool
-    let remoteAvailable: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulsing = false
 
@@ -531,16 +529,23 @@ private struct WelcomeIdentityView: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 10)
 
-            Button {
-                NotificationCenter.default.post(name: .openRemoteAccess, object: nil)
-            } label: {
-                Label(remoteAvailable ? "Pair another device" : "Pair device",
-                      systemImage: "qrcode")
+            // Contextually relevant action, not a permanent pairing banner:
+            // while the assistant cannot answer yet, the thing standing in the
+            // way is a model, and that is what the hero offers. Device pairing
+            // lives in the Devices destination, where it belongs.
+            if statusIsLive {
+                EmptyView()
+            } else {
+                Button {
+                    NotificationCenter.default.post(name: .openModelManager, object: nil)
+                } label: {
+                    Label("Choose a model", systemImage: "cpu")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .help("Pick the model that runs your next message")
+                .padding(.top, 18)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .help("Pair a device for remote access")
-            .padding(.top, 18)
 
             Spacer(minLength: 24)
         }
