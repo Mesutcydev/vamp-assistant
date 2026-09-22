@@ -108,6 +108,11 @@ struct ToolbarSearchField: NSViewRepresentable {
         field.sendsWholeSearchString = false
         field.sendsSearchStringImmediately = true
         field.focusRingType = .default
+        // Low hugging is deliberate: the field shares its toolbar item with a
+        // transparent centring spacer, and the field must not stretch into it.
+        // A width constraint here loses to the toolbar's own required sizing
+        // (measured), so the width is held by the item instead — see
+        // `pinSearchFieldWidth()`.
         field.setContentHuggingPriority(.defaultLow, for: .horizontal)
         context.coordinator.observeFocusRequests(for: field)
         return field

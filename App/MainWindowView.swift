@@ -68,8 +68,6 @@ struct MainWindowView: View {
     @State private var sidebarAutoCollapsed = false
     /// Measured so the toolbar's centre follows a sidebar the user resized.
     @State private var sidebarWidth: CGFloat = 240
-    /// Never slide the field so far that it could reach a neighbouring cluster.
-    private static let maximumToolbarShift: CGFloat = 260
     /// Sidebar (220) + a readable transcript + the composer's controls do not
     /// coexist below this; above the second figure there is room again.
     private static let sidebarCollapseWidth: CGFloat = 720
@@ -300,6 +298,89 @@ struct MainWindowView: View {
         if let view = item.view, !view.isHidden { view.isHidden = true }
     }
 
+    /// Keeps the app's own toggle on screen when the window narrows. The
+    /// toolbar folds its items into an overflow menu as space runs out, and
+    /// because the system's toggle is hidden while the app's folds away, a
+    /// narrow window could end up with no visible way to open the column at
+    /// all. High priority makes the app's item the last thing the toolbar
+    /// gives up, and the column can always be reached from the keyboard too.
+    private func pinOwnSidebarToggle() {
+        let window = NSApp.windows.first(where: { $0.isMainWindow })
+            ?? NSApp.windows.first(where: { $0.isVisible })
+        guard let toolbar = window?.toolbar else { return }
+        guard let item = toolbar.items.first(where: { $0.label == "Toggle sidebar" }) else { return }
+        if item.visibilityPriority != .high { item.visibilityPriority = .high }
+    }
+
+    /// Holds the search field at its designed width. SwiftUI's `.frame(width:)`
+    /// on a toolbar item's view is not the last word — AppKit sizes the item,
+    /// and the field measured 602pt wide against a 380pt request, which also
+    /// pushed its centre 62pt right of the window's middle. Pinning the item's
+    /// min and max to the field plus the centring spacer is what actually
+    /// holds it.
+    private func pinSearchFieldWidth() {
+        let window = NSApp.windows.first(where: { $0.isMainWindow })
+            ?? NSApp.windows.first(where: { $0.isVisible })
+        guard let toolbar = window?.toolbar else { return }
+        Self.probeToolbar(toolbar, tag: "late")
+        Self.probeToolbar(toolbar, tag: "early")
+        guard let item = toolbar.items.first(where: { item in
+            guard let view = item.view else { return false }
+            return Self.containsTextField(view)
+        }) else { return }
+        let target = Self.searchFieldWidth + toolbarCenteringInset
+        guard abs(item.maxSize.width - target) > 0.5 || abs(item.minSize.width - target) > 0.5 else { return }
+        item.minSize = NSSize(width: target, height: item.minSize.height)
+        item.maxSize = NSSize(width: target, height: item.maxSize.height)
+    }
+
+    /// Writes what the toolbar actually contains, once per launch. AppKit sizes
+    /// toolbar items, so the field's width cannot be reasoned about from the
+    /// SwiftUI side alone; this is the ground truth, and stdout from a launched
+    /// app is swallowed, so it goes to a file.
+    private static func probeToolbar(_ toolbar: NSToolbar, tag: String) {
+        var lines: [String] = ["=== \(tag): items=\(toolbar.items.count)"]
+        for item in toolbar.items {
+            let view = item.view
+            lines.append("""
+            item label=\(item.label) id=\(item.itemIdentifier.rawValue) \
+            min=\(item.minSize.width)x\(item.minSize.height) max=\(item.maxSize.width)x\(item.maxSize.height) \
+            hidden=\(item.isHidden) priority=\(item.visibilityPriority.rawValue) \
+            view=\(view.map { String(describing: type(of: $0)) } ?? "nil") \
+            frame=\(view.map { NSStringFromRect($0.frame) } ?? "-") \
+            hasField=\(view.map { containsTextField($0) } ?? false) \
+            fieldFrame=\(view.map { NSStringFromRect(textFieldFrame(in: $0)) } ?? "-")
+            """)
+        }
+        let text = lines.joined(separator: "\n") + "\n"
+        if let handle = FileHandle(forWritingAtPath: "/tmp/beet-toolbar-probe.txt") {
+            handle.seekToEndOfFile()
+            handle.write(Data(text.utf8))
+            try? handle.close()
+        } else {
+            try? text.write(toFile: "/tmp/beet-toolbar-probe.txt", atomically: true, encoding: .utf8)
+        }
+    }
+
+    /// The frame of the first text field inside a toolbar item's view, in that
+    /// view's own coordinates — what the width fix has to change.
+    private static func textFieldFrame(in view: NSView) -> NSRect {
+        if let field = view as? NSTextField { return field.frame }
+        for subview in view.subviews {
+            let found = textFieldFrame(in: subview)
+            if !found.isEmpty { return found }
+        }
+        return .zero
+    }
+
+    /// The search item is the only toolbar item that holds a text field, so
+    /// that — not a title or an identifier — is how it is found.
+    private static func containsTextField(_ view: NSView) -> Bool {
+        if view is NSTextField { return true }
+        for subview in view.subviews where containsTextField(subview) { return true }
+        return false
+    }
+
     /// macOS 26's split view keeps the toggle item alive, so it is re-checked
     /// while the window settles and again whenever the window updates.
     private func adoptOwnSidebarToggle() {
@@ -313,6 +394,8 @@ struct MainWindowView: View {
         ) { _ in
             MainActor.assumeIsolated {
                 removeSystemSidebarToggle()
+                pinOwnSidebarToggle()
+                pinSearchFieldWidth()
                 // Same reason as the toggle: the window's own setup can land
                 // before the window that finally stays on screen exists, so it
                 // is re-applied as the window updates.
@@ -322,6 +405,8 @@ struct MainWindowView: View {
         for step in 0..<20 {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5 * Double(step)) {
                 removeSystemSidebarToggle()
+                pinOwnSidebarToggle()
+                pinSearchFieldWidth()
             }
         }
     }
@@ -349,23 +434,33 @@ struct MainWindowView: View {
     private var searchFieldItem: some View {
         // The field keeps its own toolbar item: anything sharing an item with
         // it is drawn inside one merged capsule, and the search field loses
-        // its bezel. The clear spacer widens the ITEM (never the field) so the
-        // system's centring lands the field on the window's middle.
+        // its bezel.
+        //
+        // The centring spacer below widens the ITEM (never the field): the
+        // principal slot centres on the detail pane, so the item is made
+        // wider on the trailing side and the field, left-aligned inside it,
+        // lands on the WINDOW's middle instead. Measured: 13pt right of the
+        // window's centre with the spacer, 120pt right without it.
+        //
+        // Known cosmetic cost, measured on macOS 26: the system draws a
+        // capsule around the whole ITEM, so that capsule is 620pt wide while
+        // the field inside it is 380. Removing the spacer makes the capsule
+        // hug the field but moves the field 120pt right of the window's
+        // middle — the centring is worth more than the capsule's width, and
+        // this is the arrangement the app shipped with.
         HStack(spacing: 0) {
             ToolbarSearchField(text: $historySearch,
                                placeholder: "Search conversations",
                                onCommit: revealSearchResults)
-                .frame(width: 380)
+                .frame(width: Self.searchFieldWidth)
                 // Without this the field stretches to whatever the item is
-                // given, so the spacer below widened the field instead of
-                // moving it.
+                // given, so the spacer would widen the field instead of
+                // moving it. AppKit still has the last word, which is why the
+                // item itself is pinned in `pinSearchFieldWidth()`.
                 .fixedSize(horizontal: true, vertical: false)
             Color.clear
                 .frame(width: toolbarCenteringInset)
         }
-            // Without this the toolbar stretches the whole item to fill the
-            // space left of the trailing controls, which drags the field right
-            // of the window's middle; a fixed-size item is centred instead.
             .fixedSize(horizontal: true, vertical: false)
             .accessibilityIdentifier("conversation-search")
             .onChange(of: historySearch) { _, value in
@@ -374,10 +469,16 @@ struct MainWindowView: View {
             }
     }
 
+    /// The search field's designed width, in points — one source of truth,
+    /// because the toolbar item is pinned to it as well as the field's frame.
+    static let searchFieldWidth: CGFloat = 380
+
     /// Half the sidebar, expressed as trailing padding on the principal item.
+    /// The principal slot centres on the detail pane, so this is what pulls the
+    /// field back onto the window's middle.
     private var toolbarCenteringInset: CGFloat {
         guard sidebarVisibility != .detailOnly else { return 0 }
-        return min(sidebarWidth, Self.maximumToolbarShift * 2)
+        return min(sidebarWidth, 260)
     }
 
     /// The `.principal` slot centres on the space the other items leave over,
