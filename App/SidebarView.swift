@@ -434,8 +434,12 @@ struct SidebarView: View {
                 Text("Chats are saved locally and grouped by project as soon as you start a task.")
                     .font(.appUI(size: 11.5))
                     .foregroundStyle(Theme.textSecondary)
-                    // No line cap: at this column width the sentence needs five
-                    // lines, and clamping it to three ellipsised the last words.
+                    // The `.sidebar` list style clamps row text to a single
+                    // line, which ellipsised this sentence ("…saved locally
+                    // and grou…") no matter how much room the row had. An
+                    // explicit nil limit overrides the style's default, and
+                    // `fixedSize(vertical:)` lets the row grow to fit.
+                    .lineLimit(nil)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -443,8 +447,10 @@ struct SidebarView: View {
         .padding(.top, 14)
         // On the navigation label axis, with the project row's own label above
         // it: an extra half-step indent read as a mistake rather than as
-        // hierarchy.
-        .listRowInsets(EdgeInsets(top: 0, leading: SidebarMetrics.navLabelAxis,
+        // hierarchy. The list adds its own leading inset, so the request is
+        // the axis minus that, which renders the block on 48.
+        .listRowInsets(EdgeInsets(top: 0,
+                                  leading: SidebarMetrics.navLabelAxis - SidebarMetrics.sidebarListInset,
                                   bottom: 0, trailing: SidebarMetrics.inset))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)

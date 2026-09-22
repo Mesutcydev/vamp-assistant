@@ -52,6 +52,11 @@ enum SidebarMetrics {
     /// navigation, so it sits close to the section it introduces.
     static let hardwareSectionGap: CGFloat = 10
 
+    /// What a `.sidebar`-style list adds to a row's leading edge on its own.
+    /// Measured, not guessed: a row asking for 48 renders its content at 63, so
+    /// a row that has to land on the navigation axis asks for the difference.
+    static let sidebarListInset: CGFloat = 15
+
     /// Outer horizontal content inset for every sidebar region.
     static let inset: CGFloat = 12
     /// Row background edge → icon/title anchor.

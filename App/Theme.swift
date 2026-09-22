@@ -137,9 +137,16 @@ enum Theme {
     // same inks on the OLED card stay above 4.5:1 for secondary and above 12:1
     // for primary. The system label colours lose their edge on a tinted fill —
     // that is what made text look soft rather than crisp.
+    //
+    // The tertiary step was the one that failed AA in LIGHT mode: at 0x848A93
+    // it measured 3.48:1 on the card and 3.00:1 on the navigation plane, and
+    // it is used for captions and metadata. 0x666C74 is the lightest value that
+    // clears 4.5:1 on every light surface it sits on (card 5.30, well 4.86,
+    // navigation top 4.95, bottom 4.57) while staying a visible step lighter
+    // than the secondary ink, so the hierarchy survives the fix.
     static let inkPrimary   = Color.dynamic(light: 0x17191C, dark: 0xF0F1F4, oled: 0xEDEFF3)
     static let inkSecondary = Color.dynamic(light: 0x555A62, dark: 0xB3B8C0, oled: 0xADB2BA)
-    static let inkTertiary  = Color.dynamic(light: 0x848A93, dark: 0x8A9099, oled: 0x848A93)
+    static let inkTertiary  = Color.dynamic(light: 0x666C74, dark: 0x8A9099, oled: 0x848A93)
 
     // MARK: Capability tints
     //
