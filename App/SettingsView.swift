@@ -45,6 +45,9 @@ struct SettingsView: View {
     /// a `.openProviderSettings` posted while another tab is on screen still
     /// lands on Providers once the tab switches.
     @State private var modelsSection: ModelsAndProvidersTab.Section = .library
+    /// Live width of the detail pane (the rail excluded). The settings column
+    /// is sized and centered from this, never from the window width.
+    @State private var paneWidth: CGFloat = 0
 
     init(
         initialTab: Tab = .general,
@@ -90,7 +93,7 @@ struct SettingsView: View {
 
                 ScrollView {
                     SettingsColumn(
-                        windowWidth: proxy.size.width,
+                        paneWidth: paneWidth,
                         maxWidth: tab == .models ? SettingsColumnMetrics.modelsMaxWidth
                                                  : SettingsColumnMetrics.maxWidth
                     ) {
@@ -112,6 +115,7 @@ struct SettingsView: View {
                 .defaultScrollAnchor(.top, for: .sizeChanges)
                 .transaction { $0.animation = nil }
                 .background(Color.clear)
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { paneWidth = $0 }
             }
         }
         .frame(minWidth: 520, minHeight: 620)
@@ -163,28 +167,38 @@ struct SettingsView: View {
 
 // MARK: - Centered settings column
 
-/// One alignment container for the whole page. C = min(800, W − 2·(64 + 24));
-/// centered inside the rail-compensated region, so the column's outer edges
-/// are equidistant from the window edges while always clearing the rail.
-/// Shared metrics for the centered settings column.
+/// One alignment container for the whole page, sized from the DETAIL PANE —
+/// never from the window. The rail (and any inspector) is not part of the
+/// room a settings page has, so centering against the window pushed the
+/// column ~220 pt right at ordinary widths (a wide empty gutter after the
+/// rail, content jammed against the trailing edge) and pushed the wider
+/// Models column straight off the pane.
 enum SettingsColumnMetrics {
-    /// Shared maximum settings column width for this revision.
-    static let maxWidth: CGFloat = Chrome.pageMaxWidth
-    /// The model rack gets one extra equipment bay for aligned metadata and
-    /// a stable trailing action column.
-    static let modelsMaxWidth: CGFloat = 880
-    /// Minimum clearance between the column and the window/rail edges.
-    static let clearance: CGFloat = 24
+    /// Ordinary settings page maximum width.
+    static let maxWidth: CGFloat = 820
+    /// The model rack is a two-up card grid; it needs more room than a form.
+    static let modelsMaxWidth: CGFloat = 1040
+    /// Outer gutter between the column and the pane's edges. The gutter is the
+    /// first thing to give way when the pane is tight, before any control is
+    /// compressed.
+    static func gutter(forPaneWidth width: CGFloat) -> CGFloat {
+        if width < 760 { return 16 }
+        if width < 1000 { return 24 }
+        return 32
+    }
 }
 
 private struct SettingsColumn<Content: View>: View {
-    let windowWidth: CGFloat
+    /// Width of the detail pane this column lives in (the rail excluded).
+    let paneWidth: CGFloat
     let maxWidth: CGFloat
     @ViewBuilder var content: Content
 
+    private var gutter: CGFloat { SettingsColumnMetrics.gutter(forPaneWidth: paneWidth) }
+
     private var columnWidth: CGFloat {
-        min(maxWidth,
-            max(280, windowWidth - 2 * SettingsColumnMetrics.clearance))
+        guard paneWidth > 0 else { return maxWidth }
+        return min(maxWidth, max(240, paneWidth - 2 * gutter))
     }
 
     var body: some View {
@@ -192,19 +206,12 @@ private struct SettingsColumn<Content: View>: View {
             content
         }
         .frame(width: columnWidth, alignment: .leading)
-        // The centering region is the rail-compensated window width, pinned
-        // to the viewport's leading edge. A legacy always-visible scrollbar
-        // narrows the viewport on the trailing side only; pinning (instead of
-        // centering the region) keeps the column on the window's true center
-        // and lets the spare trailing margin sit under the scrollbar.
-        .frame(width: regionWidth, alignment: .center)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // Centered inside the pane: leading and trailing margins are equal by
+        // construction, so the page title, sections, helper text and footer
+        // all share one leading axis.
+        .frame(maxWidth: .infinity, alignment: .center)
         .padding(.top, Chrome.pageTopPadding)
         .padding(.bottom, Chrome.pageBottomPadding)
-    }
-
-    private var regionWidth: CGFloat {
-        max(columnWidth, windowWidth)
     }
 }
 

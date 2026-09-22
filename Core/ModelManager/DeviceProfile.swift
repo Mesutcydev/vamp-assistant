@@ -112,9 +112,12 @@ struct DeviceProfile: Equatable, Sendable, Hashable {
     }
 
     var summary: String {
+        if let name = DeviceProfile.marketingName(forIdentifier: modelIdentifier) {
+            return "\(name) · \(chipLabel) · \(memoryGB) GB"
+        }
         switch productFamily {
-        case .studio: "Mac Studio · \(chipLabel) · \(memoryGB) GB"
-        case .laptop: "\(chipLabel) · \(memoryGB) GB"
+        case .studio: return "Mac Studio · \(chipLabel) · \(memoryGB) GB"
+        case .laptop: return "\(chipLabel) · \(memoryGB) GB"
         }
     }
 
@@ -259,15 +262,31 @@ struct DeviceProfile: Equatable, Sendable, Hashable {
         return (generation, variant)
     }
 
-    /// Known Mac Studio `hw.model` IDs (M1–M4). Ultra chips also count as
+    /// Known Mac Studio `hw.model` IDs (M1–M5). Ultra chips also count as
     /// Studio-class even when the identifier is a Mac Pro.
+    ///
+    /// Verified against Apple's "Identify your Mac Studio model" page.
+    /// `Mac16,10` is NOT here: it is a Mac mini (M4, 2024), and listing it
+    /// made every M4 mini call itself a Mac Studio.
     static func isStudioIdentifier(_ identifier: String) -> Bool {
         let known: Set<String> = [
-            "Mac13,1", "Mac13,2",
-            "Mac14,13", "Mac14,14",
-            "Mac15,14", "Mac16,9", "Mac16,10",
+            "Mac13,1", "Mac13,2",      // Mac Studio (M1 Max / M1 Ultra, 2022)
+            "Mac14,13", "Mac14,14",    // Mac Studio (M2 Max / M2 Ultra, 2023)
+            "Mac15,14",                // Mac Studio (M3 Ultra, 2025)
+            "Mac16,9",                 // Mac Studio (M4 Max, 2025)
         ]
         return known.contains(identifier)
+    }
+
+    /// Truthful product name for identifiers this build can name exactly,
+    /// verified against Apple's "Identify your <Mac> model" pages. Anything
+    /// not listed falls back to the family summary rather than guessing a
+    /// marketing name from the chip.
+    static func marketingName(forIdentifier identifier: String) -> String? {
+        switch identifier {
+        case "Mac16,10", "Mac16,11": "Mac mini"   // Mac mini (M4 / M4 Pro, 2024)
+        default: nil
+        }
     }
 
     private static func sysctlString(_ name: String) -> String? {
