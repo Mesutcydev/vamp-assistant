@@ -30,6 +30,11 @@ struct DiagnosticsPanelView: View {
         HStack(spacing: 8) {
             Label("Diagnostics", systemImage: "stethoscope")
                 .font(.callout.weight(.semibold))
+                // At docked width this used to wrap mid-word ("Diagnos-/tics"),
+                // which reads as broken chrome; one line, shrinking a little
+                // before it ever breaks.
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
             if center.problemCount > 0 {
                 Text("\(center.problemCount)")
                     .font(.caption2.weight(.bold))
@@ -66,16 +71,47 @@ struct DiagnosticsPanelView: View {
 
     private var systemSnapshot: some View {
         let info = center.systemInfo
-        return HStack(spacing: Spacing.sm) {
-            snapshotItem("app", info.appVersion)
-            snapshotItem("os", info.macOSVersion)
-            snapshotItem("mem", info.physicalMemory)
-            snapshotItem("thermal", info.thermalState)
-            snapshotItem("up", info.uptime)
-            Spacer(minLength: 0)
+        let readings: [(String, String)] = [
+            ("app", info.appVersion),
+            ("os", info.macOSVersion),
+            ("mem", info.physicalMemory),
+            ("thermal", info.thermalState),
+            ("up", info.uptime),
+        ]
+        // Five readings across need roughly twice this panel's docked width.
+        // Squeezing them onto one line clipped every value ("Versio…", "17,1…",
+        // "THER-MAL nomi…"), so the row breathes downwards instead: fewer
+        // readings per line until each value has room for its whole text.
+        return ViewThatFits(in: .horizontal) {
+            snapshotRow(readings)
+            snapshotStack([Array(readings[0..<3]), Array(readings[3..<5])])
+            snapshotStack([Array(readings[0..<2]), Array(readings[2..<4]), Array(readings[4..<5])])
+            snapshotStack(readings.map { [$0] })
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
+    }
+
+    private func snapshotRow(_ readings: [(String, String)]) -> some View {
+        HStack(spacing: Spacing.sm) {
+            ForEach(Array(readings.enumerated()), id: \.offset) { _, reading in
+                snapshotItem(reading.0, reading.1)
+            }
+            Spacer(minLength: 0)
+        }
+        // Measured at its natural width: `ViewThatFits` can only pick the
+        // arrangement that shows every value if a compressible row is not
+        // allowed to "fit" by truncating.
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private func snapshotStack(_ rows: [[(String, String)]]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                snapshotRow(row)
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private func snapshotItem(_ label: String, _ value: String) -> some View {
@@ -83,11 +119,15 @@ struct DiagnosticsPanelView: View {
             Text(label.uppercased())
                 .font(.caption2.weight(.bold))
                 .foregroundStyle(Theme.textTertiary)
+                .lineLimit(1)
             Text(value)
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(Theme.textSecondary)
                 .lineLimit(1)
         }
+        // A label is one word and a value is one reading: neither may wrap
+        // ("THER-MAL") or be compressed away.
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     // MARK: Filter pills
