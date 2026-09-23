@@ -266,7 +266,7 @@ struct MainWindowView: View {
             // lights at small window sizes. It carries the chrome band's
             // material rather than the system default, so the title band and
             // the navigation column beside it read as one plane.
-            .toolbarBackground(Theme.chromeBar, for: .windowToolbar)
+            .toolbarBackground(.regularMaterial, for: .windowToolbar)
             .background(Theme.bg)
     }
 
@@ -322,8 +322,6 @@ struct MainWindowView: View {
         let window = NSApp.windows.first(where: { $0.isMainWindow })
             ?? NSApp.windows.first(where: { $0.isVisible })
         guard let toolbar = window?.toolbar else { return }
-        Self.probeToolbar(toolbar, tag: "late")
-        Self.probeToolbar(toolbar, tag: "early")
         guard let item = toolbar.items.first(where: { item in
             guard let view = item.view else { return false }
             return Self.containsTextField(view)
@@ -334,51 +332,31 @@ struct MainWindowView: View {
         item.maxSize = NSSize(width: target, height: item.maxSize.height)
     }
 
-    /// Writes what the toolbar actually contains, once per launch. AppKit sizes
-    /// toolbar items, so the field's width cannot be reasoned about from the
-    /// SwiftUI side alone; this is the ground truth, and stdout from a launched
-    /// app is swallowed, so it goes to a file.
-    private static func probeToolbar(_ toolbar: NSToolbar, tag: String) {
-        var lines: [String] = ["=== \(tag): items=\(toolbar.items.count)"]
-        for item in toolbar.items {
-            let view = item.view
-            lines.append("""
-            item label=\(item.label) id=\(item.itemIdentifier.rawValue) \
-            min=\(item.minSize.width)x\(item.minSize.height) max=\(item.maxSize.width)x\(item.maxSize.height) \
-            hidden=\(item.isHidden) priority=\(item.visibilityPriority.rawValue) \
-            view=\(view.map { String(describing: type(of: $0)) } ?? "nil") \
-            frame=\(view.map { NSStringFromRect($0.frame) } ?? "-") \
-            hasField=\(view.map { containsTextField($0) } ?? false) \
-            fieldFrame=\(view.map { NSStringFromRect(textFieldFrame(in: $0)) } ?? "-")
-            """)
-        }
-        let text = lines.joined(separator: "\n") + "\n"
-        if let handle = FileHandle(forWritingAtPath: "/tmp/beet-toolbar-probe.txt") {
-            handle.seekToEndOfFile()
-            handle.write(Data(text.utf8))
-            try? handle.close()
-        } else {
-            try? text.write(toFile: "/tmp/beet-toolbar-probe.txt", atomically: true, encoding: .utf8)
-        }
-    }
-
-    /// The frame of the first text field inside a toolbar item's view, in that
-    /// view's own coordinates — what the width fix has to change.
-    private static func textFieldFrame(in view: NSView) -> NSRect {
-        if let field = view as? NSTextField { return field.frame }
-        for subview in view.subviews {
-            let found = textFieldFrame(in: subview)
-            if !found.isEmpty { return found }
-        }
-        return .zero
-    }
-
     /// The search item is the only toolbar item that holds a text field, so
     /// that — not a title or an identifier — is how it is found.
     private static func containsTextField(_ view: NSView) -> Bool {
         if view is NSTextField { return true }
         for subview in view.subviews where containsTextField(subview) { return true }
         return false
+    }
+
+    /// Focus the *current* toolbar field after the sidebar has reflowed.
+    /// Holding a field from before that transition can focus a discarded view.
+    private static func focusChatSearchField() {
+        guard let window = NSApp.keyWindow, let toolbar = window.toolbar else { return }
+        for item in toolbar.items {
+            guard let view = item.view, let field = searchField(in: view) else { continue }
+            window.makeFirstResponder(field)
+            return
+        }
+    }
+
+    private static func searchField(in view: NSView) -> NSSearchField? {
+        if let field = view as? NSSearchField { return field }
+        for child in view.subviews {
+            if let field = searchField(in: child) { return field }
+        }
+        return nil
     }
 
     /// macOS 26's split view keeps the toggle item alive, so it is re-checked
@@ -482,8 +460,8 @@ struct MainWindowView: View {
     /// the system's own placement stands.
 
     /// Searching filters the conversation library in the sidebar, so a search
-    /// has to bring that column back into view. The field itself takes first
-    /// responder (see `ToolbarSearchField`).
+    /// has to bring that column back into view before its current toolbar
+    /// field takes first responder.
     private func revealSearchResults() {
         destination = .conversations
         showSettings = false
@@ -604,10 +582,11 @@ struct MainWindowView: View {
         AnyView(presentationView)
             .onReceive(appNotifications, perform: handleAppNotification)
             .onReceive(NotificationCenter.default.publisher(for: .focusChatSearch)) { _ in
-                // ⌘F goes to the toolbar's search field, which takes first
-                // responder itself (see ToolbarSearchField). The window only
-                // makes sure the results it filters are on screen.
                 revealSearchResults()
+                Task { @MainActor in
+                    await Task.yield()
+                    Self.focusChatSearchField()
+                }
             }
     }
 

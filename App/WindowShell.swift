@@ -114,7 +114,6 @@ struct ToolbarSearchField: NSViewRepresentable {
         // (measured), so the width is held by the item instead — see
         // `pinSearchFieldWidth()`.
         field.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        context.coordinator.observeFocusRequests(for: field)
         return field
     }
 
@@ -128,24 +127,8 @@ struct ToolbarSearchField: NSViewRepresentable {
 
     final class Coordinator: NSObject, NSSearchFieldDelegate {
         var parent: ToolbarSearchField
-        private var focusObserver: NSObjectProtocol?
 
         init(_ parent: ToolbarSearchField) { self.parent = parent }
-
-        deinit {
-            if let focusObserver { NotificationCenter.default.removeObserver(focusObserver) }
-        }
-
-        /// ⌘F belongs to this field. A SwiftUI `@FocusState` binding does
-        /// not reach a control hosted in the window's toolbar, so the field
-        /// takes first responder itself — the AppKit way.
-        func observeFocusRequests(for field: NSSearchField) {
-            focusObserver = NotificationCenter.default.addObserver(
-                forName: .focusChatSearch, object: nil, queue: .main) { [weak field] _ in
-                guard let field, let window = field.window, window.isKeyWindow else { return }
-                window.makeFirstResponder(field)
-            }
-        }
 
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSSearchField else { return }

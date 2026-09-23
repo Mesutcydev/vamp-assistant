@@ -265,28 +265,7 @@ extension View {
     /// it. The names survive because the app's controls are built from them.
     func instrumentFaceplate(radius: CGFloat = 8,
                              shadow: Bool = true) -> some View {
-        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
-        return self
-            .background {
-                shape.fill(.regularMaterial)
-                // A whisper of cast, so a card never reads as plain system grey.
-                shape.fill(LinearGradient(
-                    colors: [Color.white.opacity(0.05),
-                             Color.white.opacity(0.015),
-                             Color.black.opacity(0.06)],
-                    startPoint: .top, endPoint: .bottom))
-            }
-            .overlay(
-                // Specular edge: bright where the light lands and fading round
-                // the sides. The highlight is what makes glass read as glass.
-                shape.strokeBorder(
-                    LinearGradient(colors: [Color.white.opacity(0.22),
-                                            Color.white.opacity(0.06),
-                                            Color.white.opacity(0.02)],
-                                   startPoint: .top, endPoint: .bottom),
-                    lineWidth: 0.75))
-            .shadow(color: shadow ? Theme.cardShadow : .clear,
-                    radius: shadow ? 10 : 0, y: shadow ? 3 : 0)
+        modifier(InstrumentGlassFaceplate(radius: radius, shadow: shadow))
     }
 
     /// Recessed glass well: a translucent cavity for editors, search, fields,
@@ -317,6 +296,45 @@ extension View {
                 .frame(width: 0.75)
                 .padding(.vertical, 8)
         }
+    }
+}
+
+/// Shared card material. Text-heavy panels use a frosted, tinted material;
+/// transparency and contrast preferences resolve to a solid readable surface.
+private struct InstrumentGlassFaceplate: ViewModifier {
+    let radius: CGFloat
+    let shadow: Bool
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        let solid = reduceTransparency || contrast == .increased
+        content
+            .background {
+                if solid {
+                    shape.fill(Theme.sectionSurface)
+                } else {
+                    shape.fill(.regularMaterial)
+                    shape.fill(Theme.sectionSurface.opacity(0.22))
+                    shape.fill(LinearGradient(
+                        colors: [Color.white.opacity(colorScheme == .dark ? 0.09 : 0.42),
+                                 Color.clear,
+                                 Color.black.opacity(colorScheme == .dark ? 0.08 : 0.025)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing))
+                }
+            }
+            .overlay {
+                shape.strokeBorder(Theme.sectionStroke.opacity(solid ? 1 : 0.8), lineWidth: 0.75)
+                shape.strokeBorder(
+                    LinearGradient(colors: [Color.white.opacity(colorScheme == .dark ? 0.28 : 0.75),
+                                            Color.clear, Color.clear],
+                                   startPoint: .top, endPoint: .bottom),
+                    lineWidth: 0.75)
+            }
+            .shadow(color: shadow ? Theme.cardShadow : .clear,
+                    radius: shadow ? 12 : 0, y: shadow ? 4 : 0)
     }
 }
 

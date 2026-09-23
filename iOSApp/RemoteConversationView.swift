@@ -78,12 +78,10 @@ struct ConversationView: View {
                 }
             } else {
                 ConversationOpeningState(
-                    message: store.errorMessage,
+                    message: store.selectedSessionError ?? store.errorMessage,
                     retry: {
-                        Task {
-                            await store.select(sessionID: sessionID)
-                            await store.loadStartModels()
-                        }
+                        await store.select(sessionID: sessionID)
+                        await store.loadStartModels()
                     })
             }
         }.navigationTitle("").navigationBarTitleDisplayMode(.inline)
@@ -183,7 +181,7 @@ struct ConversationView: View {
 
 struct ConversationOpeningState: View {
     let message: String?
-    let retry: () -> Void
+    let retry: () async -> Void
     @State private var isRetrying = false
 
     var body: some View {
@@ -205,10 +203,9 @@ struct ConversationOpeningState: View {
                     .textSelection(.enabled)
                 Button {
                     isRetrying = true
-                    retry()
                     Task { @MainActor in
-                        await Task.yield()
-                        isRetrying = false
+                        defer { isRetrying = false }
+                        await retry()
                     }
                 } label: {
                     if isRetrying { ProgressView() }

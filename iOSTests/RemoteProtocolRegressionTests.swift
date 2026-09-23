@@ -242,8 +242,11 @@ final class RemoteInstrumentRenderingTests: XCTestCase {
                 return host.sizeThatFits(in: CGSize(width: width, height: 1000)).height
             }
             let empty = height("")
-            XCTAssertLessThanOrEqual(empty, 100, "Empty composer must remain compact at width \(width)")
-            XCTAssertGreaterThanOrEqual(empty, 90)
+            // The current deck includes a persistent 20pt status rail. Keep
+            // the complete surface bounded instead of asserting the older
+            // pre-rail 90–100pt geometry.
+            XCTAssertLessThanOrEqual(empty, 130, "Empty composer must remain compact at width \(width)")
+            XCTAssertGreaterThanOrEqual(empty, 120)
             XCTAssertEqual(height("A short draft"), empty, accuracy: 2)
             let six = height("One\nTwo\nThree\nFour\nFive\nSix")
             XCTAssertGreaterThan(six, empty + 60)

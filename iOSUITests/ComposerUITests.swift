@@ -12,7 +12,7 @@ final class ComposerUITests: XCTestCase {
     }
 
     private func editor(_ app: XCUIApplication) -> XCUIElement {
-        app.descendants(matching: .any).matching(identifier: "remote.composer.editor").firstMatch
+        app.textFields["remote.composer.editor"]
     }
 
     func testCompactGrowthAndSend() {

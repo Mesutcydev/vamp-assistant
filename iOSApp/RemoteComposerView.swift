@@ -57,7 +57,8 @@ private struct VampComposerLED: View {
             .fill(color)
             .frame(width: 5.5, height: 5.5)
             .opacity(animates && breathing ? 0.58 : 1)
-            .onAppear { breathing = true }
+            .onAppear { breathing = animates }
+            .onChange(of: animates) { _, active in breathing = active }
             .animation(animates ? .easeInOut(duration: 1.05).repeatForever(autoreverses: true) : nil,
                        value: breathing)
             .accessibilityHidden(true)
@@ -240,6 +241,8 @@ private struct RemoteComposerEditor: View {
 
     var body: some View {
         TextField("", text: $draft, axis: .vertical)
+            .accessibilityLabel("Message")
+            .accessibilityIdentifier("remote.composer.editor")
             .font(.body)
             .lineLimit(1...maximumLines)
             .fixedSize(horizontal: false, vertical: true)
@@ -290,8 +293,6 @@ private struct RemoteComposerEditor: View {
             .padding(.horizontal, 6)
             .padding(.top, 7)
             .padding(.bottom, 6)
-            .accessibilityLabel("Message")
-            .accessibilityIdentifier("remote.composer.editor")
     }
 }
 

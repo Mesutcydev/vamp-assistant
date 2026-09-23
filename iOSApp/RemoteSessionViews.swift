@@ -245,7 +245,8 @@ struct SessionControlHeader: View {
                 onControl.map {
                     InstrumentAction(id: "control", title: "Control Mac", symbol: "display",
                                      index: "02",
-                                     secondary: store.isConnecting ? "CONNECTING" : store.connectionSubtitle,
+                                     secondary: store.isConnecting ? "CONNECTING" :
+                                         (store.isConnected ? store.connectionSubtitle : "RECONNECT"),
                                      ledColor: store.isConnected
                                          ? RemoteInstrument.green
                                          : (store.isConnecting ? RemoteInstrument.orange : RemoteInstrument.secondaryInk),

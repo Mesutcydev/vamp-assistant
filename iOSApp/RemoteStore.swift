@@ -30,6 +30,9 @@ final class RemoteStore {
     private var temporaryDrafts: [UUID: String] = [:]
     var sessions: [RemoteSessionSummary] = []
     var selectedSession: RemoteSessionDetail?
+    /// Kept separate from transient global alerts so a background refresh
+    /// cannot turn a failed conversation load into an endless spinner.
+    private(set) var selectedSessionError: String?
     var startModels: [RemoteStartModelOption] = []
     var botRuns: [RemoteBotRun] = []
     var sharedFiles: [RemoteSharedFileItem] = []
@@ -339,6 +342,7 @@ final class RemoteStore {
             sessionStreamLastActivity = nil
             selectedSessionRevision = nil
             selectedSession = nil
+            selectedSessionError = "This conversation is no longer available on the Mac."
         }
         errorMessage = nil
     }
@@ -480,10 +484,12 @@ final class RemoteStore {
         resolvingPendingKeys.removeAll()
         resolvingPendingKey = nil
         selectedSession = nil
+        selectedSessionError = nil
         do {
             let detail = try await client.session(sessionID)
             try requireConnection(generation)
             guard selection == selectionGeneration, applySessionDetail(detail) else { return }
+            selectedSessionError = nil
             if observesNotifications {
                 RemoteNotificationCenter.shared.observeDetail(detail, computerName: activeComputerName, computerID: activeComputerID)
             }
@@ -493,6 +499,7 @@ final class RemoteStore {
         }
         catch {
             guard isCurrentConnection(generation), selection == selectionGeneration else { return }
+            selectedSessionError = error.localizedDescription
             presentError("Couldn't open session", error)
         }
     }
@@ -1149,6 +1156,7 @@ final class RemoteStore {
         sessionStreamLastActivity = nil
         selectedSessionRevision = nil
         selectedSession = nil
+        selectedSessionError = nil
         sessions = []
         startModels = []
         botRuns = []

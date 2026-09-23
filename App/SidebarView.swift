@@ -147,10 +147,7 @@ struct SidebarView: View {
         .padding(.horizontal, SidebarMetrics.navRowFillInset)
         .padding(.vertical, 5)
         .frame(maxWidth: .infinity)
-        // The footer is the last band of the column's own surface — closed by
-        // the same hairline the rows above it use, not a contrasting strip of
-        // `.bar` material that read as a third grey panel.
-        .background(Theme.navigationBottom)
+        // Let the sidebar's material continue behind the status rail.
         .overlay(alignment: .top) { SidebarDivider(inset: 0) }
         .zIndex(1)
     }

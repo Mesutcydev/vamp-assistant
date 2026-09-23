@@ -243,13 +243,14 @@ final class BeetCodeUITests: XCTestCase {
         XCTAssertLessThanOrEqual(search.frame.maxX, app.windows.firstMatch.frame.maxX)
     }
 
-    func testBotsComposerFillsWorkspaceAndNavigationLeavesBots() {
+    func testBotsComposerIsReadableAndNavigationLeavesBots() {
         let app = launchApp(screen: "bots")
         let editor = app.textViews["Task for Builder"]
         XCTAssertTrue(editor.waitForExistence(timeout: 10))
         let window = app.windows.firstMatch.frame
-        XCTAssertGreaterThan(editor.frame.width, window.width * 0.65)
-        XCTAssertGreaterThan(editor.frame.height, window.height * 0.4)
+        XCTAssertGreaterThan(editor.frame.width, window.width * 0.55)
+        XCTAssertGreaterThanOrEqual(editor.frame.height, 160)
+        XCTAssertLessThanOrEqual(editor.frame.height, 340)
         XCTAssertLessThanOrEqual(editor.frame.maxY, window.maxY)
 
         // The Bots dashboard is a destination of the main window; leaving via

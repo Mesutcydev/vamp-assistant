@@ -63,10 +63,6 @@ enum Theme {
     // canvas, which is the whole point of the appearance.
     static var navigationTop: Color { Color.dynamic(light: 0xF7F7F8, dark: 0x1E1E20, oled: 0x131315) }
     static var navigationBottom: Color { Color.dynamic(light: 0xEEEEF0, dark: 0x171719, oled: 0x0B0B0D) }
-    /// The window's top chrome band. Same material family as the navigation
-    /// column, so the window's top-left corner reads as one continuous plane
-    /// instead of three unrelated greys.
-    static var chromeBar: Color { Color.dynamic(light: 0xF3F3F5, dark: 0x1B1B1D, oled: 0x131315) }
     /// Row/selection wash on the navigation surface.
     static var navigationRowHover: Color { Color.primary.opacity(0.05) }
 

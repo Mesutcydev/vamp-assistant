@@ -154,6 +154,43 @@ final class RemoteStoreConcurrencyTests: XCTestCase {
         disconnect(store)
     }
 
+    func testFailedConversationLoadKeepsRecoveryMessageAfterBackgroundRefresh() async throws {
+        let id = UUID()
+        let (store, _, session) = makeStore { request in
+            if request.url?.path == "/api/status" { return (200, Self.status(2_100_000_000)) }
+            if request.url?.path == "/api/sessions" { return (200, Data("{\"sessions\":[]}".utf8)) }
+            if request.url?.path == "/api/bots/runs" { return (200, Data("{\"runs\":[]}".utf8)) }
+            return (404, Data("{\"error\":\"Conversation not found\"}".utf8))
+        }
+        defer { session.invalidateAndCancel() }
+
+        await store.select(sessionID: id)
+        XCTAssertNil(store.selectedSession)
+        XCTAssertNotNil(store.selectedSessionError)
+        try await store.refresh()
+        XCTAssertNil(store.errorMessage, "a healthy background poll clears global alerts")
+        XCTAssertNotNil(store.selectedSessionError, "the conversation must still offer Retry")
+        disconnect(store)
+    }
+
+    func testRemovedConversationShowsRecoveryMessageInsteadOfWaitingForever() async throws {
+        let id = UUID()
+        let (store, _, session) = makeStore { request in
+            if request.url?.path == "/api/status" { return (200, Self.status(2_100_000_000)) }
+            if request.url?.path == "/api/sessions" { return (200, Data("{\"sessions\":[]}".utf8)) }
+            if request.url?.path.hasSuffix(id.uuidString) == true { return (200, Self.detail(id)) }
+            return (200, Data("{\"runs\":[]}".utf8))
+        }
+        defer { session.invalidateAndCancel() }
+
+        await store.select(sessionID: id)
+        XCTAssertEqual(store.selectedSession?.id, id)
+        try await store.refresh()
+        XCTAssertNil(store.selectedSession)
+        XCTAssertNotNil(store.selectedSessionError)
+        disconnect(store)
+    }
+
     func testDuplicateSendIsRejectedWhileFirstSubmissionIsPending() async {
         let id = UUID()
         let sent = expectation(description: "message POST started")

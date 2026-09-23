@@ -58,13 +58,9 @@ struct ChatInputWell: View {
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .frame(minHeight: ChatFrameMetrics.inputMinHeight, alignment: .topLeading)
-        // One input surface, not controls scattered along the window's bottom
-        // frame: the editor and its supporting row sit in a single content
-        // container on the system's text background.
-        .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .textBackgroundColor))
-        }
+        // A floating writing surface: native Liquid Glass on current macOS,
+        // frosted material on older releases, and a solid accessibility fallback.
+        .modifier(ComposerGlassSurface())
         .overlay {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(editorFocused
@@ -438,5 +434,25 @@ struct ChatInputWell: View {
             store.prompt = value
             editorSyncTask = nil
         }
+    }
+}
+
+private struct ComposerGlassSurface: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        Group {
+            if reduceTransparency || contrast == .increased {
+                content.background(Theme.sectionSurface, in: shape)
+            } else if #available(macOS 26.0, *) {
+                content.glassEffect(.regular, in: shape)
+            } else {
+                content.background(.regularMaterial, in: shape)
+                    .background(Theme.sectionSurface.opacity(0.18), in: shape)
+            }
+        }
+        .shadow(color: Theme.cardShadow, radius: 14, y: 5)
     }
 }

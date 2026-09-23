@@ -132,11 +132,33 @@ extension View {
     /// owns the column — no inner rounded rectangle and no second border
     /// parallel to the window edge.
     func sidebarSurface() -> some View {
-        background {
-            LinearGradient(colors: [Theme.navigationTop, Theme.navigationBottom],
-                           startPoint: .top, endPoint: .bottom)
+        modifier(SidebarGlassSurface())
+    }
+}
+
+private struct SidebarGlassSurface: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                ZStack {
+                    if !reduceTransparency && contrast != .increased {
+                        Rectangle().fill(.regularMaterial)
+                    }
+                    LinearGradient(
+                        colors: [Theme.navigationTop.opacity(reduceTransparency ? 1 : 0.72),
+                                 Theme.navigationBottom.opacity(reduceTransparency ? 1 : 0.78)],
+                        startPoint: .top, endPoint: .bottom)
+                    LinearGradient(
+                        colors: [Color.white.opacity(colorScheme == .dark ? 0.08 : 0.58),
+                                 Color.clear, Color.clear],
+                        startPoint: .topLeading, endPoint: .bottomTrailing)
+                }
                 .ignoresSafeArea(.container, edges: [.top, .leading, .bottom])
-        }
+            }
     }
 }
 
