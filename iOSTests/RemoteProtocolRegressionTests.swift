@@ -6,6 +6,18 @@ import UIKit
 @testable import BeetCodeRemoteIOS
 
 final class RemoteProtocolRegressionTests: XCTestCase {
+    func testProviderDirectoryDecodesConnectionAndSetupState() throws {
+        let data = Data(#"{"providers":[{"id":"openAI","name":"OpenAI","kind":"builtIn","configured":true,"baseURL":"https://api.openai.com/v1","needsMacSetup":false},{"id":"custom","name":"Custom","kind":"builtIn","configured":false,"baseURL":null,"needsMacSetup":true}]}"#.utf8)
+        let providers = try JSONDecoder().decode(RemoteProviderEnvelope.self, from: data).providers
+
+        XCTAssertEqual(providers.map(\.id), ["openAI", "custom"])
+        XCTAssertTrue(providers[0].configured)
+        XCTAssertTrue(providers[0].isReady)
+        XCTAssertTrue(providers[1].needsMacSetup)
+        XCTAssertFalse(providers[1].isReady)
+        XCTAssertNil(providers[1].baseURL)
+    }
+
     func testUnauthorizedResponseRequiresPairingAndPreservesServerMessage() {
         let body = Data(#"{"error":"The saved access token expired."}"#.utf8)
         let error = RemoteAPIClient.responseError(statusCode: 401, data: body)

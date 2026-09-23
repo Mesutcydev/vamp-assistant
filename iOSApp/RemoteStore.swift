@@ -34,6 +34,8 @@ final class RemoteStore {
     /// cannot turn a failed conversation load into an endless spinner.
     private(set) var selectedSessionError: String?
     var startModels: [RemoteStartModelOption] = []
+    var apiProviders: [RemoteProviderOption] = []
+    var providerNotice: String?
     var botRuns: [RemoteBotRun] = []
     var sharedFiles: [RemoteSharedFileItem] = []
     var isConnecting = false
@@ -519,6 +521,20 @@ final class RemoteStore {
         }
     }
 
+    func loadAPIProviders() async {
+        guard let client else { return }
+        let generation = connectionGeneration
+        do {
+            let providers = try await client.providers().providers
+            try requireConnection(generation)
+            apiProviders = providers
+            providerNotice = nil
+        } catch {
+            guard isCurrentConnection(generation) else { return }
+            providerNotice = error.localizedDescription
+        }
+    }
+
     func startBotRun(profileID: String, modelID: String?, prompt: String) async -> Bool {
         await performMutation("Couldn't start bot") { client in
             _ = try await client.startBotRun(profileID: profileID, modelID: modelID, prompt: prompt)
@@ -655,10 +671,63 @@ final class RemoteStore {
     func saveAPIKey(providerID: String, key: String) async -> Bool {
         guard let client else { return false }
         let generation = connectionGeneration
-        do { _ = try await client.saveAPIKey(providerID: providerID, key: key); try requireConnection(generation); return true }
+        do {
+            _ = try await client.saveAPIKey(providerID: providerID, key: key)
+            try requireConnection(generation)
+            await loadAPIProviders()
+            await loadStartModels()
+            return true
+        }
         catch {
             guard isCurrentConnection(generation) else { return false }
  presentError("Couldn't save key", error); return false }
+    }
+
+    func removeAPIKey(providerID: String) async -> Bool {
+        guard let client else { return false }
+        let generation = connectionGeneration
+        do {
+            _ = try await client.removeAPIKey(providerID: providerID)
+            try requireConnection(generation)
+            await loadAPIProviders()
+            await loadStartModels()
+            return true
+        } catch {
+            guard isCurrentConnection(generation) else { return false }
+            presentError("Couldn't remove key", error)
+            return false
+        }
+    }
+
+    func saveCustomProviderURL(_ baseURL: String) async -> Bool {
+        guard let client else { return false }
+        let generation = connectionGeneration
+        do {
+            _ = try await client.saveCustomProviderURL(baseURL)
+            try requireConnection(generation)
+            await loadAPIProviders()
+            await loadStartModels()
+            return true
+        } catch {
+            guard isCurrentConnection(generation) else { return false }
+            presentError("Couldn't save provider URL", error)
+            return false
+        }
+    }
+
+    func addProviderModel(providerID: String, modelID: String) async -> Bool {
+        guard let client else { return false }
+        let generation = connectionGeneration
+        do {
+            _ = try await client.addProviderModel(providerID: providerID, modelID: modelID)
+            try requireConnection(generation)
+            await loadStartModels()
+            return true
+        } catch {
+            guard isCurrentConnection(generation) else { return false }
+            presentError("Couldn't add model", error)
+            return false
+        }
     }
 
     func startBotComputer(_ id: UUID) async -> Bool {
@@ -1018,6 +1087,8 @@ final class RemoteStore {
         requiresPairing = false
         sessions = []
         startModels = []
+        apiProviders = []
+        providerNotice = nil
         sharedFiles = []
         workspaces = []
         selectedSession = nil
@@ -1159,6 +1230,8 @@ final class RemoteStore {
         selectedSessionError = nil
         sessions = []
         startModels = []
+        apiProviders = []
+        providerNotice = nil
         botRuns = []
         sharedFiles = []
         workspaces = []

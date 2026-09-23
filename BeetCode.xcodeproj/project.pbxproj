@@ -2578,7 +2578,7 @@
 				CODE_SIGN_ENTITLEMENTS = iOSApp/BeetCodeRemote.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 117;
+				CURRENT_PROJECT_VERSION = 118;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = iOSApp/Info.plist;
@@ -2587,7 +2587,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.10.38;
+				MARKETING_VERSION = 0.10.39;
 				PRODUCT_BUNDLE_IDENTIFIER = com.beetcode.remote.ios;
 				PRODUCT_MODULE_NAME = BeetCodeRemoteIOS;
 				PRODUCT_NAME = "Vamp Assistant";
@@ -2607,7 +2607,7 @@
 				CODE_SIGN_ENTITLEMENTS = iOSApp/BeetCodeRemote.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 117;
+				CURRENT_PROJECT_VERSION = 118;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = iOSApp/Info.plist;
@@ -2616,7 +2616,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.10.38;
+				MARKETING_VERSION = 0.10.39;
 				PRODUCT_BUNDLE_IDENTIFIER = com.beetcode.remote.ios;
 				PRODUCT_MODULE_NAME = BeetCodeRemoteIOS;
 				PRODUCT_NAME = "Vamp Assistant";

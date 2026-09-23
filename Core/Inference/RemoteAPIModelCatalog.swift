@@ -88,7 +88,11 @@ enum RemoteAPIModelCatalog {
         hasKeyForProviderID: (String) -> Bool
     ) -> Bool {
         if let providerKey = profile.providerKey, !providerKey.isEmpty {
-            return hasKeyForProviderID(providerKey) || configuredProviders.contains(profile.provider)
+            // Dynamic gateways must have their own key. A configured generic
+            // custom endpoint must not make a removed gateway's saved models
+            // appear usable in the phone or Mac picker.
+            return hasKeyForProviderID(providerKey)
+                || (providerKey == profile.provider.rawValue && configuredProviders.contains(profile.provider))
         }
         return configuredProviders.contains(profile.provider)
     }

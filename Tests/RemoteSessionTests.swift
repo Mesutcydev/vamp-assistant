@@ -655,6 +655,35 @@ final class RemoteSessionTests: XCTestCase {
         XCTAssertEqual(accountModel["id"]?.stringValue, "chatgpt|gpt-5.6-luna")
         XCTAssertEqual(accountModel["source"]?.stringValue, "chatgpt")
 
+        let unauthorizedProviders = try await request(baseURL, path: "/api/providers")
+        XCTAssertEqual(unauthorizedProviders.status, 401)
+        let providers = try await request(baseURL, path: "/api/providers", token: token)
+        XCTAssertEqual(providers.status, 200)
+        let directory = try XCTUnwrap(providers.json.objectValue?["providers"]?.arrayValue)
+        XCTAssertTrue(directory.contains { $0.objectValue?["id"]?.stringValue == "openAI" })
+        XCTAssertTrue(directory.contains { $0.objectValue?["id"]?.stringValue == "groq" })
+        XCTAssertFalse(providers.body.contains("api-key"))
+        let unsupportedKey = try await request(
+            baseURL, path: "/api/providers/key", method: "POST", token: token,
+            body: Data(#"{"providerID":"unknown-provider","key":"example"}"#.utf8))
+        XCTAssertEqual(unsupportedKey.status, 400)
+        let emptyKey = try await request(
+            baseURL, path: "/api/providers/key", method: "POST", token: token,
+            body: Data(#"{"providerID":"openAI","key":"   "}"#.utf8))
+        XCTAssertEqual(emptyKey.status, 400)
+        let unsupportedRemoval = try await request(
+            baseURL, path: "/api/providers/key/remove", method: "POST", token: token,
+            body: Data(#"{"providerID":"unknown-provider"}"#.utf8))
+        XCTAssertEqual(unsupportedRemoval.status, 400)
+        let unsafeCustomURL = try await request(
+            baseURL, path: "/api/providers/custom-url", method: "POST", token: token,
+            body: Data(#"{"baseURL":"https://user:secret@example.com/v1"}"#.utf8))
+        XCTAssertEqual(unsafeCustomURL.status, 400)
+        let disconnectedModel = try await request(
+            baseURL, path: "/api/providers/model", method: "POST", token: token,
+            body: Data(#"{"providerID":"unknown-provider","modelID":"model-1"}"#.utf8))
+        XCTAssertEqual(disconnectedModel.status, 400)
+
         let botRuns = try await request(baseURL, path: "/api/bot-runs", token: token)
         XCTAssertEqual(botRuns.status, 200)
         XCTAssertTrue(botRuns.body.contains(botRun.id.uuidString))

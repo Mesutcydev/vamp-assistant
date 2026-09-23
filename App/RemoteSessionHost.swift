@@ -474,23 +474,139 @@ final class RemoteSessionHost {
                 ])
             }
             return .response(json(["models": .array(models)]))
+        case ("GET", "/api/providers"):
+            guard authorized(request) else { return unauthorized() }
+            let keyStore = APIKeyStore.shared
+            let builtIn = LLMProvider.allCases.map { provider in
+                LFJSONValue.object([
+                    "id": .string(provider.rawValue),
+                    "name": .string(provider.displayName),
+                    "kind": .string("builtIn"),
+                    "configured": .bool(keyStore.hasKey(for: provider)),
+                    "baseURL": (provider.openAICompatibleBaseURL
+                        ?? provider.geminiBaseURL
+                        ?? provider.anthropicBaseURL)
+                        .map { .string($0.absoluteString) } ?? .null,
+                    "needsMacSetup": .bool(provider == .custom && provider.openAICompatibleBaseURL == nil),
+                ])
+            }
+            let compatible = KnownRemoteProvider.compatiblePresets.map { provider in
+                LFJSONValue.object([
+                    "id": .string(provider.id),
+                    "name": .string(provider.displayName),
+                    "kind": .string("compatible"),
+                    "configured": .bool(keyStore.hasKey(forProviderID: provider.id)),
+                    "baseURL": .string(provider.baseURL.absoluteString),
+                    "needsMacSetup": .bool(false),
+                ])
+            }
+            return .response(json(["providers": .array(builtIn + compatible)]))
         case ("POST", "/api/providers/key"):
             guard authorized(request) else { return unauthorized() }
             guard let object = request.bodyJSON?.objectValue,
                   let providerID = object["providerID"]?.stringValue,
-                  let provider = LLMProvider(rawValue: providerID),
                   let key = object["key"]?.stringValue,
+                  !CredentialNormalizer.normalize(key).isEmpty,
                   key.utf8.count <= 8_192 else {
                 return .response(json(["error": .string("Choose a supported provider and enter a valid API key.")], status: 400))
             }
-            guard APIKeyStore.shared.save(key: key, for: provider) else {
+            let saved: Bool
+            if let provider = LLMProvider(rawValue: providerID) {
+                guard provider != .custom || provider.openAICompatibleBaseURL != nil else {
+                    return .response(json(["error": .string("Set the custom provider's base URL on your Mac first.")], status: 400))
+                }
+                saved = APIKeyStore.shared.save(key: key, for: provider)
+                if saved,
+                   let profiles = try? await RemoteLLMClient.fetchModelProfiles(provider: provider, apiKey: key),
+                   !profiles.isEmpty {
+                    AppPreferencesStore.shared.saveRemoteModelProfiles(profiles)
+                }
+            } else if let provider = KnownRemoteProvider.compatiblePresets.first(where: { $0.id == providerID }) {
+                saved = APIKeyStore.shared.save(key: key, forProviderID: provider.id)
+                if saved,
+                   let profiles = try? await RemoteLLMClient.fetchModelProfiles(
+                    endpoint: provider.endpoint(), apiKey: key),
+                   !profiles.isEmpty {
+                    AppPreferencesStore.shared.saveRemoteModelProfiles(profiles)
+                }
+            } else {
+                return .response(json(["error": .string("Choose a supported provider.")], status: 400))
+            }
+            guard saved else {
                 return .response(json(["error": .string("The API key could not be saved to the Mac Keychain.")], status: 500))
             }
-            if let profiles = try? await RemoteLLMClient.fetchModelProfiles(provider: provider, apiKey: key),
+            return .response(json(["accepted": .bool(true), "providerID": .string(providerID)]))
+        case ("POST", "/api/providers/key/remove"):
+            guard authorized(request) else { return unauthorized() }
+            guard let providerID = request.bodyJSON?.objectValue?["providerID"]?.stringValue else {
+                return .response(json(["error": .string("Choose a supported provider.")], status: 400))
+            }
+            if let provider = LLMProvider(rawValue: providerID) {
+                APIKeyStore.shared.deleteKey(for: provider)
+            } else if KnownRemoteProvider.compatiblePresets.contains(where: { $0.id == providerID }) {
+                APIKeyStore.shared.deleteKey(forProviderID: providerID)
+            } else {
+                return .response(json(["error": .string("Choose a supported provider.")], status: 400))
+            }
+            return .response(json(["accepted": .bool(true), "providerID": .string(providerID)]))
+        case ("POST", "/api/providers/custom-url"):
+            guard authorized(request) else { return unauthorized() }
+            guard let raw = request.bodyJSON?.objectValue?["baseURL"]?.stringValue?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                  raw.utf8.count <= 2_048,
+                  let components = URLComponents(string: raw),
+                  let scheme = components.scheme?.lowercased(),
+                  ["http", "https"].contains(scheme),
+                  let host = components.host, !host.isEmpty,
+                  components.user == nil, components.password == nil,
+                  components.query == nil, components.fragment == nil,
+                  let url = components.url else {
+                return .response(json(["error": .string("Enter an HTTP or HTTPS base URL without credentials or a query.")], status: 400))
+            }
+            var preferences = AppPreferencesStore.shared.current
+            if preferences.customBaseURL != url.absoluteString {
+                preferences.remoteModelProfiles = preferences.remoteModelProfiles.filter { _, profile in
+                    profile.provider != .custom || profile.providerKey != nil
+                }
+                preferences.remoteModel.removeValue(forKey: LLMProvider.custom.rawValue)
+            }
+            preferences.customBaseURL = url.absoluteString
+            AppPreferencesStore.shared.save(preferences)
+            guard AppPreferencesStore.shared.current.customBaseURL == url.absoluteString else {
+                return .response(json(["error": .string("The custom provider URL could not be saved on the Mac.")], status: 500))
+            }
+            if let profiles = try? await RemoteLLMClient.fetchModelProfiles(
+                provider: .custom, apiKey: APIKeyStore.shared.key(for: .custom)),
                !profiles.isEmpty {
                 AppPreferencesStore.shared.saveRemoteModelProfiles(profiles)
             }
-            return .response(json(["accepted": .bool(true), "providerID": .string(provider.rawValue)]))
+            return .response(json(["accepted": .bool(true)]))
+        case ("POST", "/api/providers/model"):
+            guard authorized(request) else { return unauthorized() }
+            guard let object = request.bodyJSON?.objectValue,
+                  let providerID = object["providerID"]?.stringValue,
+                  let model = object["modelID"]?.stringValue?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !model.isEmpty, model.utf8.count <= 256,
+                  !model.contains(where: \.isNewline) else {
+                return .response(json(["error": .string("Choose a provider and enter a valid model ID.")], status: 400))
+            }
+            let profile: RemoteModelProfile
+            if let provider = LLMProvider(rawValue: providerID),
+               (APIKeyStore.shared.hasKey(for: provider)
+                || (provider == .custom && provider.openAICompatibleBaseURL != nil)) {
+                profile = RemoteModelProfile(provider: provider, model: model)
+            } else if let provider = KnownRemoteProvider.compatiblePresets.first(where: { $0.id == providerID }),
+                      APIKeyStore.shared.hasKey(forProviderID: provider.id) {
+                profile = RemoteModelProfile(
+                    provider: .custom, model: model, supportsTools: true,
+                    providerKey: provider.id, providerDisplayName: provider.displayName,
+                    apiProtocol: provider.apiProtocol, baseURL: provider.baseURL.absoluteString)
+            } else {
+                return .response(json(["error": .string("Connect this provider before adding a model.")], status: 400))
+            }
+            AppPreferencesStore.shared.saveRemoteModelProfiles([profile])
+            return .response(json(["accepted": .bool(true)]))
         case ("GET", "/api/bot-computers"):
             guard authorized(request) else { return unauthorized() }
             do {

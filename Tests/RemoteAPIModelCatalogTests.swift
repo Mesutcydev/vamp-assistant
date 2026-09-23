@@ -122,4 +122,21 @@ final class RemoteAPIModelCatalogTests: XCTestCase {
 
         XCTAssertFalse(profiles.contains { $0.provider == .anthropic })
     }
+
+    func testRemovedGatewayModelsStayHiddenWhenGenericCustomProviderIsConfigured() {
+        let saved = RemoteModelProfile(
+            provider: .custom,
+            model: "gateway-model",
+            providerKey: "groq",
+            providerDisplayName: "Groq",
+            apiProtocol: .openAIChatCompletions,
+            baseURL: "https://api.groq.com/openai/v1")
+        let profiles = RemoteAPIModelCatalog.profiles(
+            configuredProviders: [.custom],
+            selectedModelByProvider: [:],
+            savedProfiles: [saved],
+            hasKeyForProviderID: { _ in false })
+
+        XCTAssertFalse(profiles.contains { $0.providerKey == "groq" })
+    }
 }

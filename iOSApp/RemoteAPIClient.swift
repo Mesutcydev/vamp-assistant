@@ -80,6 +80,7 @@ struct RemoteAPIClient {
     func status() async throws -> RemoteStatus { try await request("api/status") }
     func sessions() async throws -> RemoteSessionEnvelope { try await request("api/sessions") }
     func models() async throws -> RemoteModelEnvelope { try await request("api/models") }
+    func providers() async throws -> RemoteProviderEnvelope { try await request("api/providers") }
     func workspaces() async throws -> RemoteWorkspaceEnvelope { try await request("api/workspaces") }
     func openWorkspace(path: String) async throws -> RemoteWorkspaceAccepted {
         try await request("api/workspaces", method: "POST", body: ["path": path])
@@ -91,6 +92,15 @@ struct RemoteAPIClient {
     }
     func saveAPIKey(providerID: String, key: String) async throws -> RemoteAcceptedResponse {
         try await request("api/providers/key", method: "POST", body: ["providerID": providerID, "key": key], timeout: 30)
+    }
+    func removeAPIKey(providerID: String) async throws -> RemoteAcceptedResponse {
+        try await request("api/providers/key/remove", method: "POST", body: ["providerID": providerID])
+    }
+    func saveCustomProviderURL(_ baseURL: String) async throws -> RemoteAcceptedResponse {
+        try await request("api/providers/custom-url", method: "POST", body: ["baseURL": baseURL], timeout: 30)
+    }
+    func addProviderModel(providerID: String, modelID: String) async throws -> RemoteAcceptedResponse {
+        try await request("api/providers/model", method: "POST", body: ["providerID": providerID, "modelID": modelID])
     }
     func botComputers() async throws -> RemoteBotComputerEnvelope { try await request("api/bot-computers") }
     func botRuns() async throws -> RemoteBotRunEnvelope { try await request("api/bot-runs") }

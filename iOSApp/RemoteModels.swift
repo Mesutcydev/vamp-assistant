@@ -188,6 +188,19 @@ enum RemoteSessionMode: String, CaseIterable, Identifiable {
 
 struct RemoteModelEnvelope: Decodable { let models: [RemoteStartModelOption] }
 
+struct RemoteProviderEnvelope: Decodable { let providers: [RemoteProviderOption] }
+
+struct RemoteProviderOption: Decodable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let kind: String
+    let configured: Bool
+    let baseURL: String?
+    let needsMacSetup: Bool
+
+    var isReady: Bool { configured || (id == "custom" && !needsMacSetup) }
+}
+
 struct RemoteBotComputerEnvelope: Decodable { let computers: [RemoteBotComputer]; let capabilities: RemoteBotCapabilities? }
 struct RemoteBotRunEnvelope: Decodable { let runs: [RemoteBotRun] }
 struct RemoteBotRun: Decodable, Identifiable, Hashable {

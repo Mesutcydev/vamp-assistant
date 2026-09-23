@@ -86,7 +86,7 @@ struct RemoteModelPickerSheet: View {
     private var emptyDescription: String {
         switch source {
         case "chatgpt": "Sign in with ChatGPT on your Mac, then refresh."
-        case "api": "Configure an API provider on your Mac first."
+        case "api": "Add an API key in Settings → API providers, then refresh."
         default: "Download a model on your Mac first."
         }
     }
