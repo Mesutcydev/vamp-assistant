@@ -36,7 +36,7 @@ The [Vamp Assistant site](https://mesutcydev.github.io/vamp-assistant/) has the 
 
 The repository includes a native SwiftUI companion app that connects to the Mac app's existing private Remote Sessions endpoint. It supports camera QR pairing, one-tap reconnection, secure token storage, session browsing, new local/API sessions, live responses, prompts, stop controls, approvals/questions, and permission-gated clipboard and file exchange.
 
-[Download the latest unsigned iPhone/iPad IPA](https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.38/Vamp-Assistant-iOS-0.10.38-build-117-unsigned.ipa)
+[Download the latest unsigned iPhone/iPad IPA](https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.39/Vamp-Assistant-iOS-0.10.39-build-118-unsigned.ipa)
 
 [Add the Vamp Assistant AltStore source](https://mesutcydev.github.io/vamp-assistant/apps.json)
 
@@ -46,13 +46,15 @@ Build an unsigned sideloadable IPA:
 ./scripts/package-beetcode-remote-ios.sh
 ```
 
+On iPhone or iPad, open **Settings → API providers** to add or replace a key, browse compatible services, configure a custom OpenAI-compatible base URL, or add a model ID that a provider does not list. Credentials are saved in the paired Mac’s Keychain; use a trusted connection for setup.
+
 The resulting `Vamp-Assistant-iOS-*-unsigned.ipa` can be re-signed with AltStore, SideStore, Sideloadly, or a personal Apple development profile. Keep both devices on the same trusted LAN or Tailscale network, then paste the address or scan the QR shown by **Vamp Assistant → Remote Sessions**.
 
 ### Optional TinyFish web search
 
 Vamp Assistant can use [TinyFish Search](https://docs.tinyfish.ai/search-api) for current, ranked web sources, snippets, and URLs. Add the key in **Settings → Providers → TinyFish Search**; it is stored in the Mac Keychain and the read-only `web_search` tool is then available in Assistant, Code, browser-control, and bot runs. The assistant can pass a returned URL to `web_fetch` or the in-app browser for verification. For headless/CLI use, set `TINYFISH_API_KEY` before launching the host. No TinyFish key is bundled with the app.
 
-**Install:** [download the latest Apple-silicon DMG](https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.38/Vamp-Assistant-0.10.38-build-117-preview.dmg), open it, and move **Vamp Assistant.app** to Applications. Apple Silicon + macOS 15+.
+**Install:** [download the latest Apple-silicon DMG](https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.39/Vamp-Assistant-0.10.39-build-118-preview.dmg), open it, and move **Vamp Assistant.app** to Applications. Apple Silicon + macOS 15+.
 
 > Gatekeeper will warn once — this build is Apple Development–signed, **not notarized** (Developer ID certs are revoked). Approve it on first launch (System Settings → Privacy & Security → **Open Anyway**), or clear the download quarantine first: `xattr -dr com.apple.quarantine "/Applications/Vamp Assistant.app"`.
 
