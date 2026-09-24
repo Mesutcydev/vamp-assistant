@@ -70,7 +70,8 @@ enum SidebarMetrics {
     // their frame, swallowed the gap and collided with the label, which also
     // left every label optically off its axis. 20pt centres every symbol with
     // slack to spare, and the label axis lands on 48:
-    //   fill 8 + content 10 + glyph 20 + gap 10 = 48.
+    //   fill 8 + content 10 + glyph 20 + gap 10 = 48. The first row has no
+    //   fill inset and adds those 8pt to content instead, preserving the axis.
     static let navRowFillInset: CGFloat = 8
     static let navRowContentInset: CGFloat = 10
     static let navGlyphColumn: CGFloat = 20
@@ -81,8 +82,10 @@ enum SidebarMetrics {
     /// Vertical rhythm between navigation rows: a 32pt row every 36pt, so the
     /// rows read as a list instead of a stack of touching bars.
     static let navRowSpacing: CGFloat = 4
-    /// Breathing room above the first row and below the last.
-    static let navRowsTopInset: CGFloat = 8
+    /// The first destination starts at the top of the sidebar panel so its
+    /// selected face follows the window corner with no empty strip.
+    static let navRowsTopInset: CGFloat = 0
+    static let navFirstRowHeight: CGFloat = 40
     static let navRowsBottomInset: CGFloat = 8
     /// One conversation row. The drawer is information, not hardware: it is
     /// dense so more history is visible without reading smaller type.
@@ -222,6 +225,7 @@ struct SidebarNavRow: View {
     let title: String
     let systemImage: String
     var isSelected: Bool = false
+    var isTopRow: Bool = false
     let action: () -> Void
 
     @State private var hovering = false
@@ -241,16 +245,33 @@ struct SidebarNavRow: View {
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, SidebarMetrics.navRowContentInset)
+            .padding(.leading, isTopRow ? SidebarMetrics.navRowContentInset
+                                       + SidebarMetrics.navRowFillInset
+                                       : SidebarMetrics.navRowContentInset)
+            .padding(.trailing, SidebarMetrics.navRowContentInset)
             .frame(maxWidth: .infinity,
-                   minHeight: SidebarMetrics.rowHeight,
+                   minHeight: isTopRow ? SidebarMetrics.navFirstRowHeight
+                                       : SidebarMetrics.rowHeight,
                    alignment: .leading)
-            .background(fill, in: RoundedRectangle(cornerRadius: SidebarMetrics.selectionRadius,
-                                                   style: .continuous))
+            .background {
+                if isTopRow {
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: SidebarCornerPatch.arc,
+                        bottomLeadingRadius: SidebarMetrics.selectionRadius,
+                        bottomTrailingRadius: SidebarMetrics.selectionRadius,
+                        topTrailingRadius: SidebarMetrics.selectionRadius)
+                        .fill(fill)
+                } else {
+                    RoundedRectangle(cornerRadius: SidebarMetrics.selectionRadius,
+                                     style: .continuous)
+                        .fill(fill)
+                }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, SidebarMetrics.navRowFillInset)
+        .padding(.leading, isTopRow ? 0 : SidebarMetrics.navRowFillInset)
+        .padding(.trailing, SidebarMetrics.navRowFillInset)
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.12), value: hovering)
         .accessibilityLabel(title)
@@ -284,9 +305,8 @@ struct SidebarCornerPatch: View {
 
     var corner: Corner = .topLeading
 
-    /// How much of the corner is repainted. Large enough to swallow the
-    /// shadow, still short of the first row (which starts at x=8, y=8 of the
-    /// content area).
+    /// How much of the corner is repainted. The mask only covers the area
+    /// outside the system panel's arc, leaving the flush first row untouched.
     static let size: CGFloat = 24
     /// The system's own arc is about 20; matching it means the mask boundary
     /// falls inside the panel, where repainting the same plane is invisible.

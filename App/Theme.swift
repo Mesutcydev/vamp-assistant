@@ -213,15 +213,11 @@ enum Theme {
         }
     }
 
-    /// The window's content must start BELOW the title band. SwiftUI gives a
-    /// toolbar window a full-size content view, and on this macOS the toolbar
-    /// draws its items as floating glass with no band material behind them —
-    /// so the transcript was legible through the titlebar and across the
-    /// traffic lights. A standard (non-full-size) content view is the native
-    /// arrangement for an app whose main surface is not a scrolling page.
+    /// NavigationSplitView already accounts for the unified toolbar. Removing
+    /// the full-size content style mask adds a second top inset over the detail
+    /// column, hiding the Bots and Devices headers behind a blank grey strip.
     @MainActor static func configureTitlebar(of window: NSWindow) {
         guard window.styleMask.contains(.titled) else { return }
-        window.styleMask.remove(.fullSizeContentView)
         window.titlebarAppearsTransparent = false
         // macOS 26 insets the sidebar column a few points below the toolbar and
         // rounds its top-left corner. Whatever that inset leaves uncovered is

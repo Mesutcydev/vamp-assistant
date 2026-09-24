@@ -160,18 +160,15 @@ struct MainWindowView: View {
         }
             .navigationTitle(windowTitle)
             .toolbar(removing: .title)
-            // The system's own sidebar toggle lands at the sidebar's trailing
-            // edge (~148 pt right of the traffic lights, hugging the seam),
-            // which reads as a stray control floating over the column instead
-            // of the window's top-left corner. The app draws that button now.
+            // The system's own sidebar toggle conflicts with the app's
+            // accessible toolbar control, so hide the duplicate item.
             .toolbar(removing: .sidebarToggle)
             // Browser grammar in SYSTEM parts: each ToolbarItemGroup is one
             // capsule the way Safari groups sidebar+chevron and back/forward,
             // and the OS draws every face, hover, and press.
             .toolbar {
                 if !showSettings {
-                    // Leading edge, next to the traffic lights: show/hide the
-                    // conversation library. One item, native rendering.
+                    // Show/hide the conversation library with one native item.
                     ToolbarItem(placement: .navigation) {
                         Button {
                             sidebarVisibility = sidebarVisibility == .detailOnly ? .all : .detailOnly

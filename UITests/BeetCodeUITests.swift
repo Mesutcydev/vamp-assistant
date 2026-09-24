@@ -8,9 +8,9 @@ final class BeetCodeUITests: XCTestCase {
 
     func testOLEDModeIsAvailableAndRenders() {
         let app = launchApp(screen: "settings-general", appearance: "")
-        let oled = app.radioButtons["OLED Black"]
+        let oled = app.radioButtons["OLED"]
         XCTAssertTrue(oled.waitForExistence(timeout: 10))
-        let previous = ["System", "Light", "Dark", "OLED Black"].first {
+        let previous = ["System", "Light", "Dark", "OLED"].first {
             let button = app.radioButtons[$0]
             return button.isSelected || (button.value as? String) == "1" || (button.value as? Int) == 1
         }
@@ -21,6 +21,53 @@ final class BeetCodeUITests: XCTestCase {
         capture.name = "mac-oled-settings"
         capture.lifetime = .keepAlways
         add(capture)
+    }
+
+    func testAppearanceSegmentsStayInsideTheirControl() {
+        let app = launchApp(size: "900x700", screen: "settings-general", appearance: "oled")
+        defer { app.terminate() }
+        let window = app.windows.firstMatch
+        let oled = window.radioButtons["OLED"]
+        XCTAssertTrue(oled.waitForExistence(timeout: 10))
+        let picker = window.descendants(matching: .any)
+            .matching(identifier: "instrument-segmented").firstMatch
+        XCTAssertTrue(picker.exists)
+        XCTAssertLessThanOrEqual(oled.frame.maxX, picker.frame.maxX + 1)
+        XCTAssertLessThanOrEqual(picker.frame.maxX, window.frame.maxX - 16)
+    }
+
+    func testAppearanceAndTypeStylesFitAtMinimumWindowWidth() {
+        let app = launchApp(size: "520x700", screen: "settings-general", appearance: "oled")
+        defer { app.terminate() }
+        let window = app.windows.firstMatch
+        let capture = XCTAttachment(screenshot: window.screenshot())
+        capture.name = "mac-minimum-settings"
+        capture.lifetime = .keepAlways
+        add(capture)
+        let appearance = window.descendants(matching: .any)
+            .matching(identifier: "instrument-segmented").firstMatch
+        XCTAssertTrue(appearance.waitForExistence(timeout: 10))
+        XCTAssertLessThanOrEqual(appearance.frame.maxX, window.frame.maxX - 16)
+        let typeface = window.popUpButtons.matching(NSPredicate(
+            format: "label CONTAINS %@", "Typeface")).firstMatch
+        XCTAssertTrue(typeface.exists)
+        XCTAssertLessThanOrEqual(typeface.frame.maxX, window.frame.maxX - 16)
+    }
+
+    func testConversationsSelectionMeetsSidebarCorner() {
+        let app = launchApp(screen: "chat", appearance: "oled")
+        defer { app.terminate() }
+        let window = app.windows.firstMatch
+        let conversations = window.buttons["Conversations"]
+        XCTAssertTrue(conversations.waitForExistence(timeout: 10))
+        XCTAssertLessThanOrEqual(conversations.frame.minX - window.frame.minX, 2)
+    }
+
+    func testBotsHeaderIsVisibleBelowToolbar() {
+        let app = launchApp(screen: "bots", appearance: "oled")
+        let back = app.buttons["Back to chat"]
+        XCTAssertTrue(back.waitForExistence(timeout: 10))
+        XCTAssertTrue(back.isHittable, "The titlebar must not cover the Bots header")
     }
 
     func testPolishCaptureMatrix() {
@@ -45,7 +92,11 @@ final class BeetCodeUITests: XCTestCase {
         XCTAssertLessThan(emptyHeight, 40)
         field.click()
         XCTAssertEqual(field.frame.height, emptyHeight, accuracy: 2)
-        field.typeText(String(repeating: "A longer draft that wraps naturally. ", count: 20))
+        field.typeText("First line")
+        app.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: .shift)
+        field.typeText("Second line")
+        app.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: .shift)
+        field.typeText("Third line")
         XCTAssertGreaterThan(field.frame.height, emptyHeight + 20)
         XCTAssertLessThan(field.frame.height, 160)
         app.typeKey("a", modifierFlags: .command)
@@ -294,12 +345,18 @@ final class BeetCodeUITests: XCTestCase {
             "-ApplePersistenceIgnoreState", "YES",
             "-NSQuitAlwaysKeepsWindows", "NO",
         ]
+        if app.state != .notRunning { app.terminate() }
         app.launch()
         app.activate()
-        if !app.windows.firstMatch.waitForExistence(timeout: 2) {
+        // Give SwiftUI's WindowGroup time to create its first window before
+        // invoking New Window. A two-second fallback raced slow cold launches
+        // and made subsequent queries match overlapping restored windows.
+        if !app.windows.firstMatch.waitForExistence(timeout: 15) {
             app.menuBars.menuBarItems["File"].click()
             app.menuItems["New Window"].click()
         }
+        XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
+        XCTAssertEqual(app.windows.count, 1, "UI smoke previews should open one main window")
         return app
     }
 }

@@ -14,14 +14,16 @@ struct GeneralTab: View {
                 icon: "paintbrush",
                 footer: "Every accent is checked for contrast in both light and dark, so no palette makes text harder to read. Typeface changes reading prose only — controls stay system sans, and code, diffs, and terminals stay monospaced.") {
                 SettingRow(label: "Appearance") {
-                    InstrumentSegmentedControl(
+                    AdaptiveSegmentedControl(
                         // Capture overrides are read-only and must not write
                         // the user's saved appearance or display a stale choice.
                         selection: DesignPreview.appearanceOverride.map { .constant($0) }
                             ?? $settings.appearance,
-                        options: AppAppearance.allCases.map { ($0.label, $0) })
-                    .frame(width: 280)
+                        options: AppAppearance.allCases.map {
+                            ($0 == .oled ? "OLED" : $0.label, $0)
+                        }, label: "Appearance")
                     .accessibilityLabel("Appearance")
+                    .help("Choose an appearance. OLED uses a true-black chat canvas.")
                 }
 
                 SettingRow(label: "Accent", value: settings.accentPalette.label) {
@@ -29,18 +31,18 @@ struct GeneralTab: View {
                 }
 
                 SettingRow(label: "Typeface", value: settings.typeface.help) {
-                    InstrumentSegmentedControl(
+                    AdaptiveSegmentedControl(
                         selection: $settings.typeface,
-                        options: AppTypeface.allCases.map { ($0.label, $0) })
-                    .frame(width: 280)
+                        options: AppTypeface.allCases.map { ($0.label, $0) },
+                        label: "Typeface")
                     .accessibilityLabel("Typeface")
                 }
 
                 SettingRow(label: "Text size", value: settings.textSize.label) {
-                    InstrumentSegmentedControl(
+                    AdaptiveSegmentedControl(
                         selection: $settings.textSize,
-                        options: AppTextSize.allCases.map { ($0.label, $0) })
-                    .frame(width: 280)
+                        options: AppTextSize.allCases.map { ($0.label, $0) },
+                        label: "Text size")
                     .accessibilityLabel("Text size")
                 }
             }

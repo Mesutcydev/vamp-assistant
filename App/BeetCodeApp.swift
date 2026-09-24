@@ -67,7 +67,10 @@ final class BeetCodeAppDelegate: NSObject, NSApplicationDelegate {
         // gets the same net, later: a slow launch can legitimately take
         // seconds to put its window up, and acting too early is how a pair of
         // windows appears.
-        verifyReopenCreatesWindow(after: 5.0)
+        // Cold launches under UI automation or system load can take longer
+        // than five seconds to create the WindowGroup window. Recovering at
+        // five races that first window and leaves two overlapping windows.
+        verifyReopenCreatesWindow(after: 12.0)
     }
 
     /// Falls back to opening a window only if the app is still windowless a

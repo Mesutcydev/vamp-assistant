@@ -75,7 +75,8 @@ struct ShellSidebar: View {
             ForEach(ShellDestination.allCases) { item in
                 SidebarNavRow(title: item.title,
                               systemImage: item.symbol,
-                              isSelected: destination == item) {
+                              isSelected: destination == item,
+                              isTopRow: item == .conversations) {
                     destination = item
                 }
             }

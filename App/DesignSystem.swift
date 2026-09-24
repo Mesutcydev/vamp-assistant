@@ -112,6 +112,31 @@ struct InstrumentSegmentedControl<Selection: Hashable>: View {
     }
 }
 
+/// Keeps the native segments where they fit and uses a native menu in a
+/// narrow Settings pane. Segments report their full intrinsic width so the
+/// layout never clips the final choice against a card's trailing edge.
+struct AdaptiveSegmentedControl<Selection: Hashable>: View {
+    @Binding var selection: Selection
+    let options: [(title: String, value: Selection)]
+    let label: String
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            InstrumentSegmentedControl(selection: $selection, options: options)
+                .fixedSize(horizontal: true, vertical: false)
+
+            Picker(label, selection: $selection) {
+                ForEach(options.indices, id: \.self) { index in
+                    Text(options[index].title).tag(options[index].value)
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .accessibilityLabel(label)
+        }
+    }
+}
+
 /// Quiet text field: recessed well with an 8pt radius — the same family as
 /// the composer's editor recess and the sidebar search well.
 extension View {
