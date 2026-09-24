@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 
 @MainActor
@@ -55,12 +56,61 @@ final class BeetCodeUITests: XCTestCase {
     }
 
     func testConversationsSelectionMeetsSidebarCorner() {
-        let app = launchApp(screen: "chat", appearance: "oled")
+        for appearance in ["oled", "dark", "light"] {
+            assertSidebarCorner(appearance: appearance)
+        }
+    }
+
+    private func assertSidebarCorner(appearance: String) {
+        let app = launchApp(screen: "chat", appearance: appearance)
         defer { app.terminate() }
         let window = app.windows.firstMatch
         let conversations = window.buttons["Conversations"]
         XCTAssertTrue(conversations.waitForExistence(timeout: 10))
         XCTAssertLessThanOrEqual(conversations.frame.minX - window.frame.minX, 2)
+
+        // Geometry alone missed the previous regression: the button met the
+        // edge while its rounded fill and mismatched corner patch left a dark
+        // wedge. Check the selected and unselected surfaces in each theme.
+        assertRowCorner(in: window, row: conversations,
+                        name: "conversations-\(appearance)")
+        window.buttons["Bots"].click()
+        assertRowCorner(in: window, row: conversations,
+                        name: "bots-\(appearance)")
+    }
+
+    private func assertRowCorner(in window: XCUIElement, row: XCUIElement,
+                                 name: String) {
+        let shot = window.screenshot()
+        let capture = XCTAttachment(screenshot: shot)
+        capture.name = "sidebar-corner-\(name)"
+        capture.lifetime = .keepAlways
+        add(capture)
+        guard let bitmap = NSBitmapImageRep(data: shot.pngRepresentation) else {
+            XCTFail("Could not decode the window screenshot")
+            return
+        }
+        let scaleX = CGFloat(bitmap.pixelsWide) / window.frame.width
+        let scaleY = CGFloat(bitmap.pixelsHigh) / window.frame.height
+        let rowX = row.frame.minX - window.frame.minX
+        let rowY = row.frame.minY - window.frame.minY
+        let patchX = Int((rowX + 5) * scaleX)
+        let faceX = Int((rowX + 65) * scaleX)
+        for offset in [3.0, 8.0] {
+            let y = Int((rowY + offset) * scaleY)
+            guard let patch = bitmap.colorAt(x: patchX, y: y)?.usingColorSpace(.deviceRGB),
+                  let face = bitmap.colorAt(x: faceX, y: y)?.usingColorSpace(.deviceRGB) else {
+                XCTFail("Could not sample the \(name) corner")
+                return
+            }
+            for (edge, interior) in zip(
+                [patch.redComponent, patch.greenComponent, patch.blueComponent],
+                [face.redComponent, face.greenComponent, face.blueComponent]
+            ) {
+                XCTAssertLessThan(abs(edge - interior), 0.06,
+                                  "The \(name) row must meet the corner at offset \(offset)")
+            }
+        }
     }
 
     func testBotsHeaderIsVisibleBelowToolbar() {

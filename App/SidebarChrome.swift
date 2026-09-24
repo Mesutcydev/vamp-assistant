@@ -256,7 +256,9 @@ struct SidebarNavRow: View {
             .background {
                 if isTopRow {
                     UnevenRoundedRectangle(
-                        topLeadingRadius: SidebarCornerPatch.arc,
+                        // The window/sidebar panel already owns this outer
+                        // corner. A second radius here exposes a dark wedge.
+                        topLeadingRadius: 0,
                         bottomLeadingRadius: SidebarMetrics.selectionRadius,
                         bottomTrailingRadius: SidebarMetrics.selectionRadius,
                         topTrailingRadius: SidebarMetrics.selectionRadius)
@@ -295,6 +297,7 @@ struct SidebarNavRow: View {
 /// panel itself is untouched; outside it the window shows navigation surface
 /// rather than a shadow on black.
 struct SidebarCornerPatch: View {
+    @Environment(\.colorScheme) private var colorScheme
     /// Which of the panel's leading corners this patch covers. macOS 26 rounds
     /// the column at every corner, and the window shows through outside each
     /// arc, so both leading corners need the same treatment.
@@ -304,6 +307,7 @@ struct SidebarCornerPatch: View {
     }
 
     var corner: Corner = .topLeading
+    var selectedTopRow = false
 
     /// How much of the corner is repainted. The mask only covers the area
     /// outside the system panel's arc, leaving the flush first row untouched.
@@ -314,7 +318,26 @@ struct SidebarCornerPatch: View {
 
     var body: some View {
         ZStack(alignment: .leading) {
-            (corner == .topLeading ? Theme.navigationTop : Theme.navigationBottom)
+            ZStack {
+                (corner == .topLeading ? Theme.navigationTop : Theme.navigationBottom)
+                if corner == .topLeading && colorScheme == .dark {
+                    // The column's material and highlight make its plane
+                    // lighter than navigationTop in dark and OLED modes.
+                    Color.white.opacity(0.055)
+                }
+                if corner == .topLeading && selectedTopRow {
+                    // Match the Conversations fill over the navigation plane.
+                    // This area is outside the system panel's rounded mask,
+                    // so its row background cannot reach it on its own.
+                    Theme.washStrong(Theme.accent)
+                    // The panel's regular material and top sheen lighten its
+                    // selected row. The patch sits above the panel shadow and
+                    // needs the same visible lift at the exposed corner.
+                    if colorScheme == .dark {
+                        Color.white.opacity(0.02)
+                    }
+                }
+            }
                 .mask {
                     Rectangle()
                         .overlay(alignment: corner == .topLeading ? .bottomTrailing : .topTrailing) {

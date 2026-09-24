@@ -148,7 +148,7 @@ struct MainWindowView: View {
             // Painted last, above the split view, so it can cover the shadow the
             // system draws around the sidebar panel's rounded leading corners.
             if sidebarOnScreen, !showSettings {
-                SidebarCornerPatch()
+                SidebarCornerPatch(selectedTopRow: destination == .conversations)
                     .frame(width: SidebarCornerPatch.size, height: SidebarCornerPatch.size)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .allowsHitTesting(false)
