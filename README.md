@@ -54,7 +54,7 @@ The resulting `Vamp-Assistant-iOS-*-unsigned.ipa` can be re-signed with AltStore
 
 Vamp Assistant can use [TinyFish Search](https://docs.tinyfish.ai/search-api) for current, ranked web sources, snippets, and URLs. Add the key in **Settings → Providers → TinyFish Search**; it is stored in the Mac Keychain and the read-only `web_search` tool is then available in Assistant, Code, browser-control, and bot runs. The assistant can pass a returned URL to `web_fetch` or the in-app browser for verification. For headless/CLI use, set `TINYFISH_API_KEY` before launching the host. No TinyFish key is bundled with the app.
 
-**Install:** [download the latest Apple-silicon DMG](https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.39/Vamp-Assistant-0.10.39-build-118-preview.dmg), open it, and move **Vamp Assistant.app** to Applications. Apple Silicon + macOS 15+.
+**Install:** [download the latest Apple-silicon DMG](https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.40/Vamp-Assistant-0.10.40-build-119-preview.dmg), open it, and move **Vamp Assistant.app** to Applications. Apple Silicon + macOS 15+.
 
 > Gatekeeper will warn once — this build is Apple Development–signed, **not notarized** (Developer ID certs are revoked). Approve it on first launch (System Settings → Privacy & Security → **Open Anyway**), or clear the download quarantine first: `xattr -dr com.apple.quarantine "/Applications/Vamp Assistant.app"`.
 
