@@ -94,8 +94,8 @@ struct SettingsView: View {
                 ScrollView {
                     SettingsColumn(
                         paneWidth: paneWidth,
-                        maxWidth: tab == .models ? SettingsColumnMetrics.modelsMaxWidth
-                                                 : SettingsColumnMetrics.maxWidth
+                        baseWidth: tab == .models ? SettingsColumnMetrics.modelsBaseWidth
+                                                  : SettingsColumnMetrics.baseWidth
                     ) {
                         pageHeader
                         Group {
@@ -174,10 +174,14 @@ struct SettingsView: View {
 /// rail, content jammed against the trailing edge) and pushed the wider
 /// Models column straight off the pane.
 enum SettingsColumnMetrics {
-    /// Ordinary settings page maximum width.
-    static let maxWidth: CGFloat = 820
+    /// Ordinary settings page width on normal windows.
+    static let baseWidth: CGFloat = 820
     /// The model rack is a two-up card grid; it needs more room than a form.
-    static let modelsMaxWidth: CGFloat = 1040
+    static let modelsBaseWidth: CGFloat = 1040
+    /// On big windows the column grows past its base width to this share of
+    /// the pane, so a full-screen window isn't a thin strip in a dark field.
+    /// ponytail: one fraction, raise/lower it to taste.
+    static let paneFill: CGFloat = 0.72
     /// Outer gutter between the column and the pane's edges. The gutter is the
     /// first thing to give way when the pane is tight, before any control is
     /// compressed.
@@ -191,14 +195,15 @@ enum SettingsColumnMetrics {
 private struct SettingsColumn<Content: View>: View {
     /// Width of the detail pane this column lives in (the rail excluded).
     let paneWidth: CGFloat
-    let maxWidth: CGFloat
+    let baseWidth: CGFloat
     @ViewBuilder var content: Content
 
     private var gutter: CGFloat { SettingsColumnMetrics.gutter(forPaneWidth: paneWidth) }
 
     private var columnWidth: CGFloat {
-        guard paneWidth > 0 else { return maxWidth }
-        return min(maxWidth, max(240, paneWidth - 2 * gutter))
+        guard paneWidth > 0 else { return baseWidth }
+        let target = max(baseWidth, paneWidth * SettingsColumnMetrics.paneFill)
+        return min(target, max(240, paneWidth - 2 * gutter))
     }
 
     var body: some View {
