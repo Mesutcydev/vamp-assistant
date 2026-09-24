@@ -10,6 +10,7 @@ final class AgentSessionController: ObservableObject {
         case commandOrFile
         case permissions(LFJSONValue)
         case dynamicTool(ParsedToolCall)
+        case acpPermission(id: LFJSONValue, options: [LFJSONValue])
     }
 
     struct TranscriptItem: Identifiable, Equatable {
@@ -141,6 +142,15 @@ final class AgentSessionController: ObservableObject {
     private var codexStreamingText = ""
     private var codexReasoningText = ""
     private var codexRecord: SessionRecord?
+
+    // External ACP harness runs (Settings → Agent → Harness) reuse the Codex
+    // state above for streaming, tool rows, approvals, and persistence. The
+    // harness process lives across turns; its session belongs to one chat.
+    private var acpClient: ACPClient?
+    private var acpSession: ACPSessionInfo?
+    private var acpSessionID: String? { acpSession?.id }
+    private var acpSessionOwner: UUID?
+    private var isACPRun = false
 
     /// Supplies the active model ID (AppState owns that truth).
     var activeModelIDHandler: () -> String = { "" }
@@ -288,6 +298,7 @@ final class AgentSessionController: ObservableObject {
         runStartedAt = Date()
         // A stale event task must never outlive the run it belongs to.
         eventTask?.cancel()
+        isACPRun = false
         codexTurnID = nil
         codexApprovalRequestID = nil
         codexApprovalInvocation = nil
@@ -305,7 +316,7 @@ final class AgentSessionController: ObservableObject {
         pendingPlanID = nil
         livePlan = []
         finishReason = nil
-        exactAnswerOverride = activeCodexModelIDHandler() == nil
+        exactAnswerOverride = activeCodexModelIDHandler() == nil && settings.selectedHarness == nil
             ? PromptBuilder.exactRequestedAnswer(in: message)
             : nil
 
@@ -359,26 +370,17 @@ final class AgentSessionController: ObservableObject {
 
         // Prepared turn: the transcript shows the user's clean message; the
         // MODEL receives bounded attachment context. The two never mix.
-        // A GGUF model served with a multimodal projector sees the pixels itself;
-        // every other engine keeps the described-image path.
-        let engineSeesImages = await engine.supportsImageInput
-        let nativeImageInput = !attachments.isEmpty && engineSeesImages
-        let prepared = await Self.expand(
-            attachments: attachments,
-            message: message,
-            nativeImageInput: nativeImageInput)
-        let expandedMessage = prepared.text
-        let modelText = modelInstruction.map {
-            "Specialist instruction: \($0)\n\nUser request:\n\(expandedMessage)"
-        } ?? expandedMessage
         let displayText = attachments.isEmpty ? message : message + "  ·  " + Self.attachmentSummary(attachments)
         transcript.append(TranscriptItem(id: UUID(), kind: .user(displayText)))
-        if !prepared.images.isEmpty {
-            // Visible proof of HOW the image reached the model: sent as
-            // pixels to a projector, not paraphrased by a sidecar.
-            let count = prepared.images.count
-            transcript.append(TranscriptItem(id: UUID(), kind: .notice(
-                "\(count == 1 ? "Image" : "\(count) images") sent to \(activeModelIDHandler()) as image input (vision projector loaded).")))
+        let prepare = { (seesImages: Bool) async -> PreparedTurn in
+            var prepared = await Self.expand(
+                attachments: attachments,
+                message: message,
+                nativeImageInput: !attachments.isEmpty && seesImages)
+            prepared.text = modelInstruction.map {
+                "Specialist instruction: \($0)\n\nUser request:\n\(prepared.text)"
+            } ?? prepared.text
+            return prepared
         }
 
         // Continuation seed: an explicit seed wins; otherwise the persisted
@@ -388,6 +390,32 @@ final class AgentSessionController: ObservableObject {
         let continuationSeed = seed ?? Self.persistedSeed(
             sessionID: activeSessionID,
             workspacePath: persistenceScope)
+
+        // The harness says whether it takes images once it has started, so it
+        // prepares the turn itself.
+        if let harness = settings.selectedHarness {
+            await startHarnessRun(
+                harness,
+                workspace: workspace,
+                prepare: prepare,
+                displayText: displayText,
+                seed: continuationSeed,
+                chatOnly: chatOnly)
+            return
+        }
+
+        // A GGUF model served with a multimodal projector sees the pixels itself;
+        // every other engine keeps the described-image path.
+        let prepared = await prepare(await engine.supportsImageInput)
+        let modelText = prepared.text
+        if !prepared.images.isEmpty {
+            // Visible proof of HOW the image reached the model: sent as
+            // pixels to a projector, not paraphrased by a sidecar.
+            let count = prepared.images.count
+            transcript.append(TranscriptItem(id: UUID(), kind: .notice(
+                "\(count == 1 ? "Image" : "\(count) images") sent to \(activeModelIDHandler()) as image input (vision projector loaded).")))
+        }
+
 
         // Account-backed OpenAI runs use Codex's own agent harness. It owns
         // command execution, file changes, MCP, and sandbox decisions; Beet
@@ -592,6 +620,230 @@ final class AgentSessionController: ObservableObject {
             // Teardown: MCP servers must not outlive the run that owns them.
             await self?.mcpRegistry.stop()
         }
+    }
+
+    // MARK: External ACP harness runs
+
+    private func startHarnessRun(
+        _ harness: ACPHarness,
+        workspace: URL,
+        prepare: (Bool) async -> PreparedTurn,
+        displayText: String,
+        seed: SessionRecord?,
+        chatOnly: Bool
+    ) async {
+        isACPRun = true
+        var record = seed ?? SessionRecord(
+            id: activeSessionID ?? UUID(),
+            title: String(displayText.prefix(80)),
+            createdAt: Date(),
+            updatedAt: Date(),
+            workspacePath: "",
+            modelID: "",
+            messages: [],
+            checkpoints: [],
+            source: .app,
+            schemaVersion: SessionRecord.currentSchemaVersion)
+        record.workspacePath = chatOnly ? "" : workspace.path
+        record.modelID = "acp:\(harness.id)"
+        record.source = .app
+        record.messages.append(SessionMessage(
+            role: .user,
+            content: displayText,
+            toolName: nil,
+            timestamp: Date()))
+        record.updatedAt = Date()
+        codexRecord = record
+        activeSessionID = record.id
+        SessionStore.shared.currentSessionID = record.id
+        persistSessionRecord(record)
+
+        do {
+            if let existing = acpClient {
+                let running = await existing.isRunning
+                if existing.harness != harness || !running {
+                    await existing.stop()
+                    acpClient = nil
+                }
+            }
+            let client: ACPClient
+            if let existing = acpClient {
+                client = existing
+            } else {
+                transcript.append(TranscriptItem(id: UUID(), kind: .notice(
+                    "Starting \(harness.name) (\(harness.command))…")))
+                client = ACPClient(harness: harness)
+                do {
+                    try await client.start()
+                } catch {
+                    await client.stop()
+                    throw error
+                }
+                acpClient = client
+                acpSession = nil
+            }
+            let prepared = await prepare(await client.supportsImages)
+            var prompt = prepared.text
+            if acpSession == nil || acpSessionOwner != record.id {
+                // Same MCP scope as the built-in loop: user config always,
+                // project config only in a trusted workspace.
+                let trusted = !chatOnly && WorkspaceTrust.isTrusted(workspace)
+                let servers = chatOnly ? [:] : MCPConfig.load(
+                    workspaceRoot: workspace, includeOpenCode: trusted, includeWorkspace: trusted).servers
+                acpSession = try await client.newSession(cwd: workspace, mcpServers: servers)
+                acpSessionOwner = record.id
+                rememberHarnessModels(harness)
+                // A fresh harness session has no memory of this chat.
+                var history = seed
+                history?.codexThreadID = nil
+                prompt = Self.codexPrompt(seed: history, current: prepared.text)
+            }
+            // Checked every turn, so a pick made mid-chat applies to the next message.
+            if let choice = settings.harnessModelChoice[harness.id], let session = acpSession,
+               choice != session.currentModelID, session.models.contains(where: { $0.id == choice }) {
+                do {
+                    try await client.setModel(choice, in: session)
+                    acpSession?.currentModelID = choice
+                } catch {
+                    transcript.append(TranscriptItem(id: UUID(), kind: .notice(
+                        "Could not switch \(harness.name) to \(choice): \(error.localizedDescription)")))
+                }
+            }
+            guard isRunning, !Task.isCancelled, let sessionID = acpSessionID else { return }
+            let images = prepared.images
+            codexStreamingText = ""
+            codexReasoningText = ""
+            currentPhase = .working
+            let token = runID
+            let stream = await client.events()
+            eventTask = Task { [weak self] in
+                for await message in stream {
+                    self?.handleACP(message, runID: token)
+                }
+            }
+            Task { [weak self] in
+                var stopReason = "end_turn"
+                var failure: String?
+                do {
+                    stopReason = try await client.prompt(sessionID: sessionID, text: prompt, images: images)
+                } catch {
+                    failure = error.localizedDescription
+                }
+                // Stop already finished this run; the harness's late
+                // "cancelled" reply must not finish it twice.
+                guard let self, self.isRunning else { return }
+                let reason: AgentFinish = if let failure {
+                    .engineError(failure)
+                } else if stopReason == "cancelled" {
+                    .cancelled
+                } else if stopReason == "refusal" {
+                    .engineError("\(harness.name) refused the request.")
+                } else {
+                    .completed(Self.codexCompletionSummary(self.codexStreamingText))
+                }
+                self.finishCodex(reason, runID: token)
+            }
+        } catch {
+            guard isRunning, !Task.isCancelled else { return }
+            finishCodex(.engineError(
+                error.localizedDescription + "\nIf \(harness.name) needs installing or sign-in, run `\(harness.command)` once in Terminal."),
+                runID: runID)
+        }
+    }
+
+    /// Keeps the harness's model list for Settings; the harness default is
+    /// the current model until the user picks one.
+    private func rememberHarnessModels(_ harness: ACPHarness) {
+        guard let models = acpSession?.models, !models.isEmpty,
+              settings.harnessModels[harness.id] != models else { return }
+        settings.harnessModels[harness.id] = models
+    }
+
+    private func handleACP(_ message: ACPMessage, runID token: UUID) {
+        guard token == runID, isRunning else {
+            if let id = message.id {
+                Task { await acpClient?.respond(id: id, result: ACPClient.cancelledPermission) }
+            }
+            return
+        }
+        if let id = message.id {
+            handleACPPermission(id: id, params: message.params)
+            return
+        }
+        guard message.method == "session/update",
+              message.params["sessionId"]?.stringValue == acpSessionID,
+              let update = message.params["update"]?.objectValue
+        else { return }
+
+        switch update["sessionUpdate"]?.stringValue {
+        case "agent_message_chunk":
+            guard let text = update["content"]?.objectValue?["text"]?.stringValue, !text.isEmpty else { return }
+            codexStreamingText += text
+            pendingTokenBuffer += text
+            scheduleTokenFlush()
+        case "agent_thought_chunk":
+            guard let text = update["content"]?.objectValue?["text"]?.stringValue, !text.isEmpty else { return }
+            codexReasoningText += text
+            if settings.showReasoning {
+                pendingReasoningPublish = true
+                scheduleTokenFlush()
+            }
+        case "tool_call", "tool_call_update":
+            handleACPToolCall(update)
+        case "plan":
+            livePlan = (update["entries"]?.arrayValue ?? []).compactMap { entry in
+                guard let object = entry.objectValue, let step = object["content"]?.stringValue else { return nil }
+                return PlanEntry(step: step, status: object["status"]?.stringValue ?? "pending")
+            }
+        case "config_option_update":
+            guard var session = acpSession, let harness = acpClient?.harness else { return }
+            ACPClient.applyModels(from: update, to: &session)
+            acpSession = session
+            rememberHarnessModels(harness)
+        default:
+            break
+        }
+    }
+
+    private func handleACPToolCall(_ update: [String: LFJSONValue]) {
+        guard let callID = update["toolCallId"]?.stringValue else { return }
+        if codexItemInvocations[callID] == nil {
+            let invocation = ToolInvocation(
+                name: ACPClient.toolName(kind: update["kind"]?.stringValue),
+                argumentsJSON: (update["rawInput"] ?? .object([:])).encoded(),
+                summary: update["title"]?.stringValue ?? "Tool call")
+            codexItemInvocations[callID] = invocation
+            transcript.append(TranscriptItem(id: UUID(), kind: .toolCall(invocation)))
+            appendCodexMessage(role: .toolCall, content: invocation.argumentsJSON, toolName: invocation.name)
+        }
+        guard let invocation = codexItemInvocations[callID],
+              let status = update["status"]?.stringValue,
+              status == "completed" || status == "failed"
+        else { return }
+        let output = ACPClient.toolOutput(update)
+        transcript.append(TranscriptItem(
+            id: UUID(),
+            kind: .toolResult(id: invocation.id, output: output, failed: status == "failed", toolName: invocation.name)))
+        appendCodexMessage(role: .toolResult, content: output, toolName: invocation.name)
+    }
+
+    private func handleACPPermission(id: LFJSONValue, params: [String: LFJSONValue]) {
+        let options = params["options"]?.arrayValue ?? []
+        if effectiveFullAccess || effectiveAgentIsAuto {
+            Task { await acpClient?.respond(
+                id: id,
+                result: ACPClient.permissionResult(options: options, approved: true, always: false)) }
+            return
+        }
+        let toolCall = params["toolCall"]?.objectValue ?? [:]
+        let invocation = toolCall["toolCallId"]?.stringValue.flatMap { codexItemInvocations[$0] }
+            ?? ToolInvocation(
+                name: ACPClient.toolName(kind: toolCall["kind"]?.stringValue),
+                argumentsJSON: (toolCall["rawInput"] ?? .object([:])).encoded(),
+                summary: toolCall["title"]?.stringValue ?? "The harness wants to use a tool")
+        codexApprovalKind = .acpPermission(id: id, options: options)
+        pendingApproval = ApprovalRequest(id: UUID(), invocation: invocation, preview: .none)
+        currentPhase = .awaitingApproval
     }
 
     // MARK: Codex app-server runs
@@ -1077,15 +1329,16 @@ final class AgentSessionController: ObservableObject {
         eventTask = nil
         codexTurnID = nil
         codexLastError = nil
+        let backend = isACPRun ? "Harness" : "Codex"
         switch reason {
         case .completed:
-            DiagnosticsCenter.shared.record(.session, "Codex task completed")
+            DiagnosticsCenter.shared.record(.session, backend + " task completed")
         case .cancelled:
-            DiagnosticsCenter.shared.record(.session, "Codex task stopped by user", level: .warning)
+            DiagnosticsCenter.shared.record(.session, backend + " task stopped by user", level: .warning)
         case .maxTurnsReached, .declined:
             break
         case .engineError(let message):
-            DiagnosticsCenter.shared.record(.engine, "Codex engine error", detail: message, level: .error)
+            DiagnosticsCenter.shared.record(.engine, backend + " engine error", detail: message, level: .error)
         }
         startPendingSteerIfNeeded()
     }
@@ -1277,6 +1530,11 @@ final class AgentSessionController: ObservableObject {
     func stop() {
         startTask?.cancel()
         startTask = nil
+        if loop == nil, isRunning, isACPRun {
+            cancelACPTurn()
+            finishCodex(.cancelled, runID: runID)
+            return
+        }
         if loop == nil, let threadID = codexThreadID, let turnID = codexTurnID {
             let token = runID
             let client = codexAccount.client
@@ -1435,6 +1693,11 @@ final class AgentSessionController: ObservableObject {
     func stopAndWait() async {
         startTask?.cancel()
         startTask = nil
+        if loop == nil, isRunning, isACPRun {
+            cancelACPTurn()
+            cancelCodexState()
+            return
+        }
         if loop == nil, codexTurnID != nil {
             let threadID = codexThreadID
             let turnID = codexTurnID
@@ -1543,6 +1806,17 @@ final class AgentSessionController: ObservableObject {
         codexQuestionID = nil
     }
 
+    /// ACP cancel: answer any open permission prompt, then cancel the turn.
+    private func cancelACPTurn() {
+        guard let client = acpClient, let sessionID = acpSessionID else { return }
+        let openPermission: LFJSONValue?
+        if case .acpPermission(let id, _) = codexApprovalKind { openPermission = id } else { openPermission = nil }
+        Task {
+            if let openPermission { await client.respond(id: openPermission, result: ACPClient.cancelledPermission) }
+            await client.cancel(sessionID: sessionID)
+        }
+    }
+
     private func cancelCodexState() {
         runID = UUID()
         eventTask?.cancel()
@@ -1632,7 +1906,7 @@ final class AgentSessionController: ObservableObject {
         }
         codexThreadID = record.codexThreadID
         codexTurnID = nil
-        codexRecord = record.modelID.hasPrefix("openai-codex:") ? record : nil
+        codexRecord = record.modelID.hasPrefix("openai-codex:") || record.modelID.hasPrefix("acp:") ? record : nil
         codexItemInvocations.removeAll()
         runID = UUID()
         isRunning = false
@@ -2050,13 +2324,22 @@ final class AgentSessionController: ObservableObject {
             transcript.append(
                 TranscriptItem(id: UUID(), kind: .notice("Approved: \(request.invocation.name)")))
             DiagnosticsCenter.shared.record(.approval, "\(request.invocation.name) approved\(always ? " (always)" : "")")
-            if always {
+            if always, !isACPRun {
                 applyAlwaysApproval(for: request)
             }
         } else {
             transcript.append(
                 TranscriptItem(id: UUID(), kind: .notice("Declined: \(request.invocation.name)")))
             DiagnosticsCenter.shared.record(.approval, "\(request.invocation.name) declined", level: .warning)
+        }
+        if case .acpPermission(let id, let options) = codexKind {
+            let client = acpClient
+            Task { await client?.respond(
+                id: id,
+                result: ACPClient.permissionResult(options: options, approved: approved, always: always)) }
+            codexApprovalKind = nil
+            currentPhase = .working
+            return
         }
         if let codexRequestID {
             let client = codexAccount.client
@@ -2091,7 +2374,7 @@ final class AgentSessionController: ObservableObject {
                         requestID: codexRequestID,
                         decision: approved ? (always ? "acceptForSession" : "accept") : "decline")
                 }
-            case .none:
+            case .none, .acpPermission:
                 Task {
                     try? await client.respondToApproval(
                         requestID: codexRequestID,

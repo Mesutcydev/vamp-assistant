@@ -384,7 +384,10 @@ final class ComposerStore {
     /// commands bypass this entirely (they run locally).
     var sendBlocker: String? {
         if case .loading = currentEnginePhase { return "Model is loading…" }
-        if appState?.isModelReady != true { return "Choose a model to run" }
+        // An external harness brings its own model.
+        if appState?.isModelReady != true, SettingsStore.shared.selectedHarness == nil {
+            return "Choose a model to run"
+        }
         if prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "Describe the task first" }
         return nil
     }

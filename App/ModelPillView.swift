@@ -10,6 +10,7 @@ import SwiftUI
 
 struct ModelSelectionPill: View {
     @EnvironmentObject private var appState: AppState
+    @ObservedObject private var settings = SettingsStore.shared
     @State private var showPopover = false
     /// Caps only the label's width, so a fixed-bay composer can truncate a long
     /// model name without the pill claiming the rest of the strip.
@@ -166,6 +167,11 @@ struct ModelSelectionPill: View {
     // MARK: Derived state — one canonical source (AppState/engine)
 
     private var label: String {
+        if let harness = settings.selectedHarness {
+            let choice = settings.harnessModelChoice[harness.id]
+            let model = settings.harnessModels[harness.id]?.first { $0.id == choice }
+            return model.map { "\(harness.name) · \($0.name)" } ?? harness.name
+        }
         switch appState.enginePhase {
         case .ready(let name):
             return name
@@ -183,6 +189,7 @@ struct ModelSelectionPill: View {
     private var icon: String {
         if case .loading = appState.enginePhase { return "hourglass" }
         if case .failed = appState.enginePhase { return "exclamationmark.triangle" }
+        if settings.selectedHarness != nil { return "point.3.connected.trianglepath.dotted" }
         if appState.isCodexActive { return "person.crop.circle.fill" }
         return appState.isRemoteActive ? "cloud.fill" : "cpu.fill"
     }

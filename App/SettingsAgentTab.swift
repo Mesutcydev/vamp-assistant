@@ -3,9 +3,69 @@ import SwiftUI
 
 struct AgentTab: View {
     @ObservedObject private var settings = SettingsStore.shared
+    @State private var loadingRegistry = false
+    @State private var registryError: String?
 
     var body: some View {
         TabScroll {
+            SettingsCard(title: "Harness", icon: "point.3.connected.trianglepath.dotted", footer: "An external harness runs the whole turn with its own model, tools, and login over the Agent Client Protocol. Install it and sign in once in Terminal; its permission prompts appear here as approval cards. Vamp’s model picker and the settings below apply only to the built-in harness.") {
+                SettingRow(label: "Agent harness", value: settings.selectedHarness?.command ?? "Vamp’s own agent loop") {
+                    Picker("Agent harness", selection: $settings.harnessID) {
+                        Text("Vamp (built-in)").tag(ACPHarness.builtInID)
+                        Divider()
+                        ForEach(ACPHarness.presets) { harness in
+                            Text(harness.name).tag(harness.id)
+                        }
+                        if !settings.registryHarnesses.isEmpty {
+                            Divider()
+                            ForEach(settings.registryHarnesses) { harness in
+                                Text(harness.name).tag(harness.id)
+                            }
+                        }
+                        Divider()
+                        Text("Custom command…").tag(ACPHarness.customID)
+                    }
+                    .labelsHidden()
+                }
+                SettingRow(label: "ACP registry", value: registryError ?? "\(settings.registryHarnesses.count) more agents listed") {
+                    Button(loadingRegistry ? "Loading…" : "Refresh") {
+                        loadingRegistry = true
+                        Task {
+                            do {
+                                settings.registryHarnesses = try await ACPHarness.fetchRegistry()
+                                registryError = nil
+                            } catch {
+                                registryError = error.localizedDescription
+                            }
+                            loadingRegistry = false
+                        }
+                    }
+                    .disabled(loadingRegistry)
+                }
+                if settings.harnessID == ACPHarness.customID {
+                    SettingRow(label: "Command") {
+                        TextField("my-agent --acp", text: $settings.customHarnessCommand)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 260)
+                    }
+                }
+                if settings.selectedHarness != nil {
+                    let models = settings.harnessModels[settings.harnessID] ?? []
+                    SettingRow(label: "Model", value: models.isEmpty ? "The list appears after the harness’s first run." : "Applies from the next message.") {
+                        Picker("Model", selection: Binding(
+                            get: { settings.harnessModelChoice[settings.harnessID] ?? "" },
+                            set: { settings.harnessModelChoice[settings.harnessID] = $0.isEmpty ? nil : $0 })) {
+                            Text("Harness default").tag("")
+                            ForEach(models) { model in
+                                Text(model.name).tag(model.id)
+                            }
+                        }
+                        .labelsHidden()
+                        .disabled(models.isEmpty)
+                    }
+                }
+            }
+
             SettingsCard(title: "Autonomy", icon: "shield.lefthalf.filled", footer: "Reads run automatically. Auto mode and Full Access continue routine actions without approval cards; destructive safeguards, imported denies, and macOS privacy permissions still apply.") {
                 SettingRow(label: "Agent mode", value: settings.agentMode.help) {
                     Picker("Agent mode", selection: $settings.agentMode) {

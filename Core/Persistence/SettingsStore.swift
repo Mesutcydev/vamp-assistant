@@ -317,6 +317,58 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    /// `ACPHarness.builtInID` runs Vamp's own agent loop; any other id hands
+    /// the turn to that external ACP harness.
+    var harnessID: String {
+        get { defaults.string(forKey: DefaultsKeys.harnessID) ?? ACPHarness.builtInID }
+        set {
+            defaults.set(newValue, forKey: DefaultsKeys.harnessID)
+            objectWillChange.send()
+        }
+    }
+
+    var customHarnessCommand: String {
+        get { defaults.string(forKey: DefaultsKeys.customHarnessCommand) ?? "" }
+        set {
+            defaults.set(newValue, forKey: DefaultsKeys.customHarnessCommand)
+            objectWillChange.send()
+        }
+    }
+
+    var selectedHarness: ACPHarness? {
+        ACPHarness.resolve(id: harnessID, customCommand: customHarnessCommand, registry: registryHarnesses)
+    }
+
+    /// Last list fetched from the ACP registry (Settings → Agent → Harness).
+    var registryHarnesses: [ACPHarness] {
+        get { decoded(DefaultsKeys.registryHarnesses) ?? [] }
+        set { encode(newValue, DefaultsKeys.registryHarnesses) }
+    }
+
+    /// Models each harness reported for its last session, by harness id.
+    var harnessModels: [String: [ACPModel]] {
+        get { decoded(DefaultsKeys.harnessModels) ?? [:] }
+        set { encode(newValue, DefaultsKeys.harnessModels) }
+    }
+
+    /// The user's model per harness id; absent means the harness default.
+    var harnessModelChoice: [String: String] {
+        get { defaults.dictionary(forKey: DefaultsKeys.harnessModelChoice) as? [String: String] ?? [:] }
+        set {
+            defaults.set(newValue, forKey: DefaultsKeys.harnessModelChoice)
+            objectWillChange.send()
+        }
+    }
+
+    private func decoded<T: Decodable>(_ key: String) -> T? {
+        defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(T.self, from: $0) }
+    }
+
+    private func encode<T: Encodable>(_ value: T, _ key: String) {
+        defaults.set(try? JSONEncoder().encode(value), forKey: key)
+        objectWillChange.send()
+    }
+
     /// Explicit remote-session authority. Unlike the safe-command preference,
     /// this is the user's deliberate “Full Access” choice for remote runs.
     /// Workspace confinement and hard imported denies still apply.
@@ -804,6 +856,11 @@ final class SettingsStore: ObservableObject {
     private enum DefaultsKeys {
         static let autoApproveEdits = "autoApproveEdits"
         static let autoApproveCommands = "autoApproveCommands"
+        static let harnessID = "harnessID"
+        static let customHarnessCommand = "customHarnessCommand"
+        static let registryHarnesses = "registryHarnesses"
+        static let harnessModels = "harnessModels"
+        static let harnessModelChoice = "harnessModelChoice"
         static let remoteFullAccessEnabled = "remoteFullAccessEnabled"
         static let maxTurns = "maxTurns"
         static let maxTokensPerTurn = "maxTokensPerTurn"
