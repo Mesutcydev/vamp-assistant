@@ -1,35 +1,43 @@
 # Performance integrations for this Mac
 
-Reviewed 2026-09-27. Target: Mac mini, base Apple M4, 16 GiB unified memory. The iPhone is a remote client; inference speed is determined by the Mac host. This is a compatibility review, not a claim of measured speedups from a new integration.
+Tested 2026-09-27–28 on a Mac mini with base Apple M4 and 16 GiB unified memory. The iPhone is a remote client: these integrations run on the Mac host. They do not change or replace the selected model.
 
-## Recommended order
+## Implemented paths
 
-| Priority | Integration | Expected benefit to test | Fit and limits |
-|---|---|---|---|
-| 1 | [oMLX](https://github.com/jundot/omlx) through Vamp’s custom OpenAI-compatible provider | Lower time to first token in repeated chats and coding sessions, using memory/SSD prefix caching | Supports M4, MLX text and vision models. Use a checkpoint that fits 16 GiB. It does not load the current Huihui GGUF. Continuous batching improves aggregate throughput, not necessarily one chat’s decode rate. |
-| 2 | [Upstream llama.cpp Metal changes](https://github.com/ggml-org/llama.cpp) | Improve existing GGUF execution without changing model weights | Best architectural fit for Huihui. Benchmark the exact Q2_K model and projector before changing the runtime. [PR 28301](https://github.com/ggml-org/llama.cpp/pull/28301) targets routed MoE tiles and IQ2/IQ3 codebooks; it is not evidence of a Huihui dense Q2_K speedup. |
-| 3 | [MLXFast Bonsai 2 engine](https://github.com/Layr-Labs/mlxfast-bonsai2-27b-engine) as an optional native backend | Specialized Swift/Metal kernels and speculative decoding | Target pack is about 8.61 GB plus a 0.24 GB MTP head, or a separate 3.85 GB DFlash drafter. The MTP configuration warrants a memory-budgeted M4 prototype; weights alone do not prove runtime fit. Requires Bonsai MLX weights and a forked MLX stack, not a flag for Huihui GGUF. Official leaderboard results are on M5. Preserve vision and tools before adopting. |
-| 4 | [MLX Swift cache compression](https://github.com/ml-explore/mlx-swift-lm/blob/main/Libraries/MLXLMCommon/Documentation.docc/kv-cache-quantization.md) | Reduce long-context memory pressure and swapping | Vamp already offers experimental 8-bit KV and prompt caching. New TurboQuant schemes need dependency/API integration plus model-specific accuracy and latency tests. Lower memory does not guarantee faster decoding. |
-| Conditional | [TensorFold](https://github.com/ashhart/TensorFold) | Speculative decoding with model-specific kernels | Current code supports M1–M4 as well as M5. Tested Qwen target + drafter is 16.1 + 3.8 GB, before KV, OS and app memory; documented recommendation is 32 GB+. Its supported MLX quantization does not read Huihui Q2_K GGUF. API connection is easy; the tested configuration is a poor fit for this 16 GiB machine. |
+| Integration | Result on this Mac | Activation |
+|---|---|---|
+| [oMLX](https://github.com/jundot/omlx) | Qwen3 0.6B text, structured tool calls, repeated prompt caching, SmolVLM2 image reading, and app-managed unload passed. | Settings → Agent → Experimental inference → oMLX prompt caching. Only the verified Qwen3 0.6B and SmolVLM2 IDs are eligible. |
+| [llama.cpp Metal](https://github.com/ggml-org/llama.cpp) | Short Huihui Q2_K text and BF16 projector checks passed. Longer 128-token requests later failed with Metal out-of-memory errors. | Disabled below 24 GiB after longer tests failed on this 16 GiB Mac. Exact Huihui ID only; an enabled candidate that fails to load retries the existing runtime. |
+| [MLXFast Bonsai](https://github.com/Layr-Labs/mlxfast-bonsai2-27b-engine) | Native Swift server and optimized CBv2 adapter compiled. A live reply did not complete within this Mac's safe memory budget. | Disabled below 24 GiB. This floor is a conservative admission policy, not a successful benchmark on a 24 GiB Mac. Requires separate Bonsai MLX weights. |
 
-TensorFold source checked at `bb4b4a35863af562fc4ccb2586300d8f94b5d6de` (0.3.4.1). The site’s older M5-only wording is less complete than the current repository. No external runtime was installed, no weights were substituted, and no performance improvement is claimed from these candidates.
+All optional runtimes run as child processes, separate from the app's MLX ABI. They listen on loopback, join pool memory accounting, stop on unload/eviction, and have a parent-exit watchdog. Managed MLX children also have a physical-footprint guard. oMLX disables LAN discovery, uses a per-launch API key, and receives a dedicated model directory. Its per-model caches are bounded to 1 GB on SSD and 256 MB in memory. Failure to start oMLX falls back to the built-in MLX engine. The incompatible Bonsai ternary pack never falls through to ordinary MLX.
 
-## Already in Vamp
+The Prism runtime at `/Users/m/llama-prism/llama-server` remains installed. Bonsai PQ2_0 GGUF continues to use it; stock llama.cpp does not replace Prism globally.
 
-- GGUF: full GPU offload, one inference slot, exact-prefix prompt reuse, and a measured base-M4/16-GB batch profile of 1024/256.
-- Experimental n-gram speculation without a separate draft model.
-- Experimental DFlash limited to the trained Qwen3.5 9B pairing and admitted only when target plus draft fit the safe memory budget. It must not be enabled for an unrelated 27B checkpoint.
-- Experimental MLX prompt reuse and 8-bit KV caching, with fallback on unsupported engines.
-- Metal MTP is not enabled automatically: [upstream measurements](https://github.com/ggml-org/llama.cpp/issues/23752) report regressions on some Apple Silicon workloads. Any new implementation needs its own local comparison.
+## Measurements and limits
 
-The installed `llama-server` reports build 10685 / `7dffb158d` and resolves to the existing `/Users/m/llama-prism/llama-server` custom runtime. Avoid replacing it globally based only on a benchmark headline; compare a separately installed candidate and preserve a fallback.
+The oMLX Qwen3 0.6B test repeated a synthetic 982-token prompt and generated an eight-token answer. Total request time was 1.515 s initially, then 0.248 s and 0.165 s, with 768 cached prompt tokens. The first request includes first-use costs. This is evidence of reusable prefix caching for that small model, not a general speed multiplier or a speedup for Huihui GGUF. A structured weather-tool request passed. The separate SmolVLM2 fixture returned `Bonsai 42.`; its plain-chat/tool behavior was inadequate, so it remains a vision sidecar.
 
-## Lower-priority option
+For Huihui Q2_K, both runtimes used the same weights, projector, 4096-token context, 1024/256 batch profile, one slot, temperature zero, and prompt caching. A 467-token synthetic prompt took 9.473 s with the existing runtime and 10.092 s with the candidate on the first request. Repeated requests took 1.034/1.117 s versus 0.995/0.962 s. The image request took 10.437 s versus 9.931 s, with both returning `BONSAI 42`. Short output makes decode-rate estimates noisy. These short samples showed a small warm-response improvement, but they did not establish reliable operation. Subsequent 128-token response tests failed with GPU out-of-memory errors, first during concurrent testing and then in a separate run. Reducing the candidate to batch 256/microbatch 64, a 256 MiB RAM prompt cache and four context checkpoints did not resolve it. The candidate stays disabled on this 16 GiB Mac; the existing Prism runtime is retained. No usable speedup is claimed from the new Metal build on this device.
 
-[ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp) is not the first choice here. Its maintainers explicitly limit fully functional, performant backends to CPU and CUDA and do not commit to resolving Metal issues. NVIDIA/CUDA integrations do not accelerate this M4 GPU.
+The MLXFast experiment downloaded the pinned 8.61 GB Bonsai pack. Both the stock ModelContainer route and the optimized CBv2 route exceeded the 16 GiB machine's safe process budget. The guarded optimized attempt reached about 11.27 GiB before termination. Metal kernel self-tests ran, but no full generation correctness or speed claim is warranted. The unsuccessful experiment's weights, unused MTP head, and temporary build products were removed. The compiled helper and source patch remain available for further testing on suitable hardware. Vision and speculation are not enabled in this adapter.
 
-## Acceptance before enabling an integration
+Deleting the separate SSD-streaming Qwen model was a disk-cleanup action, not a prerequisite for any integration. Its restoration uses the existing pinned artifact manifest and verifies every file's size and SHA-256. None of these paths changes that model's streaming engine.
 
-Compare cold and warm first-token latency, prompt tokens/s, generated tokens/s, peak memory, swap growth, and output correctness on this Mac. Use the same checkpoint, prompt, context, temperature, output length and thermals; include short chat, a long follow-up, tool use, and an image. For speculation, measure accepted output tokens over elapsed decode time and include drafter memory. Never reuse the live user transcript as benchmark input.
+## Pinned runtimes
 
-Recommendation: retain the current GGUF vision backend for Huihui; trial oMLX with a fitting MLX checkpoint for repeated-session latency, and treat the Bonsai MLXFast backend as a separate native experiment. There is no verified drop-in 5× speed switch for the current Huihui model on this machine.
+- oMLX: `f0d8428acd3220c364177d1ea9593e4e15f94107`, isolated Python 3.13 environment; vision dependencies torch 2.14.0 and torchvision 0.29.0.
+- llama.cpp v0.5.0: `7fe450e19305b828c199d602c23a8337aaa1f03b`, Release Metal with embedded library.
+- MLXFast: `831fae740de35a106e85768d8b0534b4af422b13` plus `scripts/runtime-patches/mlxfast-vamp.patch` and `scripts/runtime-sources/VampBonsaiServerEngine.swift`.
+- Qwen3 0.6B test checkpoint: `mlx-community/Qwen3-0.6B-4bit`, revision `73e3e38d981303bc594367cd910ea6eb48349da8`.
+- Bonsai MLX experiment: `prism-ml/Ternary-Bonsai-2-27B-mlx-2bit`, revision `3f926b415992eaa2ae9dd7b573706494d6bbf787`.
+
+Run `python3 scripts/install-inference-runtimes.py --runtime all` on an Apple Silicon Mac with Xcode, git, cmake and uv. The installer preserves existing runtime entries, does not enable settings or select models, and does not download Bonsai weights unless explicitly requested with `--bonsai-weights`. It builds locally; runtime binaries are not bundled in the DMG or IPA. Download Qwen3 0.6B from Vamp's model catalog to try the small cached-text path. The separate Bonsai MLXFast catalog entry is explicitly experimental and has a 24 GiB minimum. Neither 27B candidate has been validated on larger hardware. Quit/reload the active model after changing a runtime toggle.
+
+`ManagedInferenceTests` covers manifest confinement, fallback, image forwarding and unload. The opt-in `LiveManagedInferenceTests` gates launch the real managed engines. Forward `TEST_RUNNER_BEETCODE_LIVE_MANAGED_INFERENCE=omlx` or `metal` and `TEST_RUNNER_BEETCODE_LIVE_VISION_IMAGE=/path/to/the/BONSAI-42-fixture.jpg` to `xcodebuild test`; the normal suite skips these tests. Live tests require the pinned installed models.
+
+## Other candidates
+
+[TensorFold](https://github.com/ashhart/TensorFold) supports M1–M4 as well as M5 in the reviewed source (`bb4b4a35863af562fc4ccb2586300d8f94b5d6de`). Its documented Qwen target plus drafter needs 16.1 + 3.8 GB before caches, app and OS memory, with a 32 GB+ recommendation. It does not load Huihui Q2_K GGUF. It was reviewed but not installed.
+
+Vamp already offers experimental n-gram speculation, prompt reuse, KV8 and a narrowly matched Qwen3.5 9B DFlash path. They remain independent settings. [Upstream Metal MTP reports](https://github.com/ggml-org/llama.cpp/issues/23752) include regressions, so MTP is not enabled as a blanket optimization. [llama.cpp PR 28301](https://github.com/ggml-org/llama.cpp/pull/28301) targets MoE/IQ2/IQ3 kernels; it alone is not evidence for a dense Q2_K speedup.

@@ -1606,16 +1606,16 @@ final class AgentSessionController: ObservableObject {
         send(message)
     }
 
-    /// Starts the next turn of a persisted Beetcode session from the remote
-    /// browser surface. The session is restored first, so the agent loop gets
-    /// the same transcript, workspace binding, model choice, and checkpoints
-    /// as a local continuation.
-    @discardableResult
     func supportsRemoteImages() async -> Bool {
         guard activeCodexModelIDHandler() == nil, settings.selectedHarness == nil else { return false }
         return await engine.supportsImageInput
     }
 
+    /// Starts the next turn of a persisted Beetcode session from the remote
+    /// browser surface. The session is restored first, so the agent loop gets
+    /// the same transcript, workspace binding, model choice, and checkpoints
+    /// as a local continuation.
+    @discardableResult
     func continuePersistedSession(id: UUID, message: String, images: [ChatImage] = []) -> Bool {
         guard !isRunning,
               let record = SessionStore.shared.load(id: id),

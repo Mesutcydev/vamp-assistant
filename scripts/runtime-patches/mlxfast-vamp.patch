@@ -1,0 +1,60 @@
+diff --git a/Vendor/mlx-swift-lm/Executables/mlx-server/main.swift b/Vendor/mlx-swift-lm/Executables/mlx-server/main.swift
+index d91906e..c145ae0 100644
+--- a/Vendor/mlx-swift-lm/Executables/mlx-server/main.swift
++++ b/Vendor/mlx-swift-lm/Executables/mlx-server/main.swift
+@@ -2,6 +2,18 @@
+ 
+ import Foundation
+ import MLXLMServer
++import MLX
++
++// Vamp: keep allocator scratch bounded on 16 GB Macs before any weights or
++// kernel self-tests allocate. The library default can retain a second model's
++// worth of freed buffers and force the machine into swap.
++// The tiled route retains a reordered copy of the quantized weights. On
++// smaller Macs keep the stored layout, which the fork validates bitwise.
++if ProcessInfo.processInfo.physicalMemory <= 24 * 1024 * 1024 * 1024 {
++    setenv("DARKBLOOM_BONSAI_TENSOR_ROUTE_TILED", "0", 1)
++}
++Memory.cacheLimit = 128 * 1024 * 1024
++Memory.memoryLimit = Int(min(ProcessInfo.processInfo.physicalMemory * 7 / 10, 12 * 1024 * 1024 * 1024))
+ 
+ do {
+     switch try MLXServerCLI.parse() {
+diff --git a/Vendor/mlx-swift-lm/Libraries/MLXLMServer/CLI/MLXServerRunner.swift b/Vendor/mlx-swift-lm/Libraries/MLXLMServer/CLI/MLXServerRunner.swift
+index d16cca5..9c754af 100644
+--- a/Vendor/mlx-swift-lm/Libraries/MLXLMServer/CLI/MLXServerRunner.swift
++++ b/Vendor/mlx-swift-lm/Libraries/MLXLMServer/CLI/MLXServerRunner.swift
+@@ -3,9 +3,20 @@
+ import Foundation
+ import Hummingbird
+ import MLXLMCommon
++import MLXRunners
+ 
+ public enum MLXServer {
+     public static func run(configuration: MLXServerConfiguration) async throws {
++        let directory = URL(fileURLWithPath: configuration.model)
++        if (try? RunnerCheckpoint.modelType(at: directory)) == "prism_hadamard_qwen35" {
++            let type = try RunnerRegistry.shared.resolve(checkpoint: directory)
++            let runner = try await type.load(directory, options: RunnerLoadOptions(kvBytesCapacity: 512 * 1024 * 1024))
++            let engine = VampBonsaiServerEngine(runner: runner, modelID: configuration.model)
++            let service = MLXOpenAIService(engine: engine, defaultReasoningParser: configuration.reasoningParser)
++            let app = MLXServerApplication.buildApplication(service: service, host: configuration.host, port: configuration.port)
++            try await app.runService()
++            return
++        }
+         var primaryModelConfiguration = modelConfiguration(
+             for: configuration.model,
+             revision: configuration.revision
+diff --git a/Vendor/mlx-swift-lm/Package.swift b/Vendor/mlx-swift-lm/Package.swift
+index 38f309f..769923d 100644
+--- a/Vendor/mlx-swift-lm/Package.swift
++++ b/Vendor/mlx-swift-lm/Package.swift
+@@ -147,6 +147,7 @@ let package = Package(
+         .target(
+             name: "MLXLMServer",
+             dependencies: [
++                "MLXRunners",
+                 "MLXLLM",
+                 "MLXVLM",
+                 "MLXLMCommon",

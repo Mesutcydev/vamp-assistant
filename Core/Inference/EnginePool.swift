@@ -149,12 +149,12 @@ actor EnginePool {
         self.engineFactory = { format, sharedGate in
             switch format {
             case .mlx:
-                return MLXEngine(
+                return ManagedMLXEngine(fallback: MLXEngine(
                     gate: sharedGate,
                     experimentalPromptCacheEnabled:
                         ExperimentalInferencePreferences.mlxPromptCacheEnabledForNewEngine,
                     experimentalQuantizedKVEnabled:
-                        ExperimentalInferencePreferences.mlxQuantizedKVEnabledForNewEngine)
+                        ExperimentalInferencePreferences.mlxQuantizedKVEnabledForNewEngine))
             case .gguf:
                 return GGUFEngine(
                     experimentalDFlashEnabled:

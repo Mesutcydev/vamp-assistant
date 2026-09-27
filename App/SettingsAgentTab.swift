@@ -170,6 +170,22 @@ private struct ExperimentalInferenceCard: View {
             icon: "bolt.badge.clock",
             footer: "Off by default and independently reversible. Reload the model after changing a setting. MLX prompt reuse keeps only an in-memory verified prefix; KV8 compresses eligible attention cache after 512 tokens without changing model files. Vision models are excluded. A failed MLX experiment retries with full replay and standard KV before showing an error."
         ) {
+            SettingToggle(label: "oMLX prompt caching", isOn: $settings.omlxEnabled)
+                .help("Uses an installed oMLX runtime for verified MLX models. Each model has a bounded 1 GB disk cache and 256 MB memory cache. Reload to apply.")
+            SettingToggle(label: "MLXFast Bonsai engine", isOn: $settings.mlxfastEnabled)
+                .disabled(!ManagedInferenceRuntime.Kind.mlxfast.supportedOnThisMac)
+                .help("Runs the separate Bonsai MLX checkpoint with the installed native Swift engine. Requires 24 GB RAM; existing GGUF files keep their current engine.")
+            if !ManagedInferenceRuntime.Kind.mlxfast.supportedOnThisMac {
+                Text("MLXFast Bonsai needs 24 GB RAM. The Bonsai GGUF model remains available on this Mac.")
+                    .font(.caption).foregroundStyle(Theme.textSecondary)
+            }
+            SettingToggle(label: "Updated llama.cpp Metal", isOn: $settings.updatedMetalEnabled)
+                .disabled(!ManagedInferenceRuntime.Kind.llamaMetal.supportedOnThisMac)
+                .help("Uses the separately installed Metal runtime only for verified GGUF models, with the existing runtime as a load fallback.")
+            if !ManagedInferenceRuntime.Kind.llamaMetal.supportedOnThisMac {
+                Text("The updated runtime exceeded this Mac's memory budget in longer Huihui replies. The existing GGUF runtime stays active.")
+                    .font(.caption).foregroundStyle(Theme.textSecondary)
+            }
             SettingToggle(
                 label: "DFlash for Qwen3.5 9B GGUF",
                 isOn: $settings.experimentalDFlashEnabled)
@@ -225,6 +241,9 @@ private struct ExperimentalInferenceCard: View {
     }
 
     private var statusText: LocalizedStringResource {
+        if let runtime = appState.lastEngineStats.runtimeName {
+            return "\(runtime) is serving the loaded model."
+        }
         if appState.activeModel?.format == .mlx {
             let promptCache = appState.lastEngineStats.mlxPromptCacheActive
             let kv8 = appState.lastEngineStats.mlxQuantizedKVActive

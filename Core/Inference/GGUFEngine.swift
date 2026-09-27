@@ -437,15 +437,18 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
     /// Strength for a LoRA adapter staged beside the weights. 0 disables the
     /// adapter without deleting it.
     private let loraScale: Double
+    private let preferredRuntime: ManagedInferenceRuntime?
 
     init(
         experimentalDFlashEnabled: Bool = false,
         experimentalNGramEnabled: Bool = false,
-        loraScale: Double = 1.0
+        loraScale: Double = 1.0,
+        preferredRuntime: ManagedInferenceRuntime? = nil
     ) {
         self.experimentalDFlashEnabled = experimentalDFlashEnabled
         self.experimentalNGramEnabled = experimentalNGramEnabled
         self.loraScale = loraScale
+        self.preferredRuntime = preferredRuntime
     }
 
     var loadedModelID: String? {
@@ -510,7 +513,9 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
             ? Planner.loraFile(named: fileNames, modelID: modelID)
                 .map { directory.appendingPathComponent($0).path }
             : nil
-        let binary = try Self.resolveServerBinary()
+        let stableBinary = try Self.resolveServerBinary()
+        let updatedRuntime = preferredRuntime ?? ManagedInferenceRuntime.resolve(kind: .llamaMetal, modelID: modelID)
+        let binary = updatedRuntime?.executableURL() ?? stableBinary
 
         // RAM-honest context sizing: sniff the transformer dims from the GGUF
         // header and buy as many KV tokens as the budget left over after the
@@ -603,6 +608,16 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
                 mmprojPath: mmprojPath,
                 loraPath: loraPath)
         }
+        var usedUpdatedRuntime = binary != stableBinary
+        if attempt == nil, usedUpdatedRuntime {
+            Log.engine.warning("Updated Metal runtime could not load this checkpoint; retrying the existing GGUF runtime")
+            usedUpdatedRuntime = false
+            usedSpeculation = .none
+            attempt = try await launchServer(
+                binary: stableBinary, modelPath: modelPath,
+                contextSize: chosenContext, speculation: .none,
+                mmprojPath: mmprojPath, loraPath: loraPath)
+        }
         guard let (child, watchdog, serverPort) = attempt else {
             throw GGUFError.serverFailedToStart(
                 "no response from llama-server after experimental and stable launch attempts")
@@ -615,6 +630,7 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
             self.loadedID = modelID
             self.launchedContextSize = chosenContext
             self.statsState = EngineStats(acceleration: usedSpeculation.acceleration)
+            self.statsState.runtimeName = usedUpdatedRuntime ? "llama.cpp Metal" : nil
             self.hasProjector = mmprojPath != nil
             self.projectorPath = mmprojPath
             self.appliedLoraPath = loraPath
@@ -747,11 +763,13 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
                         if let self {
                             self.withLock {
                                 let nextSerial = self.statsState.usageSerial + 1
+                                let runtimeName = self.statsState.runtimeName
                                 self.statsState = EngineStats(
                                     tokensPerSecond: Double(tokens) / elapsed,
                                     generatedTokens: tokens,
                                     usageSerial: nextSerial,
                                     acceleration: self.statsState.acceleration)
+                                self.statsState.runtimeName = runtimeName
                             }
                         }
                     }
@@ -819,6 +837,7 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
         let elapsed = Date().timeIntervalSince(startedAt)
         withLock {
             let nextSerial = statsState.usageSerial + 1
+            let runtimeName = statsState.runtimeName
             statsState = EngineStats(
                 tokensPerSecond: usage.tokensPerSecond
                     ?? (elapsed > 0 && completion > 0
@@ -828,6 +847,7 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
                 promptTokens: prompt,
                 usageSerial: nextSerial,
                 acceleration: statsState.acceleration)
+            statsState.runtimeName = runtimeName
         }
     }
 
@@ -923,8 +943,7 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
 
     /// Spawns llama-server (plus its crash watchdog) and waits for the health
     /// endpoint. Returns nil when the server never answers — the caller may
-    /// retry with different arguments. Spawn failures throw immediately (no
-    /// retry would fix a bad binary path).
+    /// retry with different arguments or the previously working runtime.
     private func launchServer(
         binary: URL, modelPath: String,
         contextSize: Int, speculation: Planner.Speculation,
@@ -950,7 +969,8 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
         do {
             try child.run()
         } catch {
-            throw GGUFError.serverFailedToStart(error.localizedDescription)
+            Log.engine.warning("llama-server could not start: \(error.localizedDescription, privacy: .public)")
+            return nil
         }
         // Quit-safety net: if the app exits without an unload (window close,
         // ⌘Q with a model resident), the app delegate SIGTERMs registered

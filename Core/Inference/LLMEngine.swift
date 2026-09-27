@@ -154,6 +154,8 @@ public enum EngineAcceleration: String, Sendable, Equatable {
 }
 
 public struct EngineStats: Sendable, Equatable {
+    /// Optional helper runtime actually serving this resident model.
+    public var runtimeName: String? = nil
     public var tokensPerSecond: Double?
     public var generatedTokens: Int
     /// Prompt tokens from the last usage report (0 when the engine doesn't know).

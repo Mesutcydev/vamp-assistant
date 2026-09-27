@@ -209,6 +209,9 @@ final class SettingsStore: ObservableObject {
             DefaultsKeys.experimentalNGramEnabled: false,
             ExperimentalInferencePreferences.qwenThinkingKey: false,
             DefaultsKeys.experimentalMLXPromptCacheEnabled: false,
+            ManagedInferenceRuntime.Kind.omlx.preferenceKey: false,
+            ManagedInferenceRuntime.Kind.mlxfast.preferenceKey: false,
+            ManagedInferenceRuntime.Kind.llamaMetal.preferenceKey: false,
             DefaultsKeys.experimentalMLXQuantizedKVEnabled: false,
         ])
 
@@ -841,6 +844,21 @@ final class SettingsStore: ObservableObject {
             defaults.set(newValue, forKey: DefaultsKeys.experimentalMLXPromptCacheEnabled)
             objectWillChange.send()
         }
+    }
+
+    var omlxEnabled: Bool {
+        get { defaults.bool(forKey: ManagedInferenceRuntime.Kind.omlx.preferenceKey) }
+        set { defaults.set(newValue, forKey: ManagedInferenceRuntime.Kind.omlx.preferenceKey); objectWillChange.send() }
+    }
+
+    var mlxfastEnabled: Bool {
+        get { defaults.bool(forKey: ManagedInferenceRuntime.Kind.mlxfast.preferenceKey) }
+        set { defaults.set(newValue, forKey: ManagedInferenceRuntime.Kind.mlxfast.preferenceKey); objectWillChange.send() }
+    }
+
+    var updatedMetalEnabled: Bool {
+        get { defaults.bool(forKey: ManagedInferenceRuntime.Kind.llamaMetal.preferenceKey) }
+        set { defaults.set(newValue, forKey: ManagedInferenceRuntime.Kind.llamaMetal.preferenceKey); objectWillChange.send() }
     }
 
     /// Quantize eligible MLX attention KV entries to 8-bit after the first

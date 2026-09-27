@@ -200,6 +200,11 @@ actor ACPClient {
         child.environment = environment
 
         let input = Pipe(), output = Pipe()
+        // A missing/early-exiting harness can close stdin before initialize.
+        // Convert that race to EPIPE instead of terminating the entire app.
+        guard fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) == 0 else {
+            throw ACPError("Could not prepare the input pipe for \(harness.name).")
+        }
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
         child.standardInput = input
         child.standardOutput = output
@@ -318,8 +323,9 @@ actor ACPClient {
                 try write(["jsonrpc": .string("2.0"), "id": .number(Double(id)),
                            "method": .string(method), "params": .object(params)])
             } catch {
-                pending[id] = nil
-                continuation.resume(throwing: error)
+                // Resolve every pending request with the harness's exit
+                // diagnostic, including initialize racing an early exit.
+                closed()
                 return
             }
             if let timeout {

@@ -534,6 +534,20 @@ enum ModelCatalog {
               notes: "Previous-generation GGUF 8B.",
               quant: "Q4_K_M", format: .gguf, lanes: [.air16]),
 
+        // The native ternary checkpoint needs its own installed Swift engine.
+        catalogEntry(id: ManagedMLXEngine.bonsaiModelID, repo: "prism-ml/Ternary-Bonsai-2-27B-mlx-2bit",
+              name: "Bonsai 2 27B — MLXFast experiment", family: "Bonsai", params: "27B",
+              bytes: 8_608_721_032, ctx: 4096, min: 24, rec: 32,
+              notes: "Experimental native Swift backend; requires the separately installed MLXFast runtime. Disabled on 16 GB Macs after memory-budget testing. Text only; full generation validation remains pending on larger hardware.",
+              quant: "2-bit", kind: .general, lanes: []),
+
+        // Small checkpoint used to validate the optional cached MLX runtime.
+        catalogEntry(id: "qwen3-0.6b-omlx", repo: "mlx-community/Qwen3-0.6B-4bit",
+              name: "Qwen3 0.6B", family: "Qwen3", params: "0.6B",
+              bytes: 400_000_000, ctx: 4096, min: 4, rec: 8,
+              notes: "Small text model for quick chat and oMLX prompt-cache testing. Lower capability than the larger chat models. Uses built-in MLX when oMLX is unavailable.",
+              kind: .general, lanes: [.air8, .air16]),
+
         // MARK: Vision sidecars
         catalogEntry(id: "smolvlm2-500m-mlx", repo: "mlx-community/SmolVLM2-500M-Video-Instruct-mlx",
               name: "SmolVLM2 500M", family: "SmolVLM2", params: "500M",
