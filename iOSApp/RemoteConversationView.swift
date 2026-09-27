@@ -162,7 +162,11 @@ struct ConversationView: View {
                 RemoteModelPickerSheet(models: store.startModels,
                     modeName: store.selectedSession?.mode == "code" || !(store.selectedSession?.workspacePath ?? "").isEmpty ? "Code" : "Chat",
                     source: $pickerSource,
-                    selectedModelID: $selectedModelID, onRefresh: { await store.loadStartModels() })
+                    selectedModelID: $selectedModelID, onRefresh: { await store.loadStartModels() },
+                    loadedLocalModel: store.loadedLocalModel,
+                    isUnloadingModel: store.isUnloadingModel,
+                    isConnected: store.isConnected,
+                    onUnload: { await store.unloadLocalModel() })
                     .presentationDetents([.large])
             }
             .sheet(isPresented: $showSharing) { RemoteShareSheet(store: store) }

@@ -65,6 +65,7 @@ final class AppState: ObservableObject {
     /// allowed to grow so sidebar + chat + simulator never clip each other.
     @Published var isSimulatorPanelOpen = false
     @Published var enginePhase: EnginePhase = .idle
+    private var isUnloadingModel = false
     @Published var currentFootprint: UInt64 = 0
     @Published var availableBudget: UInt64 = 0
     @Published var lastEngineStats = EngineStats()
@@ -161,6 +162,11 @@ final class AppState: ObservableObject {
         remoteSessionHost.modelOptionsHandler = { [weak self] in
             self?.remoteStartModels() ?? []
         }
+        remoteSessionHost.loadedLocalModelHandler = { [weak self] in self?.remoteLoadedLocalModel }
+        remoteSessionHost.unloadModelHandler = { [weak self] modelID in
+            guard let self else { return "The Mac is unavailable." }
+            return await self.unloadRemoteModel(modelID: modelID)
+        }
         remoteSessionHost.clipboardSharingAllowedHandler = {
             SettingsStore.shared.remoteClipboardSharingEnabled
         }
@@ -189,7 +195,8 @@ final class AppState: ObservableObject {
             guard let resolvedModelID else { return (nil, "No Assistant model is available for delegation.") }
             switch self.botRuns.start(
                 profileID: specialist.id, profileName: specialist.name,
-                modelID: resolvedModelID, prompt: prompt
+                modelID: resolvedModelID, prompt: prompt,
+                projectPath: self.botProjectPath
             ) {
             case .success(let id): return (id, nil)
             case .failure(let error): return (nil, error.localizedDescription)
@@ -210,7 +217,7 @@ final class AppState: ObservableObject {
             let resolved = modelID.flatMap { requested in models.first(where: { $0.id == requested })?.id }
                 ?? self.defaultBotModelID(in: models)
             guard let resolved else { return (nil, "No Assistant model is available for orchestration.") }
-            switch self.botRuns.orchestrate(prompt: prompt, modelID: resolved) {
+            switch self.botRuns.orchestrate(prompt: prompt, modelID: resolved, projectPath: self.botProjectPath) {
             case .success(let id): return (id, nil)
             case .failure(let error): return (nil, error.localizedDescription)
             }
@@ -266,6 +273,9 @@ final class AppState: ObservableObject {
                   controller.pendingQuestion != nil else { return false }
             controller.answerQuestion(answer)
             return true
+        }
+        botRuns.pruneHandler = { ids in
+            Task { try? await BotComputerService().removeRunWorkspaces(runIDs: ids) }
         }
         Task { [weak self] in
             await BotRunToolBridge.shared.configure { [weak self] command in
@@ -323,7 +333,8 @@ final class AppState: ObservableObject {
                     sessionID: self.sessions.activeSessionID,
                     phase: self.sessions.currentPhase,
                     finish: reason,
-                    output: self.sessions.streamingText)
+                    output: self.sessions.streamingText,
+                    trace: self.sessions.botToolTrace)
             }
             .store(in: &cancellables)
         sessions.$currentPhase
@@ -448,6 +459,27 @@ final class AppState: ObservableObject {
                 computer = try await service.start(id: computer.id)
             }
             botComputers.reload()
+            // A private copy to work in: the Builder's result for a step that depends on one,
+            // else the user's project, else an empty folder.
+            let builder = (run.dependencyRunIDs ?? [])
+                .compactMap { id in botRuns.runs.first { $0.id == id } }
+                .last { $0.state == .completed && $0.evidence?.phase == .code && $0.workPath != nil }
+            let seed = (builder?.workPath ?? run.projectPath).map { URL(fileURLWithPath: $0, isDirectory: true) }
+            let work = try await service.prepareRunWorkspace(
+                computerID: computer.id, runID: run.id, seed: seed)
+            botRuns.attachWorkspace(runID: run.id, path: work.path, baseTree: work.baseTree)
+            var prompt = run.prompt
+            if let builder, let path = builder.workPath, let base = builder.baseTree,
+               let patch = try? await service.patch(workPath: path, baseTree: base), !patch.isEmpty {
+                prompt += "\n\n### \(builder.profileName) changes, already in your workspace\n```diff\n"
+                    + String(patch.prefix(24_000)) + (patch.count > 24_000 ? "\n… (truncated)" : "") + "\n```"
+            }
+            var instruction = Self.remoteBotInstruction(id: run.profileID) ?? ""
+            if let project = run.projectPath {
+                instruction += "\n\nYour workspace is a private copy of the user's project "
+                    + "\(URL(fileURLWithPath: project).lastPathComponent). Nothing you change touches the "
+                    + "original; the user reviews and applies your changes afterwards."
+            }
             let router = EngineRouter(pool: run.modelID.hasPrefix("local|") ? engine.enginePool : nil)
             let parts = run.modelID.split(separator: "|", maxSplits: 2).map(String.init)
             guard parts.count >= 2 else { return .rejected("That model selection is invalid.") }
@@ -503,8 +535,9 @@ final class AppState: ObservableObject {
             controller.maxTokensHandler = { maxTokens }
             controller.openCodeCatalogHandler = { .empty }
             controller.applyRemoteRunOptions(autoMode: true, fullAccess: false)
+            controller.maxTurnsLimit = run.budget?.maximumTurns
             await controller.switchWorkspace(
-                to: URL(fileURLWithPath: computer.workspacePath, isDirectory: true),
+                to: URL(fileURLWithPath: work.path, isDirectory: true),
                 restoreLatest: false)
             controller.applyRemoteIsolation(
                 computerControl: run.profileID == "navigator",
@@ -521,7 +554,7 @@ final class AppState: ObservableObject {
                 title: remoteSessionTitle(from: run.prompt),
                 createdAt: now,
                 updatedAt: now,
-                workspacePath: computer.workspacePath,
+                workspacePath: work.path,
                 modelID: Self.persistedRemoteModelID(from: run.modelID),
                 messages: [], checkpoints: [], source: .app,
                 schemaVersion: SessionRecord.currentSchemaVersion)
@@ -534,9 +567,9 @@ final class AppState: ObservableObject {
             }
             botRuntimes[run.id] = runtime
             controller.send(
-                run.prompt,
+                prompt,
                 seed: session,
-                modelInstruction: Self.remoteBotInstruction(id: run.profileID))
+                modelInstruction: instruction.isEmpty ? nil : instruction)
             return .accepted(sessionID)
         } catch {
             return .rejected(error.localizedDescription)
@@ -545,14 +578,26 @@ final class AppState: ObservableObject {
 
     private func handleBotRunCommand(_ command: BotRunCommand) async -> String {
         switch command {
-        case .list:
+        case .list(let runID?):
+            guard let run = botRuns.runs.first(where: { $0.id == runID }) else {
+                return "No bot run has that ID."
+            }
+            let output = run.artifacts?.last(where: { $0.kind == .summary })?.value ?? run.latestOutput
+            return [
+                "\(run.profileName) · \(run.state.rawValue) · \(run.phase)",
+                run.evidence.map { "Evidence: \($0.label)" },
+                run.pendingInteraction.map { "Waiting: \($0)" },
+                run.errorMessage.map { "Error: \($0)" },
+                output.isEmpty ? nil : "Output:\n\(output)",
+            ].compactMap { $0 }.joined(separator: "\n")
+        case .list(nil):
             guard !botRuns.runs.isEmpty else { return "No bot runs yet." }
             return botRuns.runs.map { run in
                 let queue = run.queuePosition.map { " · queue #\($0)" } ?? ""
                 let gate = run.pendingInteraction.map { " · \($0)" } ?? ""
                 return "\(run.id.uuidString) · \(run.profileName) · \(run.state.rawValue)\(queue)\(gate) · \(run.phase)"
             }.joined(separator: "\n")
-        case .start(let profileID, let requestedModelID, let prompt):
+        case .start(let profileID, let requestedModelID, let prompt, let project):
             guard let specialist = BotComputerService.specialists.first(where: { $0.id == profileID }) else {
                 return BotComputerError.unknownProfile.localizedDescription
             }
@@ -563,38 +608,70 @@ final class AppState: ObservableObject {
             guard let modelID else { return "No Assistant model is available for delegation." }
             switch botRuns.start(
                 profileID: specialist.id, profileName: specialist.name,
-                modelID: modelID, prompt: prompt
+                modelID: modelID, prompt: prompt, projectPath: Self.botProject(project)
             ) {
             case .success(let id): return "Delegated to \(specialist.name). Run ID: \(id.uuidString)"
             case .failure(let error): return error.localizedDescription
             }
-        case .orchestrate(let requestedModelID, let prompt):
+        case .orchestrate(let requestedModelID, let prompt, let project):
             let models = remoteStartModels()
             let modelID = requestedModelID.flatMap { requested in
                 models.first(where: { $0.id == requested })?.id
             } ?? defaultBotModelID(in: models)
             guard let modelID else { return "No Assistant model is available for orchestration." }
-            switch botRuns.orchestrate(prompt: prompt, modelID: modelID) {
+            switch botRuns.orchestrate(prompt: prompt, modelID: modelID, projectPath: Self.botProject(project)) {
             case .success(let id): return "Workflow accepted. Workflow ID: \(id.uuidString)"
             case .failure(let error): return error.localizedDescription
             }
         case .steer(let runID, let message):
-            return botRuns.steer(runID: runID, message: message)
+            return await botRuns.deliverCommand(runID: runID, kind: .steer, payload: message)
                 ? "Steering delivered." : "That run cannot be steered right now."
         case .stop(let runID):
             return botRuns.stop(runID: runID)
                 ? "Run stopped." : "That run is already finished or cannot be stopped."
         case .respond(let runID, let action, let value):
             switch action {
-            case "approve": return botRuns.approve(runID: runID, approved: true) ? "Approval queued." : "No approval is pending."
-            case "decline": return botRuns.approve(runID: runID, approved: false) ? "Decline queued." : "No approval is pending."
+            case "approve", "decline":
+                return await botRuns.deliverCommand(runID: runID, kind: action == "approve" ? .approve : .decline)
+                    ? "Delivered." : "Not delivered: no approval is pending, or the run rejected it."
             case "answer":
                 guard let value else { return "An answer value is required." }
-                return botRuns.answer(runID: runID, text: value) ? "Answer queued." : "No answer is pending."
+                return await botRuns.deliverCommand(runID: runID, kind: .answer, payload: value)
+                    ? "Answer delivered." : "Not delivered: no question is pending, or the run rejected it."
             case "resume": return botRuns.resume(runID: runID) ? "Run queued for recovery." : "That run is not recoverable."
+            case "apply": return await applyBotChanges(runID: runID)
             default: return "Unknown bot response action."
             }
         }
+    }
+
+    /// Applies a finished run's changes to the project it was delegated on.
+    func applyBotChanges(runID: UUID) async -> String {
+        guard let run = botRuns.runs.first(where: { $0.id == runID }), run.state == .completed else {
+            return "Only a completed run's changes can be applied."
+        }
+        guard let project = run.projectPath, let work = run.workPath, let base = run.baseTree else {
+            return "This run has no changes to apply: it did not work on a Git project."
+        }
+        do {
+            return try await BotComputerService().applyChanges(
+                workPath: work, baseTree: base, projectPath: project)
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    /// The project open in the main window, which dashboard and phone runs work on.
+    var botProjectPath: String? { Self.botProject(sessions.workspaceURL) }
+
+    /// A caller's workspace counts as a project unless it is app-owned scratch
+    /// (the Assistant's chat runtime, a bot's own computer).
+    static func botProject(_ url: URL?) -> String? {
+        guard let url else { return nil }
+        let appOwned = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("BeetCode", isDirectory: true).standardizedFileURL.path
+        let path = url.standardizedFileURL.path
+        return path == appOwned || path.hasPrefix(appOwned + "/") ? nil : path
     }
 
     private func defaultBotModelID(in models: [RemoteStartModel]) -> String? {
@@ -643,6 +720,7 @@ final class AppState: ObservableObject {
     /// Activates a remote start-model id (`local|…`, `api|…`, `chatgpt|…`).
     /// Returns a user-facing error, or nil on success.
     private func activateRemoteStartModel(modelID: String, reasoningEffort: String?) async -> String? {
+        guard !isUnloadingModel else { return "The model is unloading. Try again in a moment." }
         let parts = modelID.split(separator: "|", maxSplits: 2).map(String.init)
         guard parts.count >= 2 else { return "That model selection is invalid." }
         switch parts[0] {
@@ -910,6 +988,7 @@ final class AppState: ObservableObject {
     }
 
     private var isEngineReady: Bool {
+        guard !isUnloadingModel else { return false }
         if case .ready = enginePhase { return true }
         return isCodexActive
     }
@@ -1196,6 +1275,7 @@ final class AppState: ObservableObject {
     }
 
     func activate(model: CatalogModel) async {
+        guard !isUnloadingModel else { return }
         clearStaleLoadError()
         // Reentrancy guard: two rapid Load clicks (or a click while a load is
         // paging in) must not race engine swaps — the second tap is ignored.
@@ -1289,6 +1369,7 @@ final class AppState: ObservableObject {
     /// explicitly unloaded first so RAM/Metal are freed while remote is active.
     @discardableResult
     func activateRemote(endpoint: RemoteEndpoint) async -> Bool {
+        guard !isUnloadingModel else { return false }
         clearStaleLoadError()
         await sessions.stopAndWait()
         sessions.dismissFinish()
@@ -1353,6 +1434,7 @@ final class AppState: ObservableObject {
     /// harness is the only owner of the next run's tools and permissions.
     @discardableResult
     func activateCodex(model: CodexModelProfile) async -> Bool {
+        guard !isUnloadingModel else { return false }
         clearStaleLoadError()
         if !codexAccount.isSignedIn {
             await codexAccount.refresh()
@@ -1376,7 +1458,27 @@ final class AppState: ObservableObject {
         drainTaskQueue()
         return true
     }
+    var remoteLoadedLocalModel: RemoteLoadedLocalModel? {
+        guard let activeModelID, engine.source == .localMLX else { return nil }
+        return RemoteLoadedLocalModel(
+            id: "local|\(activeModelID)", name: activeModel?.displayName ?? activeModelID,
+            canUnload: isEngineReady && !sessions.isRunning
+                && !botRuns.activeRuns.contains { $0.modelID.hasPrefix("local|") })
+    }
+
+    func unloadRemoteModel(modelID: String) async -> String? {
+        guard let loaded = remoteLoadedLocalModel, loaded.id == modelID else {
+            return "The loaded model changed. Refresh the model list."
+        }
+        guard loaded.canUnload else { return "Stop the active task before unloading the model." }
+        await deactivate()
+        return nil
+    }
+
     func deactivate() async {
+        guard !isUnloadingModel else { return }
+        isUnloadingModel = true
+        defer { isUnloadingModel = false }
         clearStaleLoadError()
         await sessions.stopAndWait()
         sessions.dismissFinish()

@@ -479,6 +479,42 @@ final class RemoteSessionTests: XCTestCase {
         XCTAssertEqual(controller.finishReason, .completed("A fresh chat works."))
     }
 
+    func testRemoteUnloadRequiresPairingIdleModelAndMatchingIdentity() async throws {
+        let engine = FakeLLMEngine()
+        let controller = AgentSessionController(engine: engine, settings: SettingsStore.shared, thermal: ThermalMonitor())
+        let exchangeDirectory = TempWorkspace()
+        let host = RemoteSessionHost(engine: engine, sessions: controller,
+            sharing: RemoteSharingStore(directoryURL: exchangeDirectory.url), persistsPairedClients: false)
+        var loaded: RemoteLoadedLocalModel? = .init(id: "local|huihui", name: "Huihui", canUnload: false)
+        var unloadedIDs: [String] = []
+        host.loadedLocalModelHandler = { loaded }
+        host.unloadModelHandler = { id in unloadedIDs.append(id); loaded = nil; return nil }
+        addTeardownBlock { await host.stop() }
+        try await host.start(port: 0, allowLAN: true)
+        let port = try XCTUnwrap(host.actualPort)
+        let baseURL = try XCTUnwrap(URL(string: "http://127.0.0.1:\(port)"))
+        let body = Data("{\"modelID\":\"local|huihui\"}".utf8)
+        let unauthorized = try await request(baseURL, path: "/api/models/unload", method: "POST", body: body)
+        XCTAssertEqual(unauthorized.status, 401)
+        let pair = try await request(baseURL, path: "/api/pair", method: "POST",
+            body: Data("{\"code\":\"\(host.pairingCode)\"}".utf8))
+        let token = try XCTUnwrap(pair.json.objectValue?["token"]?.stringValue)
+        let busy = try await request(baseURL, path: "/api/models/unload", method: "POST", token: token, body: body)
+        XCTAssertEqual(busy.status, 409)
+        loaded = .init(id: "local|huihui", name: "Huihui", canUnload: true)
+        let stale = try await request(baseURL, path: "/api/models/unload", method: "POST", token: token,
+            body: Data("{\"modelID\":\"local|other\"}".utf8))
+        XCTAssertEqual(stale.status, 409)
+        XCTAssertTrue(unloadedIDs.isEmpty)
+        let catalog = try await request(baseURL, path: "/api/models", token: token)
+        XCTAssertEqual(catalog.json.objectValue?["loadedLocalModel"]?.objectValue?["id"]?.stringValue, "local|huihui")
+        let accepted = try await request(baseURL, path: "/api/models/unload", method: "POST", token: token, body: body)
+        XCTAssertEqual(accepted.status, 200)
+        XCTAssertEqual(unloadedIDs, ["local|huihui"])
+        let repeatUnload = try await request(baseURL, path: "/api/models/unload", method: "POST", token: token, body: body)
+        XCTAssertEqual(repeatUnload.status, 409)
+    }
+
     func testRemotePairingIsOneTimeAndResumesTheSavedBeetCodeSession() async throws {
         try XCTSkipUnless(
             RemoteNetworkEndpointDiscovery.preferredEndpoint(allowLAN: false) != nil,

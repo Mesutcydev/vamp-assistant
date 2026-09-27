@@ -10,10 +10,13 @@ struct RemoteRootView: View {
             RemoteControlView(store: store)
         } else if ProcessInfo.processInfo.environment["VAMP_REMOTE_TEST_SCREEN"] == "composer" {
             RemoteComposerFixture()
+        } else if ProcessInfo.processInfo.environment["VAMP_REMOTE_TEST_SCREEN"] == "model-picker" {
+            RemoteModelPickerFixture()
         } else if ProcessInfo.processInfo.environment["VAMP_REMOTE_TEST_SCREEN"] == "instrument" {
             RemoteInstrumentFixture()
         } else if ProcessInfo.processInfo.environment["VAMP_REMOTE_TEST_SCREEN"] == "new-session" {
-            StartSessionSheet(store: store, initialBotID: "", showAdvanced: true) { _ in }
+            StartSessionSheet(store: store, initialBotID: "",
+                showAdvanced: ProcessInfo.processInfo.environment["VAMP_REMOTE_FIXTURE"] == "advanced") { _ in }
         } else if ProcessInfo.processInfo.environment["VAMP_REMOTE_TEST_SCREEN"] == "bots" {
             RemoteBotsView(store: store) { _ in }
         } else if store.hasSavedConnection { SessionNavigationView(store: store) }

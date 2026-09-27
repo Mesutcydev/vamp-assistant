@@ -50,11 +50,17 @@ struct RunCommandTool: AgentTool, CommandExecuting {
                     let rewritten = BotComputerService.rewriteCommandForContainer(
                         command,
                         hostWorkspacePath: linux.hostWorkspacePath)
+                    // Run where the session works (a bot run's folder under the mount), not
+                    // always at the mount root.
+                    let guestDirectory = BotComputerService.rewriteCommandForContainer(
+                        workspace.root.path, hostWorkspacePath: linux.hostWorkspacePath)
                     return try ShellRunner.runProcess(
                         executable: linux.executable,
                         arguments: BotComputerService.execArguments(
                             containerName: linux.containerName,
-                            command: rewritten),
+                            command: rewritten,
+                            workingDirectory: guestDirectory.hasPrefix("/workspace")
+                                ? guestDirectory : "/workspace"),
                         workingDirectory: URL(fileURLWithPath: linux.hostWorkspacePath, isDirectory: true),
                         timeout: Double(timeout),
                         cancelCheck: {

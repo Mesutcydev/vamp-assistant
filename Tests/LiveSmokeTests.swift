@@ -599,17 +599,25 @@ private actor Milestones {
 /// LIVE end-to-end check for native image input: the real Bonsai 2 27B GGUF
 /// plus its mmproj projector, through the exact app path
 /// (GGUFEngine → RemoteLLMClient content parts → llama-server /v1).
-/// Opt-in — needs the 7.2 GB model installed:
+/// Opt-in — defaults to Bonsai; BEETCODE_LIVE_VISION_MODEL_ID and
+/// BEETCODE_LIVE_VISION_PROJECTOR can target another installed GGUF model.
 ///   BEETCODE_LIVE_BONSAI_VISION=1 xcodebuild test -scheme BeetCode \
 ///     -only-testing:BeetCodeTests/LiveGGUFVisionTests
 final class LiveGGUFVisionTests: XCTestCase {
 
-    private static let modelID = "Ternary-Bonsai-2-27B-PQ2_0"
-    private static let projectorName = "Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf"
+    private static var modelID: String {
+        ProcessInfo.processInfo.environment["BEETCODE_LIVE_VISION_MODEL_ID"]
+            ?? "Ternary-Bonsai-2-27B-PQ2_0"
+    }
+    private static var projectorName: String {
+        ProcessInfo.processInfo.environment["BEETCODE_LIVE_VISION_PROJECTOR"]
+            ?? "Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf"
+    }
 
-    func testBonsaiProjectorReadsAnImageEndToEnd() async throws {
-        guard ProcessInfo.processInfo.environment["BEETCODE_LIVE_BONSAI_VISION"] == "1" else {
-            throw XCTSkip("Bonsai vision smoke is opt-in (BEETCODE_LIVE_BONSAI_VISION=1)")
+    func testProjectorReadsAnImageEndToEndAndUnloads() async throws {
+        guard ProcessInfo.processInfo.environment["BEETCODE_LIVE_BONSAI_VISION"] == "1"
+            || ProcessInfo.processInfo.environment["BEETCODE_LIVE_GGUF_VISION"] == "1" else {
+            throw XCTSkip("GGUF vision smoke is opt-in (BEETCODE_LIVE_GGUF_VISION=1)")
         }
         let modelDir = URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent(
@@ -620,7 +628,7 @@ final class LiveGGUFVisionTests: XCTestCase {
               FileManager.default.fileExists(
                 atPath: modelDir.appendingPathComponent(Self.projectorName).path)
         else {
-            throw XCTSkip("Bonsai PQ2_0 weights + mmproj are not installed")
+            throw XCTSkip("\(Self.modelID) weights + \(Self.projectorName) are not installed")
         }
 
         let image = try Self.renderedTextImage("BONSAI 42")
@@ -668,10 +676,19 @@ final class LiveGGUFVisionTests: XCTestCase {
         {
             answer += chunk
         }
-        print("[bonsai-vision] answer: \(answer)")
+        print("[gguf-vision] model: \(Self.modelID); projector: \(Self.projectorName); answer: \(answer)")
         let upper = answer.uppercased()
         XCTAssertTrue(upper.contains("BONSAI"), "model did not read the image: \(answer)")
         XCTAssertTrue(answer.contains("42"), "model did not read the digits: \(answer)")
+
+        await engine.unload()
+        let afterUnload = await engine.loadedModelID
+        let projectorAfterUnload = await engine.loadedProjectorPath
+        let visionAfterUnload = await engine.supportsImageInput
+        XCTAssertNil(afterUnload)
+        XCTAssertNil(projectorAfterUnload)
+        XCTAssertFalse(visionAfterUnload)
+        XCTAssertTrue(Self.llamaServerCommandLine().isEmpty, "unload must stop the model's helper process")
     }
 
     /// Renders black text on white — a real PNG the projector has to decode.
@@ -715,6 +732,8 @@ final class LiveGGUFVisionTests: XCTestCase {
         let lines = String(decoding: data, as: UTF8.self)
             .split(separator: "\n")
             .map(String.init)
-        return lines.first { $0.contains("llama-server") && $0.contains("--model") } ?? ""
+        return lines.first {
+            $0.contains("llama-server") && $0.contains("--model") && $0.contains("/\(Self.modelID).gguf")
+        } ?? ""
     }
 }

@@ -110,6 +110,38 @@ final class EndToEndTests: XCTestCase {
         XCTAssertEqual(appState.sessions.finishReason, .completed("All done here."))
     }
 
+    func testRemoteUnloadReleasesEngineButKeepsDownloadAndConversation() async throws {
+        let fixture = TempWorkspace()
+        let engine = FakeLLMEngine()
+        let app = AppState(engine: EngineRouter(local: engine), hub: FixtureHub(directory: fixture.url))
+        let model = try XCTUnwrap(ModelCatalog.all.first)
+        let directory = appSupport.url(for: "Models/\(model.id)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let weightFile = directory.appendingPathComponent("model.safetensors")
+        try Data("test weights".utf8).write(to: weightFile)
+        try Data("{}".utf8).write(to: directory.appendingPathComponent("config.json"))
+        let installed = app.modelStore.register(catalogModel: model, sizeBytes: 12)
+        await app.sessions.switchWorkspace(to: fixture.url)
+        app.sessions.newSession()
+        let sessionID = app.sessions.activeSessionID
+        await app.activate(model: model)
+        XCTAssertEqual(app.remoteLoadedLocalModel?.canUnload, true)
+        let staleError = await app.unloadRemoteModel(modelID: "local|other")
+        XCTAssertNotNil(staleError)
+        XCTAssertFalse(engine.unloaded)
+        let error = await app.unloadRemoteModel(modelID: "local|\(model.id)")
+        XCTAssertNil(error)
+        XCTAssertTrue(engine.unloaded)
+        let loadedID = await engine.loadedModelID
+        XCTAssertNil(loadedID)
+        XCTAssertNil(app.activeModelID)
+        XCTAssertNil(app.remoteLoadedLocalModel)
+        XCTAssertEqual(app.enginePhase, .idle)
+        XCTAssertEqual(app.modelStore.installedModel(id: model.id), installed)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: weightFile.path))
+        XCTAssertEqual(app.sessions.activeSessionID, sessionID)
+    }
+
     func testPauseImmediatelyAfterStartIsRememberedDuringPreparation() async throws {
         let fixture = TempWorkspace()
         fixture.write("weights", to: "weights.bin")

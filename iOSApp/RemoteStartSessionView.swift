@@ -174,6 +174,7 @@ struct StartSessionSheet: View {
   @State private var folderPathDraft = ""
   @State private var showPathEntry = false
   @State private var showAdvanced = false
+  @State private var didRestoreChoices = false
   // Start choices follow the Mac's restored-project behavior without
   // becoming part of the remote protocol or a persisted prompt draft.
   @AppStorage("remoteStart.sessionMode") private var savedSessionModeRaw =
@@ -208,7 +209,9 @@ struct StartSessionSheet: View {
   private var canStart: Bool {
     store.isConnected
       && !selectedModelID.isEmpty
+      && store.startModels.contains(where: { $0.id == selectedModelID })
       && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      && !isLoadingModels
       && !isStarting
       && !codeFolderMissing
   }
@@ -228,12 +231,6 @@ struct StartSessionSheet: View {
     guard !selectedWorkspacePath.isEmpty else { return "Choose a folder" }
     return store.workspaces.first(where: { $0.path == selectedWorkspacePath })?.name
       ?? selectedWorkspacePath
-  }
-  private var groupedAPIModels: [(detail: String, models: [RemoteStartModelOption])] {
-    let groups = Dictionary(grouping: models, by: \.detail)
-    return groups.keys.sorted { $0.localizedStandardCompare($1) == .orderedAscending }.map { key in
-      (key, groups[key]!.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending })
-    }
   }
   private var sourceIcon: String {
     switch source {
@@ -260,7 +257,7 @@ struct StartSessionSheet: View {
   var body: some View {
     NavigationStack {
       ScrollView {
-        VStack(alignment: .leading, spacing: 28) {
+        VStack(alignment: .leading, spacing: 20) {
           if !store.isConnected {
             Section {
               RemoteReconnectBanner(store: store)
@@ -268,7 +265,11 @@ struct StartSessionSheet: View {
             }
           }
 
-          RemoteConsoleSection(index: "01", title: "Task") {
+          RemoteInstrumentSegments(selection: $sessionMode,
+            options: RemoteSessionMode.allCases.map { ($0.title, $0) })
+            .accessibilityLabel("Session mode")
+
+          VStack(alignment: .leading, spacing: 12) {
             // ponytail: a `prompt` truncates to one line on a vertical-axis
             // field, so at accessibility sizes this read "What should i…".
             // The placeholder is a sibling in the ZStack rather than an
@@ -276,7 +277,7 @@ struct StartSessionSheet: View {
             // grows to fit the wrapped text instead of clipping it.
             ZStack(alignment: .topLeading) {
               if prompt.isEmpty {
-                Text("What should it work on?")
+                Text(sessionMode == .chat ? "Message Vamp…" : "What should Vamp work on?")
                   .font(.body)
                   .foregroundStyle(RemoteInstrument.secondaryInk)
                   .allowsHitTesting(false)
@@ -287,12 +288,12 @@ struct StartSessionSheet: View {
                 .font(.body)
                 .focused($taskFocused)
                 .accessibilityLabel("Task")
+                .accessibilityIdentifier("remote.start.prompt")
             }
             .padding(16)
             .frame(maxWidth: .infinity, minHeight: 116, alignment: .topLeading)
             .remoteRecess(focused: taskFocused)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: taskFocused)
-            suggestionBank
           }
 
           if isLoadingModels || store.backgroundNotice != nil {
@@ -322,17 +323,7 @@ struct StartSessionSheet: View {
             }
           }
 
-          RemoteConsoleSection(index: "02", title: "Setup") {
-            VStack(spacing: 0) {
-              RemoteStartModeRow(mode: $sessionMode)
-              RemoteStartNavigationRow(
-                title: "Bot",
-                subtitle: botProfile.name,
-                symbol: "person.crop.circle"
-              ) {
-                RemoteBotChooser(selectedBotID: $selectedBotID)
-                  .navigationTitle("Bot")
-              }
+          VStack(spacing: 0) {
               Button {
                 showModelPicker = true
               } label: {
@@ -344,6 +335,7 @@ struct StartSessionSheet: View {
                 }
               }
               .buttonStyle(RemotePressButtonStyle())
+              .accessibilityIdentifier("remote.start.model")
               if sessionMode == .code {
                 RemoteStartNavigationRow(
                   title: "Project folder",
@@ -354,19 +346,18 @@ struct StartSessionSheet: View {
                     .navigationTitle("Project folder")
                 }
               }
-            }
           }
 
-          RemoteConsoleSection(index: "03", title: "More") {
-            DisclosureGroup("Advanced setup", isExpanded: $showAdvanced) {
-              RemoteInstrumentSegments(
-                selection: $source,
-                options: RemoteModelPickerSheet.sources.map {
-                  (RemoteModelPickerSheet.sourceLabel($0), $0)
-                })
+          DisclosureGroup(isExpanded: $showAdvanced) {
+            VStack(alignment: .leading, spacing: 16) {
+              RemoteStartNavigationRow(
+                title: "Bot", subtitle: botProfile.name, symbol: "person.crop.circle"
+              ) {
+                RemoteBotChooser(selectedBotID: $selectedBotID).navigationTitle("Bot")
+              }
               RemoteAdvancedAccessBank(autoMode: $autoMode, fullAccess: $fullAccess)
-              botComputerSection
-              apiKeySection
+              if sessionMode == .code { botComputerSection }
+              if source == "api" { apiKeySection }
               if let selected = models.first(where: { $0.id == selectedModelID }),
                 let efforts = selected.reasoningEfforts, !efforts.isEmpty
               {
@@ -376,13 +367,21 @@ struct StartSessionSheet: View {
                   defaultEffort: selected.defaultReasoningEffort,
                   selection: $selectedReasoningEffort)
               }
-            }
-            .font(.subheadline.weight(.medium)).tint(RemoteInstrument.ink)
-            .padding(.vertical, 10)
+            }.padding(.top, 12)
+          } label: {
+            HStack {
+              Text("Options").font(.subheadline.weight(.medium))
+              Spacer(minLength: 8)
+              Text(botProfile.name)
+                .font(.caption).foregroundStyle(RemoteInstrument.secondaryInk)
+                .lineLimit(1)
+            }.frame(minHeight: 44)
           }
+          .tint(RemoteInstrument.ink)
+          .accessibilityIdentifier("remote.start.options")
         }
         .padding(.horizontal, horizontalSizeClass == .compact ? 16 : 20)
-        .padding(.vertical, 28)
+        .padding(.vertical, 20)
         .frame(maxWidth: 720)
         .frame(maxWidth: .infinity)
       }
@@ -392,7 +391,7 @@ struct StartSessionSheet: View {
       .safeAreaInset(edge: .bottom, spacing: 0) {
         startDeck
       }
-      .navigationTitle("New session")
+      .navigationTitle(sessionMode == .chat ? "New chat" : "New code session")
       .navigationBarTitleDisplayMode(.inline)
       .remoteNavigationChrome()
       .toolbar {
@@ -410,11 +409,17 @@ struct StartSessionSheet: View {
           source: $source,
           selectedModelID: $selectedModelID,
           onSelect: { selectedReasoningEffort = $0.defaultReasoningEffort },
-          onRefresh: { await store.loadStartModels() }
+          onRefresh: { await store.loadStartModels() },
+          loadedLocalModel: store.loadedLocalModel,
+          isUnloadingModel: store.isUnloadingModel,
+          isConnected: store.isConnected,
+          onUnload: { await store.unloadLocalModel() }
         )
         .environment(\.remoteAppearance, appearance)
       }
       .task {
+        guard !didRestoreChoices else { return }
+        didRestoreChoices = true
         selectedBotID = initialBotID
         source = savedSource
         selectedModelID = savedModelID
@@ -426,7 +431,7 @@ struct StartSessionSheet: View {
         async let folders: Void = store.loadWorkspaces()
         _ = await (models, computers, folders)
         attachMatchingBotComputer()
-        selectFirstModel()
+        selectFirstModel(allowSourceFallback: true)
         if store.workspacesSupported {
           if !store.workspaces.contains(where: { $0.path == selectedWorkspacePath }) {
             selectedWorkspacePath =
@@ -479,69 +484,39 @@ struct StartSessionSheet: View {
     }
   }
 
-  private var suggestionBank: some View {
-    let layout =
-      dynamicTypeSize.isAccessibilitySize
-      ? AnyLayout(VStackLayout(spacing: 0)) : AnyLayout(HStackLayout(spacing: 0))
-    return layout {
-      ForEach(Array(botProfile.starters.enumerated()), id: \.offset) { index, starter in
-        if index > 0 {
-          if dynamicTypeSize.isAccessibilitySize {
-            VampHairline()
-          } else {
-            Rectangle().fill(RemoteInstrument.seam).frame(width: 0.75, height: 28)
-          }
-        }
-        Button {
-          prompt = starter
-          taskFocused = true
-          UISelectionFeedbackGenerator().selectionChanged()
-        } label: {
-          Text(starter).font(.caption.monospaced().weight(.medium))
-            // ponytail: side-by-side chips hold different label lengths, so one
-            // wrapped to two lines while its neighbours sat centred on one.
-            // Reserving both lines aligns every chip; stacked (accessibility)
-            // layout has no neighbour to align to, so it does not reserve.
-            .lineLimit(2, reservesSpace: !dynamicTypeSize.isAccessibilitySize)
-            .minimumScaleFactor(0.8)
-            .multilineTextAlignment(.center).padding(.horizontal, 6)
-            .frame(maxWidth: .infinity, minHeight: 44)
-        }.buttonStyle(RemotePressButtonStyle())
-        .accessibilityHint("Fills the task field with this starter.")
-      }
-    }
-    .foregroundStyle(RemoteInstrument.ink).remoteFaceplate(radius: 8)
-  }
-
   private var startDeck: some View {
-    let layout =
-      dynamicTypeSize.isAccessibilitySize
-      ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-      : AnyLayout(HStackLayout(spacing: 12))
-    return layout {
-      RemoteMobileStatus(
-        title: !store.isConnected
-          ? "MAC OFFLINE" : isStarting ? "STARTING" : canStart ? "READY" : "CONFIGURATION",
-        color: canStart ? RemoteInstrument.green : RemoteInstrument.secondaryInk,
-        isActive: isStarting)
-      if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 8) }
+    VStack(alignment: .leading, spacing: 8) {
+      if let hint = startHint {
+        Text(hint).font(.caption).foregroundStyle(RemoteInstrument.secondaryInk)
+          .fixedSize(horizontal: false, vertical: true)
+      }
       Button {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         start()
       } label: {
         HStack(spacing: 8) {
           if isStarting { ProgressView() }
-          Text(isStarting ? "Starting…" : "Start").font(.subheadline.weight(.semibold))
+          Text(isStarting ? "Starting…" : sessionMode == .chat ? "Start chat" : "Start session")
+            .font(.subheadline.weight(.semibold))
           Image(systemName: "arrow.up.right").font(.caption)
-        }.frame(minWidth: 90, minHeight: 44)
+        }.frame(maxWidth: .infinity, minHeight: 44)
       }.buttonStyle(RemotePrimaryButtonStyle()).disabled(!canStart)
         .accessibilityLabel("Start session")
+        .accessibilityIdentifier("remote.start.submit")
     }
     .padding(.horizontal, horizontalSizeClass == .compact ? 16 : 20).padding(.vertical, 10)
     .frame(maxWidth: 720).frame(maxWidth: .infinity)
     .background(RemoteInstrument.header)
     .overlay(alignment: .top) { VampHairline() }
     .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: canStart)
+  }
+
+  private var startHint: String? {
+    if !store.isConnected { return "Connect to your Mac to start." }
+    if isLoadingModels { return "Finding your models…" }
+    if selectedModelID.isEmpty { return "Choose a model to start." }
+    if codeFolderMissing { return "Choose a project folder to start." }
+    return nil
   }
 
   private var selectedModelName: String {
@@ -555,7 +530,7 @@ struct StartSessionSheet: View {
     isLoadingModels = true
     await store.loadStartModels()
     isLoadingModels = false
-    selectFirstModel()
+    selectFirstModel(allowSourceFallback: true)
   }
 
   private func loadModels() {
@@ -567,25 +542,29 @@ struct StartSessionSheet: View {
     selectedBotComputerID = nil
   }
 
-  private func selectFirstModel() {
-    if let selected = models.first(where: { $0.id == selectedModelID }) {
-      selectedReasoningEffort = selected.defaultReasoningEffort
-      return
+  private func selectFirstModel(allowSourceFallback: Bool = false) {
+    let selected = Self.preferredModel(in: store.startModels, source: source,
+      selectedID: selectedModelID, loadedID: store.loadedLocalModel?.id,
+      allowSourceFallback: allowSourceFallback)
+    if selectedModelID != selected?.id
+      || !(selected?.reasoningEfforts ?? []).contains(selectedReasoningEffort ?? "") {
+      selectedReasoningEffort = selected?.defaultReasoningEffort
     }
+    selectedModelID = selected?.id ?? ""
+    if let selected { source = selected.source }
+  }
 
-    let first: RemoteStartModelOption?
-    switch source {
-    case "chatgpt":
-      first = models.first(where: \.isLatest) ?? models.first
-    case "api":
-      first =
-        groupedAPIModels.first?.models.first(where: \.isLatest)
-        ?? groupedAPIModels.first?.models.first
-    default:
-      first = models.first
-    }
-    selectedModelID = first?.id ?? ""
-    selectedReasoningEffort = first?.defaultReasoningEffort
+  /// Opening a new chat should reuse a valid choice, then a resident model,
+  /// then an available source. Explicit source changes stay in that source.
+  static func preferredModel(in catalog: [RemoteStartModelOption], source: String,
+    selectedID: String, loadedID: String?, allowSourceFallback: Bool
+  ) -> RemoteStartModelOption? {
+    let candidates = allowSourceFallback ? catalog : catalog.filter { $0.source == source }
+    if let saved = candidates.first(where: { $0.id == selectedID }) { return saved }
+    if let loadedID, let loaded = candidates.first(where: { $0.id == loadedID }) { return loaded }
+    let inSource = candidates.filter { $0.source == source }
+    return inSource.first(where: \.isLatest) ?? inSource.first
+      ?? candidates.first(where: \.isLatest) ?? candidates.first
   }
 
   @ViewBuilder

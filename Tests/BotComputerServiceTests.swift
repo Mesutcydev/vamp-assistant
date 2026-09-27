@@ -420,6 +420,234 @@ final class BotComputerServiceTests: XCTestCase {
             "a moving base image breaks apk provisioning inside a container nobody is watching")
     }
 
+    func testAdaptivePlannerMatchesWholeWordsOnly() {
+        func route(_ prompt: String) -> [String] {
+            BotAdaptivePlanner.plan(prompt: prompt).nodes.map(\.specialistID)
+        }
+        // "form" inside information/platform used to summon the Navigator.
+        XCTAssertEqual(route("Review the information architecture of the platform"), ["reviewer"])
+        // "app" inside approved used to add a Builder and Reviewer to pure research.
+        XCTAssertEqual(route("Research which tokens are currently approved"), ["researcher"])
+        XCTAssertEqual(route("Fixing the login pages"), ["navigator", "builder", "reviewer"])
+    }
+
+    /// The controller clears its stream before publishing `finish`, so the final answer only
+    /// arrives on `.completed`. Every completed run used to end with empty output.
+    @MainActor
+    func testCompletedRunKeepsFinalAnswerAndIgnoresLateEvents() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let coordinator = BotRunCoordinator(store: BotRunStore(root: root))
+        coordinator.startHandler = { _ in .accepted(UUID()) }
+        let id = try coordinator.start(
+            profileID: "builder", profileName: "Builder", modelID: "api|test", prompt: "Build").get()
+        await waitUntil { coordinator.runs.first { $0.id == id }?.sessionID != nil }
+
+        coordinator.sync(runID: id, phase: .finished, finish: .completed("Changed a.swift; tests pass."), output: "")
+        coordinator.sync(runID: id, phase: .finished, finish: .cancelled, output: "")
+
+        let run = try XCTUnwrap(coordinator.runs.first { $0.id == id })
+        XCTAssertEqual(run.state, .completed)
+        XCTAssertEqual(run.latestOutput, "Changed a.swift; tests pass.")
+        XCTAssertEqual(run.artifacts?.map(\.value), ["Changed a.swift; tests pass."])
+    }
+
+    @MainActor
+    func testRetryingBuilderDoesNotFailItsReviewer() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let coordinator = BotRunCoordinator(store: BotRunStore(root: root))
+        coordinator.startHandler = { _ in .accepted(UUID()) }
+        _ = try coordinator.orchestrate(prompt: "Implement the feature", modelID: "api|test").get()
+        func state(_ profile: String) -> BotRunState? {
+            coordinator.runs.first { $0.profileID == profile }?.state
+        }
+        let builder = try XCTUnwrap(coordinator.runs.first { $0.profileID == "builder" }?.id)
+        await waitUntil { coordinator.runs.first { $0.id == builder }?.sessionID != nil }
+
+        coordinator.sync(runID: builder, phase: .finished, finish: .engineError("503"), output: "")
+
+        XCTAssertEqual(state("builder"), .queued)
+        XCTAssertEqual(state("reviewer"), .queued)
+        await waitUntil { state("builder") == .running }
+        XCTAssertEqual(state("builder"), .running)
+        XCTAssertEqual(state("reviewer"), .queued)
+    }
+
+    @MainActor
+    func testStopWhileStartingStaysStopped() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let coordinator = BotRunCoordinator(store: BotRunStore(root: root))
+        var release: CheckedContinuation<Void, Never>?
+        var runtimeExists = false
+        var stops = 0
+        coordinator.startHandler = { _ in
+            await withCheckedContinuation { release = $0 }
+            runtimeExists = true
+            return .accepted(UUID())
+        }
+        // Mirrors AppState: nothing to stop until the runtime exists.
+        coordinator.stopHandler = { _ in stops += 1; return runtimeExists }
+        let id = try coordinator.start(
+            profileID: "builder", profileName: "Builder", modelID: "local|m", prompt: "Build").get()
+        await waitUntil { release != nil }
+
+        XCTAssertTrue(coordinator.stop(runID: id))
+        await waitUntil { coordinator.runs.first { $0.id == id }?.state == .stopped }
+        release?.resume()
+        await waitUntil { stops == 1 }
+
+        XCTAssertEqual(stops, 1, "the runtime created after Stop must be cancelled")
+        XCTAssertEqual(coordinator.runs.first { $0.id == id }?.state, .stopped)
+    }
+
+    func testEvidenceComesFromWhatToolsDid() {
+        let edit = BotToolTrace(name: "apply_patch", command: nil, failed: false)
+        let check = BotToolTrace(name: "run_command", command: "swift test", failed: false)
+        XCTAssertEqual(BotRunEvidence.observed(from: [edit, check], phase: .code), [.execution, .verification])
+        // An edit after the passing check means the final state was never checked.
+        XCTAssertEqual(BotRunEvidence.observed(from: [check, edit], phase: .code), [.execution])
+        XCTAssertEqual(BotRunEvidence.observed(
+            from: [edit, BotToolTrace(name: "run_command", command: "swift test", failed: true)],
+            phase: .code), [.execution])
+        XCTAssertEqual(BotRunEvidence.observed(
+            from: [BotToolTrace(name: "run_command", command: "ls tests", failed: false)],
+            phase: .code), [.execution])
+        XCTAssertEqual(BotRunEvidence.observed(
+            from: [BotToolTrace(name: "web_fetch", command: nil, failed: false)],
+            phase: .research), [.sources, .execution])
+        XCTAssertEqual(BotRunEvidence.observed(from: [], phase: .review), [])
+    }
+
+    @MainActor
+    func testWorkflowEvidenceCompletesFromReportsAndAPassingReview() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let coordinator = BotRunCoordinator(store: BotRunStore(root: root))
+        coordinator.startHandler = { _ in .accepted(UUID()) }
+        _ = try coordinator.orchestrate(prompt: "Implement the feature", modelID: "api|test").get()
+        func run(_ profile: String) -> BotRunRecord? { coordinator.runs.first { $0.profileID == profile } }
+        let builder = try XCTUnwrap(run("builder")?.id)
+        await waitUntil { run("builder")?.sessionID != nil }
+
+        coordinator.sync(
+            runID: builder, phase: .finished, finish: .completed("Done.\nAC1: met\nAC2: met"),
+            output: "", trace: [BotToolTrace(name: "apply_patch", command: nil, failed: false)])
+        XCTAssertEqual(run("builder")?.acceptanceCriteria?.map(\.satisfied), [true, true])
+        XCTAssertEqual(run("builder")?.evidence?.confidence, .reportedDone)
+        XCTAssertEqual(run("builder")?.evidence?.missing, [.verification])
+
+        let reviewer = try XCTUnwrap(run("reviewer")?.id)
+        await waitUntil { run("reviewer")?.sessionID != nil }
+        XCTAssertTrue(run("reviewer")?.prompt.contains("- [x] The requested outcome is implemented") == true)
+        coordinator.sync(
+            runID: reviewer, phase: .finished,
+            finish: .completed("No issues.\nAC1: met\nAC2: met\nVerdict: pass"),
+            output: "", trace: [BotToolTrace(name: "read_file", command: nil, failed: false)])
+
+        XCTAssertEqual(run("reviewer")?.evidence?.confidence, .verified)
+        XCTAssertEqual(run("builder")?.evidence?.confidence, .verified)
+    }
+
+    @MainActor
+    func testHistoryKeepsLiveRunsTheirDependenciesAndTheNewestFinished() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = BotRunStore(root: root)
+        let now = Date()
+        let finished = (0..<(BotRunCoordinator.retainedFinishedRuns + 2)).map { index in
+            var run = BotRunRecord.queued(profileID: "researcher", profileName: "Researcher", modelID: "api|test", prompt: "R")
+            run.state = .completed
+            run.updatedAt = now.addingTimeInterval(Double(index))
+            return run
+        }
+        var live = BotRunRecord.queued(profileID: "builder", profileName: "Builder", modelID: "api|test", prompt: "B")
+        live.state = .needsInput
+        live.dependencyRunIDs = [finished[0].id]
+        try await store.save(finished + [live])
+        _ = try await store.appendEvent(runID: finished[1].id, kind: .created, phase: "Queued")
+
+        let coordinator = BotRunCoordinator(store: store)
+        var pruned: [UUID] = []
+        coordinator.pruneHandler = { pruned = $0 }
+        await waitUntil { !pruned.isEmpty }
+
+        XCTAssertEqual(pruned, [finished[1].id], "only the oldest run nothing depends on goes")
+        XCTAssertEqual(coordinator.runs.count, BotRunCoordinator.retainedFinishedRuns + 2)
+        XCTAssertTrue(coordinator.runs.contains { $0.id == finished[0].id })
+        await settle()
+        let prunedEvents = await store.loadEvents(runID: finished[1].id)
+        XCTAssertTrue(prunedEvents.isEmpty)
+    }
+
+    func testLegacyEventsMoveToAnAppendOnlyLog() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let runID = UUID()
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode([BotRunEvent(
+            id: UUID(), runID: runID, sequence: 1, kind: .created,
+            phase: "Queued", detail: nil, createdAt: Date())])
+            .write(to: root.appendingPathComponent("bot-run-events.json"))
+
+        let store = BotRunStore(root: root)
+        _ = try await store.appendEvent(runID: runID, kind: .started, phase: "Starting")
+
+        let events = await BotRunStore(root: root).loadEvents(runID: runID)
+        XCTAssertEqual(events.map(\.sequence), [1, 2])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("bot-run-events.json").path))
+        let log = try String(contentsOf: root.appendingPathComponent("bot-run-events.jsonl"), encoding: .utf8)
+        XCTAssertEqual(log.split(separator: "\n").count, 2)
+    }
+
+    /// A bot never edits the project in place: it works on a copy, and its changes reach the
+    /// project only as a checked patch.
+    func testRunWorksOnAPrivateCopyAndAppliesBackAsAPatch() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let project = root.appendingPathComponent("project", isDirectory: true)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        _ = try ShellRunner.runProcess(
+            executable: "/usr/bin/git", arguments: ["init", "-q"], workingDirectory: project, timeout: 30)
+        let file = project.appendingPathComponent("a.txt")
+        try "one\n".write(to: file, atomically: true, encoding: .utf8)
+
+        let service = BotComputerService(root: root.appendingPathComponent("computers"))
+        let computer = try await service.prepare(
+            profileID: "builder", name: "Builder", backend: .isolatedWorkspace)
+        let runID = UUID()
+        let work = try await service.prepareRunWorkspace(computerID: computer.id, runID: runID, seed: project)
+        let base = try XCTUnwrap(work.baseTree)
+        try "two\n".write(
+            to: URL(fileURLWithPath: work.path).appendingPathComponent("a.txt"),
+            atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "one\n")
+        let patch = try await service.patch(workPath: work.path, baseTree: base)
+        XCTAssertTrue(patch.contains("+two"))
+        let summary = try await service.applyChanges(workPath: work.path, baseTree: base, projectPath: project.path)
+        XCTAssertTrue(summary.contains("a.txt"))
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "two\n")
+
+        try await service.removeRunWorkspaces(runIDs: [runID])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: work.path))
+    }
+
+    @MainActor
+    func testBotsCannotDriveBotsAndTheAssistantCanReachThem() {
+        let botTools = Set(AgentSessionController.sessionTools(
+            computerControlEnabled: false, botRun: true).map(\.name))
+        XCTAssertFalse(botTools.contains("delegate_bot"))
+        XCTAssertFalse(botTools.contains("bot_respond"))
+        let assistantTools = AgentSessionController.sessionTools(computerControlEnabled: false)
+        let routed = ToolRouter.select(from: assistantTools, for: "Have the Builder fix the login bug")
+        XCTAssertTrue(routed.contains { $0.name == "delegate_bot" })
+        XCTAssertTrue(routed.contains { $0.name == "bot_runs" })
+    }
+
     @MainActor
     private func settle() async {
         try? await Task.sleep(for: .milliseconds(100))

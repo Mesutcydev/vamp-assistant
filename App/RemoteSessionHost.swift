@@ -54,6 +54,12 @@ struct RemoteStartModel: Sendable, Equatable {
     }
 }
 
+struct RemoteLoadedLocalModel: Sendable, Equatable {
+    let id: String
+    let name: String
+    let canUnload: Bool
+}
+
 struct RemoteRunOptions: Sendable, Equatable {
     let autoMode: Bool
     let fullAccess: Bool
@@ -150,6 +156,8 @@ final class RemoteSessionHost {
     var removeQueuedTaskHandler: ((UUID, UUID) -> Bool)?
     var steerHandler: ((UUID, String) -> Bool)?
     var modelOptionsHandler: (() -> [RemoteStartModel])?
+    var loadedLocalModelHandler: (() -> RemoteLoadedLocalModel?)?
+    var unloadModelHandler: ((String) async -> String?)?
     var clipboardSharingAllowedHandler: (() -> Bool)?
     var fileSharingAllowedHandler: (() -> Bool)?
     var macControlAllowedHandler: (() -> Bool)?
@@ -473,7 +481,30 @@ final class RemoteSessionHost {
                     "defaultReasoningEffort": model.defaultReasoningEffort.map { .string($0) } ?? .null,
                 ])
             }
-            return .response(json(["models": .array(models)]))
+            let loaded = loadedLocalModelHandler?()
+            return .response(json([
+                "models": .array(models),
+                "loadedLocalModel": loaded.map {
+                    .object(["id": .string($0.id), "name": .string($0.name),
+                             "canUnload": .bool($0.canUnload)])
+                } ?? .null,
+            ]))
+        case ("POST", "/api/models/unload"):
+            guard authorized(request) else { return unauthorized() }
+            guard let modelID = request.bodyJSON?.objectValue?["modelID"]?.stringValue,
+                  !modelID.isEmpty else {
+                return .response(json(["error": .string("Choose the loaded model to unload.")], status: 400))
+            }
+            guard let loaded = loadedLocalModelHandler?(), loaded.id == modelID else {
+                return .response(json(["error": .string("The loaded model changed. Refresh the model list.")], status: 409))
+            }
+            guard loaded.canUnload, let unloadModelHandler else {
+                return .response(json(["error": .string("Stop the active task before unloading the model.")], status: 409))
+            }
+            if let error = await unloadModelHandler(modelID) {
+                return .response(json(["error": .string(error)], status: 409))
+            }
+            return .response(json(["accepted": .bool(true)]))
         case ("GET", "/api/providers"):
             guard authorized(request) else { return unauthorized() }
             let keyStore = APIKeyStore.shared

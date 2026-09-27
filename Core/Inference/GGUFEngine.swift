@@ -159,7 +159,10 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
         static func isLoraFile(_ fileName: String) -> Bool {
             let lower = fileName.lowercased()
             guard lower.hasSuffix(".gguf") else { return false }
-            return lower.contains("lora") || lower.contains("abliterate")
+            // Keep the legacy "abliterate" adapter marker, but match a whole
+            // token: "abliterated" names a complete model, not a LoRA.
+            let tokens = lower.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            return lower.contains("lora") || tokens.contains("abliterate")
         }
 
         /// The adapter staged next to the weights, if any. Same ranking idea as

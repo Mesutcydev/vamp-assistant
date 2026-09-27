@@ -154,13 +154,16 @@ struct BotDashboardView: View {
                 onOpenModels: {
                     NotificationCenter.default.post(name: .openProviderSettings, object: nil)
                 },
+                projectName: appState.botProjectPath.map { URL(fileURLWithPath: $0).lastPathComponent },
                 onStart: { model, prompt in
                     appState.botRuns.start(
                         profileID: specialist.id,
                         profileName: specialist.name,
                         modelID: model,
-                        prompt: prompt)
+                        prompt: prompt,
+                        projectPath: appState.botProjectPath)
                 },
+                onApply: { await appState.applyBotChanges(runID: $0) },
                 onOpen: open,
                 onSteer: { await appState.botRuns.deliverCommand(runID: $0, kind: .steer, payload: $1) },
                 onApprove: { await appState.botRuns.deliverCommand(runID: $0, kind: $1 ? .approve : .decline) },
@@ -230,7 +233,8 @@ struct BotDashboardView: View {
     }
 
     private func orchestrate() {
-        switch appState.botRuns.orchestrate(prompt: workflowPrompt, modelID: workflowModelID) {
+        switch appState.botRuns.orchestrate(
+            prompt: workflowPrompt, modelID: workflowModelID, projectPath: appState.botProjectPath) {
         case .success(let id):
             workflowMessage = "Workflow \(id.uuidString.prefix(8)) started."
             workflowPrompt = ""
@@ -308,7 +312,9 @@ private struct BotSpecialistCard: View {
     let models: [RemoteStartModel]
     @Binding var selectedModelID: String
     let onOpenModels: () -> Void
+    let projectName: String?
     let onStart: (String, String) -> Result<UUID, BotRunCoordinator.StartError>
+    let onApply: (UUID) async -> String
     let onOpen: (BotRunRecord) -> Void
     let onSteer: (UUID, String) async -> Bool
     let onApprove: (UUID, Bool) async -> Bool
@@ -321,6 +327,7 @@ private struct BotSpecialistCard: View {
     @State private var answerText = ""
     @State private var errorMessage: String?
     @State private var isDelivering = false
+    @State private var applyResult: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -329,6 +336,24 @@ private struct BotSpecialistCard: View {
                 .padding(.top, 12)
             if let run {
                 runStatus(run)
+                if run.state == .completed, run.baseTree != nil, let project = run.projectPath {
+                    Button("Apply changes to \(URL(fileURLWithPath: project).lastPathComponent)") {
+                        isDelivering = true
+                        Task {
+                            applyResult = await onApply(run.id)
+                            isDelivering = false
+                        }
+                    }
+                    .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
+                    .disabled(isDelivering)
+                    .help("Check the run's changes against the project, then apply them")
+                }
+                if let applyResult {
+                    Text(applyResult)
+                        .font(.app(size: 11.5 ))
+                        .foregroundStyle(Theme.textSecondary)
+                        .textSelection(.enabled)
+                }
                 if run.state == .recoverable || run.state == .interrupted {
                     Button("Resume from checkpoint") { _ = onResume(run.id) }
                         .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
@@ -392,6 +417,7 @@ private struct BotSpecialistCard: View {
         .onChange(of: steerText) { _, value in BotDraftStore.shared.set(value, for: specialist.id + ":steer") }
         .onChange(of: answerText) { _, value in BotDraftStore.shared.set(value, for: specialist.id + ":answer") }
         .onChange(of: models.map(\.id)) { _, _ in selectAvailableModel() }
+        .onChange(of: run?.id) { _, _ in applyResult = nil }
     }
 
     private var header: some View {
@@ -474,6 +500,10 @@ private struct BotSpecialistCard: View {
             Text(computer == nil
                  ? "The private workspace and browser are prepared automatically on first run."
                  : "Computer: \(computer?.state.rawValue ?? "ready")")
+                .font(.app(size: 11 ))
+                .foregroundStyle(Theme.textTertiary)
+            Text(projectName.map { "Works on a private copy of \($0); you apply its changes." }
+                 ?? "No project open: works in an empty folder.")
                 .font(.app(size: 11 ))
                 .foregroundStyle(Theme.textTertiary)
         }

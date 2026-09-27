@@ -125,6 +125,10 @@ final class AgentSessionController: ObservableObject {
     private var remoteComputerControl = false
     private var remoteLinuxContainer: LinuxContainerTarget?
     private(set) var remoteBrowserSession: BrowserSession?
+    /// Only specialist bots get a private browser, so this marks a bot run.
+    private var isBotRun: Bool { remoteBrowserSession != nil }
+    /// A bot run's turn budget; the user's own setting still caps it.
+    var maxTurnsLimit: Int?
 
     // Account-backed OpenAI runs are hosted by Codex app-server rather than
     // AgentLoop. Keeping this state beside the existing loop lets the same
@@ -468,12 +472,14 @@ final class AgentSessionController: ObservableObject {
         let tools: [any AgentTool] = qwenTextOnly ? [] : chatOnly
             ? Self.sessionTools(
                 computerControlEnabled: effectiveComputerControl,
-                chatOnly: true)
+                chatOnly: true,
+                botRun: isBotRun)
             : constrainedLocalModel
             ? Self.constrainedLocalTools
             : Self.sessionTools(
                 computerControlEnabled: effectiveComputerControl,
-                linuxGuest: remoteLinuxContainer != nil)
+                linuxGuest: remoteLinuxContainer != nil,
+                botRun: isBotRun)
                 + mcpTools
 
         if constrainedLocalModel && !chatOnly {
@@ -491,7 +497,7 @@ final class AgentSessionController: ObservableObject {
 
         let autoApproveEdits = settings.autoApproveEdits || effectiveAgentIsAuto
         let autoApproveCommands = settings.autoApproveCommands || effectiveAgentIsAuto
-        let maxTurns = settings.maxTurns
+        let maxTurns = min(settings.maxTurns, maxTurnsLimit ?? settings.maxTurns)
         let configuredMaxTokensPerTurn = min(
             settings.maxTokensPerTurn,
             maxTokensHandler() ?? settings.maxTokensPerTurn)
@@ -881,7 +887,8 @@ final class AgentSessionController: ObservableObject {
         let dynamicTools = Self.sessionTools(
             computerControlEnabled: effectiveComputerControl,
             chatOnly: true,
-            linuxGuest: remoteLinuxContainer != nil)
+            linuxGuest: remoteLinuxContainer != nil,
+            botRun: isBotRun)
         let dynamicToolNames = dynamicTools.map(\.name).sorted()
         var promptSeed = seed
         if (record.codexDynamicToolNames ?? []) != dynamicToolNames {
@@ -1272,7 +1279,9 @@ final class AgentSessionController: ObservableObject {
 
         let output = Self.codexItemOutput(item, type: type)
         let status = item["status"]?.stringValue?.lowercased() ?? "completed"
+        // A command that ran to completion with a non-zero exit still failed.
         let failed = ["failed", "declined", "cancelled", "canceled", "error"].contains(status)
+            || (item["exitCode"]?.intValue ?? 0) != 0
         transcript.append(TranscriptItem(
             id: UUID(),
             kind: .toolResult(
@@ -2791,8 +2800,11 @@ final class AgentSessionController: ObservableObject {
     static func sessionTools(
         computerControlEnabled: Bool,
         chatOnly: Bool = false,
-        linuxGuest: Bool = false
+        linuxGuest: Bool = false,
+        botRun: Bool = false
     ) -> [any AgentTool] {
+        // Bots don't drive other bots: delegation stays one level deep, under the Assistant.
+        let botControlTools = botRun ? [] : Self.botControlTools
         if chatOnly {
             let statusTools: [any AgentTool] = [
                 TailscaleStatusTool(),

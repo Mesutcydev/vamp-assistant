@@ -186,7 +186,16 @@ enum RemoteSessionMode: String, CaseIterable, Identifiable {
     }
 }
 
-struct RemoteModelEnvelope: Decodable { let models: [RemoteStartModelOption] }
+struct RemoteModelEnvelope: Decodable {
+    let models: [RemoteStartModelOption]
+    let loadedLocalModel: RemoteLoadedLocalModel?
+}
+
+struct RemoteLoadedLocalModel: Decodable, Equatable {
+    let id: String
+    let name: String
+    let canUnload: Bool
+}
 
 struct RemoteProviderEnvelope: Decodable { let providers: [RemoteProviderOption] }
 

@@ -58,6 +58,9 @@ final class BotRunCoordinator: ObservableObject {
     var stopHandler: StopHandler?
     var approvalHandler: ApprovalHandler?
     var answerHandler: AnswerHandler?
+    /// Receives the IDs of runs dropped from history, to delete their private folders.
+    var pruneHandler: (([UUID]) -> Void)?
+    static let retainedFinishedRuns = 100
 
     private let store: BotRunStore
     private var pendingIDs: [UUID] = []
@@ -86,7 +89,10 @@ final class BotRunCoordinator: ObservableObject {
     }
 
     @discardableResult
-    func start(profileID: String, profileName: String, modelID: String, prompt: String) -> Result<UUID, StartError> {
+    func start(
+        profileID: String, profileName: String, modelID: String, prompt: String,
+        projectPath: String? = nil
+    ) -> Result<UUID, StartError> {
         let task = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !task.isEmpty else { return .failure(StartError(message: "Enter a task for this specialist.")) }
         guard !modelID.isEmpty else { return .failure(StartError(message: "Choose a model first.")) }
@@ -98,6 +104,7 @@ final class BotRunCoordinator: ObservableObject {
             profileID: profileID, profileName: profileName,
             modelID: modelID, prompt: task)
         record.evidence = Self.evidenceContract(for: profileID)
+        record.projectPath = projectPath
         pendingIDs.append(record.id)
         record.queuePosition = pendingIDs.count
         runs.insert(record, at: 0)
@@ -109,7 +116,7 @@ final class BotRunCoordinator: ObservableObject {
     }
 
     @discardableResult
-    func orchestrate(prompt: String, modelID: String) -> Result<UUID, StartError> {
+    func orchestrate(prompt: String, modelID: String, projectPath: String? = nil) -> Result<UUID, StartError> {
         let task = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !task.isEmpty else { return .failure(StartError(message: "Enter a workflow objective.")) }
         guard !modelID.isEmpty else { return .failure(StartError(message: "Choose a model first.")) }
@@ -126,6 +133,7 @@ final class BotRunCoordinator: ObservableObject {
                 profileID: node.specialistID, profileName: node.specialistName,
                 modelID: modelID, prompt: node.prompt)
             record.workflowID = plan.id
+            record.projectPath = projectPath
             record.evidence = BotRunEvidence(
                 phase: node.phase, confidence: .notRun,
                 required: node.requiredEvidence, observed: [])
@@ -152,14 +160,6 @@ final class BotRunCoordinator: ObservableObject {
         return .success(plan.id)
     }
 
-    func steer(runID: UUID, message: String) -> Bool {
-        guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let run = record(runID), !run.state.isTerminal,
-              run.sessionID != nil, steerHandler != nil else { return false }
-        Task { _ = await deliverCommand(runID: runID, kind: .steer, payload: message) }
-        return true // Queued only; delivery is recorded separately.
-    }
-
     func stop(runID: UUID) -> Bool {
         guard let run = record(runID), !run.state.isTerminal else { return false }
         pendingIDs.removeAll { $0 == runID }
@@ -171,7 +171,10 @@ final class BotRunCoordinator: ObservableObject {
             // and with nothing shown to the user.
             let command = try? await store.enqueueCommand(runID: runID, kind: .cancel)
             let accepted = await MainActor.run {
-                activeRunIDs.contains(runID) ? (stopHandler?(runID) ?? false) : true
+                // Still starting (container boot, model load): there is no runtime to refuse yet.
+                // The dispatch task sees the stopped state and cancels the runtime once it exists.
+                guard activeRunIDs.contains(runID), record(runID)?.sessionID != nil else { return true }
+                return stopHandler?(runID) ?? false
             }
             if let command {
                 try? await store.acknowledgeCommand(
@@ -200,19 +203,6 @@ final class BotRunCoordinator: ObservableObject {
                 finishScheduling(runID)
             }
         }
-        return true
-    }
-
-    func approve(runID: UUID, approved: Bool) -> Bool {
-        guard record(runID)?.state == .needsApproval, approvalHandler != nil else { return false }
-        Task { _ = await deliverCommand(runID: runID, kind: approved ? .approve : .decline) }
-        return true
-    }
-
-    func answer(runID: UUID, text: String) -> Bool {
-        guard record(runID)?.state == .needsInput, answerHandler != nil,
-              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        Task { _ = await deliverCommand(runID: runID, kind: .answer, payload: text) }
         return true
     }
 
@@ -287,17 +277,30 @@ final class BotRunCoordinator: ObservableObject {
         return true
     }
 
-    func sync(sessionID: UUID?, phase: AgentPhase, finish: AgentFinish?, output: String) {
+    func sync(
+        sessionID: UUID?, phase: AgentPhase, finish: AgentFinish?, output: String,
+        trace: [BotToolTrace] = []
+    ) {
         guard let sessionID,
               let run = runs.first(where: { $0.sessionID == sessionID }) else { return }
-        sync(runID: run.id, phase: phase, finish: finish, output: output)
+        sync(runID: run.id, phase: phase, finish: finish, output: output, trace: trace)
     }
 
-    func sync(runID: UUID, phase: AgentPhase, finish: AgentFinish?, output: String) {
-        guard let run = record(runID) else { return }
+    /// `trace` is the finished run's tool record; evidence comes from it, not from the answer.
+    func sync(
+        runID: UUID, phase: AgentPhase, finish: AgentFinish?, output: String,
+        trace: [BotToolTrace] = []
+    ) {
+        // A late event from a runtime that was stopped or ran out of budget must not rewrite
+        // the outcome already recorded (a budget failure used to flip to "stopped").
+        guard let run = record(runID), !run.state.isTerminal else { return }
+        // The controller clears its stream before publishing `finish`; the answer rides on
+        // `.completed`. Using `output` alone left every completed run with no output.
+        var text = output
+        if case .completed(let answer) = finish, !answer.isEmpty { text = answer }
         update(run.id) { record in
             record.phase = phase.rawValue.capitalized
-            record.latestOutput = String(output.suffix(2_000))
+            if !text.isEmpty { record.latestOutput = String(text.suffix(2_000)) }
             record.updatedAt = Date()
             if let finish {
                 record.queuePosition = nil
@@ -305,19 +308,18 @@ final class BotRunCoordinator: ObservableObject {
                 switch finish {
                 case .completed:
                     record.state = .completed
-                    record.evidence?.confidence = .reportedDone
-                    let observedKind: BotEvidenceKind? = switch record.evidence?.phase {
-                    case .research: .sources
-                    case .navigation, .code: .execution
-                    case .review: .review
-                    case .test: .verification
-                    case .route, .none: nil
+                    if var evidence = record.evidence {
+                        for kind in BotRunEvidence.observed(from: trace, phase: evidence.phase)
+                        where !evidence.observed.contains(kind) {
+                            evidence.observed.append(kind)
+                        }
+                        record.evidence = evidence
                     }
-                    if let observedKind,
-                       record.evidence?.observed.contains(observedKind) == false {
-                        record.evidence?.observed.append(observedKind)
+                    record.acceptanceCriteria = record.acceptanceCriteria.map {
+                        BotAcceptanceCriterion.applyReport(text, to: $0)
                     }
-                    let summary = String(output.trimmingCharacters(in: .whitespacesAndNewlines).suffix(8_000))
+                    record.settleEvidence()
+                    let summary = String(text.trimmingCharacters(in: .whitespacesAndNewlines).suffix(8_000))
                     if !summary.isEmpty {
                         record.artifacts = (record.artifacts ?? []) + [BotRunArtifact(
                             id: UUID(), kind: .summary, title: "Final output",
@@ -351,6 +353,17 @@ final class BotRunCoordinator: ObservableObject {
                 }
             }
         }
+        // A passing independent review is the verification a build step cannot give itself.
+        if case .completed = finish, run.evidence?.phase == .review, BotRunEvidence.reportsPass(text) {
+            for id in run.dependencyRunIDs ?? [] {
+                update(id) {
+                    guard $0.evidence?.required.contains(.verification) == true,
+                          $0.evidence?.observed.contains(.verification) == false else { return }
+                    $0.evidence?.observed.append(.verification)
+                    $0.settleEvidence()
+                }
+            }
+        }
         if finish != nil, activeRunIDs.contains(run.id) {
             let shouldRetry: Bool
             if case .engineError = finish,
@@ -359,8 +372,18 @@ final class BotRunCoordinator: ObservableObject {
             } else {
                 shouldRetry = false
             }
-            finishScheduling(run.id)
+            // Requeue before finishScheduling drains, so dependents see a pending run rather
+            // than a failed one and do not fail a workflow the retry may still complete.
             if shouldRetry { scheduleRetry(runID: run.id) }
+            finishScheduling(run.id)
+        }
+    }
+
+    /// Records a run's private project copy once its computer has prepared it.
+    func attachWorkspace(runID: UUID, path: String, baseTree: String?) {
+        update(runID) {
+            $0.workPath = path
+            $0.baseTree = baseTree
         }
     }
 
@@ -380,7 +403,23 @@ final class BotRunCoordinator: ObservableObject {
                 + events.filter { !liveEventIDs.contains($0.id) }
             eventsByRun[runID]?.sort { $0.sequence < $1.sequence }
         }
+        pruneHistory()
         persist()
+    }
+
+    /// Keeps every live run, whatever a live run still depends on, and the newest finished
+    /// runs; drops the rest along with their events, commands, and private folders.
+    private func pruneHistory() {
+        let needed = Set(activeRuns.flatMap { $0.dependencyRunIDs ?? [] })
+        let dropped = Set(runs.filter { $0.state.isTerminal && !needed.contains($0.id) }
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .dropFirst(Self.retainedFinishedRuns).map(\.id))
+        guard !dropped.isEmpty else { return }
+        runs.removeAll { dropped.contains($0.id) }
+        for id in dropped { eventsByRun[id] = nil }
+        let kept = Set(runs.map(\.id))
+        Task { [store] in try? await store.prune(keeping: kept) }
+        pruneHandler?(Array(dropped))
     }
 
     /// Remote API and Codex specialists own independent runtimes and can run
@@ -461,6 +500,11 @@ final class BotRunCoordinator: ObservableObject {
                 }
                 guard record(id)?.state == .running else { return }
                 let outcome = await startHandler(run)
+                // Stopped or out of budget while starting: don't resurrect it as running.
+                if record(id)?.state.isTerminal != false {
+                    if case .accepted = outcome { _ = stopHandler?(id) }
+                    return
+                }
                 switch outcome {
                 case .accepted(let sessionID):
                     update(id) {
@@ -570,6 +614,7 @@ final class BotRunCoordinator: ObservableObject {
     }
 
     private func finishScheduling(_ runID: UUID) {
+        pruneHistory()
         budgetTasks[runID]?.cancel()
         budgetTasks[runID] = nil
         activeRunIDs.remove(runID)
@@ -579,21 +624,21 @@ final class BotRunCoordinator: ObservableObject {
     }
 
     private func scheduleRetry(runID: UUID) {
+        update(runID) {
+            $0.retryCount = ($0.retryCount ?? 0) + 1
+            $0.state = .queued
+            $0.phase = "Retrying"
+            $0.errorMessage = nil
+            $0.sessionID = nil
+            $0.updatedAt = Date()
+        }
+        recordEvent(runID: runID, kind: .retrying, phase: "Retrying")
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(1))
-            guard !Task.isCancelled else { return }
             await MainActor.run {
-                guard let self, let current = self.record(runID), current.state == .failed else { return }
-                self.update(runID) {
-                    $0.retryCount = ($0.retryCount ?? 0) + 1
-                    $0.state = .queued
-                    $0.phase = "Retrying"
-                    $0.errorMessage = nil
-                    $0.sessionID = nil
-                    $0.updatedAt = Date()
-                }
+                // Stopped during the backoff: stays stopped.
+                guard let self, self.record(runID)?.state == .queued else { return }
                 self.pendingIDs.append(runID)
-                self.recordEvent(runID: runID, kind: .retrying, phase: "Retrying")
                 self.refreshQueuePositions()
                 self.drain()
             }

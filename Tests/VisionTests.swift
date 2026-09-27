@@ -440,6 +440,31 @@ final class GGUFVisionInputTests: XCTestCase {
 /// adapter): never served as the base model, applied only when switched on.
 final class GGUFLoraAdapterTests: XCTestCase {
 
+    func testAbliteratedModelsRemainSelectableAsWeights() {
+        let models = [
+            "Huihui-Qwen3.8-27B-abliterated-Q2_K.gguf",
+            "Qwen2.5-7B-Instruct-abliterated-Q4_K_M.gguf",
+            "HUIHUI-QWEN3.8-27B-ABLITERATED-Q2_K.GGUF",
+        ]
+        for model in models {
+            XCTAssertEqual(GGUFEngine.Planner.selectGGUF(named: [model]), model)
+            XCTAssertNil(GGUFEngine.Planner.loraFile(named: [model]),
+                         "A complete abliterated model must not be applied as an adapter")
+        }
+    }
+
+    func testAbliteratedWeightsStaySeparateFromAdaptersAndProjectors() {
+        let model = "Huihui-Qwen3.8-27B-abliterated-Q2_K.gguf"
+        let adapter = "Huihui-Qwen3.8-27B-abliterated-lora.gguf"
+        let projector = "Huihui-Qwen3.8-27B-mmproj-Q8_0.gguf"
+        for files in [[model, adapter, projector], [projector, adapter, model]] {
+            XCTAssertEqual(GGUFEngine.Planner.selectGGUF(named: files), model)
+            XCTAssertEqual(GGUFEngine.Planner.loraFile(named: files), adapter)
+            XCTAssertEqual(GGUFEngine.Planner.projectorFile(named: files), projector)
+        }
+        XCTAssertNil(GGUFEngine.Planner.selectGGUF(named: [adapter, projector]))
+    }
+
     func testAdapterIsNeverMistakenForWeights() throws {
         let files = [
             "Ternary-Bonsai-2-27B-PQ2_0.gguf",

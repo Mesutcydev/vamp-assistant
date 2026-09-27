@@ -798,6 +798,10 @@ struct RemoteAPIClient {
         try await request("api/sessions/\(id.uuidString)")
     }
 
+    func unloadModel(_ modelID: String) async throws -> RemoteAcceptedResponse {
+        try await request("api/models/unload", method: "POST", body: ["modelID": modelID])
+    }
+
     func send(
         _ message: String,
         to id: UUID,

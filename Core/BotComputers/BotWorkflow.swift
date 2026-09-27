@@ -64,7 +64,7 @@ enum BotAdaptivePlanner {
                 evidence: [.execution, .verification]))
             nodes.append(node(
                 "verify", "reviewer", "Reviewer", prompt,
-                "Review the completed implementation independently. Check correctness, regressions, tests, safety, and report pass or concrete findings.",
+                "Review the completed implementation independently. Check correctness, regressions, tests, safety, and report pass or concrete findings. Finish with `Verdict: pass` or `Verdict: changes needed`.",
                 dependencies: ["build"],
                 phase: .review,
                 criteria: ["The implementation is reviewed independently", "Regressions, safety, and test evidence are assessed"],
@@ -72,7 +72,7 @@ enum BotAdaptivePlanner {
         } else if reviewOnly {
             nodes.append(node(
                 "review", "reviewer", "Reviewer", prompt,
-                "Perform an evidence-first review and return prioritized findings.",
+                "Perform an evidence-first review and return prioritized findings. Finish with `Verdict: pass` or `Verdict: changes needed`.",
                 phase: .review,
                 criteria: ["Findings are evidence-backed and prioritized", "Unverified assumptions are labeled"],
                 evidence: [.review]))
@@ -97,15 +97,23 @@ enum BotAdaptivePlanner {
         BotWorkflowNodeTemplate(
             key: key, specialistID: id, specialistName: name,
             prompt: "\(prompt)\n\nOrchestration contract:\n\(contract)\n\nCompletion criteria:\n"
-                + criteria.map { "- \($0)" }.joined(separator: "\n"),
+                + criteria.enumerated().map { "- AC\($0.offset + 1): \($0.element)" }.joined(separator: "\n")
+                + "\n\nEnd your final answer with one line per criterion: `AC1: met`, or `AC1: not met — reason`.",
             dependencyKeys: dependencies,
             phase: phase,
             acceptanceCriteria: criteria,
             requiredEvidence: evidence)
     }
 
+    /// Whole words plus simple inflections. Substring matching routed "information" and
+    /// "platform" to the Navigator ("form"), "prefix" to the Builder ("fix"), "approve" to
+    /// the Builder ("app").
     private static func containsAny(_ text: String, _ terms: [String]) -> Bool {
-        terms.contains { text.contains($0) }
+        terms.contains {
+            text.range(
+                of: "\\b\(NSRegularExpression.escapedPattern(for: $0))(s|es|d|ed|ing)?\\b",
+                options: .regularExpression) != nil
+        }
     }
 
     private static func rationale(

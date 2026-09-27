@@ -34,6 +34,9 @@ final class RemoteStore {
     /// cannot turn a failed conversation load into an endless spinner.
     private(set) var selectedSessionError: String?
     var startModels: [RemoteStartModelOption] = []
+    private(set) var loadedLocalModel: RemoteLoadedLocalModel?
+    private(set) var isUnloadingModel = false
+    private var modelRequestGeneration = 0
     var apiProviders: [RemoteProviderOption] = []
     var providerNotice: String?
     var botRuns: [RemoteBotRun] = []
@@ -509,15 +512,41 @@ final class RemoteStore {
     func loadStartModels() async {
         guard let client else { return }
         let generation = connectionGeneration
+        modelRequestGeneration += 1
+        let requestGeneration = modelRequestGeneration
         do {
-            let models = try await client.models().models
+            let envelope = try await client.models()
             try requireConnection(generation)
-            startModels = models
+            guard requestGeneration == modelRequestGeneration else { return }
+            startModels = envelope.models
+            loadedLocalModel = envelope.loadedLocalModel
             backgroundNotice = nil
         }
         catch {
-            guard isCurrentConnection(generation) else { return }
+            guard isCurrentConnection(generation), requestGeneration == modelRequestGeneration else { return }
             presentError("Couldn't load models", error, background: true)
+        }
+    }
+
+    func unloadLocalModel() async -> Bool {
+        guard let client, isConnected, !isUnloadingModel,
+              let loadedLocalModel, loadedLocalModel.canUnload else { return false }
+        let generation = connectionGeneration
+        isUnloadingModel = true
+        modelRequestGeneration += 1
+        defer { if isCurrentConnection(generation) { isUnloadingModel = false } }
+        do {
+            let response = try await client.unloadModel(loadedLocalModel.id)
+            try requireConnection(generation)
+            guard response.accepted else { return false }
+            self.loadedLocalModel = nil
+            await loadStartModels()
+            return isCurrentConnection(generation)
+        } catch {
+            guard isCurrentConnection(generation) else { return false }
+            presentError("Couldn't unload model", error)
+            await loadStartModels()
+            return false
         }
     }
 
@@ -1205,6 +1234,8 @@ final class RemoteStore {
     }
 
     private func invalidateConnectionWork() {
+        loadedLocalModel = nil
+        isUnloadingModel = false
         hostStatus = nil
         lastConnectedAt = nil
         connectionGeneration &+= 1

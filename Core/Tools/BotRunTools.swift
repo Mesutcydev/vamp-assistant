@@ -1,9 +1,10 @@
 import Foundation
 
 enum BotRunCommand: Sendable {
-    case list
-    case start(profileID: String, modelID: String?, prompt: String)
-    case orchestrate(modelID: String?, prompt: String)
+    case list(runID: UUID?)
+    /// `project` is the caller's workspace; the app decides whether it is a real project.
+    case start(profileID: String, modelID: String?, prompt: String, project: URL)
+    case orchestrate(modelID: String?, prompt: String, project: URL)
     case steer(runID: UUID, message: String)
     case stop(runID: UUID)
     case respond(runID: UUID, action: String, value: String?)
@@ -22,7 +23,7 @@ struct OrchestrateBotsTool: AgentTool {
     func execute(_ call: ParsedToolCall, in context: ToolContext) async throws -> String {
         guard let prompt = call.string("prompt") else { throw ToolError.missingArgument("prompt") }
         return await BotRunToolBridge.shared.perform(
-            .orchestrate(modelID: call.string("modelID"), prompt: prompt))
+            .orchestrate(modelID: call.string("modelID"), prompt: prompt, project: context.workspace.root))
     }
 }
 
@@ -44,18 +45,23 @@ actor BotRunToolBridge {
 
 struct BotRunsTool: AgentTool {
     let name = "bot_runs"
-    let summary = "List Vamp specialist runs, readiness, queue state, and pending gates"
+    let summary = "List Vamp specialist runs, or read one run's status and output by runID"
     let risk = ToolRisk.read
-    let schemaText = #"{"type":"object","properties":{},"required":[]}"#
+    let schemaText = #"{"type":"object","properties":{"runID":{"type":"string","description":"Optional; returns that run's status, error, and final output"}},"required":[]}"#
 
     func execute(_ call: ParsedToolCall, in context: ToolContext) async throws -> String {
-        await BotRunToolBridge.shared.perform(.list)
+        var runID: UUID?
+        if let raw = call.string("runID") {
+            guard let id = UUID(uuidString: raw) else { throw ToolError.missingArgument("runID") }
+            runID = id
+        }
+        return await BotRunToolBridge.shared.perform(.list(runID: runID))
     }
 }
 
 struct DelegateBotTool: AgentTool {
     let name = "delegate_bot"
-    let summary = "Delegate a task to an isolated Vamp specialist computer"
+    let summary = "Delegate a task to an isolated Vamp specialist; it works on a private copy of this project"
     let risk = ToolRisk.execute
     let schemaText = """
         {"type":"object","properties":{
@@ -73,7 +79,8 @@ struct DelegateBotTool: AgentTool {
         guard let specialist = call.string("specialist") else { throw ToolError.missingArgument("specialist") }
         guard let prompt = call.string("prompt") else { throw ToolError.missingArgument("prompt") }
         return await BotRunToolBridge.shared.perform(
-            .start(profileID: specialist, modelID: call.string("modelID"), prompt: prompt))
+            .start(profileID: specialist, modelID: call.string("modelID"), prompt: prompt,
+                   project: context.workspace.root))
     }
 }
 
@@ -116,9 +123,9 @@ struct BotStopTool: AgentTool {
 
 struct BotRespondTool: AgentTool {
     let name = "bot_respond"
-    let summary = "Approve, decline, answer, or resume a specialist run"
+    let summary = "Approve, decline, answer, or resume a specialist run, or apply its finished changes to this project"
     let risk = ToolRisk.execute
-    let schemaText = #"{"type":"object","properties":{"runID":{"type":"string"},"action":{"type":"string","enum":["approve","decline","answer","resume"]},"value":{"type":"string"}},"required":["runID","action"]}"#
+    let schemaText = #"{"type":"object","properties":{"runID":{"type":"string"},"action":{"type":"string","enum":["approve","decline","answer","resume","apply"]},"value":{"type":"string"}},"required":["runID","action"]}"#
 
     func preview(_ call: ParsedToolCall, in context: ToolContext) -> ApprovalPreview {
         .command("Respond to bot run \(call.string("runID") ?? "") with \(call.string("action") ?? "action")")

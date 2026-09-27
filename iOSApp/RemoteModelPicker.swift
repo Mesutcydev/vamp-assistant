@@ -1,5 +1,33 @@
 import SwiftUI
 
+#if DEBUG
+struct RemoteModelPickerFixture: View {
+    @State private var source = "local"
+    @State private var selectedModelID = "local|huihui"
+    @State private var loaded: RemoteLoadedLocalModel? = .init(
+        id: "local|huihui", name: "Huihui Qwen3.8 27B abliterated Q2 K",
+        canUnload: ProcessInfo.processInfo.environment["VAMP_REMOTE_FIXTURE"] != "busy")
+    @State private var unloading = false
+    var body: some View {
+        RemoteModelPickerSheet(models: [
+            .init(id: "local|huihui", name: "Huihui Qwen3.8 27B abliterated Q2 K", source: "local",
+                  detail: "Downloaded · GGUF", reasoningEfforts: nil, defaultReasoningEffort: nil),
+            .init(id: "local|bonsai", name: "Ternary Bonsai 27B", source: "local",
+                  detail: "Downloaded · GGUF", reasoningEfforts: nil, defaultReasoningEffort: nil),
+        ], source: $source, selectedModelID: $selectedModelID,
+           loadedLocalModel: loaded, isUnloadingModel: unloading,
+           isConnected: ProcessInfo.processInfo.environment["VAMP_REMOTE_FIXTURE"] != "offline",
+           onUnload: {
+               unloading = true
+               try? await Task.sleep(for: .milliseconds(300))
+               loaded = nil
+               unloading = false
+               return true
+           })
+    }
+}
+#endif
+
 // MARK: - Searchable model picker
 
 /// The one place the iOS client lists models.
@@ -19,10 +47,15 @@ struct RemoteModelPickerSheet: View {
     /// Pull-to-refresh, so a model configured on the Mac while this sheet is
     /// open can be picked up without closing and reopening it.
     var onRefresh: (() async -> Void)? = nil
+    var loadedLocalModel: RemoteLoadedLocalModel? = nil
+    var isUnloadingModel = false
+    var isConnected = true
+    var onUnload: (() async -> Bool)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.remoteAppearance) private var appearance
     @State private var query = ""
+    @State private var didUnload = false
 
     static let sources = ["local", "chatgpt", "api"]
 
@@ -141,6 +174,9 @@ struct RemoteModelPickerSheet: View {
                         .scrollContentBackground(.hidden)
                         .refreshable { await onRefresh?() }
                     }
+                    if source == "local", onUnload != nil {
+                        unloadControl
+                    }
                 }
                 .padding(.top, 10)
             }
@@ -152,6 +188,47 @@ struct RemoteModelPickerSheet: View {
             }
             .toolbarBackground(BeetTheme.background(appearance).opacity(0.94), for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
+            .task { await onRefresh?() }
+        }
+    }
+
+    @ViewBuilder
+    private var unloadControl: some View {
+        if let loaded = loadedLocalModel {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(loaded.name)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(BeetTheme.secondaryText(appearance))
+                    .lineLimit(2)
+                Button {
+                    Task { didUnload = await onUnload?() ?? false }
+                } label: {
+                    HStack(spacing: 8) {
+                        if isUnloadingModel { ProgressView().controlSize(.small) }
+                        else { Image(systemName: "eject") }
+                        Text(isUnloadingModel ? "Unloading…" : "Unload model")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .frame(maxWidth: .infinity, minHeight: RemoteInstrument.controlHeight)
+                }
+                .buttonStyle(RemoteKeyButtonStyle())
+                .disabled(!isConnected || !loaded.canUnload || isUnloadingModel)
+                .accessibilityIdentifier("remote.model.unload")
+                .accessibilityHint("Frees memory on your Mac. Keeps the downloaded model and your conversations.")
+                Text(loaded.canUnload
+                     ? "Frees Mac memory. Keeps the model downloaded."
+                     : "Stop the active task to unload this model.")
+                    .font(.caption)
+                    .foregroundStyle(BeetTheme.secondaryText(appearance))
+            }
+            .padding(18)
+            .background(BeetTheme.surface(appearance))
+            .overlay(alignment: .top) { Rectangle().fill(BeetTheme.line(appearance)).frame(height: 0.75) }
+        } else if didUnload {
+            Label("Model unloaded", systemImage: "checkmark.circle")
+                .font(.caption).foregroundStyle(RemoteInstrument.green)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(18)
+                .accessibilityIdentifier("remote.model.unloaded")
         }
     }
 

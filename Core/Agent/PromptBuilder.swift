@@ -460,6 +460,9 @@ enum PromptBuilder {
         add("Delegate focused work",
             tools: ["task"],
             guidance: "Choose research, implement, verify, or review; implementation is isolated by default. Do not nest subagents.")
+        add("Specialist bots",
+            tools: ["delegate_bot", "orchestrate_bots", "bot_runs"],
+            guidance: "Runs are asynchronous. Each works on a private copy of this project, never the project itself. After delegating, read the result with `bot_runs` and the runID; never report a bot's result before its run completes. Changes reach the project only through `bot_respond` with `apply`.")
         add("Durable project memory",
             tools: ["memory_add", "memory_delete"],
             guidance: "Store only stable project facts that will help future sessions.")
@@ -1014,6 +1017,11 @@ enum ToolRouter {
         if has(["delegate", "parallel", "subagent"]) {
             recognized = true
             include(["task"])
+        }
+        if has(["bot", "bots", "specialist", "specialists", "builder", "reviewer", "navigator",
+                "researcher", "delegate", "orchestrate"]) {
+            recognized = true
+            include(["delegate_bot", "orchestrate_bots", "bot_runs", "bot_steer", "bot_stop", "bot_respond"])
         }
         if has(["forget", "memory", "remember"]) {
             recognized = true

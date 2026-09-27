@@ -11,6 +11,46 @@ changes are in the working tree.
 
 ## Ground rules & commands
 
+### 2026-09-27: Huihui vision and simpler iOS session controls
+
+- Fixed `GGUFEngine.Planner.isLoraFile`: full **abliterated** GGUF weights no
+  longer match the legacy **abliterate** adapter marker. Regression coverage
+  includes the user's exact Huihui Q2_K filename and folders with projectors.
+- Installed the publisher's `mmproj-model-bf16.gguf` beside the Huihui Q2_K
+  weights in Application Support. SHA-256:
+  `c9a09064683620bea3d3bfed5d4462e1a97a7d2fff7e5045d6862a0a85eeb5b5`.
+  Source: https://huggingface.co/huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF/blob/main/mmproj-model-bf16.gguf
+  Live app inference correctly read **BONSAI 42** from a rendered PNG.
+  Explicit unload cleared vision state and stopped the llama-server process.
+  `LiveGGUFVisionTests` now accepts `BEETCODE_LIVE_GGUF_VISION=1`,
+  `BEETCODE_LIVE_VISION_MODEL_ID`, and `BEETCODE_LIVE_VISION_PROJECTOR`
+  (forward as `TEST_RUNNER_...` with xcodebuild).
+- iOS Model → Local now offers **Unload model** in the existing key style.
+  Authenticated `POST /api/models/unload` checks the model identity and rejects
+  active chat/local-bot work. Downloads and conversations are preserved.
+  Older Mac hosts decode normally and do not show an unsupported control.
+- New chat now shows Chat/Code, the message field, one model row, and a
+  reachable full-width Start action. Bot/access/provider options are collapsed.
+  Valid saved models are reused; unavailable choices fall back to the loaded
+  or another available model. Reasoning choices survive model refreshes.
+- Validation: macOS 1,048 passed / 45 opt-in skipped; Huihui live vision +
+  unload passed separately; iOS 40 unit tests and 3 targeted UI tests passed.
+  Light/dark, accessibility, landscape, and keyboard screenshots reviewed.
+  New-chat UI test created a session using only a message against an isolated
+  loopback fixture host and verified the outgoing model/chat request.
+  Both Release builds passed. Artifacts are in `.derived/Build/Products/Release`
+  and `.derived-ios/Build/Products/Release-iphoneos`.
+- 2026-09-27 release: both platforms are **0.10.45, build 124**. The signed
+  Mac Release build replaced `/Applications/Vamp Assistant.app` and launched.
+  Its certificate, Team ID, designated requirement, and bundle ID match the
+  previous installation. Rollback copy:
+  `dist/rollback/Vamp Assistant-0.10.44-build123-before-0.10.45.app`.
+  The unsigned IPA and checksum were copied and verified in iCloud Drive's
+  `OnDevice Builds` folder. Both artifacts are in `dist/`.
+  User authorized publishing the release and updating thevamp.app downloads.
+  The release includes the already-present bot reliability changes tested with
+  this tree. Temporary UI host and Argent simulator servers were stopped.
+
 - Xcode: `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer`
   (Xcode beta is the only install). Do not regenerate the project while a
   build runs. `xcodegen generate` only after adding/removing files.
@@ -175,7 +215,8 @@ Remote / UI
      `SessionStore` concurrent saves still have no per-id write serialization
      (supersession guard only).
    - `BotRunStore` content is still plaintext (permissions hardened only).
-   - Unbounded growth: task capsules, repo summaries, bot run/event history.
+   - Unbounded growth: task capsules, repo summaries. (Bot history keeps live
+     runs plus the newest 100 finished; events are an append-only JSONL log.)
 
 ## Useful facts
 

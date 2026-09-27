@@ -6,6 +6,25 @@ import UIKit
 @testable import BeetCodeRemoteIOS
 
 final class RemoteProtocolRegressionTests: XCTestCase {
+    @MainActor func testNewChatReusesSelectionThenLoadedModelThenAvailableSource() {
+        let local = RemoteStartModelOption(id: "local|huihui", name: "Huihui", source: "local",
+            detail: "Downloaded", reasoningEfforts: nil, defaultReasoningEffort: nil)
+        let api = RemoteStartModelOption(id: "api|gpt", name: "API model", source: "api",
+            detail: "OpenAI", reasoningEfforts: nil, defaultReasoningEffort: nil)
+        let catalog = [local, api]
+        XCTAssertEqual(StartSessionSheet.preferredModel(in: catalog, source: "api",
+            selectedID: api.id, loadedID: local.id, allowSourceFallback: true)?.id, api.id)
+        XCTAssertEqual(StartSessionSheet.preferredModel(in: catalog, source: "api",
+            selectedID: "removed", loadedID: local.id, allowSourceFallback: true)?.id, local.id)
+        XCTAssertEqual(StartSessionSheet.preferredModel(in: [api], source: "local",
+            selectedID: "", loadedID: nil, allowSourceFallback: true)?.id, api.id)
+        XCTAssertNil(StartSessionSheet.preferredModel(in: [api], source: "local",
+            selectedID: "", loadedID: nil, allowSourceFallback: false),
+            "An explicit source choice must remain on that source")
+        XCTAssertNil(StartSessionSheet.preferredModel(in: [], source: "local",
+            selectedID: "removed", loadedID: local.id, allowSourceFallback: true))
+    }
+
     func testProviderDirectoryDecodesConnectionAndSetupState() throws {
         let data = Data(#"{"providers":[{"id":"openAI","name":"OpenAI","kind":"builtIn","configured":true,"baseURL":"https://api.openai.com/v1","needsMacSetup":false},{"id":"custom","name":"Custom","kind":"builtIn","configured":false,"baseURL":null,"needsMacSetup":true}]}"#.utf8)
         let providers = try JSONDecoder().decode(RemoteProviderEnvelope.self, from: data).providers

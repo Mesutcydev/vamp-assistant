@@ -418,6 +418,76 @@ actor BotComputerService {
         return (root, target)
     }
 
+    // MARK: - Run workspaces
+
+    /// A private folder for one run inside the bot's workspace (so a container sees it under
+    /// `/workspace/runs/`), seeded with a copy of `seed` when given, plus the git tree it
+    /// starts from when that copy is a repository. On APFS the copy is a clone, so a large
+    /// project costs almost nothing until the bot changes it.
+    /// ponytail: copies the whole tree incl. build output; add excludes if non-APFS copies get slow.
+    func prepareRunWorkspace(
+        computerID: UUID, runID: UUID, seed: URL?
+    ) throws -> (path: String, baseTree: String?) {
+        let directory = try runsDirectory(computerID: computerID)
+            .appendingPathComponent(runID.uuidString, isDirectory: true)
+        try fileManager.createDirectory(
+            at: directory.deletingLastPathComponent(), withIntermediateDirectories: true)
+        // A retry or resume starts from a clean copy, like its fresh session.
+        if fileManager.fileExists(atPath: directory.path) { try fileManager.removeItem(at: directory) }
+        guard let seed else {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            return (directory.path, nil)
+        }
+        try fileManager.copyItem(at: seed, to: directory)
+        let base = try? GitCheckpointer(workspace: Workspace(root: directory))
+            .snapshot(summary: "Bot run base").treeSHA
+        return (directory.path, base)
+    }
+
+    /// A run's changes as a readable diff against the tree it was seeded with.
+    func patch(workPath: String, baseTree: String) throws -> String {
+        let work = URL(fileURLWithPath: workPath, isDirectory: true)
+        let final = try GitCheckpointer(workspace: Workspace(root: work))
+            .snapshot(summary: "Bot run result").treeSHA
+        let diff = try ShellRunner.runProcess(
+            executable: "/usr/bin/git", arguments: ["diff", baseTree, final],
+            workingDirectory: work, timeout: 60)
+        guard !diff.failed else { throw BotComputerError.commandFailed(Self.failureMessage(diff.output)) }
+        return diff.output
+    }
+
+    /// Applies a finished run's changes to the user's project. Checked first, so a conflict
+    /// leaves the project untouched — the same path isolated subagents merge through.
+    func applyChanges(workPath: String, baseTree: String, projectPath: String) throws -> String {
+        try AgentWorktree(
+            id: UUID().uuidString.lowercased(),
+            parentWorkspace: URL(fileURLWithPath: projectPath, isDirectory: true),
+            workspaceURL: URL(fileURLWithPath: workPath, isDirectory: true),
+            baseTree: baseTree,
+            baseCheckpoint: SessionCheckpoint(
+                id: UUID(), treeSHA: baseTree, createdAt: Date(), summary: "Bot run base"))
+        .merge().description
+    }
+
+    /// Deletes pruned runs' folders. Paths are rebuilt from IDs rather than read from run
+    /// history, so a damaged history file cannot aim this anywhere else.
+    func removeRunWorkspaces(runIDs: [UUID]) throws {
+        for computer in try load() {
+            let runs = try runsDirectory(computerID: computer.id)
+            for id in runIDs {
+                try? fileManager.removeItem(at: runs.appendingPathComponent(id.uuidString, isDirectory: true))
+            }
+        }
+    }
+
+    private func runsDirectory(computerID: UUID) throws -> URL {
+        guard let record = try load().first(where: { $0.id == computerID }) else {
+            throw BotComputerError.recordMissing
+        }
+        return URL(fileURLWithPath: record.workspacePath, isDirectory: true)
+            .appendingPathComponent("runs", isDirectory: true)
+    }
+
     static func relativePath(of url: URL, under root: URL) -> String {
         let resolved = url.resolvingSymlinksInPath().standardizedFileURL.path
         let base = root.path
@@ -429,8 +499,10 @@ actor BotComputerService {
         containerExecutable(fileManager: fileManager)
     }
 
-    static func execArguments(containerName: String, command: String) -> [String] {
-        ["exec", "-w", "/workspace", containerName, "sh", "-lc", command]
+    static func execArguments(
+        containerName: String, command: String, workingDirectory: String = "/workspace"
+    ) -> [String] {
+        ["exec", "-w", workingDirectory, containerName, "sh", "-lc", command]
     }
 
     /// Pinned base image.

@@ -83,6 +83,51 @@ final class RemoteStoreConcurrencyTests: XCTestCase {
         Data("{\"id\":\"\(id)\",\"title\":\"Test\",\"workspace\":\"\",\"modelID\":\"test\",\"messages\":[],\"isRunning\":false,\"phase\":\"idle\",\"streamingText\":\"\"}".utf8)
     }
 
+    func testUnloadCallsHostOnceAndKeepsDownloadedModels() async throws {
+        let posted = expectation(description: "unload started")
+        let posts = Mutex(0)
+        let unloaded = Mutex(false)
+        let (store, _, session) = makeStore { request in
+            switch request.url?.path {
+            case "/api/status": return (200, Self.status(2_100_000_000))
+            case "/api/sessions": return (200, Data("{\"sessions\":[]}".utf8))
+            case "/api/models/unload":
+                XCTAssertEqual(request.httpMethod, "POST")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-token")
+                posts.withLock { $0 += 1 }
+                posted.fulfill()
+                try await Task.sleep(for: .milliseconds(100))
+                unloaded.withLock { $0 = true }
+                return (200, Data("{\"accepted\":true}".utf8))
+            case "/api/models":
+                let loaded = unloaded.withLock { $0 } ? "null" : "{\"id\":\"local|huihui\",\"name\":\"Huihui\",\"canUnload\":true}"
+                return (200, Data("{\"models\":[{\"id\":\"local|huihui\",\"name\":\"Huihui\",\"source\":\"local\",\"detail\":\"Downloaded\"}],\"loadedLocalModel\":\(loaded)}".utf8))
+            default: return (200, Data("{\"runs\":[]}".utf8))
+            }
+        }
+        defer { session.invalidateAndCancel(); disconnect(store) }
+        try await store.refresh()
+        await store.loadStartModels()
+        XCTAssertEqual(store.loadedLocalModel?.id, "local|huihui")
+        let first = Task { await store.unloadLocalModel() }
+        await fulfillment(of: [posted], timeout: 2)
+        XCTAssertTrue(store.isUnloadingModel)
+        let duplicate = await store.unloadLocalModel()
+        XCTAssertFalse(duplicate)
+        let success = await first.value
+        XCTAssertTrue(success)
+        XCTAssertEqual(posts.withLock { $0 }, 1)
+        XCTAssertNil(store.loadedLocalModel)
+        XCTAssertFalse(store.isUnloadingModel)
+        XCTAssertEqual(store.startModels.map(\.id), ["local|huihui"])
+    }
+
+    func testOlderHostModelListRemainsCompatible() throws {
+        let envelope = try JSONDecoder().decode(RemoteModelEnvelope.self, from: Data("{\"models\":[]}".utf8))
+        XCTAssertNil(envelope.loadedLocalModel)
+        XCTAssertTrue(envelope.models.isEmpty)
+    }
+
     func testSwitchingMacDuringRefreshDoesNotReuseOldStatusOrExpiry() async throws {
         let started = expectation(description: "A request started")
         let (store, storage, session) = makeStore { request in
