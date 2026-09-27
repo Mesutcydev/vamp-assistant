@@ -3,6 +3,7 @@ import AppKit
 import Darwin
 import Security
 import CryptoKit
+import ImageIO
 @preconcurrency import ScreenCaptureKit
 
 enum RemoteNetworkKind: String, Equatable, Sendable {
@@ -114,6 +115,31 @@ final class RemoteSessionHost {
     /// immediately. Stopping the host keeps paired tokens so the phone can
     /// reconnect after a Mac sleep or Remote toggle.
     static let tokenLifetime: TimeInterval = 30 * 24 * 60 * 60
+    /// Mobile clients normalize images to JPEG/PNG before sending. Decode only
+    /// inline bytes; remote URLs and client file paths are never fetched.
+    static func decodeChatImages(_ value: LFJSONValue?) throws -> [ChatImage] {
+        guard let value else { return [] }
+        struct InvalidImage: LocalizedError {
+            var errorDescription: String? { "Attach up to four JPEG or PNG images, each under 2 MB and 4096 pixels per side." }
+        }
+        guard let entries = value.arrayValue, entries.count <= 4 else { throw InvalidImage() }
+        return try entries.enumerated().map { index, entry in
+            guard let object = entry.objectValue,
+                  let base64 = object["base64"]?.stringValue, base64.utf8.count <= 2_800_000,
+                  let data = Data(base64Encoded: base64), !data.isEmpty, data.count <= 2 * 1024 * 1024,
+                  let source = CGImageSourceCreateWithData(data as CFData, nil),
+                  let type = CGImageSourceGetType(source) as String?, ["public.jpeg", "public.png"].contains(type),
+                  let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                  let width = properties[kCGImagePropertyPixelWidth] as? Int,
+                  let height = properties[kCGImagePropertyPixelHeight] as? Int,
+                  (1...4096).contains(width), (1...4096).contains(height),
+                  CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCache: false] as CFDictionary) != nil
+            else { throw InvalidImage() }
+            return ChatImage(data: data, mimeType: type == "public.jpeg" ? "image/jpeg" : "image/png",
+                             name: "Image \(index + 1)")
+        }
+    }
+
     static let maxMessageBytes = 20_000
     static let maxPairBodyBytes = 4 * 1024
     static let maxRemoteFileBytes = 20 * 1024 * 1024
@@ -150,7 +176,7 @@ final class RemoteSessionHost {
     /// AppState installs these handlers so remote messages become durable
     /// queued tasks. Tests and lightweight hosts may leave them nil and keep
     /// the direct continuation behavior.
-    var enqueueTaskHandler: ((UUID, String) -> QueuedAgentTask?)?
+    var enqueueTaskHandler: ((UUID, String, [ChatImage]) -> QueuedAgentTask?)?
     var taskLookupHandler: ((UUID) -> QueuedAgentTask?)?
     var queuedTasksHandler: ((UUID) -> [QueuedAgentTask])?
     var removeQueuedTaskHandler: ((UUID, UUID) -> Bool)?
@@ -421,7 +447,7 @@ final class RemoteSessionHost {
                 "protocolVersion": .number(1),
                 "appVersion": .string(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"),
                 "appBuild": .string(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"),
-                "capabilities": .array(["sessions", "bots", "workspaces", "sharing", "stream-revocation"].map(LFJSONValue.string)),
+                "capabilities": .array(["sessions", "bots", "workspaces", "sharing", "stream-revocation", "chat-images"].map(LFJSONValue.string)),
                 "pairedClients": .number(Double(pairedClientCount)),
                 "networkKind": .string(networkKind?.rawValue ?? "unknown"),
                 "tokenExpiresAt": tokenDigest(from: request).flatMap { tokens[$0] }.map { .number($0.timeIntervalSince1970) } ?? .null,
@@ -1700,6 +1726,9 @@ final class RemoteSessionHost {
             guard let record = ownedRecord(id) else {
                 return .response(json(["error": .string("Session not found.")], status: 404))
             }
+            let images: [ChatImage]
+            do { images = try Self.decodeChatImages(request.bodyJSON?.objectValue?["images"]) }
+            catch { return .response(json(["error": .string(error.localizedDescription)], status: 400)) }
             let options = runOptions(from: request)
             configureRunHandler?(options)
             if let modelID = request.bodyJSON?.objectValue?["modelID"]?.stringValue,
@@ -1712,7 +1741,13 @@ final class RemoteSessionHost {
                     return .response(json(["error": .string(error)], status: 409))
                 }
             }
+            if !images.isEmpty, !(await sessions.supportsRemoteImages()) {
+                return .response(json(["error": .string("This model cannot read images. Select a vision model with its projector loaded and try again.")], status: 409))
+            }
             let action = request.bodyJSON?.objectValue?["action"]?.stringValue
+            if action == "steer", !images.isEmpty {
+                return .response(json(["error": .string("Queue image attachments as a follow-up instead of steering the current turn.")], status: 409))
+            }
             if action == "steer" {
                 if sessions.activeSessionID == record.id, sessions.isRunning {
                     if steerHandler?(record.id, message) == true {
@@ -1727,7 +1762,7 @@ final class RemoteSessionHost {
                 }
             }
             if let enqueueTaskHandler {
-                if let task = enqueueTaskHandler(record.id, message) {
+                if let task = enqueueTaskHandler(record.id, message, images) {
                     return .response(json([
                         "accepted": .bool(true),
                         "queued": .bool(true),
@@ -1746,7 +1781,7 @@ final class RemoteSessionHost {
                 guard !sessions.isRunning else {
                     return .response(json(["error": .string("Vamp Assistant is already working and the task queue is unavailable. Try again when the current task finishes.")], status: 409))
                 }
-                guard sessions.continuePersistedSession(id: record.id, message: message) else {
+                guard sessions.continuePersistedSession(id: record.id, message: message, images: images) else {
                     return .response(json(["error": .string("That session could not be resumed. Check that its workspace and model are available.")], status: 409))
                 }
                 return .response(json([
@@ -1759,7 +1794,7 @@ final class RemoteSessionHost {
             guard !sessions.isRunning else {
                 return .response(json(["error": .string("Vamp Assistant is already working on another prompt.")], status: 409))
             }
-            guard sessions.continuePersistedSession(id: record.id, message: message) else {
+            guard sessions.continuePersistedSession(id: record.id, message: message, images: images) else {
                 return .response(json(["error": .string("That session could not be resumed. Check that its workspace still exists.")], status: 409))
             }
             return .response(json([

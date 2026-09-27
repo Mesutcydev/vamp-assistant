@@ -211,6 +211,30 @@ final class EndToEndTests: XCTestCase {
         XCTAssertEqual(app.taskQueue.loadAll().count, 1)
     }
 
+    func testQueuedImageSurvivesDiskReloadAndReachesVisionEngine() async throws {
+        let engine = FakeLLMEngine(supportsImageInput: true)
+        let app = AppState(engine: EngineRouter(local: engine))
+        app.enginePhase = .ready("Vision")
+        let now = Date()
+        let record = SessionRecord(id: UUID(), title: "Image queue", createdAt: now,
+            updatedAt: now, workspacePath: "", modelID: "vision", messages: [], checkpoints: [])
+        _ = SessionStore.shared.save(record)
+        let image = ChatImage(data: Data([1, 2, 3]), mimeType: "image/png", name: "Test image")
+        let queued = try app.taskQueue.enqueue(sessionID: record.id, workspacePath: "",
+            message: "Read this image", modelID: "vision", images: [image])
+        XCTAssertEqual(app.taskQueue.load(id: queued.id)?.images?.first?.base64, image.data.base64EncodedString())
+        engine.enqueue(.text("The image arrived."))
+        XCTAssertNil(app.sendQueuedTask(queued.id, sessionID: record.id))
+        let deadline = Date().addingTimeInterval(10)
+        while app.taskQueue.load(id: queued.id)?.state != .completed, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(app.taskQueue.load(id: queued.id)?.state, .completed)
+        XCTAssertEqual(engine.turnHistory.flatMap { $0 }.filter { $0.role == .user }.last?.images.first?.data, image.data)
+        XCTAssertEqual(SessionStore.shared.load(id: record.id)?.messages.first(where: { $0.role == .user })?.images?.first?.base64,
+                       image.data.base64EncodedString())
+    }
+
     func testStoppingQueuedPreparationAllowsTheNextFollowUpToRun() async throws {
         let engine = FakeLLMEngine()
         let app = AppState(engine: EngineRouter(local: engine))

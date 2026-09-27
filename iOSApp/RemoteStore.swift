@@ -124,6 +124,12 @@ final class RemoteStore {
            let testToken = environment["BEETCODE_REMOTE_TEST_TOKEN"] {
             baseURL = url
             token = testToken
+            if environment["BEETCODE_REMOTE_TEST_IMAGE"] != nil {
+                let fixture = PairedBeetCodeComputer(id: UUID(uuidString: "44444444-4444-4444-4444-444444444444")!,
+                    name: "Image fixture", baseURL: url)
+                pairedComputers = [fixture]
+                activeComputerID = fixture.id
+            }
             return
         }
 #endif
@@ -895,22 +901,29 @@ final class RemoteStore {
         }
     }
 
-    func send(_ text: String, modelID: String? = nil, action: String? = nil, sessionID: UUID? = nil) async -> Bool {
-        let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    func send(_ text: String, modelID: String? = nil, action: String? = nil, sessionID: UUID? = nil, images: [RemoteImageAttachment] = []) async -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let message = trimmed.isEmpty && !images.isEmpty ? "Describe this image." : trimmed
         guard !message.isEmpty, let client, let id = selectedSession?.id else { return false }
+        if !images.isEmpty, hostStatus?.capabilities?.contains("chat-images") != true {
+            errorTitle = "Update Vamp on your Mac"
+            errorMessage = "This Mac host doesn’t support chat images yet. Update it, reconnect, and send again. Your images are still in the draft."
+            return false
+        }
         guard sessionID == nil || sessionID == id, !isUpdatingQueue,
               sendingSessionIDs.insert(id).inserted else { return false }
         let generation = connectionGeneration
         defer { if generation == connectionGeneration { sendingSessionIDs.remove(id) } }
         do {
-            _ = try await client.send(
+            let response = try await client.send(
                 message,
                 to: id,
                 autoMode: autoMode,
                 fullAccess: fullAccess,
                 reasoningEffort: reasoningEffort,
                 modelID: modelID,
-                action: action)
+                action: action, images: images)
+            guard response.accepted == true else { throw RemoteClientError.server("The Mac did not accept this message.") }
             try requireConnection(generation)
             return true
         } catch {

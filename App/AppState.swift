@@ -134,8 +134,8 @@ final class AppState: ObservableObject {
             taskQueue.recoverInterrupted()
         }
         queuedTasks = isTestHost ? [] : taskQueue.loadAll()
-        remoteSessionHost.enqueueTaskHandler = { [weak self] sessionID, message in
-            self?.enqueueRemoteTask(sessionID: sessionID, message: message)
+        remoteSessionHost.enqueueTaskHandler = { [weak self] sessionID, message, images in
+            self?.enqueueRemoteTask(sessionID: sessionID, message: message, images: images)
         }
         remoteSessionHost.taskLookupHandler = { [weak self] sessionID in
             self?.taskQueue.loadAll().first { $0.sessionID == sessionID && !$0.state.isTerminal }
@@ -877,7 +877,7 @@ final class AppState: ObservableObject {
     /// Enqueues a remote prompt even when another task is active. The caller
     /// gets a durable id immediately; the queue drains when a compatible model
     /// is ready and the current run reaches a terminal state.
-    func enqueueRemoteTask(sessionID: UUID, message: String) -> QueuedAgentTask? {
+    func enqueueRemoteTask(sessionID: UUID, message: String, images: [ChatImage] = []) -> QueuedAgentTask? {
         guard let record = SessionStore.shared.load(id: sessionID),
               record.source == .app,
               SessionStore.shared.validateWorkspaceBinding(record)
@@ -887,7 +887,7 @@ final class AppState: ObservableObject {
             sessionID: sessionID,
             workspacePath: record.workspacePath,
             message: message,
-            source: "remote")
+            source: "remote", images: images)
     }
 
     /// Queues a follow-up from the native composer while its current turn is
@@ -907,7 +907,8 @@ final class AppState: ObservableObject {
         sessionID: UUID,
         workspacePath: String,
         message: String,
-        source: String
+        source: String,
+        images: [ChatImage] = []
     ) -> QueuedAgentTask? {
         let modelID = engine.activeRemoteEndpoint?.model ?? activeCodexModelID ?? activeModelID ?? ""
         do {
@@ -916,7 +917,7 @@ final class AppState: ObservableObject {
                 workspacePath: workspacePath,
                 message: message,
                 modelID: modelID,
-                source: source)
+                source: source, images: images)
             refreshTaskQueue()
             drainTaskQueue()
             return task
@@ -1006,7 +1007,7 @@ final class AppState: ObservableObject {
         }
         refreshTaskQueue()
 
-        guard sessions.continuePersistedSession(id: next.sessionID, message: next.message) else {
+        guard sessions.continuePersistedSession(id: next.sessionID, message: next.message, images: (next.images ?? []).compactMap(\.chatImage)) else {
             taskQueue.update(next.id) { task in
                 task.state = .failed
                 task.phase = nil

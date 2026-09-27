@@ -54,6 +54,18 @@ final class TaskQueueTests: XCTestCase {
         }
     }
 
+    func testLegacyQueueWithoutImagesStillDecodes() throws {
+        let (store, root, _) = isolatedQueue()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let task = try store.enqueue(sessionID: UUID(), workspacePath: "", message: "Original", modelID: "m")
+        let encoded = try JSONEncoder().encode(task)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "images")
+        let restored = try JSONDecoder().decode(QueuedAgentTask.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertNil(restored.images)
+        XCTAssertEqual(restored.message, "Original")
+    }
+
     func testQueueAllowsChatOnlyEmptyWorkspace() throws {
         let (store, root, _) = isolatedQueue()
         defer { try? FileManager.default.removeItem(at: root) }

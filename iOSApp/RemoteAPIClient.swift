@@ -809,7 +809,8 @@ struct RemoteAPIClient {
         fullAccess: Bool,
         reasoningEffort: String?,
         modelID: String? = nil,
-        action: String? = nil
+        action: String? = nil,
+        images: [RemoteImageAttachment] = []
     ) async throws -> RemoteAcceptedResponse {
         var body: [String: Any] = [
             "message": message,
@@ -819,6 +820,7 @@ struct RemoteAPIClient {
         if let reasoningEffort { body["reasoningEffort"] = reasoningEffort }
         if let modelID, !modelID.isEmpty { body["modelID"] = modelID }
         if let action, !action.isEmpty { body["action"] = action }
+        if !images.isEmpty { body["images"] = images.map(\.requestValue) }
         return try await request("api/sessions/\(id.uuidString)/messages", method: "POST", body: body)
     }
 

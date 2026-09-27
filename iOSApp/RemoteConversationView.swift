@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
+import PhotosUI
 
 struct ConversationView: View {
     @Bindable var store: RemoteStore
@@ -10,6 +11,15 @@ struct ConversationView: View {
     @State private var showModelPicker = false
     @State private var pickerSource = "local"
     @State private var showSharing = false
+    @State private var showPhotoPicker = false
+    @State private var showImageFiles = false
+    @State private var photoSelection: [PhotosPickerItem] = []
+    @State private var isImportingImages = false
+    @State private var imageImportError: String?
+    private var images: [RemoteImageAttachment] {
+        guard let computerID = store.activeComputerID else { return [] }
+        return store.drafts.images(computerID: computerID, sessionID: sessionID)
+    }
     @State private var selectedModelID = ""
     @State private var dismissedErrorMessage: String?
 
@@ -135,11 +145,12 @@ struct ConversationView: View {
                             Text(warning).font(.caption).foregroundStyle(RemoteInstrument.orange)
                                 .padding(.horizontal, 16).accessibilityLabel(warning)
                         }
+                        if !images.isEmpty || isImportingImages { imageTray }
                         RemoteComposer(
                             draft: $store[draftFor: sessionID],
                             isRunning: detail.isRunning,
                             isReachable: store.isConnected,
-                            isSending: store.sendingSessionIDs.contains(sessionID) || store.isUpdatingQueue,
+                            isSending: store.sendingSessionIDs.contains(sessionID) || store.isUpdatingQueue || isImportingImages,
                             hasError: detail.error != nil,
                             onSend: { send() },
                             onQueue: { send(action: "queue") },
@@ -151,7 +162,10 @@ struct ConversationView: View {
                                 showModelPicker = true
                             },
                             onShare: { showSharing = true },
-                            modeName: detail.mode == "code" || !(detail.workspacePath ?? "").isEmpty ? "Code" : "Chat")
+                            modeName: detail.mode == "code" || !(detail.workspacePath ?? "").isEmpty ? "Code" : "Chat",
+                            hasImages: !images.isEmpty,
+                            onAddPhotos: { if canAddImages { showPhotoPicker = true } },
+                            onAddImageFiles: { if canAddImages { showImageFiles = true } })
                     }
                 }
             }
@@ -159,6 +173,14 @@ struct ConversationView: View {
                 dismissedErrorMessage = nil
                 await store.select(sessionID: sessionID)
                 await store.loadStartModels()
+#if DEBUG
+                if ProcessInfo.processInfo.environment["BEETCODE_REMOTE_TEST_URL"] != nil,
+                   let encoded = ProcessInfo.processInfo.environment["BEETCODE_REMOTE_TEST_IMAGE"],
+                   let data = Data(base64Encoded: encoded), let computerID = store.activeComputerID,
+                   images.isEmpty, let prepared = try? RemoteImageAttachment.prepare(data) {
+                    store.drafts.setImages([prepared], computerID: computerID, sessionID: sessionID)
+                }
+#endif
                 if selectedModelID.isEmpty {
                     selectedModelID = store.startModels.matching(sessionModelID: store.selectedSession?.modelID ?? "")?.id ?? ""
                 }
@@ -179,12 +201,117 @@ struct ConversationView: View {
                     .presentationDetents([.large])
             }
             .sheet(isPresented: $showSharing) { RemoteShareSheet(store: store) }
+            .photosPicker(isPresented: $showPhotoPicker, selection: $photoSelection,
+                          maxSelectionCount: max(1, RemoteImageAttachment.maximumCount - images.count), matching: .images)
+            .onChange(of: photoSelection) { _, items in
+                guard !items.isEmpty else { return }
+                importPhotos(items)
+            }
+            .fileImporter(isPresented: $showImageFiles, allowedContentTypes: [.image], allowsMultipleSelection: true) { result in
+                switch result {
+                case .success(let urls): importFiles(urls)
+                case .failure(let error): imageImportError = error.localizedDescription
+                }
+            }
+            .alert("Couldn’t attach image", isPresented: Binding(get: { imageImportError != nil }, set: { if !$0 { imageImportError = nil } })) {
+                Button("OK", role: .cancel) { imageImportError = nil }
+            } message: { Text(imageImportError ?? "") }
+
     }
+    private var canAddImages: Bool {
+        if isImportingImages { return false }
+        guard images.count < RemoteImageAttachment.maximumCount else {
+            imageImportError = "Attach up to four images per message."
+            return false
+        }
+        return true
+    }
+
+    private var imageTray: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 10) {
+                ForEach(images) { attachment in
+                    HStack(spacing: 2) {
+                        if let image = UIImage(data: attachment.data) {
+                            Image(uiImage: image).resizable().scaledToFill().frame(width: 52, height: 52)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .accessibilityLabel("Attached image")
+                        }
+                        Button {
+                            guard let computerID = store.activeComputerID else { return }
+                            store.drafts.setImages(images.filter { $0.id != attachment.id }, computerID: computerID, sessionID: sessionID)
+                        } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
+                        .accessibilityLabel("Remove image")
+                        .disabled(store.sendingSessionIDs.contains(sessionID))
+                    }
+                    .padding(4)
+                    .background(RemoteInstrument.seam.opacity(0.15), in: RoundedRectangle(cornerRadius: 9))
+                }
+                if isImportingImages { ProgressView().frame(width: 52, height: 52).accessibilityLabel("Preparing images") }
+            }.padding(.horizontal, 12)
+        }.scrollIndicators(.hidden)
+    }
+
+    private func importPhotos(_ items: [PhotosPickerItem]) {
+        guard !isImportingImages, let computerID = store.activeComputerID else { return }
+        isImportingImages = true
+        Task {
+            defer { isImportingImages = false; photoSelection = [] }
+            do {
+                var prepared: [RemoteImageAttachment] = []
+                for item in items {
+                    guard let data = try await item.loadTransferable(type: Data.self) else { throw RemoteImageAttachment.ImportError.invalid }
+                    prepared.append(try await Task.detached { try RemoteImageAttachment.prepare(data) }.value)
+                }
+                try appendImages(prepared, computerID: computerID)
+            } catch { imageImportError = error.localizedDescription }
+        }
+    }
+
+    private func importFiles(_ urls: [URL]) {
+        guard !isImportingImages, let computerID = store.activeComputerID else { return }
+        guard urls.count + images.count <= RemoteImageAttachment.maximumCount else {
+            imageImportError = "Attach up to four images per message."
+            return
+        }
+        isImportingImages = true
+        Task {
+            defer { isImportingImages = false }
+            do {
+                let prepared = try await Task.detached {
+                    try urls.map { url in
+                        let access = url.startAccessingSecurityScopedResource()
+                        defer { if access { url.stopAccessingSecurityScopedResource() } }
+                        guard (try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) <= 50 * 1024 * 1024
+                        else { throw RemoteImageAttachment.ImportError.tooLarge }
+                        return try RemoteImageAttachment.prepare(Data(contentsOf: url))
+                    }
+                }.value
+                try appendImages(prepared, computerID: computerID)
+            } catch { imageImportError = error.localizedDescription }
+        }
+    }
+
+    private func appendImages(_ added: [RemoteImageAttachment], computerID: UUID) throws {
+        let current = store.drafts.images(computerID: computerID, sessionID: sessionID)
+        guard current.count + added.count <= RemoteImageAttachment.maximumCount else {
+            throw RemoteImageAttachment.ImportError.tooLarge
+        }
+        store.drafts.setImages(current + added, computerID: computerID, sessionID: sessionID)
+    }
+
     private func send(action: String? = nil) {
         let message = draft
+        let sentImages = images
+        let computerID = store.activeComputerID
         let modelID = selectedModelID.isEmpty ? nil : selectedModelID
         Task {
-            if await store.send(message, modelID: modelID, action: action, sessionID: sessionID) {
+            if await store.send(message, modelID: modelID, action: action, sessionID: sessionID, images: sentImages) {
+                if let computerID {
+                    let sentIDs = Set(sentImages.map(\.id))
+                    store.drafts.setImages(store.drafts.images(computerID: computerID, sessionID: sessionID)
+                        .filter { !sentIDs.contains($0.id) }, computerID: computerID, sessionID: sessionID)
+                }
                 if store[draftFor: sessionID] == message { store[draftFor: sessionID] = "" }
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
             }

@@ -236,3 +236,46 @@ final class ComposerUITests: XCTestCase {
         add(attachment)
     }
 }
+
+@MainActor
+final class ChatImageUITests: XCTestCase {
+    func testPhotoMenuAndImageOnlySendKeepComposerReachable() throws {
+        guard let host = ProcessInfo.processInfo.environment["BEETCODE_IMAGE_UI_HOST"],
+              let image = ProcessInfo.processInfo.environment["BEETCODE_IMAGE_UI_DATA"] else {
+            throw XCTSkip("Set an isolated image fixture host and image data.")
+        }
+        let app = XCUIApplication()
+        app.launchEnvironment["BEETCODE_REMOTE_TEST_URL"] = host
+        app.launchEnvironment["BEETCODE_REMOTE_TEST_TOKEN"] = "local-ui-fixture-token"
+        app.launchEnvironment["BEETCODE_REMOTE_TEST_IMAGE"] = image
+        app.launchEnvironment["VAMP_TEST_APPEARANCE"] = ProcessInfo.processInfo.environment["BEETCODE_IMAGE_UI_APPEARANCE"] ?? "light"
+        app.launch()
+        let chat = app.staticTexts["Image chat"]
+        XCTAssertTrue(chat.waitForExistence(timeout: 15))
+        chat.tap()
+        let remove = app.buttons["Remove image"]
+        XCTAssertTrue(remove.waitForExistence(timeout: 10))
+        let share = app.buttons["remote.composer.share"]
+        XCTAssertTrue(share.exists)
+        share.tap()
+        XCTAssertTrue(app.buttons["Photo Library"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Image from Files"].exists)
+        app.buttons["Photo Library"].tap()
+        let cancel = app.buttons["Cancel"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 10), "The native photo picker opens")
+        cancel.tap()
+        let editor = app.textFields["remote.composer.editor"]
+        editor.tap()
+        let send = app.buttons["remote.composer.primary"]
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(send.isEnabled, "An image alone can be sent")
+        XCTAssertTrue(send.isHittable)
+        let before = XCTAttachment(screenshot: app.screenshot())
+        before.name = "image-draft-with-keyboard"
+        before.lifetime = .keepAlways
+        add(before)
+        send.tap()
+        XCTAssertTrue(app.staticTexts["Image bytes received."].waitForExistence(timeout: 15))
+        XCTAssertFalse(remove.exists)
+    }
+}

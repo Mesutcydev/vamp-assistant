@@ -15,6 +15,7 @@ private actor RemoteDraftDisk {
 final class RemoteDraftStore {
     private struct Entry: Codable {
         var text: String
+        var images: [RemoteImageAttachment]? = nil
         var updatedAt: Date
     }
     private var entries: [String: Entry] = [:]
@@ -31,7 +32,7 @@ final class RemoteDraftStore {
         guard FileManager.default.fileExists(atPath: file.path) else { return }
         do {
             let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-            guard size <= 2 * 1024 * 1024 else { throw CocoaError(.fileReadTooLarge) }
+            guard size <= 64 * 1024 * 1024 else { throw CocoaError(.fileReadTooLarge) }
             entries = try JSONDecoder().decode([String: Entry].self, from: Data(contentsOf: file))
         } catch {
             errorMessage = "Saved drafts could not be restored. Existing drafts on disk have not been removed."
@@ -42,8 +43,9 @@ final class RemoteDraftStore {
         get { entries[Self.key(computerID, sessionID)]?.text ?? "" }
         set {
             let key = Self.key(computerID, sessionID)
-            if newValue.isEmpty { entries.removeValue(forKey: key) }
-            else { entries[key] = Entry(text: newValue, updatedAt: Date()) }
+            let images = entries[key]?.images
+            if newValue.isEmpty && (images ?? []).isEmpty { entries.removeValue(forKey: key) }
+            else { entries[key] = Entry(text: newValue, images: images, updatedAt: Date()) }
             revision &+= 1
             pendingSave?.cancel()
             pendingSave = Task { [weak self] in
@@ -51,6 +53,23 @@ final class RemoteDraftStore {
                 catch { return }
                 await self?.persist()
             }
+        }
+    }
+
+    func images(computerID: UUID, sessionID: UUID) -> [RemoteImageAttachment] {
+        entries[Self.key(computerID, sessionID)]?.images ?? []
+    }
+
+    func setImages(_ images: [RemoteImageAttachment], computerID: UUID, sessionID: UUID) {
+        let key = Self.key(computerID, sessionID)
+        let text = entries[key]?.text ?? ""
+        if text.isEmpty && images.isEmpty { entries.removeValue(forKey: key) }
+        else { entries[key] = Entry(text: text, images: images.isEmpty ? nil : images, updatedAt: Date()) }
+        revision &+= 1
+        pendingSave?.cancel()
+        pendingSave = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
+            await self?.persist()
         }
     }
 
@@ -72,7 +91,7 @@ final class RemoteDraftStore {
         let savedRevision = revision
         do {
             let data = try JSONEncoder().encode(entries)
-            guard data.count <= 2 * 1024 * 1024 else { throw CocoaError(.fileWriteOutOfSpace) }
+            guard data.count <= 64 * 1024 * 1024 else { throw CocoaError(.fileWriteOutOfSpace) }
             try await disk.save(data)
             if savedRevision == revision { errorMessage = nil }
         } catch {

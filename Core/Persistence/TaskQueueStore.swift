@@ -59,6 +59,8 @@ struct QueuedAgentTask: Codable, Identifiable, Sendable, Equatable {
     var attempts: Int
     var lastError: String?
     var resultSummary: String?
+    /// Pixel payloads live inside the encrypted queue record, including across relaunch.
+    var images: [SessionImage]? = nil
 }
 
 enum TaskQueueError: LocalizedError, Equatable {
@@ -105,7 +107,8 @@ final class TaskQueueStore: @unchecked Sendable {
         workspacePath: String,
         message: String,
         modelID: String,
-        source: String = "remote"
+        source: String = "remote",
+        images: [ChatImage] = []
     ) throws -> QueuedAgentTask {
         let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedMessage.isEmpty else { throw TaskQueueError.invalidMessage }
@@ -134,7 +137,8 @@ final class TaskQueueStore: @unchecked Sendable {
             phase: nil,
             attempts: 0,
             lastError: nil,
-            resultSummary: nil)
+            resultSummary: nil,
+            images: images.isEmpty ? nil : images.map(SessionImage.init))
         try save(task)
         return task
     }

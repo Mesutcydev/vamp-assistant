@@ -63,6 +63,7 @@
 		1A08735FAE3CEE30AB11EE8D /* BrowserTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15F6E5FC15A654BEB1E7EB81 /* BrowserTools.swift */; };
 		1A38440FDE03A1E9203DDAC1 /* RemoteStartSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4208E9E8B2898E53BB71A77E /* RemoteStartSessionView.swift */; };
 		1A758484D44EAF8D840E1F15 /* HFTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E884D55E850CD7DD664F44E /* HFTokenStore.swift */; };
+		1AC09A354522D40557F0FB60 /* RemoteImageAttachment.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC3D7DFE539740DD42FA64C6 /* RemoteImageAttachment.swift */; };
 		1C700805526A48E7EB09CD91 /* HFTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E884D55E850CD7DD664F44E /* HFTokenStore.swift */; };
 		1C72330B6C62A4A5AA2B1515 /* ShellRunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7E33715D0DFCE5756D39925 /* ShellRunnerTests.swift */; };
 		1C9B00EA1E4729F26E2ECD68 /* DiskSpaceStatusTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AAB1AF2B6E000537E8438B5 /* DiskSpaceStatusTool.swift */; };
@@ -859,6 +860,7 @@
 		CA77688D5AB947A76A231210 /* TypeSafeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypeSafeClient.swift; sourceTree = "<group>"; };
 		CB1B391DCFA1FB07BD0B060D /* SwiftLanguageAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftLanguageAdapter.swift; sourceTree = "<group>"; };
 		CC22A4B9EB2247B169ABF6FA /* BotRunStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotRunStore.swift; sourceTree = "<group>"; };
+		CC3D7DFE539740DD42FA64C6 /* RemoteImageAttachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteImageAttachment.swift; sourceTree = "<group>"; };
 		CC49DFD2F9180618B7D4D523 /* IsolatedReplayEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IsolatedReplayEngine.swift; sourceTree = "<group>"; };
 		CD7B083F631043433BB92F9A /* SimBuildRunTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimBuildRunTool.swift; sourceTree = "<group>"; };
 		CDCCD8875C7FA97C619AD351 /* SessionUsage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionUsage.swift; sourceTree = "<group>"; };
@@ -1037,6 +1039,7 @@
 				35D0D979E7CE85422B331339 /* RemoteDiagnosticsView.swift */,
 				5236B8F27F37F7B2D210EA91 /* RemoteDraftStore.swift */,
 				69B5C7794F6A3B827363C5DC /* RemoteH264Decoder.swift */,
+				CC3D7DFE539740DD42FA64C6 /* RemoteImageAttachment.swift */,
 				DEC9B568D97EBF1D5FD28C65 /* RemoteInputSender.swift */,
 				37FCBC7A45E8938F821A1293 /* RemoteKeyboardOverlay.swift */,
 				8E5C1F4DFA999CFC4F38C781 /* RemoteModelPicker.swift */,
@@ -2376,6 +2379,7 @@
 				BA3D84B2ABF3DB98CB4119A3 /* RemoteDisplayMapping.swift in Sources */,
 				94A65903C09F73FC87DE752A /* RemoteDraftStore.swift in Sources */,
 				A111E2D03BF3148615570A83 /* RemoteH264Decoder.swift in Sources */,
+				1AC09A354522D40557F0FB60 /* RemoteImageAttachment.swift in Sources */,
 				443935E998979A740D59A256 /* RemoteInputCommandQueue.swift in Sources */,
 				2A0B2B5DBBEBF74F0DE0372B /* RemoteInputSender.swift in Sources */,
 				CAE034F500B98FCF75214589 /* RemoteKeyboardOverlay.swift in Sources */,
@@ -2588,7 +2592,7 @@
 				CODE_SIGN_ENTITLEMENTS = iOSApp/BeetCodeRemote.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 125;
+				CURRENT_PROJECT_VERSION = 126;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = iOSApp/Info.plist;
@@ -2597,7 +2601,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.10.46;
+				MARKETING_VERSION = 0.10.47;
 				PRODUCT_BUNDLE_IDENTIFIER = com.beetcode.remote.ios;
 				PRODUCT_MODULE_NAME = BeetCodeRemoteIOS;
 				PRODUCT_NAME = "Vamp Assistant";
@@ -2617,7 +2621,7 @@
 				CODE_SIGN_ENTITLEMENTS = iOSApp/BeetCodeRemote.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 125;
+				CURRENT_PROJECT_VERSION = 126;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = iOSApp/Info.plist;
@@ -2626,7 +2630,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.10.46;
+				MARKETING_VERSION = 0.10.47;
 				PRODUCT_BUNDLE_IDENTIFIER = com.beetcode.remote.ios;
 				PRODUCT_MODULE_NAME = BeetCodeRemoteIOS;
 				PRODUCT_NAME = "Vamp Assistant";

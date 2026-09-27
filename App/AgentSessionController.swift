@@ -281,6 +281,7 @@ final class AgentSessionController: ObservableObject {
     func send(
         _ message: String,
         attachments: [ComposerAttachment] = [],
+        images: [ChatImage] = [],
         seed: SessionRecord? = nil,
         modelInstruction: String? = nil
     ) {
@@ -329,6 +330,7 @@ final class AgentSessionController: ObservableObject {
             await self.startRun(
                 message: message,
                 attachments: attachments,
+                images: images,
                 seed: seed,
                 modelInstruction: modelInstruction)
             self.startTask = nil
@@ -340,6 +342,7 @@ final class AgentSessionController: ObservableObject {
     private func startRun(
         message: String,
         attachments: [ComposerAttachment],
+        images: [ChatImage],
         seed: SessionRecord?,
         modelInstruction: String?
     ) async {
@@ -347,6 +350,15 @@ final class AgentSessionController: ObservableObject {
             isRunning = false
             return
         }
+        if !images.isEmpty, !(await supportsRemoteImages()) {
+            isRunning = false
+            currentPhase = .finished
+            let failure = "This model cannot read images. Select a vision model with its projector loaded, then retry the queued message."
+            finishReason = .engineError(failure)
+            publishFailure(failure)
+            return
+        }
+        guard isRunning, !Task.isCancelled else { return }
         let qwenTextOnly = activeModelIDHandler() == QwenStreamArtifact.modelID
         if qwenTextOnly && !attachments.isEmpty {
             isRunning = false
@@ -374,13 +386,15 @@ final class AgentSessionController: ObservableObject {
 
         // Prepared turn: the transcript shows the user's clean message; the
         // MODEL receives bounded attachment context. The two never mix.
-        let displayText = attachments.isEmpty ? message : message + "  ·  " + Self.attachmentSummary(attachments)
+        var displayText = attachments.isEmpty ? message : message + "  ·  " + Self.attachmentSummary(attachments)
+        if !images.isEmpty { displayText += "  ·  \(images.count == 1 ? "1 image" : "\(images.count) images")" }
         transcript.append(TranscriptItem(id: UUID(), kind: .user(displayText)))
         let prepare = { (seesImages: Bool) async -> PreparedTurn in
             var prepared = await Self.expand(
                 attachments: attachments,
                 message: message,
                 nativeImageInput: !attachments.isEmpty && seesImages)
+            prepared.images.append(contentsOf: images)
             prepared.text = modelInstruction.map {
                 "Specialist instruction: \($0)\n\nUser request:\n\(prepared.text)"
             } ?? prepared.text
@@ -417,7 +431,7 @@ final class AgentSessionController: ObservableObject {
             // pixels to a projector, not paraphrased by a sidecar.
             let count = prepared.images.count
             transcript.append(TranscriptItem(id: UUID(), kind: .notice(
-                "\(count == 1 ? "Image" : "\(count) images") sent to \(activeModelIDHandler()) as image input (vision projector loaded).")))
+                "\(count == 1 ? "Image" : "\(count) images") sent to \(activeModelIDHandler()) as native image input.")))
         }
 
 
@@ -1597,13 +1611,18 @@ final class AgentSessionController: ObservableObject {
     /// the same transcript, workspace binding, model choice, and checkpoints
     /// as a local continuation.
     @discardableResult
-    func continuePersistedSession(id: UUID, message: String) -> Bool {
+    func supportsRemoteImages() async -> Bool {
+        guard activeCodexModelIDHandler() == nil, settings.selectedHarness == nil else { return false }
+        return await engine.supportsImageInput
+    }
+
+    func continuePersistedSession(id: UUID, message: String, images: [ChatImage] = []) -> Bool {
         guard !isRunning,
               let record = SessionStore.shared.load(id: id),
               record.source == .app,
               SessionStore.shared.validateWorkspaceBinding(record),
               restore(record) else { return false }
-        send(message)
+        send(message, images: images)
         return true
     }
 

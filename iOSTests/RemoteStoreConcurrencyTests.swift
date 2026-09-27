@@ -83,6 +83,32 @@ final class RemoteStoreConcurrencyTests: XCTestCase {
         Data("{\"id\":\"\(id)\",\"title\":\"Test\",\"workspace\":\"\",\"modelID\":\"test\",\"messages\":[],\"isRunning\":false,\"phase\":\"idle\",\"streamingText\":\"\"}".utf8)
     }
 
+    func testImageMessageRequiresHostCapabilityAndPreservesDraft() async throws {
+        let id = UUID()
+        let posts = Mutex(0)
+        let (store, _, session) = makeStore { request in
+            switch request.url?.path {
+            case "/api/status": return (200, Self.status(2_100_000_000))
+            case "/api/sessions": return (200, Data("{\"sessions\":[]}".utf8))
+            case "/api/sessions/\(id)": return (200, Self.detail(id))
+            default:
+                if request.httpMethod == "POST" { posts.withLock { $0 += 1 } }
+                return (404, Data("{}".utf8))
+            }
+        }
+        defer { disconnect(store); session.invalidateAndCancel() }
+        await store.connectSaved()
+        await store.select(sessionID: id)
+        let computer = try XCTUnwrap(store.activeComputerID)
+        let image = RemoteImageAttachment(id: UUID(), data: Data([1, 2, 3]))
+        store.drafts.setImages([image], computerID: computer, sessionID: id)
+        let sent = await store.send("", sessionID: id, images: [image])
+        XCTAssertFalse(sent)
+        XCTAssertEqual(posts.withLock { $0 }, 0)
+        XCTAssertEqual(store.errorTitle, "Update Vamp on your Mac")
+        XCTAssertEqual(store.drafts.images(computerID: computer, sessionID: id), [image])
+    }
+
     func testUnloadCallsHostOnceAndKeepsDownloadedModels() async throws {
         let posted = expectation(description: "unload started")
         let posts = Mutex(0)

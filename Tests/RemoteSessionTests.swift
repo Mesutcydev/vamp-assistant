@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import XCTest
 @testable import BeetCode
 
@@ -479,6 +480,59 @@ final class RemoteSessionTests: XCTestCase {
         XCTAssertEqual(controller.finishReason, .completed("A fresh chat works."))
     }
 
+    func testRemoteImageRequestValidatesPixelsAndPreservesTheQueuedPayload() async throws {
+        let temporary = TempWorkspace()
+        let original = SessionStore.shared.overrideSessionsDir
+        SessionStore.shared.overrideSessionsDir = temporary.url
+        defer { SessionStore.shared.overrideSessionsDir = original }
+        let engine = FakeLLMEngine(supportsImageInput: true)
+        let controller = AgentSessionController(engine: engine, settings: SettingsStore.shared, thermal: ThermalMonitor())
+        let host = RemoteSessionHost(engine: engine, sessions: controller,
+            sharing: RemoteSharingStore(directoryURL: temporary.url.appendingPathComponent("Sharing")), persistsPairedClients: false)
+        let now = Date()
+        let record = SessionRecord(id: UUID(), title: "Images", createdAt: now, updatedAt: now,
+            workspacePath: "", modelID: "vision", messages: [], checkpoints: [])
+        _ = SessionStore.shared.save(record)
+        let queue = TaskQueueStore()
+        queue.overrideDirectory = temporary.url.appendingPathComponent("Queue")
+        var received: [ChatImage] = []
+        host.enqueueTaskHandler = { id, message, images in
+            received = images
+            return try? queue.enqueue(sessionID: id, workspacePath: "", message: message, modelID: "vision", images: images)
+        }
+        addTeardownBlock { await host.stop() }
+        try await host.start(port: 0, allowLAN: true)
+        let base = try XCTUnwrap(URL(string: "http://127.0.0.1:\(try XCTUnwrap(host.actualPort))"))
+        let pair = try await request(base, path: "/api/pair", method: "POST",
+            body: Data("{\"code\":\"\(host.pairingCode)\"}".utf8))
+        let token = try XCTUnwrap(pair.json.objectValue?["token"]?.stringValue)
+        let pixels = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 16, pixelsHigh: 16,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+            bytesPerRow: 0, bitsPerPixel: 0))
+        let png = try XCTUnwrap(pixels.representation(using: .png, properties: [:]))
+        let payload: [String: Any] = ["message": "Read this screenshot", "images": [["base64": png.base64EncodedString()]]]
+        let body = try JSONSerialization.data(withJSONObject: payload)
+        let path = "/api/sessions/\(record.id)/messages"
+        let unauthorized = try await request(base, path: path, method: "POST", body: body)
+        XCTAssertEqual(unauthorized.status, 401)
+        let accepted = try await request(base, path: path, method: "POST", token: token, body: body)
+        XCTAssertEqual(accepted.status, 202)
+        XCTAssertEqual(received.first?.data, png)
+        XCTAssertEqual(received.first?.mimeType, "image/png")
+        XCTAssertEqual(queue.loadAll().first?.images?.first?.base64, png.base64EncodedString())
+        for badImages: Any in ["not an array", [["base64": Data("not an image".utf8).base64EncodedString()]],
+                               Array(repeating: ["base64": png.base64EncodedString()], count: 5),
+                               [["url": "https://example.com/photo.jpg"]]] {
+            let bad = try JSONSerialization.data(withJSONObject: ["message": "Read this", "images": badImages])
+            let rejected = try await request(base, path: path, method: "POST", token: token, body: bad)
+            XCTAssertEqual(rejected.status, 400)
+        }
+        XCTAssertEqual(queue.loadAll().count, 1)
+        let steer = try JSONSerialization.data(withJSONObject: payload.merging(["action": "steer"]) { _, new in new })
+        let rejectedSteer = try await request(base, path: path, method: "POST", token: token, body: steer)
+        XCTAssertEqual(rejectedSteer.status, 409)
+    }
+
     func testRemoteUnloadRequiresPairingIdleModelAndMatchingIdentity() async throws {
         let engine = FakeLLMEngine()
         let controller = AgentSessionController(engine: engine, settings: SettingsStore.shared, thermal: ThermalMonitor())
@@ -603,7 +657,7 @@ final class RemoteSessionTests: XCTestCase {
         host.stopBotRunHandler = { id in id == botRun.id }
         // A locked/unavailable encrypted queue must not turn a successfully
         // paired idle remote session into a read-only surface.
-        host.enqueueTaskHandler = { _, _ in nil }
+        host.enqueueTaskHandler = { _, _, _ in nil }
         var queuedSendCalls = 0
         var queuedSendError: String?
         host.sendQueuedTaskHandler = { id, _ in

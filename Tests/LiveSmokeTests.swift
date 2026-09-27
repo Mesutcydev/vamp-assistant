@@ -631,7 +631,12 @@ final class LiveGGUFVisionTests: XCTestCase {
             throw XCTSkip("\(Self.modelID) weights + \(Self.projectorName) are not installed")
         }
 
-        let image = try Self.renderedTextImage("BONSAI 42")
+        let image: ChatImage
+        if let path = ProcessInfo.processInfo.environment["BEETCODE_LIVE_VISION_IMAGE"] {
+            image = try XCTUnwrap(ChatImage.fromFile(at: URL(fileURLWithPath: path)))
+        } else {
+            image = try Self.renderedTextImage("BONSAI 42")
+        }
         let diskBytes = Int64(
             (try FileManager.default.attributesOfItem(atPath: weights.path)[.size]
                 as? NSNumber)?.int64Value ?? 0)

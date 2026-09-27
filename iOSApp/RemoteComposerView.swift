@@ -94,13 +94,16 @@ struct RemoteComposer: View {
     var onSelectModel: (() -> Void)? = nil
     var onShare: (() -> Void)? = nil
     var modeName: String? = nil
+    var hasImages = false
+    var onAddPhotos: (() -> Void)? = nil
+    var onAddImageFiles: (() -> Void)? = nil
 
     @State private var showTools = false
     @State private var showCommandsFallback = false
     @State private var keyboardVisible = false
     @FocusState private var focused: Bool
 
-    private var hasDraft: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var hasDraft: Bool { hasImages || !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var unavailable: Bool { !isReachable || isSending || (!isRunning && !hasDraft) }
     private var primaryLabel: String { isRunning ? (hasDraft ? "Queue follow-up" : "Stop the agent") : "Send" }
     private var primarySymbol: String { isRunning ? (hasDraft ? "text.badge.plus" : "stop.fill") : "arrow.up" }
@@ -119,10 +122,11 @@ struct RemoteComposer: View {
                 shareEnabled: onShare != nil && isReachable,
                 primaryLabel: primaryLabel, primarySymbol: primarySymbol,
                 unavailable: unavailable, isSending: isSending,
-                showsSteer: isRunning && hasDraft, steerEnabled: isReachable && !isSending,
+                showsSteer: isRunning && hasDraft && !hasImages, steerEnabled: isReachable && !isSending,
                 onModel: { onSelectModel?() }, onShare: { onShare?() },
                 onTools: { showTools = true }, onPrimary: primaryAction,
-                onSteer: { (onSteer ?? onSend)() })
+                onSteer: { (onSteer ?? onSend)() },
+                onAddPhotos: onAddPhotos, onAddImageFiles: onAddImageFiles)
             VampComposerSeam(axis: .horizontal)
             RemoteComposerStatus(
                 title: statusTitle,
@@ -324,6 +328,9 @@ private struct RemoteComposerDeck: View {
         return modelName
     }
 
+    var onAddPhotos: (() -> Void)? = nil
+    var onAddImageFiles: (() -> Void)? = nil
+
     var body: some View {
         let layout = stacksControls
             ? AnyLayout(VStackLayout(spacing: 0))
@@ -418,16 +425,35 @@ private struct RemoteComposerDeck: View {
         .frame(height: stacksControls ? 96 : 48)
     }
 
+    @ViewBuilder
     private var share: some View {
-        Button(action: onShare) {
-            Image(systemName: "plus")
-                .font(.system(size: 19, weight: .medium))
-                .frame(maxWidth: .infinity, minHeight: 48)
+        if onAddPhotos != nil || onAddImageFiles != nil {
+            Menu {
+                if let onAddPhotos { Button("Photo Library", systemImage: "photo", action: onAddPhotos) }
+                if let onAddImageFiles { Button("Image from Files", systemImage: "folder", action: onAddImageFiles) }
+                Divider()
+                Button("Share with Mac", systemImage: "square.and.arrow.up", action: onShare)
+            } label: { shareLabel }
+            .buttonStyle(VampComposerBayStyle())
+            .disabled(!shareEnabled)
+            .accessibilityLabel("Add image or share with Mac")
+            .accessibilityIdentifier("remote.composer.share")
+        } else {
+            Button(action: onShare) { shareLabel }
+                .buttonStyle(VampComposerBayStyle())
+                .disabled(!shareEnabled)
+                .accessibilityLabel("Share clipboard or files with Mac")
+                .accessibilityIdentifier("remote.composer.share")
         }
-        .buttonStyle(VampComposerBayStyle())
-        .disabled(!shareEnabled)
-        .accessibilityLabel("Share clipboard or files with Mac")
     }
+
+    private var shareLabel: some View {
+        Image(systemName: "plus")
+            .font(.system(size: 19, weight: .medium))
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .contentShape(Rectangle())
+    }
+
 }
 
 struct RemoteComposerCommand: Identifiable {

@@ -17,6 +17,10 @@ final class FakeLLMEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendabl
         case failure(any Error & Sendable)
     }
 
+    private let imageInput: Bool
+    init(supportsImageInput: Bool = false) { imageInput = supportsImageInput }
+    var supportsImageInput: Bool { get async { imageInput } }
+
     private let lock = NSLock()
 
     // Script state.
