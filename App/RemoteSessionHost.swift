@@ -154,6 +154,7 @@ final class RemoteSessionHost {
     var taskLookupHandler: ((UUID) -> QueuedAgentTask?)?
     var queuedTasksHandler: ((UUID) -> [QueuedAgentTask])?
     var removeQueuedTaskHandler: ((UUID, UUID) -> Bool)?
+    var sendQueuedTaskHandler: ((UUID, UUID) -> String?)?
     var steerHandler: ((UUID, String) -> Bool)?
     var modelOptionsHandler: (() -> [RemoteStartModel])?
     var loadedLocalModelHandler: (() -> RemoteLoadedLocalModel?)?
@@ -1859,9 +1860,22 @@ final class RemoteSessionHost {
         }
 
         if components.count == 4, components[3] == "queue", request.method == "POST" {
+            guard ownedRecord(id) != nil else {
+                return .response(json(["error": .string("Session not found.")], status: 404))
+            }
             guard let taskID = request.bodyJSON?.objectValue?["taskID"]?.stringValue.flatMap(UUID.init),
-                  request.bodyJSON?.objectValue?["action"]?.stringValue == "cancel" else {
-                return .response(json(["error": .string("Cancel a queued follow-up with taskID and action=cancel.")], status: 400))
+                  let action = request.bodyJSON?.objectValue?["action"]?.stringValue,
+                  action == "cancel" || action == "send" else {
+                return .response(json(["error": .string("Provide taskID and action=send or action=cancel.")], status: 400))
+            }
+            if action == "send" {
+                guard let sendQueuedTaskHandler else {
+                    return .response(json(["error": .string("Update Vamp Assistant on your Mac to send saved follow-ups.")], status: 409))
+                }
+                if let error = sendQueuedTaskHandler(id, taskID) {
+                    return .response(json(["error": .string(error)], status: 409))
+                }
+                return .response(json(["accepted": .bool(true), "taskID": .string(taskID.uuidString)], status: 202))
             }
             guard removeQueuedTaskHandler?(id, taskID) == true else {
                 return .response(json(["error": .string("That follow-up is no longer queued.")], status: 409))

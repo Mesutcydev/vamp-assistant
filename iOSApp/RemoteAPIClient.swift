@@ -844,6 +844,13 @@ struct RemoteAPIClient {
             body: ["taskID": taskID.uuidString, "action": "cancel"])
     }
 
+    func sendQueuedTask(_ taskID: UUID, sessionID: UUID) async throws -> RemoteAcceptedResponse {
+        try await request(
+            "api/sessions/\(sessionID.uuidString)/queue",
+            method: "POST",
+            body: ["taskID": taskID.uuidString, "action": "send"])
+    }
+
     func sessionEvents(_ id: UUID) -> AsyncThrowingStream<RemoteSessionStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {

@@ -1,6 +1,42 @@
 import XCTest
 
 @MainActor
+final class QueuedFollowUpUITests: XCTestCase {
+    func testSendQueuedFollowUpWithEmptyComposer() throws {
+        guard let host = ProcessInfo.processInfo.environment["BEETCODE_QUEUE_UI_HOST"] else {
+            throw XCTSkip("Set BEETCODE_QUEUE_UI_HOST to an isolated queued-session host.")
+        }
+        let app = XCUIApplication()
+        app.launchEnvironment["BEETCODE_REMOTE_TEST_URL"] = host
+        app.launchEnvironment["BEETCODE_REMOTE_TEST_TOKEN"] = "local-ui-fixture-token"
+        app.launchEnvironment["VAMP_TEST_APPEARANCE"] = ProcessInfo.processInfo.environment["BEETCODE_QUEUE_UI_APPEARANCE"] ?? "light"
+        app.launch()
+        let chat = app.staticTexts["Queue recovery"]
+        XCTAssertTrue(chat.waitForExistence(timeout: 15))
+        chat.tap()
+        let send = app.buttons["remote.queue.send.22222222-2222-2222-2222-222222222222"]
+        XCTAssertTrue(send.waitForExistence(timeout: 10))
+        XCTAssertTrue(send.isEnabled)
+        XCTAssertGreaterThanOrEqual(send.frame.height, 44)
+        let editor = app.textFields["remote.composer.editor"]
+        editor.tap()
+        XCTAssertFalse(app.buttons["remote.composer.primary"].isEnabled)
+        XCTAssertTrue(send.isHittable, "The saved message remains sendable with an empty, focused composer")
+        let before = XCTAttachment(screenshot: app.screenshot())
+        before.name = "queued-message-with-keyboard"
+        before.lifetime = .keepAlways
+        add(before)
+        send.tap()
+        XCTAssertTrue(app.staticTexts["Queued follow-up delivered."].waitForExistence(timeout: 15))
+        XCTAssertFalse(send.exists)
+        let after = XCTAttachment(screenshot: app.screenshot())
+        after.name = "queued-message-delivered"
+        after.lifetime = .keepAlways
+        add(after)
+    }
+}
+
+@MainActor
 final class NewChatUITests: XCTestCase {
     /// Opt-in against an isolated host with a model and no required workspace.
     /// Never uses a saved Mac connection or sends a message to the user's host.

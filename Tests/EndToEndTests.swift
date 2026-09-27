@@ -30,6 +30,7 @@ final class EndToEndTests: XCTestCase {
         ModelStore.shared.overrideModelsDir = appSupport.url(for: "Models")
         SessionStore.shared.overrideSessionsDir = appSupport.url(for: "Sessions")
         TaskCapsuleStore.shared.overrideDirectory = appSupport.url(for: "Capsules")
+        TaskQueueStore.shared.overrideDirectory = appSupport.url(for: "Queue")
         RepoSummaryCache.shared.overrideDirectory = appSupport.url(for: "Summaries")
         // Restore any previous launch state that could interfere.
         var preferences = AppPreferencesStore.shared.current
@@ -140,6 +141,95 @@ final class EndToEndTests: XCTestCase {
         XCTAssertEqual(app.modelStore.installedModel(id: model.id), installed)
         XCTAssertTrue(FileManager.default.fileExists(atPath: weightFile.path))
         XCTAssertEqual(app.sessions.activeSessionID, sessionID)
+    }
+
+    func testReselectingActiveModelKeepsRunningTurnAndDrainsFollowUp() async throws {
+        let engine = FakeLLMEngine()
+        let app = AppState(engine: EngineRouter(local: engine))
+        let model = try XCTUnwrap(ModelCatalog.all.first)
+        let directory = appSupport.url(for: "Models/\(model.id)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("weights".utf8).write(to: directory.appendingPathComponent("model.safetensors"))
+        try Data("{}".utf8).write(to: directory.appendingPathComponent("config.json"))
+        _ = app.modelStore.register(catalogModel: model, sizeBytes: 7)
+        await app.activate(model: model)
+        let now = Date()
+        let record = SessionRecord(id: UUID(), title: "Queue regression", createdAt: now,
+            updatedAt: now, workspacePath: "", modelID: model.id, messages: [], checkpoints: [])
+        _ = SessionStore.shared.save(record)
+        engine.enqueue(texts: ["First answer.", "Second answer."])
+        engine.holdNextStream()
+        defer { engine.release() }
+        let first = try XCTUnwrap(app.enqueueRemoteTask(sessionID: record.id, message: "First request"))
+        let firstDeadline = Date().addingTimeInterval(5)
+        while engine.streamCallCount == 0, Date() < firstDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertTrue(app.sessions.isRunning)
+        // Every iOS follow-up includes the current model ID, even when unchanged.
+        let error = await app.remoteSessionHost.applyModelHandler?("local|\(model.id)", nil)
+        XCTAssertNil(error)
+        XCTAssertTrue(app.sessions.isRunning, "Re-selecting the active model must not stop the current turn")
+        XCTAssertEqual(engine.loadCount, 1)
+        let second = try XCTUnwrap(app.enqueueRemoteTask(sessionID: record.id, message: "Second request"))
+        engine.release()
+        let deadline = Date().addingTimeInterval(5)
+        while app.taskQueue.load(id: second.id)?.state != .completed, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(app.taskQueue.load(id: first.id)?.state, .completed)
+        XCTAssertEqual(app.taskQueue.load(id: second.id)?.state, .completed)
+        XCTAssertEqual(engine.streamCallCount, 2)
+    }
+
+    func testSendingSavedQueueItemIsIdempotentAndPreservesUnavailableWork() async throws {
+        let engine = FakeLLMEngine()
+        let app = AppState(engine: EngineRouter(local: engine))
+        let now = Date()
+        let record = SessionRecord(id: UUID(), title: "Saved queue", createdAt: now,
+            updatedAt: now, workspacePath: "", modelID: "test", messages: [], checkpoints: [])
+        _ = SessionStore.shared.save(record)
+        let task = try app.taskQueue.enqueue(sessionID: record.id, workspacePath: "",
+            message: "Send the saved message", modelID: "test")
+        XCTAssertNotNil(app.sendQueuedTask(task.id, sessionID: record.id), "An unloaded model must leave the item intact")
+        XCTAssertEqual(app.taskQueue.load(id: task.id)?.state, .queued)
+        app.enginePhase = .ready("Test")
+        XCTAssertNotNil(app.sendQueuedTask(task.id, sessionID: UUID()), "Cannot send an item from a different session")
+        engine.enqueue(.text("Saved message delivered."))
+        engine.holdNextStream()
+        XCTAssertNil(app.sendQueuedTask(task.id, sessionID: record.id))
+        XCTAssertNil(app.sendQueuedTask(task.id, sessionID: record.id))
+        XCTAssertEqual(app.taskQueue.load(id: task.id)?.attempts, 1)
+        engine.release()
+        let deadline = Date().addingTimeInterval(5)
+        while app.taskQueue.load(id: task.id)?.state != .completed, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(app.taskQueue.load(id: task.id)?.state, .completed)
+        XCTAssertNil(app.sendQueuedTask(task.id, sessionID: record.id))
+        XCTAssertEqual(engine.streamCallCount, 1)
+        XCTAssertEqual(app.taskQueue.loadAll().count, 1)
+    }
+
+    func testStoppingQueuedPreparationAllowsTheNextFollowUpToRun() async throws {
+        let engine = FakeLLMEngine()
+        let app = AppState(engine: EngineRouter(local: engine))
+        app.enginePhase = .ready("Test")
+        let now = Date()
+        let record = SessionRecord(id: UUID(), title: "Queue cancellation", createdAt: now,
+            updatedAt: now, workspacePath: "", modelID: "test", messages: [], checkpoints: [])
+        _ = SessionStore.shared.save(record)
+        engine.enqueue(.text("Next follow-up delivered."))
+        let first = try XCTUnwrap(app.enqueueRemoteTask(sessionID: record.id, message: "Stop before preparation"))
+        let next = try XCTUnwrap(app.enqueueRemoteTask(sessionID: record.id, message: "Run this next"))
+        await app.sessions.stopAndWait()
+        let deadline = Date().addingTimeInterval(5)
+        while app.taskQueue.load(id: next.id)?.state != .completed, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(app.taskQueue.load(id: first.id)?.state, .stopped)
+        XCTAssertEqual(app.taskQueue.load(id: next.id)?.state, .completed)
+        XCTAssertEqual(engine.streamCallCount, 1)
     }
 
     func testPauseImmediatelyAfterStartIsRememberedDuringPreparation() async throws {

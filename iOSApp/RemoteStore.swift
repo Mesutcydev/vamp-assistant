@@ -103,6 +103,9 @@ final class RemoteStore {
     private var consecutivePollingFailures = 0
     private var pollIdleSeconds: Int = 4
     private(set) var sendingSessionIDs: Set<UUID> = []
+    private(set) var sendingQueuedTaskID: UUID?
+    private(set) var removingQueuedTaskID: UUID?
+    var isUpdatingQueue: Bool { sendingQueuedTaskID != nil || removingQueuedTaskID != nil }
 
     init(
         connectionStorage: any RemoteConnectionPersisting = RemoteConnectionStorage(),
@@ -895,7 +898,8 @@ final class RemoteStore {
     func send(_ text: String, modelID: String? = nil, action: String? = nil, sessionID: UUID? = nil) async -> Bool {
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty, let client, let id = selectedSession?.id else { return false }
-        guard sessionID == nil || sessionID == id, sendingSessionIDs.insert(id).inserted else { return false }
+        guard sessionID == nil || sessionID == id, !isUpdatingQueue,
+              sendingSessionIDs.insert(id).inserted else { return false }
         let generation = connectionGeneration
         defer { if generation == connectionGeneration { sendingSessionIDs.remove(id) } }
         do {
@@ -942,14 +946,41 @@ final class RemoteStore {
         }
     }
 
-    func cancelQueuedTask(_ taskID: UUID) async {
-        guard let client, let id = selectedSession?.id else { return }
+    func sendQueuedTask(_ taskID: UUID, sessionID: UUID) async -> Bool {
+        await updateQueuedTask(taskID, sessionID: sessionID, send: true)
+    }
+
+    func cancelQueuedTask(_ taskID: UUID, sessionID: UUID? = nil) async {
+        guard let id = sessionID ?? selectedSession?.id else { return }
+        _ = await updateQueuedTask(taskID, sessionID: id, send: false)
+    }
+
+    private func updateQueuedTask(_ taskID: UUID, sessionID: UUID, send: Bool) async -> Bool {
+        guard let client, selectedSession?.id == sessionID, !isUpdatingQueue else { return false }
+        if send {
+            guard isConnected, selectedSession?.isRunning == false,
+                  !sendingSessionIDs.contains(sessionID) else { return false }
+            sendingQueuedTaskID = taskID
+        } else { removingQueuedTaskID = taskID }
         let generation = connectionGeneration
+        defer {
+            if isCurrentConnection(generation) {
+                sendingQueuedTaskID = nil
+                removingQueuedTaskID = nil
+            }
+        }
         do {
-            _ = try await client.cancelQueuedTask(taskID, sessionID: id) as RemoteAcceptedResponse
+            let response: RemoteAcceptedResponse
+            if send { response = try await client.sendQueuedTask(taskID, sessionID: sessionID) }
+            else { response = try await client.cancelQueuedTask(taskID, sessionID: sessionID) }
+            try requireConnection(generation)
+            guard response.accepted else { throw RemoteClientError.invalidResponse }
+            await refreshAfterAcceptance(generation: generation)
+            return isCurrentConnection(generation)
         } catch {
-            guard isCurrentConnection(generation) else { return }
-            presentError("Couldn't remove follow-up", error)
+            guard isCurrentConnection(generation) else { return false }
+            presentError(send ? "Couldn't send follow-up" : "Couldn't remove follow-up", error)
+            return false
         }
     }
 
@@ -1270,6 +1301,8 @@ final class RemoteStore {
         workspacesSupported = true
         resolvingPendingKeys.removeAll()
         sendingSessionIDs.removeAll()
+        sendingQueuedTaskID = nil
+        removingQueuedTaskID = nil
         resolvingPendingKey = nil
         backgroundNotice = nil
         errorMessage = nil

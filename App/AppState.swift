@@ -153,6 +153,10 @@ final class AppState: ObservableObject {
             self.removeQueuedTask(taskID)
             return true
         }
+        remoteSessionHost.sendQueuedTaskHandler = { [weak self] sessionID, taskID in
+            guard let self else { return "The Mac is unavailable." }
+            return self.sendQueuedTask(taskID, sessionID: sessionID)
+        }
         remoteSessionHost.steerHandler = { [weak self] sessionID, message in
             guard let self,
                   self.sessions.activeSessionID == sessionID,
@@ -939,6 +943,9 @@ final class AppState: ObservableObject {
     /// model is unloaded, while the app is waiting for approval, or while a
     /// different workspace is active.
     func drainTaskQueue() {
+        if !sessions.isRunning, activeQueuedTaskID != nil {
+            finishQueuedTask(sessions.finishReason ?? .cancelled, scheduleNext: false)
+        }
         if !sessions.isRunning, let steer = sessions.takePendingSteer() {
             sessions.send(steer)
             refreshTaskQueue()
@@ -963,32 +970,58 @@ final class AppState: ObservableObject {
                 continue
             }
 
-            activeQueuedTaskID = next.id
-            taskQueue.update(next.id) { task in
-                task.state = .running
-                task.phase = "Starting"
-                task.attempts += 1
-                task.lastError = nil
-            }
-            refreshTaskQueue()
-
-            guard sessions.continuePersistedSession(id: next.sessionID, message: next.message) else {
-                taskQueue.update(next.id) { task in
-                    task.state = .failed
-                    task.phase = nil
-                    task.lastError = "The session could not be resumed."
-                }
-                activeQueuedTaskID = nil
-                refreshTaskQueue()
-                continue
-            }
-            return
+            if startQueuedTask(next) { return }
         }
         refreshTaskQueue()
     }
 
+    /// Runs an existing durable item; retries never enqueue a second copy.
+    func sendQueuedTask(_ id: UUID, sessionID: UUID) -> String? {
+        guard let task = taskQueue.load(id: id), task.sessionID == sessionID else {
+            return "That queued follow-up is no longer available."
+        }
+        // A repeated request after acceptance is an acknowledgement only.
+        if task.state == .completed || (activeQueuedTaskID == id && sessions.isRunning) { return nil }
+        guard task.state == .queued else { return "That follow-up is no longer queued." }
+        guard !sessions.isRunning else { return "The Mac is still answering. Try again when it finishes." }
+        guard isEngineReady else { return "Load a model on the Mac before sending this follow-up." }
+        if activeQueuedTaskID != nil {
+            finishQueuedTask(sessions.finishReason ?? .cancelled, scheduleNext: false)
+        }
+        guard let record = SessionStore.shared.load(id: sessionID),
+              record.workspacePath == task.workspacePath,
+              SessionStore.shared.validateWorkspaceBinding(record) else {
+            return "The follow-up's session or project is no longer available."
+        }
+        return startQueuedTask(task) ? nil : "The session could not be resumed."
+    }
+
+    private func startQueuedTask(_ next: QueuedAgentTask) -> Bool {
+        activeQueuedTaskID = next.id
+        taskQueue.update(next.id) { task in
+            task.state = .running
+            task.phase = "Starting"
+            task.attempts += 1
+            task.lastError = nil
+        }
+        refreshTaskQueue()
+
+        guard sessions.continuePersistedSession(id: next.sessionID, message: next.message) else {
+            taskQueue.update(next.id) { task in
+                task.state = .failed
+                task.phase = nil
+                task.lastError = "The session could not be resumed."
+            }
+            activeQueuedTaskID = nil
+            refreshTaskQueue()
+            return false
+        }
+        return true
+    }
+
     private var isEngineReady: Bool {
         guard !isUnloadingModel else { return false }
+        if case .loading = enginePhase { return false }
         if case .ready = enginePhase { return true }
         return isCodexActive
     }
@@ -1020,9 +1053,9 @@ final class AppState: ObservableObject {
         refreshTaskQueue()
     }
 
-    private func finishQueuedTask(_ reason: AgentFinish) {
+    private func finishQueuedTask(_ reason: AgentFinish, scheduleNext: Bool = true) {
         guard let id = activeQueuedTaskID else {
-            scheduleQueueDrain()
+            if scheduleNext { scheduleQueueDrain() }
             return
         }
         let state: QueuedTaskState
@@ -1058,13 +1091,14 @@ final class AppState: ObservableObject {
         }
         activeQueuedTaskID = nil
         refreshTaskQueue()
-        scheduleQueueDrain()
+        if scheduleNext { scheduleQueueDrain() }
     }
 
     private func scheduleQueueDrain() {
         queueDrainTask?.cancel()
         queueDrainTask = Task { @MainActor [weak self] in
             await Task.yield()
+            guard !Task.isCancelled else { return }
             self?.drainTaskQueue()
         }
     }
@@ -1276,6 +1310,10 @@ final class AppState: ObservableObject {
 
     func activate(model: CatalogModel) async {
         guard !isUnloadingModel else { return }
+        // iOS includes its selection with every follow-up. Reusing the live
+        // model must not cancel the active turn or strand its queue reservation.
+        if activeModelID == model.id, engine.source == .localMLX,
+           activeCodexModelID == nil, case .ready = enginePhase { return }
         clearStaleLoadError()
         // Reentrancy guard: two rapid Load clicks (or a click while a load is
         // paging in) must not race engine swaps — the second tap is ignored.
@@ -1313,6 +1351,7 @@ final class AppState: ObservableObject {
         }
         // An active agent must fully stop before its engine is swapped:
         // cancellation is awaited, so generation can never outlive the model.
+        enginePhase = .loading(model.displayName)
         await sessions.stopAndWait()
         sessions.dismissFinish()
         activeCodexModelID = nil
@@ -1370,7 +1409,10 @@ final class AppState: ObservableObject {
     @discardableResult
     func activateRemote(endpoint: RemoteEndpoint) async -> Bool {
         guard !isUnloadingModel else { return false }
+        if engine.activeRemoteEndpoint == endpoint, activeCodexModelID == nil,
+           case .ready = enginePhase { return true }
         clearStaleLoadError()
+        enginePhase = .loading(endpoint.effectiveDisplayName)
         await sessions.stopAndWait()
         sessions.dismissFinish()
         activeCodexModelID = nil
@@ -1409,6 +1451,7 @@ final class AppState: ObservableObject {
     /// for generation).
     func deactivateRemote() {
         Task { [weak self] in
+            self?.enginePhase = .idle
             await self?.sessions.stopAndWait()
             self?.sessions.dismissFinish()
             self?.engine.useLocal()
@@ -1435,6 +1478,7 @@ final class AppState: ObservableObject {
     @discardableResult
     func activateCodex(model: CodexModelProfile) async -> Bool {
         guard !isUnloadingModel else { return false }
+        if activeCodexModelID == model.id, isCodexActive, case .ready = enginePhase { return true }
         clearStaleLoadError()
         if !codexAccount.isSignedIn {
             await codexAccount.refresh()
@@ -1443,6 +1487,7 @@ final class AppState: ObservableObject {
             enginePhase = .failed(codexAccount.errorMessage ?? "Sign in with ChatGPT in Settings → Providers first.")
             return false
         }
+        enginePhase = .loading(model.displayName)
         await sessions.stopAndWait()
         sessions.dismissFinish()
         if activeModelID != nil || engine.source != .localMLX {

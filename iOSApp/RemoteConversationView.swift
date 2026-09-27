@@ -118,9 +118,18 @@ struct ConversationView: View {
                 if let detail = store.selectedSession, detail.id == sessionID {
                     VStack(spacing: 8) {
                         if let queued = detail.queued, !queued.isEmpty {
-                            QueuedFollowUpsView(items: queued) { taskID in
-                                Task { await store.cancelQueuedTask(taskID) }
-                            }
+                            QueuedFollowUpsView(items: queued,
+                                canSend: store.isConnected && !detail.isRunning &&
+                                    !store.sendingSessionIDs.contains(sessionID),
+                                canRemove: store.isConnected,
+                                isUpdating: store.isUpdatingQueue,
+                                sendingTaskID: store.sendingQueuedTaskID,
+                                onSend: { taskID in
+                                    Task { await store.sendQueuedTask(taskID, sessionID: sessionID) }
+                                },
+                                onCancel: { taskID in
+                                    Task { await store.cancelQueuedTask(taskID, sessionID: sessionID) }
+                                })
                         }
                         if let warning = store.drafts.errorMessage {
                             Text(warning).font(.caption).foregroundStyle(RemoteInstrument.orange)
@@ -130,7 +139,7 @@ struct ConversationView: View {
                             draft: $store[draftFor: sessionID],
                             isRunning: detail.isRunning,
                             isReachable: store.isConnected,
-                            isSending: store.sendingSessionIDs.contains(sessionID),
+                            isSending: store.sendingSessionIDs.contains(sessionID) || store.isUpdatingQueue,
                             hasError: detail.error != nil,
                             onSend: { send() },
                             onQueue: { send(action: "queue") },

@@ -1700,6 +1700,12 @@ final class AgentSessionController: ObservableObject {
     /// state before returning. Engine transitions (load/unload/source swap)
     /// must await this so a generation can never outlive its model.
     func stopAndWait() async {
+        let wasRunning = isRunning
+        defer {
+            // The durable queue releases its active item on a terminal event.
+            // Model switches previously went idle silently and stranded it.
+            if wasRunning, !isRunning { finishReason = .cancelled }
+        }
         startTask?.cancel()
         startTask = nil
         if loop == nil, isRunning, isACPRun {
@@ -1719,11 +1725,11 @@ final class AgentSessionController: ObservableObject {
         }
         guard let loop else {
             runID = UUID()
-        isRunning = false
-        currentPhase = .finished
-        clearPending()
-        exactAnswerOverride = nil
-        return
+            isRunning = false
+            currentPhase = .finished
+            clearPending()
+            exactAnswerOverride = nil
+            return
         }
         self.loop = nil
         runID = UUID()
@@ -1760,6 +1766,9 @@ final class AgentSessionController: ObservableObject {
         isReasoningVisible = false
         liveReasoningText = ""
         clearPending()
+        if finishReason == nil {
+            finishReason = .engineError("The response stream ended before completing. Try the message again.")
+        }
         startPendingSteerIfNeeded()
     }
 

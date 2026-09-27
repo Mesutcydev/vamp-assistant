@@ -604,6 +604,13 @@ final class RemoteSessionTests: XCTestCase {
         // A locked/unavailable encrypted queue must not turn a successfully
         // paired idle remote session into a read-only surface.
         host.enqueueTaskHandler = { _, _ in nil }
+        var queuedSendCalls = 0
+        var queuedSendError: String?
+        host.sendQueuedTaskHandler = { id, _ in
+            XCTAssertEqual(id, sessionID)
+            queuedSendCalls += 1
+            return queuedSendError
+        }
         addTeardownBlock {
             await host.stop()
         }
@@ -660,6 +667,24 @@ final class RemoteSessionTests: XCTestCase {
 
         let unauthorized = try await request(baseURL, path: "/api/status")
         XCTAssertEqual(unauthorized.status, 401)
+
+        let queueBody = try JSONSerialization.data(withJSONObject: ["taskID": UUID().uuidString, "action": "send"])
+        let unauthorizedQueue = try await request(baseURL, path: "/api/sessions/\(sessionID)/queue",
+            method: "POST", body: queueBody)
+        XCTAssertEqual(unauthorizedQueue.status, 401)
+        XCTAssertEqual(queuedSendCalls, 0)
+        let queuedSend = try await request(baseURL, path: "/api/sessions/\(sessionID)/queue",
+            method: "POST", token: token, body: queueBody)
+        XCTAssertEqual(queuedSend.status, 202)
+        XCTAssertEqual(queuedSend.json.objectValue?["accepted"]?.boolValue, true)
+        queuedSendError = "The Mac is still answering."
+        let busyQueue = try await request(baseURL, path: "/api/sessions/\(sessionID)/queue",
+            method: "POST", token: token, body: queueBody)
+        XCTAssertEqual(busyQueue.status, 409)
+        let missingQueueSession = try await request(baseURL, path: "/api/sessions/\(UUID())/queue",
+            method: "POST", token: token, body: queueBody)
+        XCTAssertEqual(missingQueueSession.status, 404)
+        XCTAssertEqual(queuedSendCalls, 2)
 
         let status = try await request(baseURL, path: "/api/status", token: token)
         XCTAssertEqual(status.status, 200)

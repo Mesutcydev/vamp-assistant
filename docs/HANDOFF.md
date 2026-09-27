@@ -11,6 +11,28 @@ changes are in the working tree.
 
 ## Ground rules & commands
 
+### 2026-09-27: queued follow-up recovery (0.10.46 build 125)
+
+- Reproduced the reported Ready + stranded Queued state: every iOS follow-up
+  includes the model selection, and reactivating the current local model
+  cancelled the active turn without releasing `activeQueuedTaskID`.
+- Reusing an already ready local/API/Codex model is now a no-op. Model
+  transitions block queue draining; `stopAndWait` and unexpectedly closed
+  streams publish a terminal result. Queue draining can reconcile an obsolete
+  active reservation and cancelled drain tasks do not execute later.
+- Added authenticated `POST /api/sessions/:id/queue` with `action=send` and
+  the existing task ID. Ownership, readiness and running state are checked;
+  repeated requests acknowledge the existing run without creating another.
+- The iOS queued card has a matching 44-point send arrow and keeps the remove
+  control. Queue mutations are serialized, show progress, preserve a failed
+  send, and ignore completions from an old Mac connection.
+- Verified 1,051 macOS tests passed / 45 opt-in skipped; 41 iOS unit tests
+  passed; a real iOS UI-to-HTTP fixture flow sent the queued message exactly
+  once from an empty focused composer in light and dark appearances.
+  Results: `/tmp/vamp-queue-mac-all2.xcresult`, `/tmp/vamp-queue-ios.xcresult`,
+  `/tmp/vamp-queue-ios-dark.xcresult`. Screenshots were visually reviewed.
+  Both release targets are version 0.10.46 / build 125.
+
 ### 2026-09-27: Huihui vision and simpler iOS session controls
 
 - Fixed `GGUFEngine.Planner.isLoraFile`: full **abliterated** GGUF weights no

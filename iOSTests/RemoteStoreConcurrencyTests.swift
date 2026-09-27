@@ -128,6 +128,50 @@ final class RemoteStoreConcurrencyTests: XCTestCase {
         XCTAssertTrue(envelope.models.isEmpty)
     }
 
+    func testQueuedSendIsSerializedAndPreservedOnFailure() async throws {
+        for responseStatus in [200, 409] {
+            let id = UUID(), taskID = UUID()
+            let posted = expectation(description: "queued send started")
+            let posts = Mutex(0)
+            let (store, _, session) = makeStore { request in
+                if request.httpMethod == "POST" {
+                    XCTAssertEqual(request.url?.path, "/api/sessions/\(id)/queue")
+                    XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-token")
+                    posts.withLock { $0 += 1 }
+                    posted.fulfill()
+                    try await Task.sleep(for: .milliseconds(150))
+                    return (responseStatus, Data((responseStatus == 200
+                        ? "{\"accepted\":true}" : "{\"error\":\"The Mac is busy.\"}").utf8))
+                }
+                if request.url?.path == "/api/status" { return (200, Self.status(2_100_000_000)) }
+                if request.url?.path == "/api/sessions" { return (200, Data("{\"sessions\":[]}".utf8)) }
+                if request.url?.path.hasSuffix(id.uuidString) == true {
+                    var detail = try JSONSerialization.jsonObject(with: Self.detail(id)) as! [String: Any]
+                    detail["queued"] = [["id": taskID.uuidString, "message": "Keep this follow-up", "state": "queued"]]
+                    return (200, try JSONSerialization.data(withJSONObject: detail))
+                }
+                return (404, Data("{}".utf8))
+            }
+            defer { session.invalidateAndCancel(); disconnect(store) }
+            try await store.refresh()
+            await store.select(sessionID: id)
+            let operation = Task { await store.sendQueuedTask(taskID, sessionID: id) }
+            await fulfillment(of: [posted], timeout: 2)
+            XCTAssertEqual(store.sendingQueuedTaskID, taskID)
+            let duplicate = await store.sendQueuedTask(taskID, sessionID: id)
+            XCTAssertFalse(duplicate)
+            await store.cancelQueuedTask(taskID, sessionID: id)
+            let success = await operation.value
+            XCTAssertEqual(success, responseStatus == 200)
+            XCTAssertEqual(posts.withLock { $0 }, 1)
+            XCTAssertFalse(store.isUpdatingQueue)
+            if responseStatus == 409 {
+                XCTAssertEqual(store.selectedSession?.queued?.first?.message, "Keep this follow-up")
+                XCTAssertNotNil(store.errorMessage)
+            }
+        }
+    }
+
     func testSwitchingMacDuringRefreshDoesNotReuseOldStatusOrExpiry() async throws {
         let started = expectation(description: "A request started")
         let (store, storage, session) = makeStore { request in

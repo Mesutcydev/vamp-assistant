@@ -531,13 +531,18 @@ struct StreamingBubble: View {
 
 struct QueuedFollowUpsView: View {
     let items: [RemoteQueuedItem]
+    var canSend = false
+    var canRemove = true
+    var isUpdating = false
+    var sendingTaskID: UUID?
+    let onSend: (UUID) -> Void
     let onCancel: (UUID) -> Void
     @Environment(\.remoteAppearance) private var appearance
 
     var body: some View {
         VStack(spacing: 6) {
             ForEach(items) { item in
-                HStack(alignment: .top, spacing: 8) {
+                HStack(alignment: .center, spacing: 8) {
                     Image(systemName: "clock.badge.checkmark")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(BeetTheme.accentBright)
@@ -552,6 +557,20 @@ struct QueuedFollowUpsView: View {
                     }
                     Spacer(minLength: 4)
                     Button {
+                        onSend(item.id)
+                    } label: {
+                        Group {
+                            if sendingTaskID == item.id { ProgressView().controlSize(.small) }
+                            else { Image(systemName: "arrow.up").font(.subheadline.weight(.semibold)) }
+                        }
+                        .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(RemoteKeyButtonStyle())
+                    .disabled(!canSend || isUpdating)
+                    .accessibilityLabel("Send queued follow-up now")
+                    .accessibilityHint("Sends this saved message when the Mac is idle.")
+                    .accessibilityIdentifier("remote.queue.send.\(item.id)")
+                    Button {
                         onCancel(item.id)
                     } label: {
                         Image(systemName: "xmark")
@@ -561,6 +580,7 @@ struct QueuedFollowUpsView: View {
                     }
                     .foregroundStyle(BeetTheme.secondaryText(appearance))
                     .buttonStyle(RemotePressButtonStyle())
+                    .disabled(!canRemove || isUpdating)
                     .accessibilityLabel("Remove queued follow-up")
                 }
                 .padding(.horizontal, 12)
