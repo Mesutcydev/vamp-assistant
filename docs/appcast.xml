@@ -1,0 +1,20 @@
+<?xml version="1.0" standalone="yes"?><!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Vamp Assistant</title>
+        <item>
+            <title>0.10.53</title>
+            <pubDate>Thu, 01 Oct 2026 20:22:12 +0300</pubDate>
+            <link>https://thevamp.app/assistant/</link>
+            <sparkle:version>132</sparkle:version>
+            <sparkle:shortVersionString>0.10.53</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.53/Vamp-Assistant-0.10.53-build-132-public.zip" length="16401062" type="application/octet-stream" sparkle:edSignature="I/Z1adlhQILiN9gFvdzYkiYa3FGyQOYIv8XFBiVAj6dA1XqrmXSbElTjsUlUuauLTwG9NzKC0ytGU3VuWWRhDw=="></enclosure>
+        </item>
+    </channel>
+</rss><!-- sparkle-signatures:
+edSignature: iRh4JGZ/NCZEp5FM3W3MRv8s2xujRmrAbaxJxotcP3Vw8MxMewQs5GSF2sGLkHUV5x77xJ+0SrHA9GMCd7eWBg==
+length: 1224
+-->
