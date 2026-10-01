@@ -54,9 +54,9 @@ The resulting `Vamp-Assistant-iOS-*-unsigned.ipa` can be re-signed with AltStore
 
 Vamp Assistant can use [TinyFish Search](https://docs.tinyfish.ai/search-api) for current, ranked web sources, snippets, and URLs. Add the key in **Settings → Providers → TinyFish Search**; it is stored in the Mac Keychain and the read-only `web_search` tool is then available in Assistant, Code, browser-control, and bot runs. The assistant can pass a returned URL to `web_fetch` or the in-app browser for verification. For headless/CLI use, set `TINYFISH_API_KEY` before launching the host. No TinyFish key is bundled with the app.
 
-**Install:** [download the latest Apple-silicon DMG](https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.52/Vamp-Assistant-0.10.52-build-131-preview.dmg), open it, and move **Vamp Assistant.app** to Applications. Apple Silicon + macOS 15+.
+**Install:** [download the notarized Apple Silicon ZIP](https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.53/Vamp-Assistant-0.10.53-build-132-public.zip), extract it, and move **Vamp Assistant.app** to Applications. Apple Silicon + macOS 15+.
 
-> Gatekeeper will warn once — this build is Apple Development–signed, **not notarized** (Developer ID certs are revoked). Approve it on first launch (System Settings → Privacy & Security → **Open Anyway**), or clear the download quarantine first: `xattr -dr com.apple.quarantine "/Applications/Vamp Assistant.app"`.
+> This release is Developer ID signed and notarized by Apple. Sparkle checks for updates automatically; use **Vamp Assistant → Check for Updates…** to check manually.
 
 > Phase 1 deliberately focuses on one polished path: MLX + MLX-quantized safetensors + core coding tools. GGUF/llama.cpp has since shipped (v0.2+, see the GGUF entries in the model catalog).
 
