@@ -420,6 +420,98 @@ final class RemoteStoreConcurrencyTests: XCTestCase {
 
 @MainActor
 extension RemoteStoreConcurrencyTests {
+    func testUnlockRefreshesStatusUntilConfirmedAndPostsPasswordOnlyOnce() async throws {
+        let posts = Mutex(0)
+        let polls = Mutex(0)
+        let (store, _, session) = makeStore { request in
+            if request.url?.path == "/api/control/unlock" {
+                posts.withLock { $0 += 1 }
+                XCTAssertEqual(request.httpMethod, "POST")
+                XCTAssertGreaterThanOrEqual(request.timeoutInterval, 20,
+                    "Allow 256 paced characters plus host confirmation")
+                return (202, Data(#"{"accepted":true}"#.utf8))
+            }
+            XCTAssertEqual(request.url?.path, "/api/control")
+            let attempt = polls.withLock { $0 += 1; return $0 }
+            return (200, Data("{\"enabled\":true,\"screenRecording\":true,\"accessibility\":true,\"ready\":\(attempt > 1),\"locked\":\(attempt == 1)}".utf8))
+        }
+        defer { disconnect(store); session.invalidateAndCancel() }
+        let client = RemoteAPIClient(baseURL: URL(string: "http://100.90.4.3:9575")!, token: "test-token", session: session)
+
+        let status = try await client.unlockMac(password: String(repeating: "a", count: 256), sleep: { _ in })
+
+        XCTAssertEqual(status.locked, false)
+        XCTAssertTrue(status.ready)
+        XCTAssertEqual(posts.withLock { $0 }, 1)
+        XCTAssertEqual(polls.withLock { $0 }, 2)
+    }
+
+    func testUnlockNeverTreatsAcceptedOrMissingLockStateAsConfirmation() async throws {
+        for lockField in [",\"locked\":true", ""] {
+            let posts = Mutex(0)
+            let polls = Mutex(0)
+            let (store, _, session) = makeStore { request in
+                if request.url?.path == "/api/control/unlock" {
+                    posts.withLock { $0 += 1 }
+                    return (202, Data(#"{"accepted":true}"#.utf8))
+                }
+                polls.withLock { $0 += 1 }
+                return (200, Data("{\"enabled\":true,\"screenRecording\":true,\"accessibility\":true,\"ready\":false\(lockField)}".utf8))
+            }
+            defer { disconnect(store); session.invalidateAndCancel() }
+            let client = RemoteAPIClient(baseURL: URL(string: "http://100.90.4.3:9575")!, token: "test-token", session: session)
+
+            do {
+                _ = try await client.unlockMac(password: "never-log-this", sleep: { _ in })
+                XCTFail("Must require an unlocked status")
+            } catch {
+                XCTAssertTrue(error.localizedDescription.contains("still locked"))
+                XCTAssertFalse(error.localizedDescription.contains("never-log-this"))
+            }
+            XCTAssertEqual(posts.withLock { $0 }, 1)
+            XCTAssertEqual(polls.withLock { $0 }, 12)
+        }
+    }
+
+    func testUnlockPreservesHostRejectionWithoutRetrying() async {
+        for statusCode in [409, 423] {
+            let requests = Mutex(0)
+            let (store, _, session) = makeStore { _ in
+                requests.withLock { $0 += 1 }
+                return (statusCode, Data(#"{"error":"The Mac is still locked."}"#.utf8))
+            }
+            defer { disconnect(store); session.invalidateAndCancel() }
+            let client = RemoteAPIClient(baseURL: URL(string: "http://100.90.4.3:9575")!, token: "test-token", session: session)
+            do {
+                _ = try await client.unlockMac(password: "example", sleep: { _ in })
+                XCTFail("Must preserve the host failure")
+            } catch {
+                XCTAssertEqual(error.localizedDescription, "The Mac is still locked.")
+            }
+            XCTAssertEqual(requests.withLock { $0 }, 1)
+        }
+    }
+
+    func testUnlockCancellationStopsConfirmationWithoutResending() async {
+        let requests = Mutex(0)
+        let (store, _, session) = makeStore { request in
+            requests.withLock { $0 += 1 }
+            if request.url?.path == "/api/control/unlock" {
+                return (202, Data(#"{"accepted":true}"#.utf8))
+            }
+            return (200, Data(#"{"enabled":true,"screenRecording":true,"accessibility":true,"ready":false,"locked":true}"#.utf8))
+        }
+        defer { disconnect(store); session.invalidateAndCancel() }
+        let client = RemoteAPIClient(baseURL: URL(string: "http://100.90.4.3:9575")!, token: "test-token", session: session)
+        do {
+            _ = try await client.unlockMac(password: "example", sleep: { _ in throw CancellationError() })
+            XCTFail("Must stop confirmation when cancelled")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+        XCTAssertEqual(requests.withLock { $0 }, 2)
+    }
+
     func testFileDownloadEncodesNamesExactlyOnce() async throws {
         let payload = Data("download payload".utf8)
         for name in ["notes.txt", "my notes.txt", "résumé.txt", "report #1+100%.txt"] {

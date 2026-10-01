@@ -355,32 +355,34 @@ final class QwenStreamTensorStoreSet: @unchecked Sendable {
                 self.readLock.unlock()
                 let readStarted = DispatchTime.now().uptimeNanoseconds
                 var completed = false
-                defer {
-                    let elapsed = DispatchTime.now().uptimeNanoseconds &- readStarted
-                    self.readLock.lock()
-                    self.readStats.totalReadSeconds += Double(elapsed) / 1_000_000_000
-                    var phaseStats = self.readStats.stats(for: phase)
-                    phaseStats.totalReadSeconds += Double(elapsed) / 1_000_000_000
-                    if completed {
-                        self.readStats.totalCompletedBytes += UInt64(byteLength)
-                        phaseStats.completedBytes += UInt64(byteLength)
-                    }
-                    self.readStats.phases[phase] = phaseStats
-                    self.readStats.activeReadsAtSnapshot -= 1
-                    self.readLock.unlock()
-                    self.ioLimit.signal()
-                }
+                let result: Result<QwenStreamTensorBytes, Error>
                 do {
                     let bytes = try store.readSync(
                         location, byteOffset: byteOffset, byteLength: byteLength
                     )
                     completed = true
-                    continuation.resume(returning: QwenStreamTensorBytes(
+                    result = .success(QwenStreamTensorBytes(
                         location: location, bytes: bytes
                     ))
                 } catch {
-                    continuation.resume(throwing: error)
+                    result = .failure(error)
                 }
+                // Publish completion before waking the caller. A defer after
+                // resume raced readStatistics() on the awaiting task.
+                let elapsed = DispatchTime.now().uptimeNanoseconds &- readStarted
+                self.readLock.lock()
+                self.readStats.totalReadSeconds += Double(elapsed) / 1_000_000_000
+                var completedPhaseStats = self.readStats.stats(for: phase)
+                completedPhaseStats.totalReadSeconds += Double(elapsed) / 1_000_000_000
+                if completed {
+                    self.readStats.totalCompletedBytes += UInt64(byteLength)
+                    completedPhaseStats.completedBytes += UInt64(byteLength)
+                }
+                self.readStats.phases[phase] = completedPhaseStats
+                self.readStats.activeReadsAtSnapshot -= 1
+                self.readLock.unlock()
+                self.ioLimit.signal()
+                continuation.resume(with: result)
             }
         }
     }

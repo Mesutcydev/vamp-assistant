@@ -54,4 +54,45 @@ final class ControlSurfaceUITests: XCTestCase {
             controlButton.waitForExistence(timeout: 15),
             "the app never returned from the control surface — it wedged on dismiss")
     }
+
+    /// Run scripts/mock-remote-unlock-host.py first. The first submission stays
+    /// locked and the second unlocks after a delay, without controlling a Mac.
+    func testUnlockReportsRejectionThenLeavesLockScreenAfterConfirmation() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["VAMP_UNLOCK_UI_TEST"] == "1",
+            "requires the dedicated remote-unlock loopback fixture")
+        try requireMockHost()
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["VAMP_UITEST"] = "1"
+        app.launchEnvironment["BEETCODE_REMOTE_TEST_URL"] = "http://127.0.0.1:9576"
+        app.launchEnvironment["BEETCODE_REMOTE_TEST_TOKEN"] = "unlock-qa-token"
+        app.launch()
+
+        let control = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "control mac")).firstMatch
+        XCTAssertTrue(control.waitForExistence(timeout: 30))
+        control.tap()
+        let password = app.secureTextFields["Mac login password"].firstMatch
+        XCTAssertTrue(password.waitForExistence(timeout: 15))
+        password.tap()
+        password.typeText("qa-not-a-real-password")
+        XCTAssertTrue(app.keyboards.firstMatch.exists, "Exercise the form with the software keyboard open")
+        XCTAssertTrue(app.buttons["Unlock Mac"].isHittable,
+            "The keyboard must not cover the submit button")
+        let form = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        form.name = "Unlock form with keyboard"
+        form.lifetime = .keepAlways
+        add(form)
+        app.buttons["Unlock Mac"].tap()
+
+        let failure = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "The Mac is still locked.")).firstMatch
+        XCTAssertTrue(failure.waitForExistence(timeout: 15))
+        XCTAssertTrue(password.exists, "A rejected attempt must keep the retry form visible")
+        XCTAssertFalse(app.staticTexts["Unlock request sent. Waiting for the Mac…"].exists)
+
+        password.tap()
+        password.typeText("qa-not-a-real-password\n")
+        let unlocked = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: password)
+        XCTAssertEqual(XCTWaiter.wait(for: [unlocked], timeout: 15), .completed)
+        XCTAssertTrue(app.buttons["Close remote control"].firstMatch.exists)
+    }
 }

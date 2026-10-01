@@ -59,6 +59,7 @@ final class BeetCodeAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppUpdater.shared.start()
         // A state restoration that comes back empty leaves the app with no
         // window at all: AppKit asks SwiftUI's restorer for the saved window,
         // gets nothing (logged as `window=0x0`), and no window is ever
@@ -202,6 +203,9 @@ struct BeetCodeApp: App {
         .defaultSize(width: 760, height: 680)
         .windowResizability(.contentMinSize)
         .commands {
+            CommandGroup(after: .appInfo) {
+                CheckForUpdatesButton()
+            }
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") {
                     NotificationCenter.default.post(name: .openAppSettings, object: nil)

@@ -430,12 +430,15 @@ final class RemoteStore {
         return try await client.sendControlBatch(commands.map(Self.controlBody(for:)))
     }
 
-    func unlockMac(password: String) async throws {
+    func unlockMac(password: String) async throws -> RemoteMacControlStatus {
         guard let client else { throw RemoteClientError.notConnected }
         guard !password.isEmpty, password.count <= 256 else {
             throw RemoteClientError.server("Enter a login password between 1 and 256 characters.")
         }
-        _ = try await client.unlockMac(password: password)
+        let generation = connectionGeneration
+        let status = try await client.unlockMac(password: password)
+        guard generation == connectionGeneration else { throw CancellationError() }
+        return status
     }
 
     static func controlBody(for command: RemoteInputCommand) -> [String: Any] {

@@ -15,6 +15,9 @@ struct QwenStreamBudget: Sendable, Equatable {
     // allocator slack, and application growth above the measured footprint.
     static let transientReserve: UInt64 = 1_073_741_824
     static let safetyReserve: UInt64 = 536_870_912
+    // One retained prefill checkpoint alongside the active cache. Includes
+    // recurrent state and the maximum admitted attention state with slack.
+    static let promptStateReserve: UInt64 = 256 * 1_048_576
 
     var slots: Int { Int(poolBytes / QwenStreamArtifact.expertBundleBytes) }
 
@@ -23,14 +26,14 @@ struct QwenStreamBudget: Sendable, Equatable {
                         poolCeiling: UInt64 = 2 * 1_073_741_824) -> Self? {
         guard outputTokens > 0, requestedContext > outputTokens else { return nil }
         let fixed = QwenStreamArtifact.residentBytes + fixedStateBytes
-            + transientReserve + safetyReserve
+            + transientReserve + safetyReserve + promptStateReserve
         guard availableBytes > fixed else { return nil }
         let minimumPool: UInt64 = 512 * 1_048_576
         guard poolCeiling >= minimumPool, availableBytes - fixed > minimumPool else { return nil }
         let tokens = min(contextCeiling, requestedContext,
             Int((availableBytes - fixed - minimumPool) / kvBytesPerToken))
         guard tokens > outputTokens else { return nil }
-        for mib: UInt64 in [2048, 1024, 512] {
+        for mib: UInt64 in [3072, 2048, 1024, 512] {
             let pool = mib * 1_048_576
             guard pool <= poolCeiling, availableBytes - fixed > pool else { continue }
             guard UInt64(tokens) * kvBytesPerToken <= availableBytes - fixed - pool else { continue }

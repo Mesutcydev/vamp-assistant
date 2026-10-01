@@ -85,15 +85,9 @@ struct GeneralTab: View {
                         preferences.autoResumeDownloads = newValue
                         AppPreferencesStore.shared.save(preferences)
                     }))
-                SettingRow(label: "Updates") {
-                    Button("Check for updates") {
-                        if let url = URL(string: "https://thevamp.app/assistant") {
-                            NSWorkspace.shared.open(url)
-                        }
-                    }
-                    .buttonStyle(LFCapsuleButtonStyle())
-                }
             }
+
+            AppUpdateSettings()
 
         }
     }

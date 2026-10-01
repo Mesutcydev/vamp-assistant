@@ -2,12 +2,34 @@ import AppKit
 import Carbon
 import CoreGraphics
 import Foundation
+import IOKit.pwr_mgt
 @preconcurrency import ScreenCaptureKit
 
 /// A paced physical-key path for loginwindow. It is deliberately separate from
 /// ordinary remote input because secure fields may ignore Unicode event payloads.
 @MainActor
 final class LoginWindowInputService {
+    /// Fixed labels only: diagnostics must never include password characters,
+    /// key codes, modifiers, lengths, or request bodies.
+    enum Stage: String {
+        case started, displayWakeRequested, displayReady, formCleared
+        case passwordPosted, returnPosted, unlocked, stillLocked, failed
+    }
+
+    enum UnlockError: LocalizedError {
+        case stillLocked
+        case displayUnavailable
+
+        var errorDescription: String? {
+            switch self {
+            case .stillLocked:
+                "The Mac is still locked. Check the login password and the keyboard layout on the Mac, then try again."
+            case .displayUnavailable:
+                "The Mac's display could not wake. No further password input was sent. Wake the Mac and try again."
+            }
+        }
+    }
+
     struct Key: Equatable {
         let code: CGKeyCode
         var modifiers: CGEventFlags
@@ -26,18 +48,29 @@ final class LoginWindowInputService {
 
     private let isLocked: () -> Bool
     private let hasAccessibility: () -> Bool
+    private let beginDisplayWake: () throws -> (() -> Void)
+    private let isDisplayAwake: () -> Bool
     private let resolveKeys: (String) throws -> [Key]
     private let postKey: (Key, Bool) throws -> Void
     private let sleep: (Duration) async throws -> Void
+    private let report: (Stage) -> Void
     private var isSubmitting = false
 
     convenience init() {
         let source = CGEventSource(stateID: .hidSystemState)
+        Log.tools.notice("[remote-unlock] HID event source ready=\(source != nil, privacy: .public)")
         self.init(
             isLocked: { ComputerPermission.sessionLocked },
             hasAccessibility: { ComputerPermission.accessibilityGranted },
+            beginDisplayWake: Self.beginDisplayWake,
+            isDisplayAwake: { CGDisplayIsAsleep(CGMainDisplayID()) == 0 },
             resolveKeys: Self.keysForCurrentLayout,
             postKey: { key, isDown in
+                guard let source else {
+                    Log.tools.error("[remote-unlock] HID event source unavailable")
+                    throw RemoteMacControl.ParseError.message(
+                        "Remote Unlock could not create its input event source.")
+                }
                 guard let event = CGEvent(
                     keyboardEventSource: source,
                     virtualKey: key.code,
@@ -55,22 +88,31 @@ final class LoginWindowInputService {
                 }
                 event.post(tap: .cghidEventTap)
             },
-            sleep: { try await Task.sleep(for: $0) }
+            sleep: { try await Task.sleep(for: $0) },
+            report: { stage in
+                Log.tools.notice("[remote-unlock] stage=\(stage.rawValue, privacy: .public)")
+            }
         )
     }
 
     init(
         isLocked: @escaping () -> Bool,
         hasAccessibility: @escaping () -> Bool,
+        beginDisplayWake: @escaping () throws -> (() -> Void),
+        isDisplayAwake: @escaping () -> Bool,
         resolveKeys: @escaping (String) throws -> [Key],
         postKey: @escaping (Key, Bool) throws -> Void,
-        sleep: @escaping (Duration) async throws -> Void
+        sleep: @escaping (Duration) async throws -> Void,
+        report: @escaping (Stage) -> Void = { _ in }
     ) {
         self.isLocked = isLocked
         self.hasAccessibility = hasAccessibility
+        self.beginDisplayWake = beginDisplayWake
+        self.isDisplayAwake = isDisplayAwake
         self.resolveKeys = resolveKeys
         self.postKey = postKey
         self.sleep = sleep
+        self.report = report
     }
 
     func submit(password: String) async throws {
@@ -79,6 +121,9 @@ final class LoginWindowInputService {
         }
         isSubmitting = true
         defer { isSubmitting = false }
+        report(.started)
+        var completed = false
+        defer { if !completed { report(.failed) } }
         try checkCanType()
         guard !password.isEmpty, password.count <= 256,
               !password.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
@@ -93,19 +138,59 @@ final class LoginWindowInputService {
         selectAll.modifiers.insert(.maskCommand)
         selectAll.unicodeString = nil
 
-        // Wake/reveal the login form, then remove both the wake key and any
-        // partial input left by an earlier failed attempt.
+        // HID keys alone can be consumed as wake activity while the display
+        // sleeps. loginwindow also clears its password field on display wake.
+        // Power on the display first, then settle/reveal the login form before
+        // entering anything. Hold it awake only for this serialized attempt.
+        let releaseDisplayWake = try beginDisplayWake()
+        defer { releaseDisplayWake() }
+        report(.displayWakeRequested)
+        for _ in 0..<40 {
+            try checkCanType()
+            if isDisplayAwake() { break }
+            try await sleep(.milliseconds(250))
+        }
+        try checkCanType()
+        guard isDisplayAwake() else { throw UnlockError.displayUnavailable }
+        report(.displayReady)
+
+        // Remove both the reveal key and any partial input from an earlier
+        // failed attempt after the display wake has completed.
         try await stroke(Key(code: 49))
         try await sleep(.milliseconds(750))
         try await stroke(selectAll)
         try await stroke(Key(code: 51))
         try await sleep(.milliseconds(100))
+        report(.formCleared)
         for key in keys {
             try await stroke(key)
             try await sleep(.milliseconds(25))
         }
+        report(.passwordPosted)
         try await sleep(.milliseconds(100))
         try await stroke(Key(code: 36))
+        report(.returnPosted)
+
+        // Posting Return is not proof that loginwindow accepted the input.
+        // Keep attempts serialized until the session confirms the result; never
+        // automatically replay a password after an unsuccessful submission.
+        for _ in 0..<20 {
+            try Task.checkCancellation()
+            if !isLocked() {
+                completed = true
+                report(.unlocked)
+                return
+            }
+            try await sleep(.milliseconds(250))
+        }
+        try Task.checkCancellation()
+        guard !isLocked() else {
+            completed = true
+            report(.stillLocked)
+            throw UnlockError.stillLocked
+        }
+        completed = true
+        report(.unlocked)
     }
 
     private func checkCanType() throws {
@@ -119,6 +204,7 @@ final class LoginWindowInputService {
 
     private func stroke(_ key: Key) async throws {
         try checkCanType()
+        guard isDisplayAwake() else { throw UnlockError.displayUnavailable }
         try postKey(key, true)
         do {
             try await sleep(.milliseconds(20))
@@ -129,6 +215,32 @@ final class LoginWindowInputService {
         // Balance every down event even if a local unlock happened while the
         // key was held. The next suspension rechecks the lock state.
         try postKey(key, false)
+    }
+
+    private static func beginDisplayWake() throws -> (() -> Void) {
+        var holdID: IOPMAssertionID = 0
+        guard IOPMAssertionCreateWithName(
+            kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
+            IOPMAssertionLevel(kIOPMAssertionLevelOn),
+            "Vamp Assistant remote unlock" as CFString,
+            &holdID
+        ) == kIOReturnSuccess else { throw UnlockError.displayUnavailable }
+
+        // This is the same explicit local-user wake used by Vamp Sync before
+        // display capture. A prevent-sleep assertion alone does not wake it.
+        var activityID: IOPMAssertionID = 0
+        guard IOPMAssertionDeclareUserActivity(
+            "Vamp Assistant remote unlock" as CFString,
+            kIOPMUserActiveLocal,
+            &activityID
+        ) == kIOReturnSuccess else {
+            IOPMAssertionRelease(holdID)
+            throw UnlockError.displayUnavailable
+        }
+        return {
+            IOPMAssertionRelease(activityID)
+            IOPMAssertionRelease(holdID)
+        }
     }
 
     static func keysForCurrentLayout(_ text: String) throws -> [Key] {
@@ -304,9 +416,16 @@ enum RemoteMacControl {
 
     /// Mirrors Vamp Control's direct-distribution unlock path. The caller is
     /// responsible for authenticating and rate-limiting the request; this
-    /// method only delivers the already-validated password to loginwindow.
-    /// Nothing is persisted or logged.
+    /// method delivers the password and waits for the session to unlock.
+    /// The password is never persisted or logged; only fixed delivery stages
+    /// are logged for diagnosing an unsuccessful attempt.
     @MainActor private static let loginWindowInput = LoginWindowInputService()
+
+    /// Match Vamp Sync's lifecycle: prepare the HID source at startup rather
+    /// than lazily creating it during the first locked-console request.
+    @MainActor static func prepareLoginWindowInput() {
+        _ = loginWindowInput
+    }
 
     @MainActor static func unlockLoginWindow(password: String) async throws {
         try await loginWindowInput.submit(password: password)

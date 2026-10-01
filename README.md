@@ -54,9 +54,9 @@ The resulting `Vamp-Assistant-iOS-*-unsigned.ipa` can be re-signed with AltStore
 
 Vamp Assistant can use [TinyFish Search](https://docs.tinyfish.ai/search-api) for current, ranked web sources, snippets, and URLs. Add the key in **Settings → Providers → TinyFish Search**; it is stored in the Mac Keychain and the read-only `web_search` tool is then available in Assistant, Code, browser-control, and bot runs. The assistant can pass a returned URL to `web_fetch` or the in-app browser for verification. For headless/CLI use, set `TINYFISH_API_KEY` before launching the host. No TinyFish key is bundled with the app.
 
-**Install:** [download the latest Apple-silicon DMG](https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.48/Vamp-Assistant-0.10.48-build-127-preview.dmg), open it, and move **Vamp Assistant.app** to Applications. Apple Silicon + macOS 15+.
+**Install:** [download the notarized Apple Silicon ZIP](https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.53/Vamp-Assistant-0.10.53-build-132-public.zip), extract it, and move **Vamp Assistant.app** to Applications. Apple Silicon + macOS 15+.
 
-> Gatekeeper will warn once — this build is Apple Development–signed, **not notarized** (Developer ID certs are revoked). Approve it on first launch (System Settings → Privacy & Security → **Open Anyway**), or clear the download quarantine first: `xattr -dr com.apple.quarantine "/Applications/Vamp Assistant.app"`.
+> This release is Developer ID signed and notarized by Apple. Sparkle checks for updates automatically; use **Vamp Assistant → Check for Updates…** to check manually.
 
 > Phase 1 deliberately focuses on one polished path: MLX + MLX-quantized safetensors + core coding tools. GGUF/llama.cpp has since shipped (v0.2+, see the GGUF entries in the model catalog).
 
@@ -66,6 +66,40 @@ Run the Apple apps CI matrix before release. It tests the macOS and iOS targets
 and builds both Release configurations with Xcode 26.6. Local test runs that
 exercise Ship Center must export both `DEVELOPER_DIR` and
 `TEST_RUNNER_DEVELOPER_DIR` to the full Xcode developer directory.
+
+Vamp Assistant uses Sparkle 2.10.0 for signed in-app updates. **Check for Updates…**
+is available in the app menu and **Settings → General → Updates**, with a daily
+automatic-check preference. Updates require confirmation before installation.
+Update archives and the appcast are signed with the app's Ed25519 key, whose
+private half stays in the login Keychain under the `vamp-assistant` account.
+
+Prepare a Developer ID archive for **Xcode Organizer → Distribute App → Direct
+Distribution**:
+
+```sh
+DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer ./scripts/release-vamp-macos.sh --prepare
+```
+
+The script selects the sole valid Developer ID Application identity, excluding
+revoked certificates. Set `VAMP_SIGNING_IDENTITY` to a certificate SHA-1 when
+multiple valid identities exist. Xcode's signed-in Apple account handles
+notarization; no separate API key or password is required by the scripts.
+`--submit` uses Xcode's command-line upload flow, and `--export-notarized
+/path/to/App.xcarchive` exports an accepted archive and packages it.
+
+After Xcode exports the notarized app, create the public ZIP and signed feed:
+
+```sh
+./scripts/finalize-vamp-macos.sh "/path/to/notarized/Vamp Assistant.app"
+```
+
+Upload the ZIP and checksum to its `v<version>` GitHub release first, then publish
+the generated `dist/updates/<version>-build-<build>/appcast.xml` as
+`docs/appcast.xml`. The embedded feed URL is
+`https://mesutcydev.github.io/vamp-assistant/appcast.xml`. Never publish a feed
+whose archive is unavailable or edit a signed feed without signing it again.
+Existing preview versions need one manual installation to gain Sparkle updates.
+See [macOS distribution](docs/MACOS-DISTRIBUTION.md) for verification and recovery.
 
 The DMG packager defaults to a clearly named `preview` artifact. Public packaging
 requires a Developer ID signed app with hardened runtime and a stapled

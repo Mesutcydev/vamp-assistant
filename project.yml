@@ -17,6 +17,9 @@ settings:
     EXCLUDED_ARCHS: x86_64
 
 packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    version: "2.10.0"
   MLX:
     url: https://github.com/ml-explore/mlx-swift
     version: "0.31.6"
@@ -40,6 +43,8 @@ targets:
     resources:
       - App/Assets.xcassets
     dependencies:
+      - package: Sparkle
+        product: Sparkle
       - package: MLX
         products:
           - MLX
@@ -56,8 +61,15 @@ targets:
       properties:
         CFBundleDisplayName: "Vamp Assistant"
         CFBundleIconName: AppIcon
-        CFBundleShortVersionString: "0.10.48"
-        CFBundleVersion: "127"
+        CFBundleShortVersionString: "0.10.53"
+        CFBundleVersion: "132"
+        SUFeedURL: https://mesutcydev.github.io/vamp-assistant/appcast.xml
+        SUPublicEDKey: "yjY7zlQpF4bDqZV/vVo21Am1NKtAFnypz2szzMvU4cc="
+        SUEnableAutomaticChecks: true
+        SUAutomaticallyUpdate: false
+        SUSendProfileInfo: false
+        SUVerifyUpdateBeforeExtraction: true
+        SURequireSignedFeed: true
         LSApplicationCategoryType: public.app-category.developer-tools
         LSMinimumSystemVersion: "15.0"
         NSHumanReadableCopyright: "Copyright © 2026 Vamp Assistant contributors"
@@ -85,6 +97,9 @@ targets:
         # Allow, forever.
         CODE_SIGN_IDENTITY: "Apple Development"
         DEVELOPMENT_TEAM: "438VSM6P5L"
+      configs:
+        Release:
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
 
   BeetCodeCLI:
     type: tool
@@ -198,8 +213,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.beetcode.remote.ios
         PRODUCT_NAME: "Vamp Assistant"
         PRODUCT_MODULE_NAME: BeetCodeRemoteIOS
-        MARKETING_VERSION: "0.10.48"
-        CURRENT_PROJECT_VERSION: "127"
+        MARKETING_VERSION: "0.10.52"
+        CURRENT_PROJECT_VERSION: "131"
         CODE_SIGN_ENTITLEMENTS: iOSApp/BeetCodeRemote.entitlements
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: iOSApp/Info.plist

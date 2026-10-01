@@ -183,6 +183,7 @@ final class AppState: ObservableObject {
         remoteSessionHost.remoteMacUnlockAllowedHandler = {
             SettingsStore.shared.remoteMacUnlockEnabled
         }
+        RemoteMacControl.prepareLoginWindowInput()
         remoteSessionHost.remoteMacUnlockHandler = { password in
             try await RemoteMacControl.unlockLoginWindow(password: password)
         }
