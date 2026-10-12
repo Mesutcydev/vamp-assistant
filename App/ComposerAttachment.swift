@@ -1,7 +1,7 @@
 import Foundation
 
 /// A file or image attached to a draft message.
-struct ComposerAttachment: Identifiable, Equatable, Sendable {
+struct ComposerAttachment: Identifiable, Codable, Equatable, Sendable {
     let id: UUID
     let url: URL
     let name: String

@@ -29,25 +29,17 @@ struct ChatView: View {
     }
 
     var body: some View {
-        // Measured, not pinned: a GeometryReader that forced its child to the
-        // full proposed size also swallowed the window's top safe area, so the
-        // transcript drew up through the title band.
         VStack(spacing: 0) {
-            if controller.workspaceTrustNeeded {
-                workspaceTrustBanner
-            }
+            if controller.workspaceTrustNeeded { workspaceTrustBanner }
             if isEmptyConversation {
-                WelcomeIdentityView(status: homeStatus,
-                                    statusTint: homeStatusTint,
-                                    statusIsLive: homeStatusIsLive)
-            } else {
-                transcript
-                if hasPendingGate {
-                    pendingGate
+                ScrollView {
+                    WelcomeIdentityView(status: homeStatus, statusTint: homeStatusTint, statusIsLive: homeStatusIsLive)
+                    DelegatedWorkSection(originatingSessionID: controller.activeSessionID)
+                        .padding(.horizontal, 20)
                 }
-            }
-            bottomDock(workspaceWidth: paneWidth)
+            } else { transcript }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) { bottomDock(workspaceWidth: paneWidth) }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { paneWidth = $0 }
         // Keep an opaque themed backing at this boundary. During a streamed
@@ -94,7 +86,8 @@ struct ChatView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 8)
-        .padding(.bottom, 18)
+        .padding(.bottom, 16)
+        .background(Theme.workspaceCanvas)
     }
 
     private var workspaceTrustBanner: some View {
@@ -185,6 +178,8 @@ struct ChatView: View {
                     } else if controller.isReasoningVisible && controller.isRunning {
                         ReasoningIndicator()
                     }
+                    DelegatedWorkSection(originatingSessionID: controller.activeSessionID)
+                    if hasPendingGate { pendingGate }
                     if let finish = controller.finishReason {
                         FinishBanner(
                             reason: finish,
@@ -205,7 +200,7 @@ struct ChatView: View {
                 .padding(.bottom, 20)
                 // A short conversation rests just above the writing well
                 // instead of stranding itself at the top of a tall page.
-                .containerRelativeFrame(.vertical, alignment: .bottom)
+
             }
             .background(Theme.workspaceCanvas)
             .defaultScrollAnchor(.bottom)
@@ -406,13 +401,14 @@ struct ChatView: View {
             if let question = controller.pendingQuestion {
                 QuestionCard(
                     question: question,
-                    choices: controller.pendingQuestionChoices
+                    choices: controller.pendingQuestionChoices,
+                    draftKey: "question.\(controller.activeSessionID?.uuidString ?? "new").\(question)"
                 ) { answer in
                     controller.answerQuestion(answer)
                 }
             }
             if let plan = controller.pendingPlan {
-                PlanCard(plan: plan) { feedback in
+                PlanCard(plan: plan, draftKey: "plan.\(controller.activeSessionID?.uuidString ?? "new").\(plan)") { feedback in
                     if let feedback {
                         controller.revisePlan(feedback)
                     } else {
@@ -422,8 +418,6 @@ struct ChatView: View {
             }
         }
         .frame(maxWidth: ContentColumn.maxWidth, alignment: .leading)
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 20)
         .padding(.vertical, 12)
         // Approval responses can arrive at the same time as the live session
         // snapshot. Keep the gate's geometry stable while that state settles;
@@ -475,11 +469,10 @@ private struct WelcomeIdentityView: View {
     let statusTint: Color
     let statusIsLive: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var pulsing = false
 
     var body: some View {
         VStack(spacing: 0) {
-            Spacer(minLength: 24)
+            Spacer(minLength: 64)
 
             // One honest signal instead of two decorative meters: a live green
             // dot with the state written beside it. It says the app is up, and
@@ -488,16 +481,6 @@ private struct WelcomeIdentityView: View {
                 Circle()
                     .fill(statusIsLive ? Color.green : Color(nsColor: .tertiaryLabelColor))
                     .frame(width: 7, height: 7)
-                    .overlay {
-                        // The halo only breathes when the state it reports is
-                        // actually live.
-                        if statusIsLive {
-                            Circle()
-                                .stroke(Color.green.opacity(0.45), lineWidth: 3)
-                                .scaleEffect(pulsing ? 2.1 : 1)
-                                .opacity(pulsing ? 0 : 0.9)
-                        }
-                    }
                     .accessibilityHidden(true)
                 Text(status)
                     .font(.system(size: 12, weight: .medium))
@@ -511,16 +494,11 @@ private struct WelcomeIdentityView: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Status: \(status)")
             .padding(.bottom, 20)
-            .task(id: statusIsLive) {
-                guard statusIsLive, !reduceMotion else { return }
-                withAnimation(.easeOut(duration: 1.8).repeatForever(autoreverses: false)) {
-                    pulsing = true
-                }
-            }
+
 
             WelcomeEyebrow(compact: paneIsCompact, showsEyebrow: true)
 
-            Text("Ask, browse, create, and control your Mac—with permission at every step.")
+            Text("Ask a question, explore an idea, or get something done.")
                 .font(.system(size: 14))
                 .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                 .multilineTextAlignment(.center)
@@ -541,15 +519,15 @@ private struct WelcomeIdentityView: View {
                 } label: {
                     Label("Choose a model", systemImage: "cpu")
                 }
-                .glassButton(prominent: true)
-                .controlSize(.large)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
                 .help("Pick the model that runs your next message")
                 .padding(.top, 18)
             }
 
-            Spacer(minLength: 24)
+            Spacer(minLength: 64)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
     }
 
@@ -569,8 +547,10 @@ private struct WelcomeEyebrow: View {
                     // 38% watermark is what made this screen read as disabled.
                     .font(.appUI(size: compact ? 20 : 24, weight: .semibold))
                     .foregroundStyle(Color(nsColor: .labelColor))
-                    .lineLimit(1)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .padding(.horizontal, 20)
             .accessibilityIdentifier("welcome-wordmark")
             .accessibilityAddTraits(.isHeader)
         }

@@ -6,7 +6,7 @@ import SwiftUI
 /// the simulator through argent-backed tools (sim_tap, sim_type, …) — this
 /// panel is the human's viewport and control surface.
 struct SimulatorPanelView: View {
-    @StateObject private var controller = SimulatorContext()
+    @ObservedObject var controller: SimulatorContext
     @EnvironmentObject private var appState: AppState
     @State private var bundleID = ""
     @State private var showInstaller = false
@@ -27,9 +27,7 @@ struct SimulatorPanelView: View {
         .onAppear {
             controller.refreshDevices()
         }
-        .onDisappear {
-            controller.stopStreaming()
-        }
+
     }
 
     private var header: some View {

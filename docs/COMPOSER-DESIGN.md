@@ -4,6 +4,67 @@
 > gone. The composer below is the app's single input surface; the per-turn
 > agent direction lives in the Intent picker (see "Intent" section at the end).
 
+## Verification — 2026-10-12
+
+The final macOS unit run passed 1,134 tests with 51 existing skips and no
+failures. macOS and iOS arm64 Release builds succeeded. The final macOS
+Release confirmation completed in the Developer ID archive for 0.10.54 (133). Native UI checks passed
+Browser/composer bounds, minimum-width appearance controls, inline delegation,
+and composer expansion/reset. Earlier preview coverage captured all 16 light/dark
+fixtures. Full final UI acceptance remains incomplete: Xcode repeatedly lost its
+accessibility helper or failed to discover app windows, and the isolated iOS
+simulator failed to boot (`launchd_sim` could not bind to its session). Devices
+content assertions and the remaining final UI matrix are not recorded as passing.
+A fresh-session retry also failed before running tests: Xcode timed out enabling
+automation mode. Native inspection timed out, and the isolated simulator tools
+server could not become ready. Logs are retained under
+`.derived/redesign-validation/`.
+
+## macOS workspace redesign — 2026-10-12
+
+The shipping input is `ChatInputWell` in `App/ChatFrame.swift`. It binds directly
+to the window's `ComposerStore` and sits in the conversation's bottom safe-area
+inset. Tool panes cannot push it off the window. The idle accessory row contains
+attachments, model, project, task options, and Send. During work, Stop remains
+available; a populated draft exposes Queue follow-up and steering. Roles and
+focus sources remain in Task options → Roles & context.
+
+Drafts are keyed by conversation ID; unsent chats use a window/workspace slot.
+Prompt, intent, and existing attachment paths survive view recreation and disk
+restoration. Older workspace drafts migrate once without deleting their files.
+Explicit New Chat clears the new slot while keeping saved conversation drafts.
+
+`MainWindowView` owns Chats, Devices, and Settings routing and one native toolbar.
+`WorkspaceDock` persists a validated tree of tab groups and horizontal/vertical
+splits per window/workspace. Resources reopen into their existing tab. In a narrow
+window, the labeled Focus layout switcher temporarily replaces the split tree;
+the saved arrangement returns as space becomes available. Reset Layout retains
+open tools beside the single nonclosable conversation.
+
+Browser and Simulator controllers live outside pane views. Review models and
+specialist console state also survive moving panes. Delegated runs carry optional
+`originatingSessionID` metadata, separate from the worker's session ID. Conversations
+show associated progress and decisions; Activity retains access to unlinked legacy
+and remote runs. Approval and answer delivery still uses the coordinator's durable
+command log and existing permission authority.
+
+Fresh installs follow system appearance with burgundy. Existing explicit and old
+implicit appearance preferences are preserved. After visual review, dark content
+uses neutral charcoal (`#191919` canvas, `#242424` surface, `#202020` inset) and a
+deeper sidebar (`#151515`), with softened burgundy emphasis. Reading surfaces are
+opaque. Light surfaces follow the redesign specification. SF prose remains subject
+to the saved reading-size and typeface preferences.
+
+The developer-only `--design-preview` fixtures exercise welcome, chat, approvals,
+delegation, docking, Models, Devices, and Settings in both appearances. Fixtures
+avoid restoring real chat history, executing composer submissions, or polling live
+metrics. They size captures to the available screen. Unit coverage includes layout
+validation/moves/restoration and conversation draft/attachment isolation. Native UI
+checks cover toolbar round trips, pane bounds, search, menus, narrow fallback, and
+light/dark captures. Unicode paste is used for deterministic text fidelity on
+Turkish keyboards; navigation and command shortcuts use real key events.
+
+
 ## Audit of leading composers
 
 | App | Input style | Attachments | Expansion | Context & actions |

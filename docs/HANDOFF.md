@@ -242,6 +242,20 @@ Remote / UI
 
 ## Useful facts
 
+- 2026-10-02 iOS model catalog fix: `RemoteStore.loadStartModels()` now owns
+  and shares one catalog task between the new-session screen and its picker.
+  Cancelling the picker previously invalidated the other successful response,
+  leaving Local, ChatGPT, and API tabs empty. Connection changes and model
+  unload still cancel and invalidate that shared task.
+  `testCancelledPickerRefreshDoesNotDiscardSuccessfulModelLoad` failed before
+  the fix and passes afterward; all 48 iOS tests and 24 Mac remote-session
+  tests pass. Release 0.10.54 (133) built successfully. Local unsigned IPA:
+  `dist/Vamp-Assistant-iOS-0.10.54-build-133-unsigned.ipa`, SHA-256
+  `6415e000487aac742396babb03608cd2035e65d2588f15fa2fd198d3ef09ad50`.
+  The physical iPhone still has 0.10.50 (129); delivery must use its existing
+  signing method without uninstalling. Simulator manual QA was inconclusive
+  because Argent taps did not reliably hit discovered controls.
+
 - Key design decisions made: UI tests were updated to the **new** composer
   design (do not restore the old rail/status keys to satisfy tests); remote
   busy returns 409 unless `replace:true`; verification is classified by

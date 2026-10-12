@@ -635,4 +635,51 @@ final class ComposerStoreTests: XCTestCase {
         let restored = await waitUntil { store.prompt == "workspace A draft" }
         XCTAssertTrue(restored, "switching back restores workspace A's draft")
     }
+    func testConversationDraftsAndAttachmentsStaySeparateInsideOneProject() async throws {
+        let (appState, store, _) = makeStack()
+        await openWorkspace(appState, store)
+        func record(_ title: String) -> SessionRecord {
+            SessionRecord(id: UUID(), title: title, createdAt: Date(), updatedAt: Date(),
+                          workspacePath: workspace.url.path, modelID: "fixture", messages: [], checkpoints: [])
+        }
+        let first = record("First")
+        let second = record("Second")
+        XCTAssertTrue(appState.sessions.restore(first))
+        let selected = await waitUntil { appState.sessions.activeSessionID == first.id && store.prompt.isEmpty }
+        XCTAssertTrue(selected)
+        try? await Task.sleep(for: .milliseconds(100))
+        store.prompt = "First conversation draft"
+        _ = store.addAttachments([workspace.url(for: "README.md")])
+        store.flushDraft()
+        XCTAssertTrue(appState.sessions.restore(second))
+        let empty = await waitUntil { store.prompt.isEmpty && store.attachments.isEmpty }
+        XCTAssertTrue(empty)
+        store.prompt = "Second conversation draft"
+        XCTAssertTrue(appState.sessions.restore(first))
+        let restored = await waitUntil { store.prompt == "First conversation draft" }
+        XCTAssertTrue(restored)
+        XCTAssertEqual(store.attachments.map(\.name), ["README.md"])
+        // Repeated wiring caused duplicate subscriptions to reload the draft.
+        store.attach(controller: appState.sessions, appState: appState)
+        XCTAssertEqual(store.prompt, "First conversation draft")
+        store.flushDraft()
+        let recreated = ComposerStore()
+        recreated.attach(controller: appState.sessions, appState: appState)
+        XCTAssertEqual(recreated.prompt, "First conversation draft")
+        XCTAssertEqual(recreated.attachments.map(\.name), ["README.md"])
+    }
+
+    func testNewChatRetainsPreviousDraftAndClearsItsOwnAttachmentLane() async {
+        let (appState, store, _) = makeStack()
+        await openWorkspace(appState, store)
+        store.prompt = "An unsent task"
+        _ = store.addAttachments([workspace.url(for: "README.md")])
+        store.beginNewConversation()
+        appState.sessions.newSession()
+        XCTAssertTrue(store.prompt.isEmpty)
+        XCTAssertTrue(store.attachments.isEmpty)
+        try? await Task.sleep(for: .milliseconds(120))
+        XCTAssertTrue(store.prompt.isEmpty, "A queued session-change callback must not resurrect the discarded unsent draft")
+    }
+
 }

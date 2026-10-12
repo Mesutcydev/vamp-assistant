@@ -1,5 +1,6 @@
 # Vamp Assistant macOS distribution
 
+The released source and scripts are available in tag [`v0.10.53`](https://github.com/Mesutcydev/vamp-assistant/tree/v0.10.53).
 The project uses Sparkle 2.10.0 (pinned in `project.yml`) and Xcode's Developer ID
 notarization flow. The app supports Apple Silicon and macOS 15 or later.
 

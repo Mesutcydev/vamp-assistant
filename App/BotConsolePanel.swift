@@ -1,4 +1,5 @@
 import SwiftUI
+import Observation
 
 /// Live view into one bot's computer: what it produced, a shell inside it, and its workspace.
 ///
@@ -25,14 +26,45 @@ struct BotConsolePanel: View {
     let events: [BotRunEvent]
 
     @EnvironmentObject private var appState: AppState
-    @State private var tab: Tab = .output
-    @State private var command = ""
-    @State private var transcript: [String] = []
-    @State private var entries: [BotWorkspaceEntry] = []
-    @State private var directory = ""
-    @State private var preview: (name: String, contents: String)?
-    @State private var isBusy = false
-    @State private var errorMessage: String?
+    private let state: BotConsoleState
+
+    init(computer: BotComputerRecord?, run: BotRunRecord?, events: [BotRunEvent]) {
+        self.computer = computer; self.run = run; self.events = events
+        state = BotConsoleState.forResource(computer?.id ?? run?.id)
+    }
+
+    private var tab: BotConsolePanel.Tab {
+        get { state.tab }
+        nonmutating set { state.tab = newValue }
+    }
+    private var command: String {
+        get { state.command }
+        nonmutating set { state.command = newValue }
+    }
+    private var transcript: [String] {
+        get { state.transcript }
+        nonmutating set { state.transcript = newValue }
+    }
+    private var entries: [BotWorkspaceEntry] {
+        get { state.entries }
+        nonmutating set { state.entries = newValue }
+    }
+    private var directory: String {
+        get { state.directory }
+        nonmutating set { state.directory = newValue }
+    }
+    private var preview: (name: String, contents: String)? {
+        get { state.preview }
+        nonmutating set { state.preview = newValue }
+    }
+    private var isBusy: Bool {
+        get { state.isBusy }
+        nonmutating set { state.isBusy = newValue }
+    }
+    private var errorMessage: String? {
+        get { state.errorMessage }
+        nonmutating set { state.errorMessage = newValue }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -46,7 +78,9 @@ struct BotConsolePanel: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .instrumentFaceplate(radius: Radius.card, shadow: false)
-        .task(id: computer?.id) { await loadFiles(reset: true) }
+        .task(id: computer?.id) {
+            if !state.hasLoaded { state.hasLoaded = true; await loadFiles(reset: true) }
+        }
     }
 
     private var headerRow: some View {
@@ -66,7 +100,7 @@ struct BotConsolePanel: View {
             }
             Spacer()
             InstrumentSegmentedControl(
-                selection: $tab,
+                selection: Binding(get: { tab }, set: { tab = $0 }),
                 options: Tab.allCases.map { (title: $0.rawValue, value: $0) })
             .frame(width: 240)
         }
@@ -140,7 +174,7 @@ struct BotConsolePanel: View {
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.tertiary)
-                TextField("ls -la", text: $command)
+                TextField("ls -la", text: Binding(get: { command }, set: { command = $0 }))
                     .textFieldStyle(.plain)
                     .font(.system(.caption, design: .monospaced))
                     .onSubmit { runCommand(computer) }
@@ -298,4 +332,25 @@ struct BotConsolePanel: View {
             errorMessage = error.localizedDescription
         }
     }
+}
+
+/// Moving a console does not discard its pending command, output, or file
+/// selection. The computer service's identity owns these resources.
+@MainActor @Observable
+private final class BotConsoleState {
+    private static var resources: [UUID: BotConsoleState] = [:]
+    static func forResource(_ id: UUID?) -> BotConsoleState {
+        guard let id else { return BotConsoleState() }
+        if let existing = resources[id] { return existing }
+        let state = BotConsoleState(); resources[id] = state; return state
+    }
+    var tab: BotConsolePanel.Tab = .output
+    var command = ""
+    var transcript: [String] = []
+    var entries: [BotWorkspaceEntry] = []
+    var directory = ""
+    var preview: (name: String, contents: String)?
+    var isBusy = false
+    var errorMessage: String?
+    var hasLoaded = false
 }

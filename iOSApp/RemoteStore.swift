@@ -37,6 +37,7 @@ final class RemoteStore {
     private(set) var loadedLocalModel: RemoteLoadedLocalModel?
     private(set) var isUnloadingModel = false
     private var modelRequestGeneration = 0
+    private var modelLoadTask: Task<Void, Never>?
     var apiProviders: [RemoteProviderOption] = []
     var providerNotice: String?
     var botRuns: [RemoteBotRun] = []
@@ -522,22 +523,42 @@ final class RemoteStore {
     }
 
     func loadStartModels() async {
+        if let modelLoadTask {
+            await modelLoadTask.value
+            return
+        }
         guard let client else { return }
         let generation = connectionGeneration
         modelRequestGeneration += 1
         let requestGeneration = modelRequestGeneration
-        do {
-            let envelope = try await client.models()
-            try requireConnection(generation)
-            guard requestGeneration == modelRequestGeneration else { return }
-            startModels = envelope.models
-            loadedLocalModel = envelope.loadedLocalModel
-            backgroundNotice = nil
+        // The new-session screen and its model picker both request this
+        // catalog. Own one request here so dismissing either screen cannot
+        // cancel the other screen's load or supersede its successful reply.
+        let task = Task { @MainActor [weak self] in
+            do {
+                let envelope = try await client.models()
+                guard let self, self.isCurrentConnection(generation),
+                      requestGeneration == self.modelRequestGeneration else { return }
+                self.startModels = envelope.models
+                self.loadedLocalModel = envelope.loadedLocalModel
+                self.backgroundNotice = nil
+            } catch {
+                guard let self, self.isCurrentConnection(generation),
+                      requestGeneration == self.modelRequestGeneration else { return }
+                self.presentError("Couldn't load models", error, background: true)
+            }
         }
-        catch {
-            guard isCurrentConnection(generation), requestGeneration == modelRequestGeneration else { return }
-            presentError("Couldn't load models", error, background: true)
+        modelLoadTask = task
+        await task.value
+        if requestGeneration == modelRequestGeneration {
+            modelLoadTask = nil
         }
+    }
+
+    private func cancelModelLoad() {
+        modelRequestGeneration += 1
+        modelLoadTask?.cancel()
+        modelLoadTask = nil
     }
 
     func unloadLocalModel() async -> Bool {
@@ -545,7 +566,7 @@ final class RemoteStore {
               let loadedLocalModel, loadedLocalModel.canUnload else { return false }
         let generation = connectionGeneration
         isUnloadingModel = true
-        modelRequestGeneration += 1
+        cancelModelLoad()
         defer { if isCurrentConnection(generation) { isUnloadingModel = false } }
         do {
             let response = try await client.unloadModel(loadedLocalModel.id)
@@ -1281,6 +1302,7 @@ final class RemoteStore {
     }
 
     private func invalidateConnectionWork() {
+        cancelModelLoad()
         loadedLocalModel = nil
         isUnloadingModel = false
         hostStatus = nil

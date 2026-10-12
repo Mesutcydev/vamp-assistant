@@ -501,7 +501,7 @@ private struct LocalModelsSection: View {
                 ForEach(sections) { section in
                     LazyVStack(alignment: .leading, spacing: 10) {
                         SectionHeader(title: section.title, systemImage: section.systemImage)
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 14)], spacing: 14) {
+                        LazyVStack(spacing: 8) {
                             ForEach(section.models) { model in
                                 ModelCard(model: model, isRecommended: recommended.contains(model.id))
                             }
@@ -585,61 +585,36 @@ private struct ModelCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 10) {
-                ModelGlyph(format: model.format, isActive: isActive, tint: capabilityTint)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(capabilityLabel)
-                        .font(.app(size: 11, weight: .semibold))
-                        .foregroundStyle(capabilityTint)
-                    if isRecommended {
-                        Text("Recommended for this Mac")
-                            .font(.app(size: 10.5))
-                            .foregroundStyle(Theme.textTertiary)
-                    }
-                }
-                Spacer(minLength: 0)
-                VerdictBadge(verdict: isActive ? .fits : budget.verdict, projectedFootprint: budget.projectedFootprint)
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                Text(model.displayName)
-                    .font(.app(size: 16, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(2)
-                sizeChips
-            }
-            Text(model.notes)
-                .font(.callout)
-                .foregroundStyle(Theme.textSecondary)
-                .lineLimit(2)
-                .frame(height: 36, alignment: .topLeading)
-            DownloadStatusView(state: downloadState)
-            if showDetails {
-                specReadout
-                if !isActive, case .wontFit(let reason) = budget.verdict {
-                    Text(reason).font(.caption).foregroundStyle(Theme.danger)
-                }
-            }
-            Divider().overlay(Theme.hairline)
-            HStack {
-                Button(showDetails ? "Less" : "Details") { showDetails.toggle() }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(Theme.textSecondary)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                ModelGlyph(format: model.format, isActive: isActive, tint: Theme.accent)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(model.displayName).font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary).fixedSize(horizontal: false, vertical: true)
+                    Text("Local · \(capabilityLabel) · \(model.parameters)")
+                        .font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+                    if isActive { Text("Ready · selected").font(.system(size: 12)).foregroundStyle(Theme.success) }
+                    else { VerdictBadge(verdict: budget.verdict, projectedFootprint: budget.projectedFootprint) }
+                    if isRecommended { Text("Recommended for this Mac").font(.system(size: 12)).foregroundStyle(Theme.accentText) }
+                }.frame(maxWidth: .infinity, alignment: .leading)
                 ModelActions(model: model, isActive: isActive, downloadState: downloadState, budget: budget)
             }
+            DownloadStatusView(state: downloadState)
+            DisclosureGroup("Details", isExpanded: $showDetails) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(model.notes).font(.system(size: 13)).foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    sizeChips
+                    specReadout
+                    if !isActive, case .wontFit(let reason) = budget.verdict {
+                        Text(reason).font(.system(size: 12)).foregroundStyle(Theme.danger)
+                    }
+                }.padding(.top, 8)
+            }.font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(LinearGradient(
-                    colors: [Theme.sectionSurfaceTop, Theme.sectionSurface, Theme.sectionSurfaceBottom],
-                    startPoint: .top, endPoint: .bottom)))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(isActive ? Theme.positive : Theme.sectionStroke,
-                              lineWidth: isActive ? 1.5 : 1))
-        .shadow(color: Theme.cardShadow, radius: 6, y: 2)
+        .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(isActive ? Theme.accent : Theme.hairline, lineWidth: 1))
     }
 
     /// Parameters, precision and size as scannable chips rather than one run-on
@@ -771,7 +746,7 @@ private struct DownloadStatusView: View {
             Label(message, systemImage: "exclamationmark.triangle.fill")
                 .font(.caption)
                 .foregroundStyle(Theme.danger)
-                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
         default:
             EmptyView()
         }
@@ -798,7 +773,6 @@ private struct ModelActions: View {
             primaryAction
             overflowMenu
         }
-        .frame(maxWidth: .infinity, alignment: .trailing)
         .font(.appUI(size: 12.5, weight: .medium))
     }
 
@@ -816,8 +790,14 @@ private struct ModelActions: View {
                 }
                 .buttonStyle(LFCapsuleButtonStyle())
             } else {
-                Button("Load") {
-                    Task { await appState.activate(model: model) }
+                Button("Use model") {
+                    Task {
+                        await appState.activate(model: model)
+                        if appState.isModelReady {
+                            RecentModelSelections.shared.record("local.\(model.id)")
+                            NotificationCenter.default.post(name: .openAssistantHome, object: nil)
+                        }
+                    }
                 }
                 .buttonStyle(LFCapsuleButtonStyle(tone: .primary))
                 .disabled(budget.verdict.fitsLoad == false)

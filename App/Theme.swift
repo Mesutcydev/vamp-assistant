@@ -17,7 +17,7 @@ enum Theme {
     // takes effect live without recreating the type. All four are mirrored
     // from SettingsStore by `ThemeSync` in BeetCodeApp, on the main actor,
     // before any view below it resolves a color or a font.
-    nonisolated(unsafe) static var currentPalette: AccentPalette = .graphite
+    nonisolated(unsafe) static var currentPalette: AccentPalette = .beetRed
     private static let appearanceState = ThemeAppearanceState()
     static var currentAppearance: AppAppearance {
         get { appearanceState.appearance }
@@ -33,7 +33,9 @@ enum Theme {
         dark: KeyPath<AccentPalette.Hexes, UInt32>
     ) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
-            let hexes = currentPalette.hexes
+            let hexes = currentPalette == .beetRed
+                ? AccentPalette.Hexes(accentLight: 0x7A1F3D, accentDark: 0x9D4E66, brightLight: 0x7A1F3D, brightDark: 0xD6A2B3)
+                : currentPalette.hexes
             let hex = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
                 ? hexes[keyPath: dark] : hexes[keyPath: light]
             return NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
@@ -43,126 +45,53 @@ enum Theme {
         })
     }
 
-    // MARK: Window surfaces — the system's, not painted ones.
-    //
-    // These used to be hand-mixed pearl/graphite hexes so the app could read
-    // as one machined object. It now reads as a Mac app: every surface and ink
-    // resolves through AppKit's semantic colors, which already answer light,
-    // dark, increased contrast, and inactive windows correctly.
-    static var workspaceCanvas: Color { systemSurface(.windowBackgroundColor) }
-    static var navigationSurface: Color { systemSurface(.controlBackgroundColor) }
-    static var headerSurface: Color { systemSurface(.windowBackgroundColor) }
-    static var readingSurface: Color { systemSurface(.textBackgroundColor) }
-
-    // MARK: Navigation column
-    //
-    // One designed plane for the whole leading column, flush with the window
-    // mask. A flat system slab reads as a card; a whisper of vertical depth
-    // plus a hairline seam reads as part of the window. The OLED steps keep
-    // the column darker than any panel but still visibly above a true-black
-    // canvas, which is the whole point of the appearance.
-    static var navigationTop: Color { Color.dynamic(light: 0xF7F7F8, dark: 0x1E1E20, oled: 0x131315) }
-    static var navigationBottom: Color { Color.dynamic(light: 0xEEEEF0, dark: 0x171719, oled: 0x0B0B0D) }
-    /// Row/selection wash on the navigation surface.
-    static var navigationRowHover: Color { Color.primary.opacity(0.05) }
-
-    /// A system surface that still honours the OLED appearance. AppKit has no
-    /// true-black variant, and OLED is a real setting in this app — reading
-    /// `currentAppearance` here also keeps these surfaces observable, so a
-    /// theme switch invalidates the views that drew with them.
-    private static func systemSurface(_ nsColor: NSColor) -> Color {
-        guard currentAppearance == .oled else { return Color(nsColor: nsColor) }
-        return Color(nsColor: NSColor(name: nil) { appearance in
-            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-                ? .black
-                : nsColor
-        })
-    }
-    static let textOnSilver = Color(nsColor: .labelColor)
-    static let secondaryOnSilver = Color(nsColor: .secondaryLabelColor)
-    static let placeholderOnSilver = Color(nsColor: .placeholderTextColor)
-    /// Selected / primary control fill: the system accent, with the text color
-    /// AppKit pairs with it.
-    static let controlInsert = Color(nsColor: .controlAccentColor)
+    // Flat, coordinated content surfaces. Native materials belong to navigation.
+    static var workspaceCanvas: Color { Color.dynamic(light: 0xF6F7F9, dark: 0x191919, oled: 0x000000) }
+    static var navigationSurface: Color { Color.dynamic(light: 0xEEF0F4, dark: 0x151515, oled: 0x000000) }
+    static var headerSurface: Color { workspaceCanvas }
+    static var readingSurface: Color { Color.dynamic(light: 0xFFFFFF, dark: 0x242424, oled: 0x000000) }
+    static var navigationTop: Color { navigationSurface }
+    static var navigationBottom: Color { navigationSurface }
+    static var navigationRowHover: Color { textPrimary.opacity(0.05) }
+    static let textOnSilver = Color.dynamic(light: 0x1B1D24, dark: 0xEFEDEB, oled: 0xECEFF4)
+    static let secondaryOnSilver = Color.dynamic(light: 0x5C6470, dark: 0xAAA7A4, oled: 0xAAB3C1)
+    static let placeholderOnSilver = secondaryOnSilver
+    static var controlInsert: Color { accent }
     static let textOnControlInsert = Color.white
-    static let structuralDivider = Color(nsColor: .separatorColor)
-
-    // Shared neutral aliases used by reading, settings, and transient surfaces.
+    static let structuralDivider = Color.dynamic(light: 0xD9DDE5, dark: 0x383838, oled: 0x363C47)
     static var bg: Color { workspaceCanvas }
-    static var surface     : Color { Color(nsColor: .controlBackgroundColor) }
-    /// Code, diff, and log bodies sit on the text surface. (`underPageBackground`
-    /// is the desktop's dark "behind the page" texture — as a card fill it
-    /// turned every diff into a grey slab.)
-    static var surfaceInset: Color { Color(nsColor: .textBackgroundColor) }
-    static let hairline = Color(nsColor: .separatorColor)
-    static let composerStroke = Color(nsColor: .separatorColor)
+    static var surface: Color { Color.dynamic(light: 0xFFFFFF, dark: 0x242424, oled: 0x14171C) }
+    static var surfaceInset: Color { Color.dynamic(light: 0xEEF0F4, dark: 0x202020, oled: 0x0B0D11) }
+    static let hairline = structuralDivider
+    static let composerStroke = structuralDivider
     static let sidebarWash = Color.clear
-    static var librarySurface: Color { Color(nsColor: .controlBackgroundColor) }
+    static var librarySurface: Color { navigationSurface }
     static let libraryTextPrimary = textOnSilver
     static let libraryTextSecondary = secondaryOnSilver
-    static let libraryRowHover = Color.primary.opacity(0.06)
-    static let libraryRowSelected = Color(nsColor: .selectedContentBackgroundColor)
+    static let libraryRowHover = textOnSilver.opacity(0.05)
+    static var libraryRowSelected: Color { accent.opacity(0.12) }
     static let chromeWash = Color.clear
-
-    // Text tiers resolve alongside their surface, including native controls.
-    static let textPrimary   = inkPrimary
-    static let textSecondary = inkSecondary
-    static let textTertiary  = inkTertiary
-
-    // MARK: Designed surfaces
-    //
-    // These are drawn from the app's own palette rather than inherited from
-    // AppKit. `controlBackgroundColor` is a neutral grey slab: in dark mode it
-    // reads as unfinished next to the navigation plane, and in OLED Black the
-    // card, the canvas and the separator collapse into the same value, so every
-    // group looks like the same grey rectangle. The card surface is a hair
-    // lighter than the canvas with a cool cast, and it steps — top to bottom —
-    // by just enough to read as a raised face without becoming a gradient.
-    static let sectionSurfaceTop    = Color.dynamic(light: 0xFFFFFF, dark: 0x24262D, oled: 0x17191D)
-    static let sectionSurface       = Color.dynamic(light: 0xFFFFFF, dark: 0x202228, oled: 0x141619)
-    static let sectionSurfaceBottom = Color.dynamic(light: 0xFAFAFC, dark: 0x1C1E24, oled: 0x111316)
-    /// A recessed well inside a card: fields, editors, code, console bodies.
-    static let wellSurface          = Color.dynamic(light: 0xF4F5F7, dark: 0x171920, oled: 0x0D0E11)
-    static let sectionStroke        = Color.dynamic(light: 0xE3E5EA, dark: 0x353842, oled: 0x272A31)
-    static let sectionStrokeStrong  = Color.dynamic(light: 0xD3D6DD, dark: 0x424654, oled: 0x33363E)
-
-    // MARK: Reading ink
-    //
-    // Measured against `sectionSurface`, not guessed. Contrast ratios at these
-    // values: primary 15:1, secondary ~7.9:1, tertiary ~5.0:1 in dark mode; the
-    // same inks on the OLED card stay above 4.5:1 for secondary and above 12:1
-    // for primary. The system label colours lose their edge on a tinted fill —
-    // that is what made text look soft rather than crisp.
-    //
-    // The tertiary step was the one that failed AA in LIGHT mode: at 0x848A93
-    // it measured 3.48:1 on the card and 3.00:1 on the navigation plane, and
-    // it is used for captions and metadata. 0x666C74 is the lightest value that
-    // clears 4.5:1 on every light surface it sits on (card 5.30, well 4.86,
-    // navigation top 4.95, bottom 4.57) while staying a visible step lighter
-    // than the secondary ink, so the hierarchy survives the fix.
-    static let inkPrimary   = Color.dynamic(light: 0x17191C, dark: 0xF0F1F4, oled: 0xEDEFF3)
-    static let inkSecondary = Color.dynamic(light: 0x555A62, dark: 0xB3B8C0, oled: 0xADB2BA)
-    static let inkTertiary  = Color.dynamic(light: 0x666C74, dark: 0x8A9099, oled: 0x848A93)
-
-    // MARK: Capability tints
-    //
-    // The model library is scanned, not read: a colour per capability lets you
-    // find "the vision one" or "the coding one" without parsing every card.
-    static let tintChat      = Color.dynamic(light: 0x2F6FB0, dark: 0x6FB2E8, oled: 0x7CBCEF)
-    static let tintCoding    = Color.dynamic(light: 0x6A4BB5, dark: 0xB194F0, oled: 0xB99FF4)
-    static let tintVision    = Color.dynamic(light: 0x0F7A6B, dark: 0x54C9B4, oled: 0x64D3BE)
-    static let rose          = Color.dynamic(light: 0x913E58, dark: 0xD68CA4)
-
-    // Semantic ink, not decorative fills. Signal LEDs use Instrument tokens.
-    static let positive      = Color.dynamic(light: 0x255B34, dark: 0x7FCA92)
-    static let negative      = Color.dynamic(light: 0x8E352F, dark: 0xED958B)
-    static let controlStrong = Color.fixed(0x686868)
-    static let statusNeutral = Color.fixed(0x8E8E93)
-
-    /// Elevation shadow: a whisper on the silver shell, always.
-    static let cardShadow = Color(nsColor: NSColor(name: nil) { _ in
-        NSColor.black.withAlphaComponent(0.12)
-    })
+    static let textPrimary = textOnSilver
+    static let textSecondary = secondaryOnSilver
+    static let textTertiary = secondaryOnSilver
+    static var sectionSurfaceTop: Color { surface }
+    static var sectionSurface: Color { surface }
+    static var sectionSurfaceBottom: Color { surface }
+    static var wellSurface: Color { surfaceInset }
+    static let sectionStroke = structuralDivider
+    static let sectionStrokeStrong = structuralDivider
+    static let inkPrimary = textOnSilver
+    static let inkSecondary = secondaryOnSilver
+    static let inkTertiary = secondaryOnSilver
+    static let tintChat = Color.dynamic(light: 0x2F6FB0, dark: 0x6FB2E8, oled: 0x7CBCEF)
+    static let tintCoding = Color.dynamic(light: 0x6A4BB5, dark: 0xB194F0, oled: 0xB99FF4)
+    static let tintVision = Color.dynamic(light: 0x0F7A6B, dark: 0x54C9B4, oled: 0x64D3BE)
+    static let rose = Color.dynamic(light: 0x7A1F3D, dark: 0xD6A2B3)
+    static let positive = Color.dynamic(light: 0x255B34, dark: 0x7FCA92)
+    static let negative = Color.dynamic(light: 0x8E352F, dark: 0xED958B)
+    static let controlStrong = Color.dynamic(light: 0x1B1D24, dark: 0xEFEDEB)
+    static let statusNeutral = secondaryOnSilver
+    static let cardShadow = Color.black.opacity(0.06)
 
     // Accent — resolved live from the user's palette choice.
     static var accent: Color { paletteColor(light: \.accentLight, dark: \.accentDark) }
@@ -240,7 +169,7 @@ enum Radius {
     static let xl: CGFloat = 12
     // Reference-export cards and controls keep their own steps so the
     // transcript surfaces stay distinct from general window chrome.
-    static let card: CGFloat = 8
+    static let card: CGFloat = 10
     static let bubble: CGFloat = 12
     static let control: CGFloat = 6
 }
@@ -261,7 +190,7 @@ enum Chrome {
     static let chipRadius: CGFloat = 13
     static let chipHPadding: CGFloat = 10
     /// Action buttons (approval, settings, cards): 28 high, 8 radius.
-    static let buttonHeight: CGFloat = 28
+    static let buttonHeight: CGFloat = 32
     static let buttonRadius: CGFloat = Radius.control
     static let buttonHPadding: CGFloat = 14
     /// Status strip above the composer.
@@ -277,7 +206,7 @@ enum Chrome {
     static let composerInnerBottom: CGFloat = 10
     static let sendSize: CGFloat = 28
     /// Search fields (sidebar, model filter): 32 high, 8 radius.
-    static let searchHeight: CGFloat = 34
+    static let searchHeight: CGFloat = 32
     static let searchRadius: CGFloat = Radius.control
     /// Settings / dashboard content column and page padding.
     static let pageMaxWidth: CGFloat = 800
@@ -304,7 +233,7 @@ enum Chrome {
 /// in the main pane; the composer deliberately spans wider (22pt side
 /// insets) and does not use this cap.
 enum ContentColumn {
-    static let maxWidth: CGFloat = 800
+    static let maxWidth: CGFloat = 760
 }
 
 /// One mathematical control scale shared by every surface. Everything steps
@@ -333,7 +262,7 @@ enum InstrumentScale {
 /// the call site.
 enum AppFont {
     /// Prose: the user's chosen reading family at answer body size.
-    static var chatBody: Font { .appProse(size: 14.5) }
+    static var chatBody: Font { .appProse(size: 15) }
     /// User prose: 14pt, one step quieter than answers.
     static var chatUserBody: Font { .appProse(size: 14.5) }
     static var chatHeading: Font { .appProse(size: 18, weight: .semibold) }
@@ -594,9 +523,9 @@ struct LFCapsuleButtonStyle: ButtonStyle {
             .padding(.horizontal, Chrome.buttonHPadding)
             .frame(minHeight: height)
             .background(shape.fill(primary
-                                   ? Color(nsColor: .controlAccentColor)
-                                   : Color(nsColor: .controlColor)))
-            .overlay(shape.strokeBorder(primary ? .clear : Color(nsColor: .separatorColor),
+                                   ? Theme.accent
+                                   : Theme.surfaceInset))
+            .overlay(shape.strokeBorder(primary ? .clear : Theme.hairline,
                                         lineWidth: 1))
             .contentShape(shape)
             .brightness(down ? -0.06 : 0)
@@ -608,7 +537,7 @@ struct LFCapsuleButtonStyle: ButtonStyle {
         switch tone {
         case .primary: Color.white
         case .destructive: Theme.negative
-        default: Color(nsColor: .labelColor)
+        default: Theme.textPrimary
         }
     }
 }

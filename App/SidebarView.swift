@@ -3,6 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct SidebarView: View {
+    @Environment(\.workspaceWindowID) private var workspaceWindowID
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var sessions: AgentSessionController
     @Binding var showRemoteAccess: Bool
@@ -156,49 +157,15 @@ struct SidebarView: View {
     /// (remote sessions, models) live in the disclosure popover, preserving
     /// their real actions without crowding the strip.
     private var connectionMenu: some View {
-        InstrumentMenu(menuWidth: 240) {
-            // The drawer's base reads as the machine's status strip: a lamp in
-            // a bore and an engraved legend, the same pair the composer's
-            // endcap uses — not a dot and a sentence.
-            // Content-sized, not a full-width bar: this is a readout, and
-            // stretching it to the drawer's edge left the chevron stranded a
-            // hundred points from the text it belongs to. The 8pt engraved
-            // panel legend is for four-character endcap marks — at sentence
-            // length it just sprawled, so this keeps a compact mono readout.
-            HStack(spacing: SidebarMetrics.navGlyphGap) {
-                InstrumentLamp(color: connectionColor, bore: 9, live: connectionIsLive)
-                    .frame(width: SidebarMetrics.navGlyphColumn, alignment: .leading)
-                Text(connectionLabel)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .tracking(0.4)
-                    .foregroundStyle(Instrument.inkSecondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(Instrument.inkSecondary)
-            }
-            .padding(.horizontal, SidebarMetrics.navRowContentInset)
-            .frame(height: SidebarMetrics.connectionRailHeight)
-            .contentShape(Rectangle())
-        } options: {
-            InstrumentMenuRow(title: "Connection: \(connectionLabel)",
-                              systemImage: "circle.fill",
-                              isSelected: false,
-                              help: "Current engine state") {}
-            InstrumentMenuRow(
-                title: appState.remoteSessionRunning
-                    ? "Remote sessions — running" : "Remote sessions…",
-                systemImage: "antenna.radiowaves.left.and.right") {
-                showRemoteAccess = true
-            }
-            InstrumentMenuRow(title: "Models…", systemImage: "cpu") {
-                NotificationCenter.default.post(name: .openModelManager, object: nil)
-            }
-        }
-        .fixedSize(horizontal: true, vertical: false)
-        .help("\(connectionLabel) — Connection and services")
-        .accessibilityLabel("Connection: \(connectionLabel). Menu shows remote sessions and models.")
+        Menu {
+            Button("Models & connections…") { NotificationCenter.default.postWorkspace(name: .openModelManager, object: nil, windowID: workspaceWindowID) }
+            Button("Devices") { showRemoteAccess = true }
+        } label: {
+            HStack(spacing: 8) {
+                Circle().fill(connectionColor).frame(width: 6, height: 6)
+                Text(connectionLabel).font(.system(size: 12)).lineLimit(1)
+            }.foregroundStyle(Theme.textSecondary)
+        }.menuStyle(.borderlessButton).help(connectionLabel)
     }
 
     /// The lamp only breathes while the engine is actually doing something.
@@ -874,7 +841,7 @@ struct SidebarView: View {
             workspaceLabel: workspacePathLabel(record.workspacePath),
             onTogglePinned: { togglePinned(record) },
             onSelect: {
-                NotificationCenter.default.post(name: .openAssistantHome, object: nil)
+                NotificationCenter.default.postWorkspace(name: .openAssistantHome, object: nil, windowID: workspaceWindowID)
                 selectedSessionID = record.id
             },
             onRename: { renameSession(record) },
@@ -1106,6 +1073,17 @@ struct SidebarView: View {
     @State private var needsKeychainUnlock = false
 
     private func reloadSessions() async {
+        if ProcessInfo.processInfo.arguments.contains("--design-preview") {
+            let now = Date()
+            recentSessions = ["Keyboard layout review", "Plan a calmer workspace", "Research notes"].enumerated().map { index, title in
+                SessionRecord(id: UUID(), title: title, createdAt: now, updatedAt: now.addingTimeInterval(Double(-index * 3600)),
+                    workspacePath: "", modelID: "Preview model", messages: [
+                        .init(role: .user, content: title, toolName: nil, timestamp: now),
+                        .init(role: .assistant, content: "Preview conversation", toolName: nil, timestamp: now)
+                    ], checkpoints: [])
+            }
+            return
+        }
         // More than the visible ten: the Imported tab browses the same cache.
         let loaded = await Task.detached(priority: .utility) {
             // recent(limit:) orders by file date and decrypts ONLY what it
@@ -1428,6 +1406,7 @@ struct SessionHistoryRow: View {
 /// lane. It receives only the values it renders plus closures for mutations,
 /// keeping the session list isolated from header-only state changes.
 struct SidebarHeaderView: View {
+    @Environment(\.workspaceWindowID) private var workspaceWindowID
     let workspaceURL: URL?
     let sidebarTab: SidebarHistoryTab
     @Binding var historySearch: String
@@ -1504,49 +1483,25 @@ struct SidebarHeaderView: View {
     /// its title in a dimmed style, which made the project row the quietest
     /// text in the column (~40 % ink, measured).
     private var workspaceSelector: some View {
-        InstrumentMenu(menuWidth: 240) {
-            HStack(spacing: SidebarMetrics.navGlyphGap) {
-                workspaceMark
-                Text(workspaceURL?.lastPathComponent ?? "No project")
-                    .font(.appUI(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .foregroundStyle(Theme.textPrimary)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(Instrument.inkSecondary)
-                Spacer(minLength: 0)
-            }
-            .frame(height: SidebarMetrics.workspaceRowHeight)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            // The header insets its contents by `SidebarMetrics.inset`; the
-            // selector carries the row's own fill + content inset on top of it
-            // so its mark and label land on the SAME axes as the destination
-            // rows above it (8 + 10 from the column's edge).
-            .padding(.horizontal, SidebarMetrics.navRowFillInset
-                     + SidebarMetrics.navRowContentInset - SidebarMetrics.inset)
-            .contentShape(Rectangle())
-        } options: {
-            if workspaceURL != nil {
-                InstrumentMenuRow(title: "New chat in this project",
-                                  systemImage: "plus") { onNewChat() }
-            }
-            InstrumentMenuRow(title: "Open project…", systemImage: "folder") {
-                onChooseWorkspace()
-            }
-            InstrumentMenuRow(title: "Chat without a project",
-                              systemImage: "bubble.left") { onChatOnly() }
-            Divider().padding(.vertical, 3)
-            InstrumentMenuRow(title: "Import conversations…",
-                              systemImage: "square.and.arrow.down",
-                              isDisabled: isImporting) { onImport() }
-            InstrumentMenuRow(title: "Import task bundle…", systemImage: "shippingbox",
-                              isDisabled: isImportingBundle) { onImportTaskBundle() }
-            InstrumentMenuRow(title: "Refresh history",
-                              systemImage: "arrow.clockwise") { onRefresh() }
-        }
-        .help(workspaceURL?.path ?? "Conversation workspace and import actions")
-        .accessibilityLabel("Workspace: \(workspaceURL?.lastPathComponent ?? "Chat only")")
+        HStack(spacing: 8) {
+            Menu {
+                Button("New chat", action: onNewChat)
+                Button("Open project…", action: onChooseWorkspace)
+                Button("Chat without a project", action: onChatOnly)
+                Divider()
+                Button("Import conversations…", action: onImport).disabled(isImporting)
+                Button("Import task bundle…", action: onImportTaskBundle).disabled(isImportingBundle)
+                Button("Refresh history", action: onRefresh)
+            } label: {
+                Label(workspaceURL?.lastPathComponent ?? "Recent chats", systemImage: workspaceURL == nil ? "clock" : "folder")
+                    .font(.system(size: 12)).lineLimit(1)
+            }.menuStyle(.borderlessButton)
+            Spacer(minLength: 4)
+            Button { onSelectTab(sidebarTab == .imported ? .sessions : .imported) } label: {
+                Image(systemName: "line.3.horizontal.decrease").frame(width: 24, height: 28)
+            }.buttonStyle(.plain).help("Show imported conversations")
+                .accessibilityLabel(sidebarTab == .imported ? "Show recent chats" : "Show imported conversations")
+        }.padding(.horizontal, 6).frame(height: 32)
     }
 
     /// Imported conversations live behind a compact filter toggle (the

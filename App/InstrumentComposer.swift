@@ -112,9 +112,9 @@ enum Instrument {
     static let seam = Color(nsColor: .separatorColor)
     static let seamLight = Color(nsColor: .separatorColor)
     static let engraved = Color(nsColor: .secondaryLabelColor)
-    static let darkInsert = Color(nsColor: .controlAccentColor)
-    static let sendFace = Color(nsColor: .controlAccentColor)
-    static let accentOrange = Color(red: 0.88, green: 0.48, blue: 0.18)
+    static var darkInsert: Color { Theme.accent }
+    static var sendFace: Color { Theme.accent }
+    static var accentOrange: Color { Theme.accent }
     static let signalGreen = Color(red: 0.34, green: 0.76, blue: 0.37)
     static let signalIdle = Color(red: 0.55, green: 0.55, blue: 0.55)
     /// Dark screen inserts — the display family shared by the user's message

@@ -138,7 +138,7 @@ struct IntelligenceInspectorView: View {
                 .padding(24)
             }
         }
-        .frame(width: 420, height: 520)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.bg)
         .task(id: workspaceRoot) {
             await controller.load(workspaceRoot: workspaceRoot)
@@ -267,5 +267,13 @@ struct IntelligenceInspectorButton: View {
                 Task { await controller.load(workspaceRoot: workspace) }
             }
         }
+    }
+}
+
+struct WorkspaceContextPane: View {
+    let workspace: URL
+    @StateObject private var controller = IntelligenceInspectorController()
+    var body: some View {
+        IntelligenceInspectorView(controller: controller, workspaceRoot: workspace)
     }
 }

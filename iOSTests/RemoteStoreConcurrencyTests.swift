@@ -154,6 +154,43 @@ final class RemoteStoreConcurrencyTests: XCTestCase {
         XCTAssertTrue(envelope.models.isEmpty)
     }
 
+    func testCancelledPickerRefreshDoesNotDiscardSuccessfulModelLoad() async throws {
+        let requested = expectation(description: "model request started")
+        let releaseResponse = Mutex(false)
+        let requests = Mutex(0)
+        let (store, _, session) = makeStore { request in
+            if request.url?.path == "/api/models" {
+                let count = requests.withLock { $0 += 1; return $0 }
+                if count == 1 { requested.fulfill() }
+                while !releaseResponse.withLock({ $0 }) {
+                    try await Task.sleep(for: .milliseconds(5))
+                }
+                return (200, Data(#"{"models":[{"id":"local|qwen","name":"Qwen","source":"local","detail":"Downloaded"},{"id":"chatgpt|astra","name":"Astra","source":"chatgpt","detail":"ChatGPT"},{"id":"api|openai|gpt","name":"GPT","source":"api","detail":"OpenAI"}]}"#.utf8))
+            }
+            if request.url?.path == "/api/status" { return (200, Self.status(2_100_000_000)) }
+            if request.url?.path == "/api/sessions" { return (200, Data(#"{"sessions":[]}"#.utf8)) }
+            return (200, Data(#"{"runs":[]}"#.utf8))
+        }
+        defer { disconnect(store); session.invalidateAndCancel() }
+        await store.connectSaved()
+        let first = Task { await store.loadStartModels() }
+        await fulfillment(of: [requested], timeout: 2)
+        let pickerStarted = expectation(description: "picker refresh started")
+        let picker = Task {
+            pickerStarted.fulfill()
+            await store.loadStartModels()
+        }
+        await fulfillment(of: [pickerStarted], timeout: 2)
+        picker.cancel()
+        releaseResponse.withLock { $0 = true }
+        await first.value
+        await picker.value
+        XCTAssertEqual(store.startModels.map(\.source), ["local", "chatgpt", "api"],
+            "Dismissing the picker must not discard the new-session screen's successful catalog request")
+        XCTAssertEqual(requests.withLock { $0 }, 1, "Overlapping screens should share the same model request")
+        XCTAssertNil(store.backgroundNotice)
+    }
+
     func testQueuedSendIsSerializedAndPreservedOnFailure() async throws {
         for responseStatus in [200, 409] {
             let id = UUID(), taskID = UUID()

@@ -13,9 +13,9 @@ struct SettingsCard<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                HStack(spacing: 6) {
+                HStack(spacing: 8) {
                     Image(systemName: icon)
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(Instrument.engraved)
                     Text(title)
                         .font(.appUI(size: 13, weight: .semibold))
@@ -81,7 +81,8 @@ struct ShortcutEditor: View {
             .font(.app(size: 12, design: .monospaced))
             .foregroundStyle(Theme.textPrimary)
             .padding(.horizontal, 10)
-            .frame(width: 170, height: Chrome.buttonHeight)
+            .frame(minWidth: 80, idealWidth: 130, maxWidth: 170)
+            .frame(height: Chrome.buttonHeight)
             .background(Theme.surfaceInset,
                         in: RoundedRectangle(cornerRadius: Chrome.buttonRadius,
                                              style: .continuous))

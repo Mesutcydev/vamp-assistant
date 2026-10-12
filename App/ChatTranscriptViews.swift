@@ -16,13 +16,13 @@ enum TranscriptMaterial {
     /// A card in the transcript: the system's content surface, not a moulded
     /// faceplate. Both stops are the same colour so the old gradient reads
     /// flat until the gradients themselves are removed.
-    static let moduleTop = Color(nsColor: .controlBackgroundColor)
-    static let moduleLow = Color(nsColor: .controlBackgroundColor)
+    static var moduleTop: Color { Theme.surface }
+    static var moduleLow: Color { Theme.surface }
 
     /// The user's own message: an accent-tinted card, the way a Mac app marks
     /// "yours" — it was a dark hardware screen with fixed off-white ink.
-    static let screenTop = Color(nsColor: .controlAccentColor).opacity(0.14)
-    static let screenLow = Color(nsColor: .controlAccentColor).opacity(0.14)
+    static var screenTop: Color { Theme.accentSoft }
+    static var screenLow: Color { Theme.accentSoft }
     static let screenInk = Color(nsColor: .labelColor)
     static let screenLegend = Color(nsColor: .secondaryLabelColor)
 }
@@ -50,15 +50,15 @@ extension View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         return self
             .background(shape.fill(TranscriptMaterial.moduleTop))
-            .overlay(shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1))
+            .overlay(shape.strokeBorder(Theme.hairline, lineWidth: 1))
     }
 
     /// Activity logs, raw output, code blocks: the system's text surface.
     func transcriptWell(radius: CGFloat = TranscriptMaterial.radius) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         return self
-            .background(shape.fill(Color(nsColor: .textBackgroundColor)))
-            .overlay(shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1))
+            .background(shape.fill(Theme.surfaceInset))
+            .overlay(shape.strokeBorder(Theme.hairline, lineWidth: 1))
     }
 
     /// The user's own message: a tinted card, readable in both appearances.
@@ -1435,11 +1435,11 @@ struct CompactActionButtonStyle: ButtonStyle {
             .font(.system(size: 13, weight: filled ? .semibold : .regular))
             .foregroundStyle(filled ? Color.white : Color(nsColor: .labelColor))
             .padding(.horizontal, 12)
-            .frame(minHeight: 24)
+            .frame(minHeight: 32)
             .background(shape.fill(filled
-                                   ? Color(nsColor: .controlAccentColor)
-                                   : Color(nsColor: .controlColor)))
-            .overlay(shape.strokeBorder(filled ? .clear : Color(nsColor: .separatorColor),
+                                   ? Theme.accent
+                                   : Theme.surfaceInset))
+            .overlay(shape.strokeBorder(filled ? .clear : Theme.hairline,
                                         lineWidth: 1))
             .contentShape(shape)
             .brightness(configuration.isPressed ? -0.06 : 0)
@@ -1680,8 +1680,8 @@ struct DiffPreview: View {
 struct QuestionCard: View {
     let question: String
     var choices: [String] = []
+    var draftKey: String? = nil
     let onAnswer: (String) -> Void
-
     @State private var answer = ""
 
     var body: some View {
@@ -1723,6 +1723,8 @@ struct QuestionCard: View {
         .padding(.vertical, 14)
         .padding(.leading, Spacing.sm)
         .lfTranscriptCard(Theme.info, radius: Radius.card)
+        .onAppear { if let draftKey { answer = BotDraftStore.shared.value(for: draftKey) } }
+        .onChange(of: answer) { _, value in if let draftKey { BotDraftStore.shared.set(value, for: draftKey) } }
     }
 }
 
@@ -2235,6 +2237,7 @@ struct LiveReasoningCard: View {
 /// Plan-mode card: the agent's proposed plan with Approve / Revise.
 struct PlanCard: View {
     let plan: String
+    var draftKey: String? = nil
     let onDecision: (String?) -> Void
     @State private var feedback = ""
 
@@ -2275,5 +2278,7 @@ struct PlanCard: View {
         .padding(.vertical, 14)
         .padding(.leading, Spacing.sm)
         .lfTranscriptCard(Theme.accent, radius: Radius.card)
+        .onAppear { if let draftKey { feedback = BotDraftStore.shared.value(for: draftKey) } }
+        .onChange(of: feedback) { _, value in if let draftKey { BotDraftStore.shared.set(value, for: draftKey) } }
     }
 }

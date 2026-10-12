@@ -237,14 +237,25 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertTrue(SettingsStore(defaults: defaults).showHomeSuggestions)
     }
 
-    func testNewStoreDefaultsToDark() {
+    func testExistingImplicitAppearanceDefaultsSurviveRedesign() {
+        let (defaults, suite) = isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: "appearanceDefaultMigration.v1")
+        let store = SettingsStore(defaults: defaults, persistentDomainName: suite)
+        XCTAssertEqual(store.appearance, .dark)
+        XCTAssertEqual(store.accentPalette, .graphite)
+        XCTAssertEqual(SettingsStore(defaults: defaults, persistentDomainName: suite).appearance, .dark)
+    }
+
+    func testNewStoreDefaultsToSystemAndBurgundy() {
         let (defaults, suite) = isolatedDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }
 
         let store = SettingsStore(defaults: defaults)
 
-        XCTAssertEqual(store.appearance, .dark)
+        XCTAssertEqual(store.appearance, .system)
         XCTAssertEqual(store.textSize, .comfortable)
+        XCTAssertEqual(store.accentPalette, .beetRed)
         XCTAssertFalse(store.computerControlEnabled)
         XCTAssertFalse(store.remoteMacControlEnabled)
         XCTAssertFalse(store.remoteMacUnlockEnabled)
@@ -324,7 +335,7 @@ final class SettingsStoreTests: XCTestCase {
         store.textSize = .large
 
         XCTAssertEqual(SettingsStore(defaults: defaults).textSize, .large)
-        XCTAssertEqual(store.appearance, .dark)
+        XCTAssertEqual(store.appearance, .system)
     }
 
     func testLegacyBeetAppearanceMigratesToDarkOnce() {

@@ -61,8 +61,8 @@ targets:
       properties:
         CFBundleDisplayName: "Vamp Assistant"
         CFBundleIconName: AppIcon
-        CFBundleShortVersionString: "0.10.53"
-        CFBundleVersion: "132"
+        CFBundleShortVersionString: "0.10.54"
+        CFBundleVersion: "133"
         SUFeedURL: https://mesutcydev.github.io/vamp-assistant/appcast.xml
         SUPublicEDKey: "yjY7zlQpF4bDqZV/vVo21Am1NKtAFnypz2szzMvU4cc="
         SUEnableAutomaticChecks: true
@@ -213,8 +213,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.beetcode.remote.ios
         PRODUCT_NAME: "Vamp Assistant"
         PRODUCT_MODULE_NAME: BeetCodeRemoteIOS
-        MARKETING_VERSION: "0.10.52"
-        CURRENT_PROJECT_VERSION: "131"
+        MARKETING_VERSION: "0.10.54"
+        CURRENT_PROJECT_VERSION: "133"
         CODE_SIGN_ENTITLEMENTS: iOSApp/BeetCodeRemote.entitlements
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: iOSApp/Info.plist

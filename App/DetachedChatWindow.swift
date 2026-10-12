@@ -21,13 +21,12 @@ struct DetachedChatWindow: View {
     let sessionID: UUID
     @EnvironmentObject private var appState: AppState
     @State private var controller: AgentSessionController?
-    @State private var store = ComposerStore()
     @State private var title = "Chat"
 
     var body: some View {
         Group {
             if let controller {
-                ChatView(controller: controller, store: store)
+                MainWindowView()
                     .environmentObject(appState)
                     .environmentObject(controller)
             } else {

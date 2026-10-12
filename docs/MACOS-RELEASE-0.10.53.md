@@ -42,14 +42,14 @@ Prepared on 2026-10-01 with Xcode 27 beta. The iOS app remains 0.10.52 (131).
 - Machine-readable checks: `dist/macos-0.10.53-build-132/release-verification.json`.
 
 Source includes the preexisting working-tree changes on top of
-`8be3fe9dc299b10341744f26f23c39ba382d4e12`; those changes were preserved.
+`8be3fe9dc299b10341744f26f23c39ba382d4e12`; those changes were preserved in release tag `v0.10.53` at `c5418f3fced931bdd6309c159505372e5d7fe6dd`.
 The release scripts and recovery procedure are in [macOS distribution](MACOS-DISTRIBUTION.md).
 
 ## Publication
 
 The archive URL in the feed targets GitHub release `v0.10.53`. The ZIP must be
 available there before deploying the feed to the existing GitHub Pages site.
-Publishing has not yet been performed. Existing preview users need to install
+The notarized ZIP is published at [GitHub release v0.10.53](https://github.com/Mesutcydev/vamp-assistant/releases/tag/v0.10.53). The signed feed and download links are published from `docs/` through GitHub Pages. Existing preview users need to install
 this first Sparkle-enabled build manually. A real update-installation test still
 requires a subsequent notarized Sparkle-enabled release.
 

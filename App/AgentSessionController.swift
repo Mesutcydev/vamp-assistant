@@ -78,7 +78,7 @@ final class AgentSessionController: ObservableObject {
     /// default; Plan is also available from the composer without changing
     /// the rest of the session surface.
     @Published var selectedOpenCodeAgentName: String? = "build"
-    private(set) var activeSessionID: UUID?
+    @Published private(set) var activeSessionID: UUID?
 
     private var loop: AgentLoop?
     /// Retained separately from the agent loop so a stop or workspace switch
@@ -913,7 +913,7 @@ final class AgentSessionController: ObservableObject {
             promptSeed?.codexThreadID = nil
         }
         record.codexDynamicToolNames = dynamicToolNames
-        let codexContext = ToolContext(workspace: Workspace(root: workspace))
+        let codexContext = ToolContext(workspace: Workspace(root: workspace), originatingSessionID: sessionID)
         codexContext.linuxContainer = remoteLinuxContainer
         codexContext.browserSession = remoteBrowserSession
         codexDynamicExecutor = ToolExecutor(

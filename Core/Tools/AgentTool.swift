@@ -276,6 +276,7 @@ struct BrowserSession: Sendable, Equatable {
 /// (write-after-read enforcement) and truncates oversized observations.
 final class ToolContext: @unchecked Sendable {
     let workspace: Workspace
+    let originatingSessionID: UUID?
     /// When set, `run_command` executes inside this Linux micro-VM instead of
     /// the host shell. File tools still use the mounted host workspace.
     var linuxContainer: LinuxContainerTarget?
@@ -290,8 +291,9 @@ final class ToolContext: @unchecked Sendable {
     /// Observations longer than this are truncated with a marker.
     static let outputLimit = 16_384
 
-    init(workspace: Workspace) {
+    init(workspace: Workspace, originatingSessionID: UUID? = nil) {
         self.workspace = workspace
+        self.originatingSessionID = originatingSessionID
     }
 
     /// Requests cancellation of in-flight tool work (e.g. long commands).

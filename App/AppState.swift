@@ -83,6 +83,10 @@ final class AppState: ObservableObject {
     /// remote API and Codex runs to execute concurrently.
     private var botRuntimes: [UUID: BotRunRuntimeHandle] = [:]
 
+    func specialistController(for runID: UUID) -> AgentSessionController? {
+        botRuntimes[runID]?.controller
+    }
+
     /// Local OpenAI-compatible API server (loopback-only). Lazily created when
     /// the user enables it; nil while disabled.
     private var apiServer: LocalAPIServer?
@@ -419,8 +423,10 @@ final class AppState: ObservableObject {
             }
             .store(in: &cancellables)
 
-        startPressureMonitoring()
-        startStatsRefresh()
+        if !ProcessInfo.processInfo.arguments.contains("--design-preview") {
+            startPressureMonitoring()
+            startStatsRefresh()
+        }
         restoreLaunchState()
         refreshOpenCodeCatalog(workspace: sessions.workspaceURL)
         // Honor a persisted "server enabled" across launches.
@@ -602,7 +608,7 @@ final class AppState: ObservableObject {
                 let gate = run.pendingInteraction.map { " · \($0)" } ?? ""
                 return "\(run.id.uuidString) · \(run.profileName) · \(run.state.rawValue)\(queue)\(gate) · \(run.phase)"
             }.joined(separator: "\n")
-        case .start(let profileID, let requestedModelID, let prompt, let project):
+        case .start(let profileID, let requestedModelID, let prompt, let project, let originatingSessionID):
             guard let specialist = BotComputerService.specialists.first(where: { $0.id == profileID }) else {
                 return BotComputerError.unknownProfile.localizedDescription
             }
@@ -613,18 +619,18 @@ final class AppState: ObservableObject {
             guard let modelID else { return "No Assistant model is available for delegation." }
             switch botRuns.start(
                 profileID: specialist.id, profileName: specialist.name,
-                modelID: modelID, prompt: prompt, projectPath: Self.botProject(project)
+                modelID: modelID, prompt: prompt, projectPath: Self.botProject(project), originatingSessionID: originatingSessionID
             ) {
             case .success(let id): return "Delegated to \(specialist.name). Run ID: \(id.uuidString)"
             case .failure(let error): return error.localizedDescription
             }
-        case .orchestrate(let requestedModelID, let prompt, let project):
+        case .orchestrate(let requestedModelID, let prompt, let project, let originatingSessionID):
             let models = remoteStartModels()
             let modelID = requestedModelID.flatMap { requested in
                 models.first(where: { $0.id == requested })?.id
             } ?? defaultBotModelID(in: models)
             guard let modelID else { return "No Assistant model is available for orchestration." }
-            switch botRuns.orchestrate(prompt: prompt, modelID: modelID, projectPath: Self.botProject(project)) {
+            switch botRuns.orchestrate(prompt: prompt, modelID: modelID, projectPath: Self.botProject(project), originatingSessionID: originatingSessionID) {
             case .success(let id): return "Workflow accepted. Workflow ID: \(id.uuidString)"
             case .failure(let error): return error.localizedDescription
             }

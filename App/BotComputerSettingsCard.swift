@@ -11,7 +11,7 @@ struct BotComputerSettingsCard: View {
 
     var body: some View {
         SettingsCard(
-            title: "Bot computers",
+            title: "Run environments",
             icon: "square.stack.3d.up.fill",
             footer: "Builder, Reviewer, Navigator, and Researcher each get a private computer and in-app browser. Linux micro-VMs run a full guest shell (git, Python, Node, compilers) inside the container."
         ) {

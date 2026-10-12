@@ -4,6 +4,7 @@ import SwiftUI
 // MARK: - Providers tab
 
 struct ProvidersTab: View {
+    @Environment(\.workspaceWindowID) private var workspaceWindowID
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var keyStore = APIKeyStore.shared
     /// Keys that survived the LocalForge rename inside the OLD Keychain
@@ -15,6 +16,9 @@ struct ProvidersTab: View {
     @State private var query = ""
     @State private var selectedID: String?
     @State private var connectedOnly = false
+    @State private var choosingModel = false
+    @State private var connectionValidated = false
+    @State private var paneWidth: CGFloat = 600
     @ObservedObject private var codex = CodexAccountStore.shared
 
     var body: some View {
@@ -29,7 +33,7 @@ struct ProvidersTab: View {
             Text("Connect once, then choose a model in any chat.")
                 .font(.callout)
                 .foregroundStyle(Theme.textSecondary)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 12)], spacing: 12) {
+            LazyVStack(spacing: 8) {
                 if matches("ChatGPT", connected: codex.isSignedIn) {
                     ProviderDirectoryTile(name: "ChatGPT", subtitle: codex.isSignedIn ? "Connected account" : "Use your subscription", icon: "person.crop.circle", connected: codex.isSignedIn) { selectedID = "account" }
                 }
@@ -61,41 +65,67 @@ struct ProvidersTab: View {
             Text("Credentials are stored securely in your Mac’s Keychain.")
                 .font(.caption)
                 .foregroundStyle(Theme.textTertiary)
-            // Not a provider tile: TypeSafe decides, it never answers the
-            // conversation. See `TypeSafeSettingsCard`.
-            TypeSafeSettingsCard()
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { paneWidth = $0 }
         .sheet(isPresented: Binding(get: { selectedID != nil }, set: { if !$0 { selectedID = nil } })) {
             VStack(alignment: .leading, spacing: 16) {
                 HStack {
-                    Text("Connection settings").font(.title2.weight(.semibold))
+                    Text(choosingModel ? "Choose a model" : "Connect & test").font(.title2.weight(.semibold))
                     Spacer()
-                    Button("Done") { selectedID = nil }.keyboardShortcut(.defaultAction)
+                    Button("Done") { selectedID = nil }.keyboardShortcut(.cancelAction)
                 }
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
+                        if !choosingModel {
+                        Text("Connect → Test → Choose model → Return to chat")
+                            .font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
                         if selectedID == "account" { CodexAccountCard() }
                         if selectedID == "search" { TinyFishSearchSettingsCard() }
                         if selectedID == "downloads" { HuggingFaceProviderCard() }
                         ForEach(LLMProvider.allCases) { provider in
-                            if selectedID == "api:" + provider.rawValue { ProviderCard(provider: provider, initiallyExpanded: true) }
+                            if selectedID == "api:" + provider.rawValue { ProviderCard(provider: provider, initiallyExpanded: true, onValidated: { connectionValidated = true }) }
                         }
                         ForEach(KnownRemoteProvider.compatiblePresets) { provider in
-                            if selectedID == "known:" + provider.id { KnownProviderRow(provider: provider) }
+                            if selectedID == "known:" + provider.id { KnownProviderRow(provider: provider, onValidated: { connectionValidated = true }) }
                         }
                         ForEach(appState.openCodeCatalog.providers) { provider in
                             if selectedID == "import:" + provider.id { OpenCodeProviderRow(provider: provider) }
+                        }
+                        if selectedID != "search" && selectedID != "downloads" {
+                            Button("Choose model", systemImage: "arrow.right") { choosingModel = true }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(!connectionValidated && !(selectedID == "account" && codex.isSignedIn)
+                                    && !(selectedID?.hasPrefix("import:") ?? false))
+                        }
+                        } else {
+                            Button("Back to connection") { choosingModel = false }.buttonStyle(.borderless)
+                            ModelPickerPopover(onSelection: {
+                                selectedID = nil
+                                NotificationCenter.default.postWorkspace(name: .openAssistantHome, object: nil, windowID: workspaceWindowID)
+                            }, initialProviderID: selectedProviderKey, accountOnly: selectedID == "account")
+                                .frame(height: 440)
                         }
                     }.padding(2)
                 }
             }
             .padding(24)
-            .frame(width: 640, height: 560)
+            .frame(width: min(600, max(360, paneWidth)), height: 600)
             .background(Theme.surface)
             .environmentObject(appState)
         }
+        .onChange(of: selectedID) { old, new in
+            if old != new { choosingModel = false; connectionValidated = false }
+        }
         .task { pendingRestore = LegacyMigration.needsInteractiveKeyMigration() }
         .task { await codex.refresh() }
+    }
+
+    private var selectedProviderKey: String? {
+        guard let selectedID else { return nil }
+        if selectedID.hasPrefix("api:") { return String(selectedID.dropFirst(4)) }
+        if selectedID.hasPrefix("known:") { return String(selectedID.dropFirst(6)) }
+        if selectedID.hasPrefix("import:") { return String(selectedID.dropFirst(7)) }
+        return nil
     }
 
     private func matches(_ name: String, connected: Bool) -> Bool {
@@ -360,28 +390,20 @@ private struct ProviderDirectoryTile: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack {
-                    Image(systemName: icon).font(.title3)
-                        .foregroundStyle(connected ? Theme.positive : Instrument.accentOrange)
-                        .frame(width: 34, height: 34)
-                        .background((connected ? Instrument.signalGreen : Instrument.accentOrange).opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
-                    Spacer()
-                    if connected { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.positive) }
-                    Image(systemName: "arrow.up.right").foregroundStyle(Theme.textTertiary)
-                }
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(name).font(.headline).foregroundStyle(Theme.textPrimary)
-                    Text(subtitle).font(.caption).foregroundStyle(Theme.textSecondary)
-                }
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity, minHeight: 105, alignment: .leading)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.hairline, lineWidth: 0.75))
+            HStack(spacing: 12) {
+                Image(systemName: icon).font(.system(size: 16)).foregroundStyle(Theme.accent)
+                    .frame(width: 32, height: 32).background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: 6))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(name).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.textPrimary)
+                    Text(subtitle).font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                if connected { Image(systemName: "checkmark.circle").foregroundStyle(Theme.success) }
+                Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Theme.textSecondary)
+            }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.hairline, lineWidth: 1))
             .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(name), \(subtitle)")
+        }.buttonStyle(.plain).accessibilityLabel("\(name), \(subtitle)")
     }
 }

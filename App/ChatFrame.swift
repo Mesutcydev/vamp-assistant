@@ -26,25 +26,20 @@ enum ChatFrameMetrics {
 /// live in here — the caret and the text are the only things inside, and the
 /// well grows with real content.
 struct ChatInputWell: View {
+    @Environment(\.workspaceWindowID) private var workspaceWindowID
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var controller: AgentSessionController
     @ObservedObject private var settings = SettingsStore.shared
     var store: ComposerStore
 
+    @State private var showsTurnContext = false
     @FocusState private var editorFocused: Bool
-    @State private var editorText: String
     /// Whether the resident engine can see image bytes itself (a GGUF model
     /// launched with a staged mmproj). Drives the attachment lane's label so
     /// the user knows if a picture will be seen or only described.
     @State private var engineSeesImages = false
-    @State private var editorSyncTask: Task<Void, Never>?
     /// Measured content width of the composer; drives the key-row layout.
     @State private var availableWidth: CGFloat = 800
-
-    init(store: ComposerStore) {
-        self.store = store
-        _editorText = State(initialValue: store.prompt)
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -58,21 +53,13 @@ struct ChatInputWell: View {
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .frame(minHeight: ChatFrameMetrics.inputMinHeight, alignment: .topLeading)
-        // A floating writing surface: native Liquid Glass on current macOS,
-        // frosted material on older releases, and a solid accessibility fallback.
-        .modifier(ComposerGlassSurface())
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
         .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(editorFocused
-                              ? Color(nsColor: .controlAccentColor)
-                              : Color(nsColor: .separatorColor),
-                              lineWidth: editorFocused ? 1.5 : 1)
+            RoundedRectangle(cornerRadius: 14).strokeBorder(editorFocused ? Theme.accent : Theme.hairline,
+                                                           lineWidth: editorFocused ? 1.5 : 1)
         }
         .contentShape(Rectangle())
-        .onAppear { editorFocused = true }
-        // The caret used to be nowhere after a send, a tab switch, or Cmd-N:
-        // every turn began by clicking into the field.
-        .task(id: controller.activeSessionID) { editorFocused = true }
+        .defaultFocus($editorFocused, true)
         // Ask the resident engine once per attachment change whether images
         // reach it as pixels (projector loaded) or as a sidecar description.
         .task(id: store.attachments.map(\.id)) {
@@ -81,14 +68,6 @@ struct ChatInputWell: View {
                 return
             }
             engineSeesImages = await appState.engine.supportsImageInput
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .sendMessage)) { _ in
-            _ = store.submit()
-        }
-        .onChange(of: store.prompt) { _, value in
-            guard editorText != value else { return }
-            editorSyncTask?.cancel()
-            editorText = value
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Message composer")
@@ -100,19 +79,32 @@ struct ChatInputWell: View {
     /// native menu rather than wrapping into a second row — send and the
     /// current model never leave the surface.
     private var keyRow: some View {
-        HStack(spacing: 8) {
-            sourceMarks
-            ModelSelectionPill(maxLabelWidth: compactRow ? 110 : 190, plainStyle: true)
-                .layoutPriority(1)
-            modeTextKey
-            Spacer(minLength: 8)
-            if compactRow {
-                supportingMenu
-            } else {
-                toolsIcon
+        let populated = !store.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                sourceMarks
+                ModelSelectionPill(maxLabelWidth: compactRow ? 85 : 160, plainStyle: true)
+                    .layoutPriority(1)
+                Spacer(minLength: 4)
                 projectIcon
+                toolsIcon
+                if !compactRow && !controller.isRunning { modeTextKey }
+                if !controller.isRunning || !populated { sendKey }
             }
-            sendKey
+            if controller.isRunning && populated {
+                HStack(spacing: 8) {
+                    Text("Working").font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+                    Spacer(minLength: 0)
+                    Menu {
+                        Button("Steer current work") { _ = store.steer() }.disabled(!store.canSteer)
+                    } label: { Image(systemName: "ellipsis") }
+                    .menuIndicator(.hidden).frame(width: 24).accessibilityLabel("Follow-up options")
+                    Button("Queue follow-up") { _ = store.queue() }
+                        .buttonStyle(.borderedProminent).disabled(!store.canQueue)
+                        .accessibilityIdentifier("queue-follow-up")
+                    sendKey
+                }
+            }
         }
     }
 
@@ -126,13 +118,13 @@ struct ChatInputWell: View {
     private var supportingMenu: some View {
         Menu {
             Button("Tools…", systemImage: "wrench.and.screwdriver") {
-                NotificationCenter.default.post(name: .openAppSettings, object: nil)
+                NotificationCenter.default.postWorkspace(name: .openAppSettings, object: nil, windowID: workspaceWindowID)
             }
             Button("Open project…", systemImage: "folder") {
-                NotificationCenter.default.post(name: .openWorkspace, object: nil)
+                NotificationCenter.default.postWorkspace(name: .openWorkspace, object: nil, windowID: workspaceWindowID)
             }
             Button("Review changed files", systemImage: "doc.text.magnifyingglass") {
-                NotificationCenter.default.post(name: .gitDiff, object: nil)
+                NotificationCenter.default.postWorkspace(name: .gitDiff, object: nil, windowID: workspaceWindowID)
             }
         } label: {
             Label("More", systemImage: "ellipsis")
@@ -149,7 +141,7 @@ struct ChatInputWell: View {
     }
 
     private var editor: some View {
-        TextField("", text: $editorText,
+        TextField("", text: Binding(get: { store.prompt }, set: { store.prompt = $0 }),
                   prompt: Text("What's on your mind?")
                       .foregroundStyle(Theme.placeholderOnSilver),
                   axis: .vertical)
@@ -161,9 +153,6 @@ struct ChatInputWell: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
             .accessibilityLabel("Task description")
             .focused($editorFocused)
-            .onChange(of: editorText) { _, value in
-                schedulePromptSync(value)
-            }
             .onKeyPress(phases: .down) { press in
                 if press.key == .escape && controller.isRunning {
                     controller.stop()
@@ -305,91 +294,50 @@ struct ChatInputWell: View {
 
     /// Tools menu as a page mark: the same options the top bar used to hold.
     private var toolsIcon: some View {
-        InstrumentMenu(menuWidth: 240) {
-            // A ⌘ glyph named nothing: this menu is the agent's tools.
-            Image(systemName: "wrench.and.screwdriver")
-                .font(.system(size: InstrumentScale.markGlyph, weight: .medium))
-                .foregroundStyle(Instrument.inkSecondary)
-                .frame(width: InstrumentScale.mark, height: InstrumentScale.mark)
-                .contentShape(Rectangle())
-        } options: {
-            InstrumentMenuRow(
-                title: settings.computerControlEnabled ? "Disable Mac control" : "Enable Mac control",
-                systemImage: "laptopcomputer.and.arrow") {
-                settings.computerControlEnabled.toggle()
+        Menu {
+            Button("Browser", systemImage: "globe") { NotificationCenter.default.postWorkspace(name: .openWorkspacePanel, object: WorkspacePanel.browser, windowID: workspaceWindowID) }
+            Button("Specialist activity", systemImage: "list.bullet.rectangle") {
+                NotificationCenter.default.postWorkspace(name: .openWorkspacePanel, object: WorkspacePanel.activity, windowID: workspaceWindowID)
             }
-            InstrumentMenuRow(title: "Browser panel", systemImage: "globe") {
-                NotificationCenter.default.post(name: .toggleBrowserPanel, object: nil)
-            }
-        }
-        .help("Tools")
-        .accessibilityLabel("Tools")
-    }
-
-    /// Project menu as a page mark: the workspace's whole command set.
-    private var projectIcon: some View {
-        InstrumentMenu(menuWidth: 260) {
-            HStack(spacing: 5) {
-                Image(systemName: controller.workspaceURL == nil ? "tray" : "folder")
-                    .font(.system(size: InstrumentScale.markGlyph, weight: .medium))
-                if let name = controller.workspaceURL?.lastPathComponent {
-                    Text(name)
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .lineLimit(1)
-                        .frame(maxWidth: 80, alignment: .leading)
+            Divider()
+            Toggle("Mac control", isOn: $settings.computerControlEnabled)
+            Toggle("Plan before working", isOn: $settings.planMode)
+            Button("Roles & context…") { showsTurnContext = true }
+            ForEach(AgentMode.allCases) { mode in
+                Button { settings.agentMode = mode } label: {
+                    Label(mode.label, systemImage: settings.agentMode == mode ? "checkmark" : mode.icon)
                 }
             }
-            .foregroundStyle(Instrument.inkSecondary)
-            .frame(minHeight: InstrumentScale.mark)
-            .contentShape(Rectangle())
-        } options: {
-            InstrumentMenuRow(title: "New chat in this project", systemImage: "plus") {
-                NotificationCenter.default.post(name: .newChat, object: nil)
+        } label: { Image(systemName: "slider.horizontal.3").frame(width: 28, height: 32) }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden)
+        .help("Task options").accessibilityLabel("Task options")
+        .popover(isPresented: $showsTurnContext) { IntentPicker(store: store).background(Theme.surface) }
+    }
+
+    private var projectIcon: some View {
+        Menu {
+            Button("Open project…", systemImage: "folder") { NotificationCenter.default.postWorkspace(name: .openWorkspace, object: nil, windowID: workspaceWindowID) }
+            if controller.workspaceURL != nil {
+                Button("Review changes", systemImage: "doc.text.magnifyingglass") {
+                    NotificationCenter.default.postWorkspace(name: .openWorkspacePanel, object: WorkspacePanel.changes, windowID: workspaceWindowID)
+                }
+                Button("Project context", systemImage: "square.stack.3d.up") {
+                    NotificationCenter.default.postWorkspace(name: .openWorkspacePanel, object: WorkspacePanel.context, windowID: workspaceWindowID)
+                }
             }
-            InstrumentMenuRow(title: "Open project…", systemImage: "folder") {
-                NotificationCenter.default.post(name: .openWorkspace, object: nil)
-            }
-            InstrumentMenuRow(title: "Chat without a project", systemImage: "bubble.left") {
-                NotificationCenter.default.post(name: .openAssistantHome, object: nil)
-            }
+        } label: {
+            Image(systemName: controller.workspaceURL == nil ? "folder.badge.plus" : "folder")
+                .frame(width: 28, height: 32)
         }
-        .help(controller.workspaceURL?.path ?? "Choose a project folder")
+        .menuStyle(.borderlessButton).menuIndicator(.hidden)
+        .help(controller.workspaceURL?.path ?? "Add project context")
         .accessibilityLabel("Project: \(controller.workspaceURL?.lastPathComponent ?? "None")")
     }
 
-    /// Assistant mode as page text: the same mode menu, worn as a faint line
-    /// under the draft instead of a key.
     private var modeTextKey: some View {
-        InstrumentMenu(menuWidth: 220) {
-            HStack(spacing: 5) {
-                Text(settings.agentMode.label.uppercased())
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .tracking(0.8)
-                    .foregroundStyle(Instrument.inkSecondary)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 7.5, weight: .semibold))
-                    .foregroundStyle(Instrument.engraved)
-            }
-            .opacity(0.72)
-            .padding(.bottom, 3)
-            .overlay(alignment: .bottom) {
-                Rectangle()
-                    .fill(Instrument.seam.opacity(0.35))
-                    .frame(height: 0.75)
-            }
-            .contentShape(Rectangle())
-        } options: {
-            ForEach(AgentMode.allCases) { mode in
-                InstrumentMenuRow(
-                    title: mode.label,
-                    systemImage: mode.icon,
-                    isSelected: settings.agentMode == mode) {
-                    settings.agentMode = mode
-                }
-            }
-        }
-        .help("Assistant mode: \(settings.agentMode.label)")
-        .accessibilityLabel("Assistant mode")
+        Text(settings.agentMode.label)
+            .font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+            .help("Change the assistant mode in Task options")
     }
 
     /// The page's primary action: send while idle, stop while running. It
@@ -403,7 +351,7 @@ struct ChatInputWell: View {
             Image(systemName: controller.isRunning ? "stop.fill" : "arrow.up")
                 .font(.system(size: 13, weight: .semibold))
                 .contentTransition(.symbolEffect(.replace))
-                .frame(width: 22, height: 20)
+                .frame(width: 22, height: 24)
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.regular)
@@ -426,33 +374,5 @@ struct ChatInputWell: View {
     /// Commit the draft after a short quiet period. The editor remains fully
     /// responsive while a paste or fast typing burst arrives; validation and
     /// persistence catch up once the value settles.
-    private func schedulePromptSync(_ value: String) {
-        editorSyncTask?.cancel()
-        editorSyncTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(80))
-            guard !Task.isCancelled else { return }
-            store.prompt = value
-            editorSyncTask = nil
-        }
-    }
-}
 
-private struct ComposerGlassSurface: ViewModifier {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorSchemeContrast) private var contrast
-
-    func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
-        Group {
-            if reduceTransparency || contrast == .increased {
-                content.background(Theme.sectionSurface, in: shape)
-            } else if #available(macOS 26.0, *) {
-                content.glassEffect(.regular, in: shape)
-            } else {
-                content.background(.regularMaterial, in: shape)
-                    .background(Theme.sectionSurface.opacity(0.18), in: shape)
-            }
-        }
-        .shadow(color: Theme.cardShadow, radius: 14, y: 5)
-    }
 }

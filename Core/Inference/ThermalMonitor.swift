@@ -36,6 +36,7 @@ final class ThermalMonitor: ObservableObject {
     private let proxyCoolWindow: TimeInterval = 30  // sustained calm before cooling
 
     init() {
+        guard !ProcessInfo.processInfo.arguments.contains("--design-preview") else { return }
         let notifications = NotificationCenter.default.notifications(
             named: ProcessInfo.thermalStateDidChangeNotification)
         notificationTask = Task { [weak self] in
