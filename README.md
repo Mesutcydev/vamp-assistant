@@ -54,7 +54,7 @@ The resulting `Vamp-Assistant-iOS-*-unsigned.ipa` can be re-signed with AltStore
 
 Vamp Assistant can use [TinyFish Search](https://docs.tinyfish.ai/search-api) for current, ranked web sources, snippets, and URLs. Add the key in **Settings → Providers → TinyFish Search**; it is stored in the Mac Keychain and the read-only `web_search` tool is then available in Assistant, Code, browser-control, and bot runs. The assistant can pass a returned URL to `web_fetch` or the in-app browser for verification. For headless/CLI use, set `TINYFISH_API_KEY` before launching the host. No TinyFish key is bundled with the app.
 
-**Install:** [download the notarized Apple Silicon ZIP](https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.53/Vamp-Assistant-0.10.53-build-132-public.zip), extract it, and move **Vamp Assistant.app** to Applications. Apple Silicon + macOS 15+.
+**Install:** [download the notarized Apple Silicon ZIP](https://github.com/Mesutcydev/vamp-assistant/releases/download/v0.10.54/Vamp-Assistant-0.10.54-build-133-public.zip), extract it, and move **Vamp Assistant.app** to Applications. Apple Silicon + macOS 15+.
 
 > This release is Developer ID signed and notarized by Apple. Sparkle checks for updates automatically; use **Vamp Assistant → Check for Updates…** to check manually.
 
@@ -548,6 +548,9 @@ Project policy reference: [`docs/PROJECT-POLICY.md`](docs/PROJECT-POLICY.md).
 - **Xcode 26.6 or Xcode 27.0** / Swift 6 (the same `project.yml` builds on both)
 - XcodeGen (`brew install xcodegen`)
 - 8 GB Macs: Qwen3 1.7B is the recommended first model; 4B is marginal; 7B+ is refused by the admission gate on this tier.
+
+
+Source for the current macOS release: [v0.10.54](https://github.com/Mesutcydev/vamp-assistant/tree/v0.10.54).
 
 ## Build
 
