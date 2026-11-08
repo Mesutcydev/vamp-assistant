@@ -734,3 +734,6 @@ picker; the format and architecture are selected from the model metadata.
 - [swift-transformers](https://github.com/huggingface/swift-transformers) — Apache-2.0
 
 The design was informed by the memory, thermal, downloader, and lifecycle patterns in [Mesutcydev/ios-local-llm](https://github.com/Mesutcydev/ios-local-llm), an MIT-licensed reference project.
+
+The current website DMG preview bundles the upstream and Prism GGUF runtimes.
+It is Developer ID signed; Apple notarization and Sparkle promotion are deferred.

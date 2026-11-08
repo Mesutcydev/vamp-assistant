@@ -96,10 +96,10 @@ text/image chat and the iOS protocol remain unchanged.
 - App-hosted XCTest execution stalled before any tests ran, both before and
   after the update; that suite is not reported as passing. Companion's frozen
   iOS verification passed (76 unchanged files and unchanged targets/scheme).
-- No public release or replacement of the installed `/Applications` app bundles
-  was performed. Updated local apps are in each project's
-  `.derived/Build/Products/Debug/` directory. The newly installed runtime
-  manifests are already in each app's own Application Support directory.
+- Website DMG preview 0.10.55 (134) includes both signed compatibility
+  runtimes inside the app. Apple notarization and Sparkle promotion are deferred
+  at the user’s request. Existing installed app bundles were not replaced.
+
 
 Sources: [llama.cpp v0.9.0](https://github.com/ggml-org/llama.cpp/releases/tag/v0.9.0),
 [Prism release](https://github.com/PrismML-Eng/llama.cpp/releases/tag/prism-b12128-d7b2896),
