@@ -16,6 +16,10 @@ enum DesignPreviewScreen: String, CaseIterable {
     case chat
     case composer
     case welcome
+    case docking
+    case devices
+    case delegation
+    case approvals
     case settingsGeneral = "settings-general"
     case settingsModels = "settings-models"
     case settingsBots = "settings-bots"
@@ -50,12 +54,12 @@ enum DesignPreview {
     static func install(_ screen: DesignPreviewScreen,
                         into sessions: AgentSessionController) {
         switch screen {
-        case .chat:
+        case .chat, .docking, .delegation:
             sessions.installDesignPreview(
                 transcript: transcript,
                 plan: plan,
                 approval: approval)
-        case .composer:
+        case .composer, .approvals:
             // Canonical composer fixture: short valid draft, no network,
             // no permission or history mutation. Model selection is left to
             // the real app state; the fixture only seeds the draft.
@@ -63,7 +67,7 @@ enum DesignPreview {
                 transcript: [],
                 plan: [],
                 approval: approval)
-        case .welcome, .settingsGeneral, .settingsModels, .settingsBots,
+        case .welcome, .devices, .settingsGeneral, .settingsModels, .settingsBots,
              .settingsAgent, .settingsNetwork, .settingsPlugins,
              .settingsHover, .settingsFocus, .botsDashboard:
             break

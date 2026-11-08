@@ -315,21 +315,37 @@ final class LoginWindowInputServiceTests: XCTestCase {
     @MainActor private final class Fixture {
         var locked = true
         var accessibility = true
+        var displayAwake = true
+        var displayWakeRequests = 0
+        var displayWakeReleases = 0
+        var onWake: (() throws -> Void)?
         var events: [(Key, Bool)] = []
         var waits: [Duration] = []
+        var stages: [LoginWindowInputService.Stage] = []
         var onWait: (() throws -> Void)?
         var keys = [Key(code: 18), Key(code: 19, modifiers: .maskShift)]
+        var unlockOnReturn = true
 
         func service() -> LoginWindowInputService {
             LoginWindowInputService(
                 isLocked: { self.locked },
                 hasAccessibility: { self.accessibility },
+                beginDisplayWake: {
+                    try self.onWake?()
+                    self.displayWakeRequests += 1
+                    return { self.displayWakeReleases += 1 }
+                },
+                isDisplayAwake: { self.displayAwake },
                 resolveKeys: { $0 == "a" ? [Key(code: 0)] : self.keys },
-                postKey: { self.events.append(($0, $1)) },
+                postKey: { key, isDown in
+                    self.events.append((key, isDown))
+                    if key.code == 36, !isDown, self.unlockOnReturn { self.locked = false }
+                },
                 sleep: { duration in
                     self.waits.append(duration)
                     try self.onWait?()
-                }
+                },
+                report: { self.stages.append($0) }
             )
         }
     }
@@ -338,6 +354,7 @@ final class LoginWindowInputServiceTests: XCTestCase {
         let fixture = Fixture()
         let service = fixture.service()
         for _ in 0..<2 {
+            fixture.locked = true
             fixture.events = []
             try await service.submit(password: "example")
             let downs = fixture.events.filter(\.1).map(\.0)
@@ -352,6 +369,138 @@ final class LoginWindowInputServiceTests: XCTestCase {
             }
         }
         XCTAssertTrue(fixture.waits.contains(.milliseconds(750)))
+        XCTAssertEqual(fixture.displayWakeRequests, 2)
+        XCTAssertEqual(fixture.displayWakeReleases, 2)
+    }
+
+    func testSleepingDisplayWakesBeforeAnyKeysAndReleasesAfterUnlock() async throws {
+        let fixture = Fixture()
+        fixture.displayAwake = false
+        var wakeWaits = 0
+        fixture.onWait = {
+            guard !fixture.displayAwake else { return }
+            XCTAssertTrue(fixture.events.isEmpty, "Display wake must precede every key")
+            XCTAssertEqual(fixture.displayWakeRequests, 1)
+            XCTAssertEqual(fixture.displayWakeReleases, 0)
+            wakeWaits += 1
+            if wakeWaits == 3 { fixture.displayAwake = true }
+        }
+
+        try await fixture.service().submit(password: "example")
+
+        XCTAssertEqual(wakeWaits, 3)
+        XCTAssertFalse(fixture.locked)
+        XCTAssertEqual(fixture.displayWakeReleases, 1)
+        XCTAssertEqual(Array(fixture.stages.prefix(3)), [.started, .displayWakeRequested, .displayReady])
+    }
+
+    func testDisplayWakeTimeoutAndCancellationPostNothingAndReleaseAssertion() async {
+        for cancel in [false, true] {
+            let fixture = Fixture()
+            fixture.displayAwake = false
+            if cancel { fixture.onWait = { throw CancellationError() } }
+            do {
+                try await fixture.service().submit(password: "never-log-this")
+                XCTFail("A sleeping display must stop password entry")
+            } catch {
+                if cancel { XCTAssertTrue(error is CancellationError) }
+                else { XCTAssertEqual(error as? LoginWindowInputService.UnlockError, .displayUnavailable) }
+                XCTAssertFalse(error.localizedDescription.contains("never-log-this"))
+                XCTAssertTrue(fixture.events.isEmpty)
+                XCTAssertEqual(fixture.displayWakeReleases, 1)
+                XCTAssertEqual(fixture.stages, [.started, .displayWakeRequested, .failed])
+            }
+        }
+    }
+
+    func testDisplayWakeFailurePostsNothingAndAllowsExplicitRetry() async throws {
+        let fixture = Fixture()
+        fixture.onWake = { throw LoginWindowInputService.UnlockError.displayUnavailable }
+        let service = fixture.service()
+        do {
+            try await service.submit(password: "example")
+            XCTFail("A failed power assertion must stop password entry")
+        } catch {
+            XCTAssertEqual(error as? LoginWindowInputService.UnlockError, .displayUnavailable)
+            XCTAssertTrue(fixture.events.isEmpty)
+            XCTAssertEqual(fixture.displayWakeReleases, 0)
+        }
+        fixture.onWake = nil
+        try await service.submit(password: "example")
+        XCTAssertFalse(fixture.locked)
+        XCTAssertEqual(fixture.displayWakeReleases, 1)
+    }
+
+    func testDisplaySleepingAgainStopsBeforePasswordAndBalancesRevealKey() async {
+        let fixture = Fixture()
+        fixture.onWait = { fixture.displayAwake = false }
+        do {
+            try await fixture.service().submit(password: "example")
+            XCTFail("Display sleep during entry must stop the attempt")
+        } catch {
+            XCTAssertEqual(error as? LoginWindowInputService.UnlockError, .displayUnavailable)
+            XCTAssertEqual(fixture.events.map(\.0.code), [49, 49])
+            XCTAssertFalse(fixture.events.last?.1 ?? true)
+            XCTAssertEqual(fixture.displayWakeReleases, 1)
+        }
+    }
+
+    func testReturnWaitsForActualUnlockWithoutReplayingPassword() async throws {
+        let fixture = Fixture()
+        fixture.unlockOnReturn = false
+        var confirmations = 0
+        fixture.onWait = {
+            guard fixture.events.last?.0.code == 36, fixture.events.last?.1 == false else { return }
+            confirmations += 1
+            if confirmations == 3 { fixture.locked = false }
+        }
+
+        try await fixture.service().submit(password: "example")
+
+        XCTAssertEqual(confirmations, 3)
+        XCTAssertFalse(fixture.locked)
+        XCTAssertEqual(fixture.events.filter { $0.0.code == 36 && $0.1 }.count, 1)
+        XCTAssertEqual(fixture.stages, [.started, .displayWakeRequested, .displayReady, .formCleared, .passwordPosted, .returnPosted, .unlocked])
+    }
+
+    func testRejectedPasswordReportsStillLockedAndAllowsExplicitRetry() async throws {
+        let fixture = Fixture()
+        fixture.unlockOnReturn = false
+        let service = fixture.service()
+        do {
+            try await service.submit(password: "never-log-this")
+            XCTFail("Posting Return must not be reported as a successful unlock")
+        } catch let error as LoginWindowInputService.UnlockError {
+            XCTAssertFalse(error.localizedDescription.contains("never-log-this"))
+        }
+        XCTAssertEqual(fixture.waits.filter { $0 == .milliseconds(250) }.count, 20)
+        XCTAssertEqual(fixture.events.filter { $0.0.code == 36 && $0.1 }.count, 1)
+        XCTAssertEqual(fixture.stages, [.started, .displayWakeRequested, .displayReady, .formCleared, .passwordPosted, .returnPosted, .stillLocked])
+        XCTAssertEqual(fixture.displayWakeReleases, 1)
+
+        fixture.unlockOnReturn = true
+        try await service.submit(password: "example")
+        XCTAssertFalse(fixture.locked)
+    }
+
+    func testCancellationDuringConfirmationDoesNotResendPassword() async {
+        let fixture = Fixture()
+        fixture.unlockOnReturn = false
+        fixture.onWait = {
+            if fixture.events.last?.0.code == 36, fixture.events.last?.1 == false {
+                throw CancellationError()
+            }
+        }
+        do {
+            try await fixture.service().submit(password: "example")
+            XCTFail("Cancellation must be propagated")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+            XCTAssertEqual(fixture.events.filter { $0.0.code == 36 && $0.1 }.count, 1)
+            XCTAssertFalse(fixture.events.last?.1 ?? true)
+            XCTAssertEqual(fixture.stages, [.started, .displayWakeRequested, .displayReady, .formCleared, .passwordPosted, .returnPosted, .failed])
+            XCTAssertEqual(fixture.displayWakeReleases, 1)
+        }
     }
 
     func testLocalUnlockStopsBeforePasswordAndBalancesWakeKey() async {
@@ -387,6 +536,8 @@ final class LoginWindowInputServiceTests: XCTestCase {
         var posted = false
         let service = LoginWindowInputService(
             isLocked: { true }, hasAccessibility: { true },
+            beginDisplayWake: { XCTFail("Must resolve the layout before waking"); return {} },
+            isDisplayAwake: { true },
             resolveKeys: { _ in
                 throw RemoteMacControl.ParseError.message("Unsupported keyboard layout")
             },

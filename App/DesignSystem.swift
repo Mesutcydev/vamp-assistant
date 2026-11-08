@@ -298,12 +298,8 @@ extension View {
     /// reads as a recess rather than as a second card.
     func instrumentRecess(radius: CGFloat = 6) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
-        return self
-            .background {
-                shape.fill(.ultraThinMaterial)
-                shape.fill(Color.black.opacity(0.18))
-            }
-            .overlay(shape.strokeBorder(Color.white.opacity(0.07), lineWidth: 0.75))
+        return self.background(shape.fill(Theme.surfaceInset))
+            .overlay(shape.strokeBorder(Theme.hairline, lineWidth: 1))
     }
 
     /// Dark inserted control surface (selected capsules, primary actions).
@@ -335,31 +331,10 @@ private struct InstrumentGlassFaceplate: ViewModifier {
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
-        let solid = reduceTransparency || contrast == .increased
         content
-            .background {
-                if solid {
-                    shape.fill(Theme.sectionSurface)
-                } else {
-                    shape.fill(.regularMaterial)
-                    shape.fill(Theme.sectionSurface.opacity(0.22))
-                    shape.fill(LinearGradient(
-                        colors: [Color.white.opacity(colorScheme == .dark ? 0.09 : 0.42),
-                                 Color.clear,
-                                 Color.black.opacity(colorScheme == .dark ? 0.08 : 0.025)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing))
-                }
-            }
-            .overlay {
-                shape.strokeBorder(Theme.sectionStroke.opacity(solid ? 1 : 0.8), lineWidth: 0.75)
-                shape.strokeBorder(
-                    LinearGradient(colors: [Color.white.opacity(colorScheme == .dark ? 0.28 : 0.75),
-                                            Color.clear, Color.clear],
-                                   startPoint: .top, endPoint: .bottom),
-                    lineWidth: 0.75)
-            }
-            .shadow(color: shadow ? Theme.cardShadow : .clear,
-                    radius: shadow ? 12 : 0, y: shadow ? 4 : 0)
+            .background(shape.fill(Theme.surface))
+            .overlay(shape.strokeBorder(Theme.hairline, lineWidth: contrast == .increased ? 1.5 : 1))
+
     }
 }
 

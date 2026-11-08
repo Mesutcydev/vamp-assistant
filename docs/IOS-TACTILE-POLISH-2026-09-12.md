@@ -1,5 +1,53 @@
 # Vamp iOS — compact composer and tactile controls
 
+## Reference-led revision — 13 October 2026
+
+The original instrument composer is restored from the pre-redesign source, unchanged.
+Its editor, MODEL bay, attachment and Tools controls, Send/Queue/Steer/Stop behavior,
+physical seams and integrated status rail are retained. The intrinsic-size regression
+again checks the original 120–130pt empty deck at 320, 402 and 740pt widths. This
+supersedes the earlier compact-card composer introduced during this redesign.
+
+The surrounding interface follows the supplied Vamp identity reference: graphite
+`#131416`, warm white `#F4F3F1`, reading surfaces `#1D1F22` / white, Vamp red
+`#BD2939`, and accent ink `#FF7B88` / `#AD2030`. The VAMP wordmark uses SF Rounded
+Heavy; controls and reading text retain native SF sizing. The Assistant's existing
+beacon icon is drawn natively for headers and response identity. Existing explicitly
+saved color choices remain; Vamp red is the default when no accent has been saved.
+
+The library now has a shaded graphite connection console and one satin action bank
+for Bots, Control Mac and Computer. Connection and task indicators animate only
+when their underlying state is active, pause outside the active scene and respect
+Reduce Motion. Pairing uses a small native device illustration that settles into
+place once. The existing navigation, draft persistence, transport, approvals,
+sharing, terminal, app-stream and model-selection handlers remain in place.
+
+Current evidence is in `/Users/m/Downloads/beetcode/tmp/ios-design-character/`.
+The original composer source is backed up under
+`/Users/m/Downloads/beetcode/tmp/ios-design-2026-10-13/source-before/` and byte
+comparison confirms that it matches the restored file.
+
+[Restored composer](../../tmp/ios-design-character/final/iphone-composer-design-light-fixture.png) ·
+[Graphite library](../../tmp/ios-design-character/final/iphone-05-sessions-dark-fixture.png) ·
+[Pairing](../../tmp/ios-design-character/final/iphone-13-pairing-light-fixture.png)
+
+Validation:
+
+- Final unsigned iOS arm64 Release build succeeded.
+- 47 iOS regression and rendering checks passed with no failures, including
+  the original composer geometry. There are 72 final light/dark captures.
+- Nine native UI checks passed: keyboard growth and deletion, offline rotation,
+  canceled presses, Send/Queue/Steer/Stop, command insertion, models and Mac control
+  navigation.
+- The known invalidated-URLSession crash in
+  `testOldMacMutationFailuresDoNotAlertOnNewMac` remains excluded; it reproduced
+  in the baseline before the design work. The previous macOS baseline could not
+  establish its test-runner connection. No macOS source was changed by this pass.
+- Physical haptics, spoken VoiceOver and live Mac video/input were not exercised
+  by these isolated design fixtures.
+
+The sections below record the earlier September design and its verification.
+
 Implemented design: silver in light mode, neutral graphite in dark mode, open conversation typography, and shallow physical controls. This supersedes the earlier instructions to reserve a large editor, show dark user cards, and keep a permanent composer status strip.
 
 ## Audit and implementation

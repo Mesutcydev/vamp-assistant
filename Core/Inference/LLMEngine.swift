@@ -277,6 +277,9 @@ public protocol LLMEngine: AnyObject, Sendable {
     /// dispatch reason as `effectiveContextWindow`.
     var supportsImageInput: Bool { get async }
 
+    /// File-based local Omni analysis and speech. Unsupported backends fail explicitly.
+    func processMedia(_ request: OmniMediaRequest) async throws -> OmniMediaResult
+
     /// Cancels queued/in-flight generation. In-flight Metal work completes;
     /// queued work is skipped.
     func cancelGeneration() async
@@ -309,6 +312,10 @@ extension LLMEngine {
     /// Default: this engine cannot see pixels. MLX text models and every
     /// remote/BYOK provider use the described-image path instead.
     public var supportsImageInput: Bool { get async { false } }
+
+    public func processMedia(_ request: OmniMediaRequest) async throws -> OmniMediaResult {
+        throw LocalOmniClient.Failure.unavailable("Select a local Omni GGUF model with its matching projector to use audio, video, or speech.")
+    }
 
     /// In-process and remote engines have no separately-accounted helper.
     public var externalResidentMemoryBytes: UInt64? { get async { nil } }

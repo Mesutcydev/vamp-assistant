@@ -1,14 +1,15 @@
+import AppKit
 import Combine
 import Foundation
 import SwiftUI
 
 // MARK: - Persisted draft
 
-/// Codable per-workspace draft: the prompt text plus the intent selection.
-/// Attachments are deliberately not persisted (they point at live files).
+/// A conversation-owned draft. Missing attachments in legacy files decode as empty.
 struct ComposerDraftState: Codable, Sendable, Equatable {
     var prompt: String = ""
     var selection = IntentSelection()
+    var attachments: [ComposerAttachment]? = nil
 }
 
 // MARK: - Store
@@ -40,7 +41,7 @@ final class ComposerStore {
         }
     }
     var attachments: [ComposerAttachment] = [] {
-        didSet { refreshAvailability(); refreshResolvedFocus() }
+        didSet { schedulePersist(); refreshAvailability(); refreshResolvedFocus() }
     }
     var selection: IntentSelection = IntentSelection() {
         didSet { schedulePersist(); refreshResolvedFocus() }
@@ -99,6 +100,10 @@ final class ComposerStore {
     private var estimateTask: Task<Void, Never>?
     private nonisolated static let draftWriteQueue = DispatchQueue(label: "com.beetcode.draft-writes", qos: .utility)
     private var workspaceKey: String?
+    private var draftKey: String?
+    private var windowID = "main"
+    private var draftSessionID: UUID?
+    private var memoryDrafts: [String: ComposerDraftState] = [:]
     private var lastEstimateRefresh = Date.distantPast
     private var cachedHistoryTokens = 0
     private var cachedHistoryMessageCount = 0
@@ -116,9 +121,16 @@ final class ComposerStore {
     // MARK: Wiring
 
     func attach(controller: AgentSessionController, appState: AppState) {
+        guard self.controller !== controller || self.appState !== appState else { return }
+        flushDraft()
+        cancellables.removeAll()
         self.controller = controller
         self.appState = appState
         currentEnginePhase = appState.enginePhase
+
+        NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)
+            .sink { [weak self] _ in self?.flushDraft() }
+            .store(in: &cancellables)
 
         // Subscribe to the phase publisher itself so the composer invalidates
         // its own observation graph when an MLX load completes.
@@ -131,12 +143,9 @@ final class ComposerStore {
             }
             .store(in: &cancellables)
 
-        // Workspace changes are transactions. Preserve the published value
-        // inside the task so a rapid second switch cannot make the first
-        // callback reread the wrong workspace.
-        controller.$workspaceURL
-            .sink { [weak self] url in
-                Task { @MainActor in self?.workspaceDidChange(to: url) }
+        controller.$workspaceURL.combineLatest(controller.$activeSessionID)
+            .sink { [weak self] workspace, sessionID in
+                Task { @MainActor in self?.conversationDidChange(workspace: workspace, sessionID: sessionID) }
             }
             .store(in: &cancellables)
 
@@ -173,19 +182,57 @@ final class ComposerStore {
             }
             .store(in: &cancellables)
 
-        workspaceDidChange(to: controller.workspaceURL)
+        conversationDidChange(workspace: controller.workspaceURL, sessionID: controller.activeSessionID)
     }
 
     // MARK: Availability — driven by REAL application state
 
-    private func workspaceDidChange(to workspace: URL?) {
-        // Ignore a queued callback for an older switch; the newer callback
-        // will load the current workspace's draft.
-        guard workspace?.path == controller?.workspaceURL?.path else { return }
+    func configureWindow(_ id: String) { windowID = id }
+
+    func flushDraft() {
+        if let draftKey { memoryDrafts[draftKey] = draftSnapshot }
         flushPersistNow()
-        workspaceKey = workspace?.path ?? "chat-only"
-        loadDraft(for: workspace)
+    }
+
+    func beginNewConversation() {
+        flushDraft()
+        isLoadingDraft = true
+        prompt = ""
+        attachments = []
+        selection = IntentSelection()
+        isLoadingDraft = false
+        draftSessionID = nil
+        // A second New Chat while already on an unsent chat must not restore
+        // that same window slot's old draft from the queued session publisher.
+        draftKey = "window.\(windowID).\(workspaceKey ?? "chat-only")"
+        memoryDrafts[draftKey!] = draftSnapshot
+        schedulePersist()
+    }
+
+    private var draftSnapshot: ComposerDraftState {
+        ComposerDraftState(prompt: prompt, selection: selection, attachments: attachments)
+    }
+
+    private func conversationDidChange(workspace: URL?, sessionID: UUID?) {
+        guard workspace?.path == controller?.workspaceURL?.path,
+              sessionID == controller?.activeSessionID else { return }
+        let workspacePath = workspace?.standardizedFileURL.path ?? "chat-only"
+        let key = sessionID.map { "conversation.\($0.uuidString)" }
+            ?? "window.\(windowID).\(workspacePath)"
+        guard key != draftKey else { return }
+        let newlyStarted = draftKey != nil && draftSessionID == nil && sessionID != nil
+            && workspaceKey == workspacePath && controller?.isRunning == true
+        flushDraft()
+        workspaceKey = workspacePath
+        draftKey = key
+        draftSessionID = sessionID
+        if newlyStarted {
+            // The first send assigns a session ID. Carry its already-cleared
+            // composer forward instead of restoring another conversation.
+            schedulePersist()
+        } else { loadDraft(for: workspace) }
         refreshAvailability()
+        refreshResolvedFocus()
         refreshHistoryEstimate()
     }
 
@@ -426,6 +473,7 @@ final class ComposerStore {
     /// and the intent selection all clear.
     @discardableResult
     func send() -> Bool {
+        guard !ProcessInfo.processInfo.arguments.contains("--design-preview") else { return false }
         let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return false }
 
@@ -452,6 +500,7 @@ final class ComposerStore {
     /// an ordinary submit becomes a durable follow-up instead of being lost.
     @discardableResult
     func submit() -> Bool {
+        guard !ProcessInfo.processInfo.arguments.contains("--design-preview") else { return false }
         if controller?.isRunning == true {
             return queue()
         }
@@ -460,6 +509,7 @@ final class ComposerStore {
 
     @discardableResult
     func queue() -> Bool {
+        guard !ProcessInfo.processInfo.arguments.contains("--design-preview") else { return false }
         guard let controller,
               let appState,
               let sessionID = controller.activeSessionID,
@@ -505,7 +555,7 @@ final class ComposerStore {
         // Visual fixtures and UI smoke tests must neither restore nor overwrite
         // a person's draft. Each preview starts from an in-memory composer.
         guard !ProcessInfo.processInfo.arguments.contains("--design-preview") else { return nil }
-        guard let key = workspaceKey else { return nil }
+        guard let key = draftKey else { return nil }
         let dir: URL
         if let base = Self.overrideDraftsDir {
             dir = base.appendingPathComponent("ComposerDrafts", isDirectory: true)
@@ -513,8 +563,8 @@ final class ComposerStore {
             dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("BeetCode/ComposerDrafts", isDirectory: true)
         }
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        // Stable filename from the workspace path.
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        // Stable filename from the conversation/window identity.
         let digest = key.unicodeScalars.reduce(into: UInt64(5381)) { acc, s in
             acc = (acc &* 33) &+ UInt64(s.value)
         }
@@ -525,7 +575,7 @@ final class ComposerStore {
         if isLoadingDraft { return }
         persistTask?.cancel()
         guard let url = draftFileURL else { return }
-        let state = ComposerDraftState(prompt: prompt, selection: selection)
+        let state = draftSnapshot
         pendingPersist = (url, state)
         persistTask = Task {
             try? await Task.sleep(for: .milliseconds(400))
@@ -549,24 +599,41 @@ final class ComposerStore {
     private nonisolated static func persist(_ state: ComposerDraftState, to url: URL) {
         guard let data = try? JSONEncoder().encode(state) else { return }
         try? data.write(to: url, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
     private func loadDraft(for workspace: URL?) {
         isLoadingDraft = true
         defer { isLoadingDraft = false }
-        guard let url = draftFileURL,
-              FileManager.default.fileExists(atPath: url.path),
-              let data = try? Data(contentsOf: url),
-              let state = try? JSONDecoder().decode(ComposerDraftState.self, from: data)
-        else {
-            prompt = ""
-            selection = IntentSelection()
-            return
+        var restored = draftKey.flatMap { memoryDrafts[$0] }
+        if restored == nil, let url = draftFileURL,
+           let data = try? Data(contentsOf: url) {
+            restored = try? JSONDecoder().decode(ComposerDraftState.self, from: data)
         }
-        prompt = state.prompt
-        selection = state.selection
+        // Import the former workspace draft once, keeping the original file
+        // intact. Each conversation subsequently saves under its own key.
+        if restored == nil, let legacy = legacyDraftURL,
+           !UserDefaults.standard.bool(forKey: "draft-migrated.\(legacy.lastPathComponent)"),
+           let data = try? Data(contentsOf: legacy),
+           let state = try? JSONDecoder().decode(ComposerDraftState.self, from: data) {
+            restored = state
+            UserDefaults.standard.set(true, forKey: "draft-migrated.\(legacy.lastPathComponent)")
+        }
+        prompt = restored?.prompt ?? ""
+        selection = restored?.selection ?? IntentSelection()
+        attachments = (restored?.attachments ?? []).filter { FileManager.default.fileExists(atPath: $0.url.path) }
         _ = workspace
     }
+
+    private var legacyDraftURL: URL? {
+        guard !ProcessInfo.processInfo.arguments.contains("--design-preview"), let workspaceKey,
+              let current = draftFileURL else { return nil }
+        let digest = workspaceKey.unicodeScalars.reduce(into: UInt64(5381)) {
+            $0 = ($0 &* 33) &+ UInt64($1.value)
+        }
+        return current.deletingLastPathComponent().appendingPathComponent("draft-\(digest).json")
+    }
+
 }
 
 // MARK: - AppState readiness bridge

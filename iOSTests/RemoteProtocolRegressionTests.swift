@@ -273,10 +273,8 @@ final class RemoteInstrumentRenderingTests: XCTestCase {
                 return host.sizeThatFits(in: CGSize(width: width, height: 1000)).height
             }
             let empty = height("")
-            // The current deck includes a persistent 20pt status rail. Keep
-            // the complete surface bounded instead of asserting the older
-            // pre-rail 90–100pt geometry.
-            XCTAssertLessThanOrEqual(empty, 130, "Empty composer must remain compact at width \(width)")
+            // Preserve the original instrument deck and its integrated status rail.
+            XCTAssertLessThanOrEqual(empty, 130, "Original composer must remain bounded at width \(width)")
             XCTAssertGreaterThanOrEqual(empty, 120)
             XCTAssertEqual(height("A short draft"), empty, accuracy: 2)
             let six = height("One\nTwo\nThree\nFour\nFive\nSix")
@@ -411,13 +409,23 @@ final class RemoteInstrumentRenderingTests: XCTestCase {
                     if view is UITextField || view is UITextView { return view }
                     return view.subviews.lazy.compactMap { editor(in: $0) }.first
                 }
+                // Rendering can take longer than one fixed delay while other
+                // build gates are running. Wait for the actual editor, keeping
+                // failure bounded instead of sampling an unmounted view.
+                let deadline = Date().addingTimeInterval(5)
+                while editor(in: controller.view) == nil && Date() < deadline {
+                    controller.view.setNeedsLayout(); controller.view.layoutIfNeeded()
+                    try await Task.sleep(for: .milliseconds(100))
+                }
                 XCTAssertTrue(try XCTUnwrap(editor(in: controller.view)).becomeFirstResponder())
                 try await Task.sleep(for: .milliseconds(500))
             }
             controller.view.setNeedsLayout()
             controller.view.layoutIfNeeded()
             let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
-                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+                // The fixture window is not the app's foreground scene. Waiting
+                // for screen updates can block indefinitely on newer runtimes.
+                window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
             }
             let attachment = XCTAttachment(image: image)
             attachment.name = "\(UIDevice.current.userInterfaceIdiom == .pad ? "ipad" : "iphone")-\(name)-\(scheme == .dark ? "dark" : "light")-fixture"

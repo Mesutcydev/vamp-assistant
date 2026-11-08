@@ -146,7 +146,7 @@ struct FileSharingSection: View {
             .buttonStyle(RemoteSecondaryButtonStyle())
 
             if store.sharedFiles.isEmpty {
-                Text("Files shared through Vamp Assistant appear in Downloads › BeetCode Remote on your Mac (legacy storage name).")
+                Text("Files shared through Vamp Companion appear in Downloads › BeetCode Remote on your Mac (legacy storage name).")
                     .font(.subheadline).foregroundStyle(BeetTheme.secondaryText(appearance)).lineSpacing(2).padding(.vertical, 10)
             } else {
                 VStack(spacing: 0) {

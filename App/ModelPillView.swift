@@ -9,6 +9,7 @@ import SwiftUI
 // pill never holds its own model string.
 
 struct ModelSelectionPill: View {
+    @Environment(\.workspaceWindowID) private var workspaceWindowID
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var settings = SettingsStore.shared
     @State private var showPopover = false
@@ -30,9 +31,15 @@ struct ModelSelectionPill: View {
         Button {
             showPopover = true
         } label: {
-            face
+            HStack(spacing: 6) {
+                Image(systemName: "cpu").font(.system(size: 13))
+                Text(label).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                    .frame(maxWidth: maxLabelWidth, alignment: .leading)
+                Image(systemName: "chevron.down").font(.system(size: 9))
+            }.foregroundStyle(Theme.textPrimary).padding(.horizontal, 8).frame(height: 32)
+                .background(Theme.surfaceInset, in: RoundedRectangle(cornerRadius: 6))
         }
-        .buttonStyle(InstrumentPressStyle())
+        .buttonStyle(.plain)
         .help(tooltip)
         .accessibilityLabel("Active model: \(label)")
         .popover(isPresented: $showPopover, arrowEdge: .top) {
@@ -234,6 +241,11 @@ struct ModelSelectionPill: View {
 /// configured BYOK providers, then management entries. Selecting anything
 /// here performs the real switch — no decorative rows.
 struct ModelPickerPopover: View {
+    @Environment(\.workspaceWindowID) private var workspaceWindowID
+    var onSelection: (() -> Void)? = nil
+    var initialProviderID: String? = nil
+    var accountOnly = false
+    @ObservedObject private var recentSelections = RecentModelSelections.shared
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var keyStore = APIKeyStore.shared
@@ -400,9 +412,10 @@ struct ModelPickerPopover: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     if source == .all {
+                        recentSection
+                        localSection
                         accountSection
                         apiSection
-                        localSection
                     } else if source == .local {
                         localSection
                     } else if source == .api {
@@ -435,7 +448,9 @@ struct ModelPickerPopover: View {
         .background(Theme.surface)
         .task {
             allRemoteModels = buildRemoteModels()
-            if appState.isRemoteActive, let endpoint = appState.engine.activeRemoteEndpoint {
+            if accountOnly { source = .account }
+            else if let initialProviderID { source = .api; selectedProvider = initialProviderID }
+            else if appState.isRemoteActive, let endpoint = appState.engine.activeRemoteEndpoint {
                 source = .api
                 selectedProvider = endpoint.effectiveProviderKey
             } else if appState.isCodexActive {
@@ -461,6 +476,11 @@ struct ModelPickerPopover: View {
         }
         .onChange(of: appState.activeCodexModelID) { _, _ in loadReasoningEffort() }
         .onChange(of: appState.engine.activeRemoteEndpoint) { _, _ in loadReasoningEffort() }
+    }
+
+    private func completeSelection(_ identity: String) {
+        recentSelections.record(identity)
+        if let onSelection { onSelection() } else { dismiss() }
     }
 
     /// Whether `activeReasoningControl` will render anything — checked before
@@ -624,6 +644,18 @@ struct ModelPickerPopover: View {
         .padding(.vertical, 2)
     }
 
+    @ViewBuilder private var recentSection: some View {
+        let local = allInstalledModels.filter { recentSelections.ids.contains("local.\($0.id)") }
+        let remote = allRemoteModels.filter { recentSelections.ids.contains("api.\($0.providerKey ?? $0.provider.rawValue).\($0.model)") }
+        let account = accountModels.filter { recentSelections.ids.contains("account.\($0.id)") }
+        if query.isEmpty && (!local.isEmpty || !remote.isEmpty || !account.isEmpty) {
+            sectionLabel("Recent & ready")
+            ForEach(local) { modelRow($0) }
+            ForEach(remote) { apiModelRow($0) }
+            ForEach(account) { codexModelRow($0) }
+        }
+    }
+
     // MARK: Local models
 
     @ViewBuilder
@@ -648,8 +680,10 @@ struct ModelPickerPopover: View {
         let loadingThis = appState.enginePhase == .loading(model.displayName)
         let budget = appState.budget(for: model)
         return Button {
-            dismiss()
-            Task { await appState.activate(model: model) }
+            Task {
+                await appState.activate(model: model)
+                if appState.isModelReady { completeSelection("local.\(model.id)") }
+            }
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: isActive ? "checkmark.circle.fill" : "cpu")
@@ -711,7 +745,7 @@ struct ModelPickerPopover: View {
                     .foregroundStyle(Theme.textSecondary)
                 Button("Add provider…") {
                     dismiss()
-                    NotificationCenter.default.post(name: .openProviderSettings, object: nil)
+                    NotificationCenter.default.postWorkspace(name: .openProviderSettings, object: nil, windowID: workspaceWindowID)
                 }
                 .font(.caption.weight(.medium))
                 .buttonStyle(.borderless)
@@ -827,7 +861,7 @@ struct ModelPickerPopover: View {
         let isActive = appState.isCodexActive && appState.activeCodexModelID == model.id
         return Button {
             Task {
-                if await appState.activateCodex(model: model) { dismiss() }
+                if await appState.activateCodex(model: model) { completeSelection("account.\(model.id)") }
             }
         } label: {
             HStack(spacing: 8) {
@@ -889,9 +923,8 @@ struct ModelPickerPopover: View {
             && activeEndpoint?.providerID == profile.providerKey
             && activeEndpoint?.model == profile.model
         return Button {
-            dismiss()
             Task {
-                _ = await appState.activateRemote(endpoint: profile.endpoint())
+                if await appState.activateRemote(endpoint: profile.endpoint()) { completeSelection("api.\(profile.providerKey ?? profile.provider.rawValue).\(profile.model)") }
             }
         } label: {
             HStack(spacing: 8) {
@@ -989,9 +1022,9 @@ struct ModelPickerPopover: View {
             Button {
                 dismiss()
                 if source == .local {
-                    NotificationCenter.default.post(name: .openModelManager, object: nil)
+                    NotificationCenter.default.postWorkspace(name: .openModelManager, object: nil, windowID: workspaceWindowID)
                 } else {
-                    NotificationCenter.default.post(name: .openProviderSettings, object: nil)
+                    NotificationCenter.default.postWorkspace(name: .openProviderSettings, object: nil, windowID: workspaceWindowID)
                 }
             } label: {
                     Label(source == .all ? "Manage providers…" : source == .local ? "Model Manager…" : source == .api ? "Manage API models…" : "Manage account…",

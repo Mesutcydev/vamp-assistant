@@ -420,7 +420,7 @@ final class QwenStreamQ25LocalizationTests: XCTestCase {
         XCTAssertEqual(fixture.selection.nativePartitionKth, 256 - fixture.routingK)
         XCTAssertEqual(fixture.selection.finalSliceLength, fixture.routingK)
 
-        let device = Device.defaultDevice().deviceType?.rawValue ?? "unavailable"
+        let device = Device.defaultDevice().deviceType.rawValue
         var results: [SelectorResult] = []
         for vector in fixture.vectors {
             XCTAssertEqual(vector.dtype, "bfloat16", vector.name)
@@ -712,7 +712,7 @@ final class QwenStreamQ25LocalizationTests: XCTestCase {
                 "promptSHA256": reference.promptSHA256,
                 "prefillGroupSize": reference.prefillGroupSize,
                 "groupsCompared": reference.groups.count,
-                "nativeDevice": Device.defaultDevice().deviceType?.rawValue ?? "unavailable",
+                "nativeDevice": Device.defaultDevice().deviceType.rawValue,
                 "rows": rows,
             ]
             try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
@@ -963,7 +963,7 @@ final class QwenStreamQ25LocalizationTests: XCTestCase {
                 "nativePackage": "mlx-swift 0.31.6",
                 "nativeMLXCore": "0.31.1",
                 "nativeMLXC": "0.6.0",
-                "device": Device.defaultDevice().deviceType?.rawValue ?? "unavailable",
+                "device": Device.defaultDevice().deviceType.rawValue,
                 "promptTokenCount": fixture.promptTokenCount,
                 "promptTokenIDs": fixture.promptTokenIDs,
                 "groups": rows,

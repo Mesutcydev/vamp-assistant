@@ -206,6 +206,19 @@ final class ComposerUITests: XCTestCase {
         XCTAssertEqual(app.buttons["remote.composer.primary"].label, "Sending")
     }
 
+    func testToolsInsertPromptWithoutSubmitting() {
+        let app = launch()
+        XCTAssertTrue(editor(app).waitForExistence(timeout: 15))
+        app.buttons["Tools and context"].tap()
+        XCTAssertTrue(app.navigationBars["Tools & context"].waitForExistence(timeout: 5))
+        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Git diff")).firstMatch.tap()
+        let input = editor(app)
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        XCTAssertTrue((input.value as? String)?.hasPrefix("Inspect the current git diff.") == true)
+        XCTAssertEqual(app.staticTexts["fixture.lastAction"].label, "None")
+        XCTAssertTrue(app.buttons["remote.composer.primary"].isEnabled)
+    }
+
     func testDeleteAndCanceledPress() {
         let app = launch()
         let input = editor(app)

@@ -199,6 +199,47 @@ struct ChangedFilesReviewView: View {
     }
 }
 
+/// Finite, adaptive review pane using the window-owned review model.
+struct WorkspaceChangesPane: View {
+    @Bindable var model: ChangedFilesReviewModel
+    var body: some View {
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    Picker("Changed file", selection: $model.selectedPath) {
+                        ForEach(model.files, id: \.path) { file in Text(file.path).tag(Optional(file.path)) }
+                    }.labelsHidden().frame(maxWidth: .infinity)
+                    Button { Task { await model.load() } } label: { Image(systemName: "arrow.clockwise") }
+                        .accessibilityLabel("Refresh changes").disabled(model.isLoading)
+                    if model.checkpoint != nil {
+                        Button { Task { await model.restoreCheckpoint() } } label: { Image(systemName: "arrow.uturn.backward") }
+                            .accessibilityLabel("Restore review checkpoint").disabled(model.isLoading)
+                    }
+                }.padding(12).background(Theme.surface)
+                Divider()
+                HStack(spacing: 0) {
+                    if geometry.size.width >= 680 {
+                        List(model.files, id: \.path, selection: $model.selectedPath) { file in
+                            GitReviewFileRow(path: file.path, status: file.statusLabel, isStaged: file.isStaged,
+                                             added: file.diff.addedCount, removed: file.diff.removedCount).tag(file.path)
+                        }.frame(width: 220).listStyle(.sidebar)
+                        Divider()
+                    }
+                    GitReviewDetail(file: model.selectedFile, acceptedHunkIDs: model.acceptedHunkIDs,
+                                    isBusy: model.isLoading, onAccept: model.accept,
+                                    onReject: { hunk, file in Task { await model.reject(hunk, in: file) } })
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                if let error = model.errorMessage {
+                    Text(error).font(.system(size: 12)).foregroundStyle(Theme.warning).padding(12)
+                }
+            }
+        }
+        .background(Theme.workspaceCanvas)
+        .task { if model.files.isEmpty { await model.load() } }
+    }
+}
+
 private struct GitReviewFileRow: View {
     let path: String
     let status: String

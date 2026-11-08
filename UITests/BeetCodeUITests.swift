@@ -3,410 +3,213 @@ import XCTest
 
 @MainActor
 final class BeetCodeUITests: XCTestCase {
-    override func setUpWithError() throws {
-        continueAfterFailure = false
-    }
+    override func setUpWithError() throws { continueAfterFailure = false }
 
-    func testOLEDModeIsAvailableAndRenders() {
-        let app = launchApp(screen: "settings-general", appearance: "")
-        let oled = app.radioButtons["OLED"]
-        XCTAssertTrue(oled.waitForExistence(timeout: 10))
-        let previous = ["System", "Light", "Dark", "OLED"].first {
-            let button = app.radioButtons[$0]
-            return button.isSelected || (button.value as? String) == "1" || (button.value as? Int) == 1
-        }
-        defer { if let previous { app.radioButtons[previous].click() } }
-        oled.click()
-        XCTAssertTrue(oled.isSelected || (oled.value as? String) == "1" || (oled.value as? Int) == 1)
-        let capture = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
-        capture.name = "mac-oled-settings"
-        capture.lifetime = .keepAlways
-        add(capture)
-    }
-
-    func testAppearanceSegmentsStayInsideTheirControl() {
-        let app = launchApp(size: "900x700", screen: "settings-general", appearance: "oled")
+    func testSettingsRoundTripPreservesToolbarAndDraft() {
+        let app = launchApp()
         defer { app.terminate() }
-        let window = app.windows.firstMatch
-        let oled = window.radioButtons["OLED"]
-        XCTAssertTrue(oled.waitForExistence(timeout: 10))
-        let picker = window.descendants(matching: .any)
-            .matching(identifier: "instrument-segmented").firstMatch
-        XCTAssertTrue(picker.exists)
-        XCTAssertLessThanOrEqual(oled.frame.maxX, picker.frame.maxX + 1)
-        XCTAssertLessThanOrEqual(picker.frame.maxX, window.frame.maxX - 16)
+        let editor = composer(in: app)
+        editor.click(); pasteText("Keep this draft through Settings", app: app)
+        app.buttons["Settings"].click()
+        XCTAssertTrue(app.staticTexts["General"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Sidebar")).firstMatch.exists)
+        XCTAssertTrue(app.buttons["new-conversation"].exists)
+        XCTAssertEqual(app.windows.firstMatch.toolbars.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Sidebar")).count, 1)
+        app.buttons["Chats"].click()
+        XCTAssertTrue(composer(in: app).waitForExistence(timeout: 5))
+        XCTAssertEqual(composer(in: app).value as? String, "Keep this draft through Settings")
+        app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Sidebar")).firstMatch.click()
+        XCTAssertEqual(composer(in: app).value as? String, "Keep this draft through Settings")
+        XCTAssertTrue(app.buttons["command-palette-toggle"].exists)
     }
 
-    func testAppearanceAndTypeStylesFitAtMinimumWindowWidth() {
+    func testBrowserKeepsComposerInsideWindowAndDraftIntact() {
+        let app = launchApp(screen: "chat")
+        defer { app.terminate() }
+        composer(in: app).click(); pasteText("Finish the UI review", app: app)
+        workspaceAction("Browser", app: app)
+        XCTAssertTrue(app.textFields["browser-url"].waitForExistence(timeout: 5))
+        assertComposerBounds(app)
+        XCTAssertEqual(composer(in: app).value as? String, "Finish the UI review")
+        app.buttons["Close Browser"].click()
+        assertComposerBounds(app)
+        XCTAssertEqual(composer(in: app).value as? String, "Finish the UI review")
+    }
+
+    func testNestedDockingAndKeyboardMenuReset() {
+        let app = launchApp(screen: "docking")
+        defer { app.terminate() }
+        XCTAssertTrue(app.textFields["browser-url"].waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "dock-split-")).count, 2)
+        assertComposerBounds(app)
+        // The native context menu provides the keyboard equivalent of edge drops.
+        app.buttons["Browser pane"].rightClick()
+        app.menuItems["Dock below conversation"].click()
+        assertComposerBounds(app)
+        workspaceAction("Reset Layout", app: app)
+        XCTAssertTrue(app.buttons["Conversation pane"].exists)
+        XCTAssertTrue(app.buttons["Browser pane"].exists)
+        XCTAssertTrue(app.buttons["Diagnostics pane"].exists)
+    }
+
+    func testNarrowDockingProvidesPaneSwitcherAndReturnToConversation() {
+        let app = launchApp(size: "520x640", screen: "docking")
+        defer { app.terminate() }
+        XCTAssertTrue(app.staticTexts["Focus layout"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Back to conversation"].exists)
+        app.buttons["Back to conversation"].click()
+        assertComposerBounds(app)
+        XCTAssertFalse(app.buttons["Close Conversation"].exists)
+    }
+
+    func testSidebarSearchAndCommandPaletteHaveSeparateKeyboardFlows() {
+        let app = launchApp()
+        defer { app.terminate() }
+        app.typeKey("f", modifierFlags: .command)
+        let search = app.textFields["conversation-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        pasteText("nothing-matches-this-chat", app: app)
+        XCTAssertEqual(search.value as? String, "nothing-matches-this-chat")
+        XCTAssertEqual(composer(in: app).value as? String, "")
+        app.typeKey("k", modifierFlags: .command)
+        let palette = app.textFields["command-palette-search"]
+        XCTAssertTrue(palette.waitForExistence(timeout: 5))
+        pasteText("Devices", app: app)
+        XCTAssertEqual(palette.value as? String, "Devices")
+        app.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(app.staticTexts["Remote access"].waitForExistence(timeout: 5))
+    }
+
+    func testComposerGrowsAndShrinksWithoutClipping() {
+        let app = launchApp(size: "900x700")
+        defer { app.terminate() }
+        let field = composer(in: app)
+        let original = field.frame.height
+        field.click()
+        for index in 1...4 {
+            pasteText("Draft line \(index)", app: app)
+            app.typeKey(.return, modifierFlags: .shift)
+        }
+        XCTAssertGreaterThan(composer(in: app).frame.height, original)
+        assertComposerBounds(app)
+        app.typeKey("a", modifierFlags: .command); app.typeKey(.delete, modifierFlags: [])
+        XCTAssertEqual(composer(in: app).value as? String, "")
+        assertComposerBounds(app)
+    }
+
+    func testModelsAndProviderRowsStayInsideNormalAndNarrowWindows() {
+        for size in ["1240x840", "520x700"] {
+            let app = launchApp(size: size, screen: "settings-models")
+            let window = app.windows.firstMatch
+            let filter = app.textFields["Filter models"]
+            XCTAssertTrue(filter.waitForExistence(timeout: 10))
+            XCTAssertLessThanOrEqual(filter.frame.maxX, window.frame.maxX - 12)
+            let providers = app.radioButtons["Providers"]
+            XCTAssertTrue(providers.exists)
+            providers.click()
+            let providerSearch = app.textFields["Find a provider"]
+            XCTAssertTrue(providerSearch.waitForExistence(timeout: 5))
+            XCTAssertLessThanOrEqual(providerSearch.frame.maxX, window.frame.maxX - 12)
+            app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "ChatGPT,")).firstMatch.click()
+            XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
+            XCTAssertLessThanOrEqual(app.buttons["Done"].frame.maxX, window.frame.maxX)
+            app.terminate()
+        }
+    }
+
+    func testDelegationIsInlineAndApprovalsRemainAccessible() {
+        let app = launchApp(screen: "delegation")
+        defer { app.terminate() }
+        let work = app.descendants(matching: .any)["inline-specialist-work"]
+        XCTAssertTrue(work.waitForExistence(timeout: 5))
+        let review = app.buttons["Review"].firstMatch
+        if !review.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        XCTAssertTrue(review.exists)
+        review.click()
+        XCTAssertTrue(app.buttons["Specialist work pane"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Allow"].firstMatch.exists)
+        XCTAssertFalse(app.buttons["Bots"].exists)
+        XCTAssertFalse(app.buttons["Team task"].exists)
+        assertComposerBounds(app)
+    }
+
+    func testDevicesShowsStatusPairingAndSharedPermissions() {
+        let app = launchApp(screen: "devices")
+        defer { app.terminate() }
+        XCTAssertTrue(app.staticTexts["Remote access"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Running"].exists)
+        XCTAssertTrue(app.staticTexts["2 paired clients"].exists)
+        XCTAssertTrue(app.staticTexts["482 716"].exists)
+        XCTAssertTrue(app.staticTexts["Sharing"].exists)
+        XCTAssertFalse(app.buttons["Enable remote access"].exists)
+    }
+
+    func testAppearanceControlsFitAtMinimumWidthAndPreserveOLED() {
         let app = launchApp(size: "520x700", screen: "settings-general", appearance: "oled")
         defer { app.terminate() }
         let window = app.windows.firstMatch
-        let capture = XCTAttachment(screenshot: window.screenshot())
-        capture.name = "mac-minimum-settings"
-        capture.lifetime = .keepAlways
-        add(capture)
-        let appearance = window.descendants(matching: .any)
-            .matching(identifier: "instrument-segmented").firstMatch
-        XCTAssertTrue(appearance.waitForExistence(timeout: 10))
-        XCTAssertLessThanOrEqual(appearance.frame.maxX, window.frame.maxX - 16)
-        let typeface = window.popUpButtons.matching(NSPredicate(
-            format: "label CONTAINS %@", "Typeface")).firstMatch
-        XCTAssertTrue(typeface.exists)
-        XCTAssertLessThanOrEqual(typeface.frame.maxX, window.frame.maxX - 16)
+        let oled = app.radioButtons["OLED"]
+        XCTAssertTrue(oled.waitForExistence(timeout: 10))
+        XCTAssertLessThanOrEqual(oled.frame.maxX, window.frame.maxX - 12)
+        XCTAssertTrue(app.staticTexts["Appearance"].exists)
+        capture(app, name: "settings-oled-minimum")
     }
 
-    func testConversationsSelectionMeetsSidebarCorner() {
-        for appearance in ["oled", "dark", "light"] {
-            assertSidebarCorner(appearance: appearance)
-        }
-    }
-
-    private func assertSidebarCorner(appearance: String) {
-        let app = launchApp(screen: "chat", appearance: appearance)
-        defer { app.terminate() }
-        let window = app.windows.firstMatch
-        let conversations = window.buttons["Conversations"]
-        XCTAssertTrue(conversations.waitForExistence(timeout: 10))
-        XCTAssertLessThanOrEqual(conversations.frame.minX - window.frame.minX, 2)
-
-        // Geometry alone missed the previous regression: the button met the
-        // edge while its rounded fill and mismatched corner patch left a dark
-        // wedge. Check the selected and unselected surfaces in each theme.
-        assertRowCorner(in: window, row: conversations,
-                        name: "conversations-\(appearance)")
-        window.buttons["Bots"].click()
-        assertRowCorner(in: window, row: conversations,
-                        name: "bots-\(appearance)")
-    }
-
-    private func assertRowCorner(in window: XCUIElement, row: XCUIElement,
-                                 name: String) {
-        let shot = window.screenshot()
-        let capture = XCTAttachment(screenshot: shot)
-        capture.name = "sidebar-corner-\(name)"
-        capture.lifetime = .keepAlways
-        add(capture)
-        guard let bitmap = NSBitmapImageRep(data: shot.pngRepresentation) else {
-            XCTFail("Could not decode the window screenshot")
-            return
-        }
-        let scaleX = CGFloat(bitmap.pixelsWide) / window.frame.width
-        let scaleY = CGFloat(bitmap.pixelsHigh) / window.frame.height
-        let rowX = row.frame.minX - window.frame.minX
-        let rowY = row.frame.minY - window.frame.minY
-        let patchX = Int((rowX + 5) * scaleX)
-        let faceX = Int((rowX + 65) * scaleX)
-        for offset in [3.0, 8.0] {
-            let y = Int((rowY + offset) * scaleY)
-            guard let patch = bitmap.colorAt(x: patchX, y: y)?.usingColorSpace(.deviceRGB),
-                  let face = bitmap.colorAt(x: faceX, y: y)?.usingColorSpace(.deviceRGB) else {
-                XCTFail("Could not sample the \(name) corner")
-                return
-            }
-            for (edge, interior) in zip(
-                [patch.redComponent, patch.greenComponent, patch.blueComponent],
-                [face.redComponent, face.greenComponent, face.blueComponent]
-            ) {
-                XCTAssertLessThan(abs(edge - interior), 0.06,
-                                  "The \(name) row must meet the corner at offset \(offset)")
-            }
-        }
-    }
-
-    func testBotsHeaderIsVisibleBelowToolbar() {
-        let app = launchApp(screen: "bots", appearance: "oled")
-        let back = app.buttons["Back to chat"]
-        XCTAssertTrue(back.waitForExistence(timeout: 10))
-        XCTAssertTrue(back.isHittable, "The titlebar must not cover the Bots header")
-    }
-
-    func testPolishCaptureMatrix() {
+    func testVisualPreviewMatrix() {
         for appearance in ["light", "dark"] {
-            for screen in ["chat", "settings-general", "settings-models", "bots"] {
+            for screen in ["welcome", "chat", "approvals", "delegation", "docking", "settings-models", "devices", "settings-general"] {
                 let app = launchApp(screen: screen, appearance: appearance)
-                XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
-                let capture = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
-                capture.name = "mac-\(screen)-\(appearance)"
-                capture.lifetime = .keepAlways
-                add(capture)
+                if screen == "settings-models" { XCTAssertTrue(app.textFields["Filter models"].waitForExistence(timeout: 5)) }
+                else if ["welcome", "chat", "approvals", "delegation", "docking"].contains(screen) { assertComposerBounds(app) }
+                capture(app, name: "redesign-\(screen)-\(appearance)")
                 app.terminate()
             }
         }
     }
 
-    func testComposerGrowsAndShrinksWithDraft() {
-        let app = launchApp(size: "1000x700")
-        let field = composer(in: app)
-        XCTAssertTrue(field.waitForExistence(timeout: 10))
-        let emptyHeight = field.frame.height
-        XCTAssertLessThan(emptyHeight, 40)
-        field.click()
-        XCTAssertEqual(field.frame.height, emptyHeight, accuracy: 2)
-        field.typeText("First line")
-        app.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: .shift)
-        field.typeText("Second line")
-        app.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: .shift)
-        field.typeText("Third line")
-        XCTAssertGreaterThan(field.frame.height, emptyHeight + 20)
-        XCTAssertLessThan(field.frame.height, 160)
-        app.typeKey("a", modifierFlags: .command)
-        app.typeKey(XCUIKeyboardKey.delete.rawValue, modifierFlags: [])
-        XCTAssertEqual(field.frame.height, emptyHeight, accuracy: 2)
-    }
-
-    func testPrimaryComposerControlsAreAccessibleAtLaunch() {
-        let app = launchApp()
-
-        XCTAssertTrue(composer(in: app).waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["Attach files"].exists)
-        XCTAssertTrue(app.buttons["Assistant mode"].exists)
-        XCTAssertTrue(app.buttons["Send"].exists)
-    }
-
-    func testComposerStartsReadyForTaskInput() {
-        let app = launchApp()
-        let editor = composer(in: app)
-
-        XCTAssertTrue(editor.waitForExistence(timeout: 10))
-        XCTAssertTrue(editor.isEnabled)
-        XCTAssertTrue(app.buttons["Assistant mode"].exists)
-        XCTAssertTrue(app.buttons["Tools"].exists)
-    }
-
-    /// The conversation library is the sidebar now: its destinations, the
-    /// session list, and the project row all live there.
-    func testHistoryNavigationIsAccessible() {
-        let app = launchApp()
-        let library = app.descendants(matching: .any)
-            .matching(identifier: "conversation-browser").firstMatch
-        XCTAssertTrue(library.waitForExistence(timeout: 10))
-        // The destinations are drawn rows (buttons) on the column's own
-        // surface, not system list cells: the label is the contract, not the
-        // element role.
-        for destination in ["Conversations", "Bots", "Devices"] {
-            XCTAssertTrue(app.staticTexts[destination].exists
-                          || app.buttons[destination].exists,
-                          "Sidebar destination missing a label: \(destination)")
+    /// Xcode's physical-key text injection drops dotted i on Turkish-QWERTY
+    /// layouts. Unicode paste tests draft fidelity without changing the Mac's
+    /// input source; navigation and shortcuts still use real key events.
+    private func pasteText(_ text: String, app: XCUIApplication) {
+        let clipboard = NSPasteboard.general
+        let saved = (clipboard.pasteboardItems ?? []).map { item -> NSPasteboardItem in
+            let copy = NSPasteboardItem()
+            for type in item.types { if let data = item.data(forType: type) { copy.setData(data, forType: type) } }
+            return copy
         }
-        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(
-            format: "label BEGINSWITH %@", "Project:")).firstMatch.exists)
-    }
-
-    /// ⌘F focuses the toolbar's conversation search and typing lands there —
-    /// and never reaches the composer.
-    func testCommandFFocusesChatSearch() {
-        let app = launchApp()
-        let search = app.searchFields.firstMatch
-        XCTAssertTrue(search.waitForExistence(timeout: 10))
-
-        app.typeKey("f", modifierFlags: .command)
-        app.typeKey("a", modifierFlags: .command)
-        app.typeText("x")
-
-        XCTAssertEqual(search.value as? String, "x")
-        XCTAssertEqual(composer(in: app).value as? String ?? "", "")
-    }
-
-    /// Typing in the toolbar's search filters the library and never submits a
-    /// prompt: the composer's draft must be untouched afterwards.
-    func testToolbarSearchFiltersWithoutSubmitting() {
-        let app = launchApp()
-        let search = app.searchFields.firstMatch
-        XCTAssertTrue(search.waitForExistence(timeout: 10))
-        search.click()
-        app.typeText("zzz-no-such-chat")
-        XCTAssertEqual(search.value as? String, "zzz-no-such-chat")
-        XCTAssertTrue(app.descendants(matching: .any)
-            .matching(identifier: "conversation-browser").firstMatch.exists)
-        XCTAssertEqual(composer(in: app).value as? String ?? "", "")
-    }
-
-    /// Collapsing the sidebar must not disturb the draft in the composer.
-    func testSidebarTogglePreservesDraft() {
-        let app = launchApp()
-        let editor = composer(in: app)
-        XCTAssertTrue(editor.waitForExistence(timeout: 10))
-        editor.click()
-        editor.typeText("Keep this draft")
-        let existingDraft = editor.value as? String
-        XCTAssertFalse(existingDraft?.isEmpty ?? true)
-
-        let toggle = app.buttons.matching(NSPredicate(
-            format: "label CONTAINS[c] %@", "sidebar")).firstMatch
-        if toggle.exists {
-            toggle.click()
-            XCTAssertEqual(editor.value as? String, existingDraft)
-            toggle.click()
-        }
-        XCTAssertEqual(editor.value as? String, existingDraft)
-    }
-
-    /// Every control the redesign introduced carries a name VoiceOver can
-    /// read: the toolbar buttons, the sidebar destinations, the search field,
-    /// the inspector rows, and the composer's primary action.
-    func testShellControlsAreNamedForAccessibility() {
-        let app = launchApp()
-        XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 10))
-
-        for name in ["New conversation", "Browser", "Simulator", "Diagnostics",
-                     "Session info", "More app actions"] {
-            // Menus report as pop-up buttons, so match on the name alone.
-            XCTAssertTrue(app.descendants(matching: .any)[name].exists,
-                          "Toolbar control missing a label: \(name)")
-        }
-        for destination in ["Conversations", "Bots", "Devices", "Settings"] {
-            XCTAssertTrue(app.staticTexts[destination].exists
-                          || app.buttons[destination].exists,
-                          "Sidebar destination missing a label: \(destination)")
-        }
-        XCTAssertTrue(app.buttons["Send"].exists)
-        XCTAssertTrue(app.buttons["Attach files"].exists)
-
-        // The inspector's rows must read as text, not colour alone.
-        app.buttons["Session info"].click()
-        let assistantRow = app.descendants(matching: .any).matching(NSPredicate(
-            format: "label BEGINSWITH %@", "Assistant:")).firstMatch
-        XCTAssertTrue(assistantRow.waitForExistence(timeout: 5))
-    }
-
-    func testCompactComposerStaysInsideWindow() {
-        let app = launchApp(size: "1000x700")
-        let editor = composer(in: app)
-        XCTAssertTrue(editor.waitForExistence(timeout: 10))
-        let bounds = app.windows.firstMatch.frame
-        XCTAssertGreaterThanOrEqual(editor.frame.minX, bounds.minX)
-        XCTAssertLessThanOrEqual(editor.frame.maxX, bounds.maxX)
-        let send = app.buttons["Send"]
-        XCTAssertTrue(send.exists)
-        XCTAssertLessThanOrEqual(send.frame.maxX, bounds.maxX)
-    }
-
-    func testModelsCatalogOpensAtNormalWidth() {
-        let app = launchApp(screen: "settings-models")
-        XCTAssertTrue(app.textFields["Filter models"].waitForExistence(timeout: 10))
-    }
-
-    /// The Models page section switch must be drivable from UI tests: the old
-    /// custom key row merged its accessibility frames, so a click always hit
-    /// the first key and the provider directory could not be opened.
-    func testProviderDirectorySegmentOpensProviderBrowser() {
-        let app = launchApp(screen: "settings-models")
-        XCTAssertTrue(app.textFields["Filter models"].waitForExistence(timeout: 10))
-
-        let providers = app.radioButtons["Providers"]
-        XCTAssertTrue(providers.waitForExistence(timeout: 5))
-        providers.click()
-
-        XCTAssertTrue(app.textFields["Find a provider"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons.matching(NSPredicate(
-            format: "label BEGINSWITH %@", "OpenAI")).firstMatch.waitForExistence(timeout: 5))
-    }
-
-    func testComposerKeepsOneSendAndOneModelControl() {
-        let app = launchApp()
-        let send = app.buttons["Send"]
-        XCTAssertTrue(send.waitForExistence(timeout: 10))
-        XCTAssertEqual(app.buttons.matching(identifier: "Send").count, 1)
-        XCTAssertTrue(app.buttons["Assistant mode"].exists)
-        let model = app.buttons.matching(NSPredicate(
-            format: "label BEGINSWITH %@", "Active model:")).firstMatch
-        XCTAssertTrue(model.exists)
-        XCTAssertEqual(app.buttons.matching(NSPredicate(
-            format: "label BEGINSWITH %@", "Active model:")).count, 1)
-    }
-
-    /// At the smallest supported size the composer stays reachable inside the
-    /// window and the toolbar keeps its search field.
-    func testMinimumWindowKeepsSearchAndComposer() {
-        let app = launchApp(size: "520x700")
-        let send = app.buttons["Send"]
-        XCTAssertTrue(send.waitForExistence(timeout: 10))
-        XCTAssertLessThanOrEqual(send.frame.maxX, app.windows.firstMatch.frame.maxX)
-        // At this width the toolbar legitimately moves the search field into
-        // the system overflow; it is asserted at a regular width instead.
-    }
-
-    func testDarkWelcomeRetainsTitleAndHardwareGeometry() {
-        let app = launchApp(appearance: "dark")
-        XCTAssertTrue(app.staticTexts["welcome-wordmark"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["Send"].exists)
-        XCTAssertTrue(app.buttons["Assistant mode"].exists)
-    }
-
-    func testDarkModelSearchAcceptsKeyboardInputAtMinimumWidth() {
-        let app = launchApp(size: "520x700", screen: "settings-models", appearance: "dark")
-        let search = app.textFields["Filter models"]
-        XCTAssertTrue(search.waitForExistence(timeout: 10))
-        search.click()
-        app.typeKey("a", modifierFlags: .command)
-        app.typeText("x")
-        XCTAssertEqual(search.value as? String, "x")
-        XCTAssertLessThanOrEqual(search.frame.maxX, app.windows.firstMatch.frame.maxX)
-    }
-
-    func testBotsComposerIsReadableAndNavigationLeavesBots() {
-        let app = launchApp(screen: "bots")
-        let editor = app.textViews["Task for Builder"]
-        XCTAssertTrue(editor.waitForExistence(timeout: 10))
-        let window = app.windows.firstMatch.frame
-        XCTAssertGreaterThan(editor.frame.width, window.width * 0.55)
-        XCTAssertGreaterThanOrEqual(editor.frame.height, 160)
-        XCTAssertLessThanOrEqual(editor.frame.height, 340)
-        XCTAssertLessThanOrEqual(editor.frame.maxY, window.maxY)
-
-        // The Bots dashboard is a destination of the main window; leaving via
-        // a panel toggle returns to the chat composer and its hardware.
-        let browserToggle = app.buttons.matching(identifier: "browser-toggle").firstMatch
-        browserToggle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
-        XCTAssertTrue(composer(in: app).waitForExistence(timeout: 10))
-        XCTAssertFalse(editor.exists)
-
-        // Bots is a sidebar destination now, not a toolbar toggle — a drawn
-        // row (button) on the column's own surface.
-        let botsDestination = app.buttons["Bots"].firstMatch
-        if botsDestination.exists {
-            botsDestination.click()
-        } else {
-            app.staticTexts["Bots"].firstMatch
-                .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
-        }
-        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        defer { clipboard.clearContents(); if !saved.isEmpty { clipboard.writeObjects(saved) } }
+        clipboard.clearContents(); clipboard.setString(text, forType: .string)
+        app.typeKey("v", modifierFlags: .command)
     }
 
     private func composer(in app: XCUIApplication) -> XCUIElement {
-        // The composer editor is a vertical-axis text field labelled
-        // "Task description"; query by label so a future TextEditor keeps
-        // the same contract.
-        app.textFields["Task description"]
+        let field = app.textFields["Task description"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        return field
     }
-
-    private func launchApp(size: String = "1320x856", screen: String = "welcome",
-                           appearance: String = "light") -> XCUIApplication {
-        let app: XCUIApplication
-        if let path = ProcessInfo.processInfo.environment["VAMP_UI_APP_PATH"] {
-            app = XCUIApplication(url: URL(fileURLWithPath: path))
-        } else {
-            app = XCUIApplication()
-        }
-        app.launchArguments += [
-            "--ui-smoke",
-            "--design-preview", screen, "--design-size", size,
-            "--design-appearance", appearance,
-            "-ApplePersistenceIgnoreState", "YES",
-            "-NSQuitAlwaysKeepsWindows", "NO",
-        ]
+    private func assertComposerBounds(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        let field = composer(in: app)
+        let window = app.windows.firstMatch
+        XCTAssertGreaterThanOrEqual(field.frame.minX, window.frame.minX, file: file, line: line)
+        XCTAssertLessThanOrEqual(field.frame.maxX, window.frame.maxX, file: file, line: line)
+        XCTAssertLessThanOrEqual(field.frame.maxY, window.frame.maxY - 8, file: file, line: line)
+        XCTAssertTrue(app.buttons["Send"].exists || app.buttons["Stop"].exists, file: file, line: line)
+    }
+    private func workspaceAction(_ title: String, app: XCUIApplication) {
+        app.menuBars.menuBarItems["Workspace"].click()
+        app.menuItems[title].click()
+    }
+    private func capture(_ app: XCUIApplication, name: String) {
+        let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+    }
+    private func launchApp(size: String = "1240x840", screen: String = "welcome", appearance: String = "light") -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-smoke", "--design-preview", screen, "--design-size", size,
+            "--design-appearance", appearance, "-ApplePersistenceIgnoreState", "YES", "-NSQuitAlwaysKeepsWindows", "NO"]
         if app.state != .notRunning { app.terminate() }
-        app.launch()
-        app.activate()
-        // Give SwiftUI's WindowGroup time to create its first window before
-        // invoking New Window. A two-second fallback raced slow cold launches
-        // and made subsequent queries match overlapping restored windows.
-        if !app.windows.firstMatch.waitForExistence(timeout: 15) {
-            app.menuBars.menuBarItems["File"].click()
-            app.menuItems["New Window"].click()
-        }
-        XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
-        XCTAssertEqual(app.windows.count, 1, "UI smoke previews should open one main window")
+        app.launch(); app.activate()
+        XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 15))
         return app
     }
 }

@@ -1,6 +1,6 @@
 # Qwen streaming progress
 
-Status: CORRECTNESS BASELINE VALIDATED — Q2.16 independent explicit 64-token parity and Q2.17 lifecycle closeout passed. This status applies only to the developer-only `referenceCompatibleExplicit` strategy; the user-facing fused production path remains experimental/unvalidated. The current 1,213-slot pool, official K=8 routing, model files, and release artifact remain unchanged. See QWEN-STREAMING-REPORT.md for the exact fixture, cancellation, switch, relaunch, and quiescence evidence.
+Current implementation (2026-09-28): explicit production attention, exact prefill-state reuse, and reusable expert slots with the 2 GiB default. The controlled 3 GiB experiment is complete. See [current implementation and measurements](QWEN-STREAMING-OPTIMIZATIONS-2026-09-28.md). The chronological notes below preserve intermediate findings; later validated outcomes supersede earlier status statements.
 
 Current workspace: Downloads/beetcode/BeetCode; Desktop source copy is not the implementation target.
 

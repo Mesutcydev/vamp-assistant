@@ -104,23 +104,13 @@ struct ConversationView: View {
                         .font(.headline)
                         .lineLimit(1)
                         .truncationMode(.tail)
-                        .frame(maxWidth: 170)
                         .padding(.horizontal, 4)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     let locked = store.isUpdatingAccess || !store.isConnected
-                    InstrumentKeyBank(
-                        selection: Binding(
-                            get: { store.isFullAccessSelected },
-                            set: { full in
-                                Task { await store.setAccessMode(autoMode: !full, fullAccess: full) }
-                            }),
-                        titles: ["AUTO", "FULL"],
-                        values: [false, true],
-                        isMono: true,
-                        size: .compact)
-                    .disabled(locked)
-                    .accessibilityLabel("Access mode")
+                    ConversationAccessMenu(isFullAccess: store.isFullAccessSelected, isLocked: locked) { full in
+                        Task { await store.setAccessMode(autoMode: !full, fullAccess: full) }
+                    }
                 }
                 .vampUtilityAction()
             }
@@ -319,6 +309,36 @@ struct ConversationView: View {
     }
 }
 
+private struct ConversationAccessMenu: View {
+    let isFullAccess: Bool
+    let isLocked: Bool
+    let onChange: (Bool) -> Void
+
+    var body: some View {
+        Menu {
+            Button(action: { onChange(false) }) {
+                Label("Auto", systemImage: isFullAccess ? "shield" : "checkmark.shield")
+            }
+            Button(action: { onChange(true) }) {
+                Label("Full access", systemImage: isFullAccess ? "checkmark.shield" : "shield")
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: isFullAccess ? "bolt.shield" : "shield")
+                Text(isFullAccess ? "Full" : "Auto")
+                    .font(.caption.weight(.semibold))
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
+            }
+            .foregroundStyle(RemoteInstrument.ink)
+            .frame(minHeight: 44)
+        }
+        .disabled(isLocked)
+        .accessibilityLabel("Access mode")
+        .accessibilityValue(isFullAccess ? "Full access" : "Auto")
+        .accessibilityHint("Choose whether changes require approval")
+    }
+}
+
 struct ConversationOpeningState: View {
     let message: String?
     let retry: () async -> Void
@@ -384,10 +404,9 @@ struct ConversationStatus: View {
             detailedStatus
             compactStatus
         }
-        .font(.caption2.monospaced())
-                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .font(.caption)
         .foregroundStyle(BeetTheme.secondaryText(appearance))
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 16)
         .padding(.vertical, verticalSizeClass == .compact ? 3 : 6)
         .frame(maxWidth: .infinity, minHeight: verticalSizeClass == .compact ? 26 : 34, alignment: .leading)
         .background(BeetTheme.readingSurface(appearance))
@@ -437,14 +456,12 @@ struct ConversationStatus: View {
 
     private var statusIdentity: some View {
         HStack(spacing: 7) {
-            Circle()
-                .fill(!isReachable ? RemoteInstrument.secondaryInk : (detail.error != nil ? RemoteInstrument.danger : (detail.isRunning || isSending ? RemoteInstrument.orange : RemoteInstrument.green)))
-                .frame(width: 5.5, height: 5.5)
-            Text((!isReachable ? "Offline" : detail.error != nil ? "Error" : isSending ? "Sending" : detail.isRunning ? detail.phase.capitalized : "Ready").uppercased())
+            RemoteSignal(color: !isReachable ? RemoteInstrument.secondaryInk : (detail.error != nil ? RemoteInstrument.danger : (detail.isRunning || isSending ? RemoteInstrument.orange : RemoteInstrument.green)),
+                         isActive: isReachable && (detail.isRunning || isSending))
+            Text(!isReachable ? "Offline" : detail.error != nil ? "Error" : isSending ? "Sending" : detail.isRunning ? detail.phase.capitalized : "Ready")
                 .fontWeight(.semibold)
             Text("·")
             Text(detail.mode == "code" || !(detail.workspacePath ?? "").isEmpty ? "Code" : "Chat")
-                .textCase(.uppercase)
                 .fontWeight(.semibold)
         }
     }

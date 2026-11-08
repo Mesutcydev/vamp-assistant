@@ -17,12 +17,15 @@ settings:
     EXCLUDED_ARCHS: x86_64
 
 packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    version: "2.10.0"
   MLX:
     url: https://github.com/ml-explore/mlx-swift
-    version: "0.31.6"
+    version: "0.32.3"
   MLXLM:
     url: https://github.com/ml-explore/mlx-swift-lm
-    version: "3.31.4"
+    version: "3.32.3"
   SwiftTransformers:
     url: https://github.com/huggingface/swift-transformers
     from: "1.3.0"
@@ -40,6 +43,8 @@ targets:
     resources:
       - App/Assets.xcassets
     dependencies:
+      - package: Sparkle
+        product: Sparkle
       - package: MLX
         products:
           - MLX
@@ -51,13 +56,30 @@ targets:
       - package: SwiftTransformers
         products:
           - Tokenizers
+    postBuildScripts:
+      - name: Embed signed inference runtimes
+        basedOnDependencyAnalysis: false
+        script: |
+          if [ "${VAMP_BUNDLE_RUNTIMES:-NO}" = YES ]; then
+            python3 "$PROJECT_DIR/scripts/embed-inference-runtimes.py" \
+              --source "$PROJECT_DIR/.release-runtimes" \
+              --destination "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Runtimes" \
+              --identity "$EXPANDED_CODE_SIGN_IDENTITY"
+          fi
     info:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: "Vamp Assistant"
         CFBundleIconName: AppIcon
-        CFBundleShortVersionString: "0.10.48"
-        CFBundleVersion: "127"
+        CFBundleShortVersionString: "0.10.55"
+        CFBundleVersion: "134"
+        SUFeedURL: https://mesutcydev.github.io/vamp-assistant/appcast.xml
+        SUPublicEDKey: "yjY7zlQpF4bDqZV/vVo21Am1NKtAFnypz2szzMvU4cc="
+        SUEnableAutomaticChecks: true
+        SUAutomaticallyUpdate: false
+        SUSendProfileInfo: false
+        SUVerifyUpdateBeforeExtraction: true
+        SURequireSignedFeed: true
         LSApplicationCategoryType: public.app-category.developer-tools
         LSMinimumSystemVersion: "15.0"
         NSHumanReadableCopyright: "Copyright © 2026 Vamp Assistant contributors"
@@ -85,6 +107,9 @@ targets:
         # Allow, forever.
         CODE_SIGN_IDENTITY: "Apple Development"
         DEVELOPMENT_TEAM: "438VSM6P5L"
+      configs:
+        Release:
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
 
   BeetCodeCLI:
     type: tool
@@ -161,7 +186,7 @@ targets:
     info:
       path: iOSApp/Info.plist
       properties:
-        CFBundleDisplayName: "Vamp Assist"
+        CFBundleDisplayName: "Vamp Companion"
         # xcodegen writes iOSApp/Info.plist from this block, so these were the real version —
         # the target's MARKETING_VERSION / CURRENT_PROJECT_VERSION settings below had no effect
         # on the shipped app at all, and a bump there silently produced an identically-numbered
@@ -169,14 +194,14 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         ITSAppUsesNonExemptEncryption: false
-        NSLocalNetworkUsageDescription: "Vamp Assistant connects to Vamp Assistant running on your trusted Mac."
-        NSCameraUsageDescription: "Vamp Assistant scans the one-time pairing QR code shown by your Mac."
-        NSMicrophoneUsageDescription: "Vamp Assistant can dictate text onto your Mac from the Control keyboard."
-        NSSpeechRecognitionUsageDescription: "Vamp Assistant turns on-device speech into keystrokes on your Mac."
+        NSLocalNetworkUsageDescription: "Vamp Companion connects to Vamp Assistant running on your trusted Mac."
+        NSCameraUsageDescription: "Vamp Companion scans the one-time pairing QR code shown by your Mac."
+        NSMicrophoneUsageDescription: "Vamp Companion can dictate text onto your Mac from the Control keyboard."
+        NSSpeechRecognitionUsageDescription: "Vamp Companion turns on-device speech into keystrokes on your Mac."
         LSApplicationQueriesSchemes:
           - tailscale
         NSAppTransportSecurity:
-          # Vamp Assistant is intentionally a private-network HTTP peer. The client enforces the
+          # Vamp Companion is intentionally a private-network HTTP peer. The client enforces the
           # LAN/Tailscale-only address policy before any request is made. Do not combine this
           # with NSAllowsLocalNetworking: on current iOS the fine-grained key causes the global
           # dynamic-IP allowance to be ignored. (Same rationale as vampstream-project.yml.)
@@ -196,10 +221,10 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.beetcode.remote.ios
-        PRODUCT_NAME: "Vamp Assistant"
+        PRODUCT_NAME: "Vamp Companion"
         PRODUCT_MODULE_NAME: BeetCodeRemoteIOS
-        MARKETING_VERSION: "0.10.48"
-        CURRENT_PROJECT_VERSION: "127"
+        MARKETING_VERSION: "0.10.54"
+        CURRENT_PROJECT_VERSION: "134"
         CODE_SIGN_ENTITLEMENTS: iOSApp/BeetCodeRemote.entitlements
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: iOSApp/Info.plist
@@ -212,6 +237,14 @@ targets:
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: ""
         DEVELOPMENT_TEAM: ""
+      configs:
+        Release:
+          # Scope distribution signing to the iOS device app. Command-line
+          # overrides also affect Swift package plugins and resource bundles.
+          CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]: scripts/ios-appstore.entitlements
+          CODE_SIGN_IDENTITY[sdk=iphoneos*]: "Apple Distribution"
+          DEVELOPMENT_TEAM[sdk=iphoneos*]: "PUH4GMFV56"
+          PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]: "Vamp Companion App Store"
     dependencies:
       - package: SwiftTerm
         products:
@@ -236,7 +269,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.beetcode.remote.ios.tests
         GENERATE_INFOPLIST_FILE: YES
-        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Vamp Assistant.app/Vamp Assistant"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Vamp Companion.app/Vamp Companion"
         BUNDLE_LOADER: "$(TEST_HOST)"
         SWIFT_STRICT_CONCURRENCY: complete
         SWIFT_APPROACHABLE_CONCURRENCY: YES

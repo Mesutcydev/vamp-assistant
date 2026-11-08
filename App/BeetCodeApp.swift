@@ -59,6 +59,7 @@ final class BeetCodeAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppUpdater.shared.start()
         // A state restoration that comes back empty leaves the app with no
         // window at all: AppKit asks SwiftUI's restorer for the saved window,
         // gets nothing (logged as `window=0x0`), and no window is ever
@@ -176,7 +177,7 @@ struct BeetCodeApp: App {
                 // Palette / typeface / text size live in Theme globals that
                 // SwiftUI cannot observe, so mirroring them from a `.task`
                 // would land a frame late and never force a redraw.
-                .modifier(ThemeSync(palette: settings.accentPalette,
+                .modifier(ThemeSync(palette: DesignPreviewScreen.fromLaunchArguments() == nil ? settings.accentPalette : .beetRed,
                                     typeface: settings.typeface,
                                     textSize: settings.textSize))
                 .task {
@@ -201,54 +202,7 @@ struct BeetCodeApp: App {
         }
         .defaultSize(width: 760, height: 680)
         .windowResizability(.contentMinSize)
-        .commands {
-            CommandGroup(replacing: .appSettings) {
-                Button("Settings…") {
-                    NotificationCenter.default.post(name: .openAppSettings, object: nil)
-                }
-                .keyboardShortcut(",", modifiers: [.command])
-            }
-            // ⌘M is macOS's standard Minimize shortcut; Model Manager gets
-            // ⇧⌘M so neither command fights the system.
-            CommandGroup(after: .newItem) {
-                Button("New Chat") {
-                    NotificationCenter.default.post(name: .newChat, object: nil)
-                }
-                .keyboardShortcut("n", modifiers: [.command])
-                Button("Stop Agent") {
-                    NotificationCenter.default.post(name: .stopAgent, object: nil)
-                }
-                .keyboardShortcut(
-                    ShortcutBinding(rawValue: settings.stopShortcut).keyEquivalent,
-                    modifiers: ShortcutBinding(rawValue: settings.stopShortcut).eventModifiers)
-                Button("Send") {
-                    NotificationCenter.default.post(name: .sendMessage, object: nil)
-                }
-                .keyboardShortcut(
-                    ShortcutBinding(rawValue: settings.sendShortcut).keyEquivalent,
-                    modifiers: ShortcutBinding(rawValue: settings.sendShortcut).eventModifiers)
-                Button("Toggle Plan Mode") {
-                    settings.planMode.toggle()
-                }
-                .keyboardShortcut(
-                    ShortcutBinding(rawValue: settings.planShortcut).keyEquivalent,
-                    modifiers: ShortcutBinding(rawValue: settings.planShortcut).eventModifiers)
-                Button("Model Manager…") {
-                    NotificationCenter.default.post(name: .openModelManager, object: nil)
-                }
-                .keyboardShortcut("M", modifiers: [.command, .shift])
-                Divider()
-                Button("Search Chats") {
-                    NotificationCenter.default.post(name: .focusChatSearch, object: nil)
-                }
-                .keyboardShortcut("f", modifiers: [.command])
-            }
-            CommandGroup(after: .help) {
-                Button("System Readiness…") {
-                    NotificationCenter.default.post(name: .openSystemReadiness, object: nil)
-                }
-            }
-        }
+        .commands { WorkspaceAppCommands() }
 
     }
 }
@@ -381,6 +335,7 @@ private enum QwenQ217RelaunchValidation {
 }
 
 extension Notification.Name {
+    static let openWorkspacePanel = Notification.Name("com.beetcode.openWorkspacePanel")
     static let openModelManager = Notification.Name("com.beetcode.openModelManager")
     static let openProviderSettings = Notification.Name("com.beetcode.openProviderSettings")
     static let openRemoteAccess = Notification.Name("com.beetcode.openRemoteAccess")

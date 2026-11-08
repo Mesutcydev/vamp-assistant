@@ -32,3 +32,6 @@ BeetCode.xcodeproj/
 
 # Ad-hoc derived-data dirs from scratch builds
 .build-*/
+
+# Verified release helper staging
+.release-runtimes/

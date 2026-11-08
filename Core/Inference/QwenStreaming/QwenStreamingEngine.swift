@@ -20,6 +20,8 @@ final class QwenStreamingEngine: LLMEngine, @unchecked Sendable {
     private var accessTrace: QwenStreamExpertAccessTrace?
     private var stores: QwenStreamTensorStoreSet?
     private var history: [ChatTurn] = []
+    private var promptState: QwenStreamPromptState?
+    private let optimizations: QwenStreamOptimizations
     private var scopedDirectory: URL?
     private var debugLifecycleObserver: (@Sendable (String) -> Void)?
     /// Attention strategy for the production streaming path. Defaults to
@@ -31,7 +33,10 @@ final class QwenStreamingEngine: LLMEngine, @unchecked Sendable {
     /// nil so the hot path performs no counter work.
     private var debugAttentionCounters: StreamQwen35AttentionDiagnosticCounters?
 
-    init(gate: GenerationGate) { self.gate = gate }
+    init(gate: GenerationGate, optimizations: QwenStreamOptimizations = .init()) {
+        self.gate = gate
+        self.optimizations = optimizations
+    }
     var loadedModelID: String? { get async { lock.withLock { loadedID } } }
     var stats: EngineStats { get async { lock.withLock { currentStats } } }
     var effectiveContextWindow: Int? { get async { lock.withLock { contextWindow > 0 ? contextWindow : nil } } }
@@ -52,7 +57,8 @@ final class QwenStreamingEngine: LLMEngine, @unchecked Sendable {
                          device.recommendedMaxWorkingSetSize)
         guard let budget = QwenStreamBudget.resolve(
             availableBytes: usable,
-            requestedContext: min(contextSize ?? 4096, 4096)) else {
+            requestedContext: min(contextSize ?? 4096, 4096),
+            poolCeiling: optimizations.poolCeilingBytes) else {
             throw EngineError.loadFailed("Not enough memory for Qwen text state and eight experts.")
         }
         let scoped = directory.startAccessingSecurityScopedResource()
@@ -116,7 +122,8 @@ final class QwenStreamingEngine: LLMEngine, @unchecked Sendable {
                 let accessTrace = ProcessInfo.processInfo.environment["BEETCODE_QWEN35_TRACE"] == "1"
                     ? QwenStreamExpertAccessTrace() : nil
                 let pool = try QwenStreamExpertPool(index: index, stores: stores,
-                    bytes: budget.poolBytes, slots: budget.slots, accessTrace: accessTrace)
+                    bytes: budget.poolBytes, slots: budget.slots, accessTrace: accessTrace,
+                    storage: self.optimizations.expertStorage)
                 self.scopedDirectory = scoped ? directory : nil
                 self.model = model
                 self.tokenizer = tokenizer
@@ -124,6 +131,7 @@ final class QwenStreamingEngine: LLMEngine, @unchecked Sendable {
                 self.pool = pool
                 self.accessTrace = accessTrace
                 self.history = []
+                self.promptState = nil
                 MLX.Memory.cacheLimit = 128 * 1024 * 1024
                 self.lock.withLock {
                     self.loadedID = modelID
@@ -179,6 +187,7 @@ final class QwenStreamingEngine: LLMEngine, @unchecked Sendable {
         counters: StreamQwen35AttentionDiagnosticCounters? = nil
     ) async {
         _ = try? await gate.run {
+            self.promptState = nil
             self.lock.withLock {
                 self.attentionStrategy = strategy
                 self.debugAttentionCounters = counters
@@ -212,8 +221,15 @@ final class QwenStreamingEngine: LLMEngine, @unchecked Sendable {
                             throw EngineError.notLoaded
                         }
                         let started = ContinuousClock.now
+                        // Consume once: a failed/cancelled/replayed request may
+                        // never publish a partially advanced checkpoint.
+                        var previousPromptState = self.promptState
+                        self.promptState = nil
                         var diagnostics = self.lock.withLock { self.currentStats.qwenStreaming ?? QwenStreamingDiagnostics() }
                         diagnostics.state = "interrupted"
+                        diagnostics.reusedPromptTokens = 0
+                        diagnostics.prefilledPromptTokens = 0
+                        diagnostics.expertStorage = pool.storage.rawValue
                         // Captured once per generation so the reported strategy
                         // cannot change underneath a running request.
                         let (generationAttentionStrategy, generationAttentionCounters) = self.lock.withLock {
@@ -383,7 +399,25 @@ final class QwenStreamingEngine: LLMEngine, @unchecked Sendable {
                         }
                         let parameters = GenerateParameters(temperature: Float(requestedTemperature))
                         let sampler = parameters.sampler()
-                        let cache = model.newCache(parameters: parameters)
+                        let prefillBatchSize = pool.maximumPrefillTokens
+                        let reusable = !replay && self.optimizations.reusePromptState
+                            && previousPromptState?.matches(prompt: prompt, thinking: thinking,
+                                attention: generationAttentionStrategy, groupSize: prefillBatchSize) == true
+                        let cache = reusable ? previousPromptState!.cache : model.newCache(parameters: parameters)
+                        var prefillOffset = reusable ? previousPromptState!.tokens.count : 0
+                        previousPromptState = nil
+                        diagnostics.reusedPromptTokens = prefillOffset
+                        diagnostics.prefilledPromptTokens = prompt.count - prefillOffset
+                        diagnostics.expertStorage = pool.storage.rawValue
+                        let checkpointLength = QwenStreamPromptState.checkpointLength(
+                            prompt: prompt, assistantStartToken: tokenizer.convertTokenToId("<|im_start|>"),
+                            groupSize: prefillBatchSize)
+                        var nextPromptState: QwenStreamPromptState?
+                        if reusable && checkpointLength == prefillOffset {
+                            nextPromptState = QwenStreamPromptState(tokens: Array(prompt.prefix(prefillOffset)),
+                                thinking: thinking, attention: generationAttentionStrategy,
+                                groupSize: prefillBatchSize, cache: cache)
+                        }
                         // AgentLoop sends the previous assistant turn with the
                         // next input. Accumulate only handed-in canonical turns.
                         if !replay { self.history = conversation }
@@ -395,11 +429,9 @@ final class QwenStreamingEngine: LLMEngine, @unchecked Sendable {
                         // bundles for one quantized matmul. Decode below stays
                         // single-token so its cache and routing contract is
                         // independent of this throughput optimization.
-                        let prefillBatchSize = pool.maximumPrefillTokens
                         self.stores?.setReadPhase(.prefill)
                         pool.setDebugLifecyclePhase("prefill")
                         self.notifyDebugLifecycle("prefill-start")
-                        var prefillOffset = 0
                         while prefillOffset < prompt.count {
                             try self.checkOwnership(id)
                             let end = min(prefillOffset + prefillBatchSize, prompt.count)
@@ -412,6 +444,11 @@ final class QwenStreamingEngine: LLMEngine, @unchecked Sendable {
                                 diagnosticCounters: generationAttentionCounters)
                             MLX.eval(logits!, cache.map { $0.state })
                             prefillOffset = end
+                            if !replay && self.optimizations.reusePromptState && end == checkpointLength {
+                                nextPromptState = QwenStreamPromptState(tokens: Array(prompt.prefix(end)),
+                                    thinking: thinking, attention: generationAttentionStrategy,
+                                    groupSize: prefillBatchSize, cache: cache)
+                            }
                         }
                         prefillCompleted = ContinuousClock.now
                         self.notifyDebugLifecycle("prefill-complete")
@@ -499,6 +536,8 @@ final class QwenStreamingEngine: LLMEngine, @unchecked Sendable {
                         } else {
                             diagnostics.finalizationSeconds = started.duration(to: finalized).qwenSeconds
                         }
+                        try self.checkOwnership(id)
+                        self.promptState = nextPromptState
                     }
                     self.finishOwnership(id)
                     continuation.finish()
@@ -537,13 +576,16 @@ final class QwenStreamingEngine: LLMEngine, @unchecked Sendable {
         }
         pending?.cancel()
         await pending?.value
+        // Do not bump the gate generation here: a new reply may already be
+        // queued behind the cancelled worker. Enqueue only a safe-point clear.
+        await gate.clearCacheWhenIdle { self.promptState = nil }
         if pending != nil {
             lock.withLock { currentStats.qwenStreaming?.cancellationSeconds = started.duration(to: .now).qwenSeconds }
         }
     }
     func reset() async {
         await cancelGeneration()
-        _ = try? await gate.run { self.history.removeAll() }
+        _ = try? await gate.run { self.history.removeAll(); self.promptState = nil }
     }
 
     /// Clears only reusable application expert entries after the generation
@@ -1856,6 +1898,7 @@ final class QwenStreamingEngine: LLMEngine, @unchecked Sendable {
             self.model = nil
             self.tokenizer = nil
             self.history = []
+            self.promptState = nil
             await self.stores?.closeAll()
             self.stores = nil
             self.scopedDirectory?.stopAccessingSecurityScopedResource()
@@ -1870,6 +1913,6 @@ final class QwenStreamingEngine: LLMEngine, @unchecked Sendable {
         }
     }
     func trimTransientMemory() async {
-        _ = try? await gate.run { self.pool?.trim(); MLX.Memory.clearCache() }
+        _ = try? await gate.run { self.promptState = nil; self.pool?.trim(); MLX.Memory.clearCache() }
     }
 }

@@ -172,6 +172,7 @@ private struct RemoteMacUnlockState: View {
     let message: String
     let topInset: CGFloat
     let bottomInset: CGFloat
+    let keyboardInset: CGFloat
     let submit: (String) async throws -> Void
     let dismiss: () -> Void
 
@@ -202,88 +203,93 @@ private struct RemoteMacUnlockState: View {
                     .padding(.horizontal, 18)
                     .padding(.top, max(topInset + 8, 58))
 
-                    Spacer(minLength: 20)
-
-                    VStack(spacing: 18) {
-                        ZStack {
-                            Circle()
-                                .fill(BeetTheme.surfaceStrong(appearance))
-                                .frame(width: 76, height: 76)
-                            Circle()
-                                .stroke(BeetTheme.line(appearance), lineWidth: 0.75)
-                                .frame(width: 76, height: 76)
-                            Image(systemName: "lock.open.fill")
-                                .font(.system(size: 28, weight: .medium))
-                                .foregroundStyle(BeetTheme.accentBright)
-                        }
-
-                        VStack(spacing: 8) {
-                            Text("SECURE REMOTE UNLOCK")
-                                .font(.caption2.weight(.bold))
-                                .tracking(1.1)
-                                .foregroundStyle(BeetTheme.secondaryText(appearance))
-                            Text("Mac is locked")
-                                .font(.title2.weight(.semibold))
-                                .foregroundStyle(RemoteInstrument.ink)
-                            Text(message)
-                                .font(.subheadline)
-                                .foregroundStyle(BeetTheme.secondaryText(appearance))
-                                .multilineTextAlignment(.center)
-                                .lineSpacing(2)
-                                .frame(maxWidth: 330)
-                        }
-
-                        SecureField("Mac login password", text: $password)
-                            .textContentType(.password)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .submitLabel(.go)
-                            .privacySensitive()
-                            .focused($passwordIsFocused)
-                            .onSubmit(submitPassword)
-                            .disabled(isSubmitting)
-                            .padding(.horizontal, 14)
-                            .frame(minHeight: 48)
-                            .modifier(RemoteGlassBackdrop(radius: 12, role: .control))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    ScrollView {
+                        VStack(spacing: 18) {
+                            ZStack {
+                                Circle()
+                                    .fill(BeetTheme.surfaceStrong(appearance))
+                                    .frame(width: 76, height: 76)
+                                Circle()
                                     .stroke(BeetTheme.line(appearance), lineWidth: 0.75)
+                                    .frame(width: 76, height: 76)
+                                Image(systemName: "lock.open.fill")
+                                    .font(.system(size: 28, weight: .medium))
+                                    .foregroundStyle(BeetTheme.accentBright)
                             }
 
-                        Button(action: submitPassword) {
-                            HStack(spacing: 8) {
-                                if isSubmitting { ProgressView().controlSize(.small) }
-                                Text(isSubmitting ? "Unlocking…" : "Unlock Mac")
+                            VStack(spacing: 8) {
+                                Text("SECURE REMOTE UNLOCK")
+                                    .font(.caption2.weight(.bold))
+                                    .tracking(1.1)
+                                    .foregroundStyle(BeetTheme.secondaryText(appearance))
+                                Text("Mac is locked")
+                                    .font(.title2.weight(.semibold))
+                                    .foregroundStyle(RemoteInstrument.ink)
+                                Text(message)
+                                    .font(.subheadline)
+                                    .foregroundStyle(BeetTheme.secondaryText(appearance))
+                                    .multilineTextAlignment(.center)
+                                    .lineSpacing(2)
+                                    .frame(maxWidth: 330)
                             }
-                            .font(.headline)
-                            .frame(maxWidth: .infinity, minHeight: 48)
-                        }
-                        .buttonStyle(RemotePrimaryButtonStyle())
-                        .tint(Color(white: 0.28))
-                        .disabled(password.isEmpty || password.count > 256 || isSubmitting)
 
-                        if let feedback {
-                            Text(feedback)
-                                .font(.caption)
-                                .foregroundStyle(feedback.hasPrefix("Unlock request sent")
-                                    ? BeetTheme.secondaryText(appearance)
-                                    : RemoteInstrument.orange)
+                            SecureField("Mac login password", text: $password)
+                                .textContentType(.password)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .submitLabel(.go)
+                                .privacySensitive()
+                                .focused($passwordIsFocused)
+                                .onSubmit(submitPassword)
+                                .disabled(isSubmitting)
+                                .padding(.horizontal, 14)
+                                .frame(minHeight: 48)
+                                .modifier(RemoteGlassBackdrop(radius: 12, role: .control))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(BeetTheme.line(appearance), lineWidth: 0.75)
+                                }
+
+                            Button(action: submitPassword) {
+                                HStack(spacing: 8) {
+                                    if isSubmitting { ProgressView().controlSize(.small) }
+                                    Text(isSubmitting ? "Unlocking…" : "Unlock Mac")
+                                }
+                                .font(.headline)
+                                .frame(maxWidth: .infinity, minHeight: 48)
+                            }
+                            .buttonStyle(RemotePrimaryButtonStyle())
+                            .tint(Color(white: 0.28))
+                            .disabled(password.isEmpty || password.count > 256 || isSubmitting)
+
+                            if let feedback {
+                                Text(feedback)
+                                    .font(.caption)
+                                    .foregroundStyle(RemoteInstrument.orange)
+                                    .multilineTextAlignment(.center)
+                                    .frame(maxWidth: .infinity)
+                            }
+
+                            Text("Available only through your encrypted Tailscale connection. The password is sent once, then cleared from this field.")
+                                .font(.caption2)
+                                .foregroundStyle(BeetTheme.secondaryText(appearance))
                                 .multilineTextAlignment(.center)
-                                .frame(maxWidth: .infinity)
+                                .frame(maxWidth: 310)
                         }
-
-                        Text("Available only through your encrypted Tailscale connection. The password is sent once, then cleared from this field.")
-                            .font(.caption2)
-                            .foregroundStyle(BeetTheme.secondaryText(appearance))
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: 310)
+                        .frame(maxWidth: 360)
+                        .padding(24)
+                        .remoteFaceplate()
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 20)
+                        .frame(maxWidth: .infinity, minHeight: max(
+                            0, proxy.size.height - max(topInset + 8, 58) - 44
+                                - max(keyboardInset, bottomInset) - 16))
                     }
-                    .frame(maxWidth: 360)
-                    .padding(24)
-                    .remoteFaceplate()
-                    .padding(.horizontal, 20)
-
-                    Spacer(minLength: max(bottomInset, 16) + 20)
+                    .scrollDismissesKeyboard(.interactively)
+                    // The streaming surface ignores safe areas, including the
+                    // keyboard. Reserve its actual inset for this form so the
+                    // submit button and failure text remain reachable.
+                    .padding(.bottom, max(keyboardInset, bottomInset) + 16)
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height)
             }
@@ -303,20 +309,19 @@ private struct RemoteMacUnlockState: View {
         guard !password.isEmpty, password.count <= 256, !isSubmitting else { return }
         let submittedPassword = password
         password = ""
+        passwordIsFocused = false
         feedback = nil
         isSubmitting = true
 
         Task { @MainActor in
+            defer { isSubmitting = false }
             do {
                 try await submit(submittedPassword)
-                feedback = "Unlock request sent. Waiting for the Mac…"
-                try? await Task.sleep(for: .seconds(4))
             } catch is CancellationError {
                 return
             } catch {
                 feedback = error.localizedDescription
             }
-            isSubmitting = false
             if password.isEmpty { passwordIsFocused = true }
         }
     }
@@ -434,8 +439,11 @@ struct RemoteControlView: View {
                                 ?? "Enter your Mac login password to unlock it remotely.",
                             topInset: proxy.safeAreaInsets.top,
                             bottomInset: proxy.safeAreaInsets.bottom,
+                            keyboardInset: keyboardPad,
                             submit: { password in
-                                try await store.unlockMac(password: password)
+                                let unlockedStatus = try await store.unlockMac(password: password)
+                                streamRestart.bump()
+                                self.status = unlockedStatus
                             },
                             dismiss: { dismiss() })
                     } else {
@@ -1128,7 +1136,9 @@ struct RemoteControlView: View {
             let generation = streamGeneration
             do {
                 diagnostics.breadcrumb("fetch /api/control")
-                status = try await store.macControlStatus()
+                let latestStatus = try await store.macControlStatus()
+                guard generation == streamGeneration else { continue }
+                status = latestStatus
                 guard let status, status.enabled, status.screenRecording, status.locked != true else {
                     stopAudio()
                     reconnectBanner = status?.locked == true ? "Mac locked · waiting for unlock…" : "Waiting for Mac Control…"

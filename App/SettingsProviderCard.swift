@@ -4,6 +4,7 @@ import SwiftUI
 struct ProviderCard: View {
     let provider: LLMProvider
     var initiallyExpanded = false
+    var onValidated: (() -> Void)? = nil
     @ObservedObject private var keyStore = APIKeyStore.shared
     @State private var keyDraft = ""
     @State private var modelDraft = ""
@@ -216,7 +217,7 @@ struct ProviderCard: View {
                     .accessibilityLabel("Refresh \(provider.displayName) model list")
                     .disabled(refreshingModels || (!keyAvailableForUse && !provider.keyOptional))
 
-                    Button("Test") { runTest() }
+                    Button("Test connection") { runTest() }
                         .buttonStyle(LFCapsuleButtonStyle())
                         .disabled(testState == .running || (!keyAvailableForUse && !provider.keyOptional))
                 }
@@ -280,7 +281,7 @@ struct ProviderCard: View {
         .padding(.vertical, Chrome.cardVPadding)
         .padding(.horizontal, Chrome.cardHPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surface.opacity(0.55),
+        .background(Theme.surface,
                     in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
             .strokeBorder(Theme.hairline, lineWidth: 0.75))
@@ -515,6 +516,7 @@ struct ProviderCard: View {
                 let answered = try await RemoteLLMClient.testConnection(
                     endpoint: endpoint, apiKey: key)
                 testState = .ok("Connected — answered as \(answered) (\(model))")
+                onValidated?()
             } catch {
                 // A valid credential can still be paired with a stale or
                 // account-inaccessible model id. Probe the catalog once so

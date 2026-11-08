@@ -53,6 +53,9 @@ struct PairingView: View {
                 }
             }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    RemoteWordmark()
+                }.vampUtilityAction()
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     if store.pairedComputers.count > 1 {
                         Button { showComputers = true } label: {
@@ -63,10 +66,7 @@ struct PairingView: View {
                     AppearanceMenuButton()
                 }
             }
-            // Matches the hero heading below it — two phrasings for one screen
-            // ("Connect to Mac" / "Connect your Mac") read as two destinations,
-            // and VoiceOver announced both.
-            .navigationTitle("Connect your Mac")
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .remoteNavigationChrome()
             .alert(store.errorTitle, isPresented: errorBinding) { Button("OK") { store.errorMessage = nil } }
@@ -92,72 +92,107 @@ struct PairingView: View {
 
 struct PairingHero: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 10) {
-                    pairingGlyph
-                    Text("VAMP ASSISTANT")
-                        .font(.caption.weight(.semibold))
-                        .tracking(1.35)
-                        .fixedSize(horizontal: true, vertical: false)
-                    Spacer(minLength: 8)
-                    remoteBadge
-                }
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        pairingGlyph
-                        Spacer(minLength: 12)
-                        remoteBadge
-                    }
-                    Text("VAMP\nASSISTANT")
-                        .font(.headline.weight(.semibold))
-                        .tracking(1.1)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+        VStack(alignment: .leading, spacing: 24) {
+            PairingDeviceIllustration()
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Your Mac, within reach.")
+                    .font(.largeTitle.weight(.bold))
+                    .tracking(-0.8)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                Text("Continue your conversations, approve tasks, and control your Mac from this device.")
+                    .font(.body)
+                    .foregroundStyle(RemoteInstrument.secondaryInk)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.bottom, 12)
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(RemoteInstrument.seam).frame(height: 0.75)
-            }
-            Text("Connect your Mac")
-                .font(RemoteInstrument.TypeStyle.title)
-                .tracking(-0.5)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityAddTraits(.isHeader)
-            Text("Bring your conversations, approvals, and Mac controls to this device.")
-                .font(.body)
-                .foregroundStyle(RemoteInstrument.secondaryInk)
-                .lineSpacing(3)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack(alignment: .top, spacing: 10) {
-                Text("01").font(RemoteInstrument.TypeStyle.metadata).foregroundStyle(RemoteInstrument.orange)
-                Text("Open Remote Sessions on your Mac").font(.subheadline)
-            }
-            HStack(alignment: .top, spacing: 10) {
-                Text("02").font(RemoteInstrument.TypeStyle.metadata).foregroundStyle(RemoteInstrument.orange)
-                Text("Scan the code with this device").font(.subheadline)
+            VStack(alignment: .leading, spacing: 14) {
+                PairingSetupStep(number: "1", title: "Open Remote Sessions", detail: "In Vamp Assistant on your Mac.")
+                PairingSetupStep(number: "2", title: "Scan the pairing code", detail: "Use this device to connect securely.")
             }
         }
         .foregroundStyle(RemoteInstrument.ink)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+}
 
-    private var pairingGlyph: some View {
-        Image(systemName: "desktopcomputer")
-            .font(.system(size: 20, weight: .regular))
-            .foregroundStyle(.white)
-            .frame(width: 42, height: 42)
-            .background(RemoteInstrument.darkInsert, in: RoundedRectangle(cornerRadius: 8))
-            .accessibilityHidden(true)
-    }
+private struct PairingDeviceIllustration: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var settled = false
 
-    private var remoteBadge: some View {
-        HStack(spacing: 4) {
-            Circle().fill(RemoteInstrument.orange).frame(width: 4, height: 4).accessibilityHidden(true)
-            Text("REMOTE").font(.caption2.monospaced())
+    var body: some View {
+        ZStack {
+            PairingMonitor()
+                .rotationEffect(.degrees(settled ? -5 : -8))
+                .offset(x: -34, y: settled ? -5 : 0)
+            PairingPocket()
+                .rotationEffect(.degrees(settled ? 7 : 12))
+                .offset(x: settled ? 82 : 94, y: 17)
         }
-        .foregroundStyle(RemoteInstrument.secondaryInk)
-        .fixedSize(horizontal: true, vertical: false)
+        .frame(width: 280, height: 154)
+        .frame(maxWidth: .infinity)
+        .onAppear { settled = true }
+        .animation(reduceMotion ? nil : .spring(response: 0.5, dampingFraction: 0.86), value: settled)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct PairingMonitor: View {
+    var body: some View {
+        VStack(spacing: 6) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12).fill(RemoteInstrument.pearl)
+                RoundedRectangle(cornerRadius: 8).fill(RemoteInstrument.console).padding(6)
+                RemoteBeaconMark(ink: Color(red: 0.96, green: 0.96, blue: 0.95), size: 72)
+            }
+            .frame(width: 172, height: 114)
+            .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(RemoteInstrument.housingRim.opacity(0.7), lineWidth: 1) }
+            RoundedRectangle(cornerRadius: 2).fill(RemoteInstrument.pearl)
+                .frame(width: 50, height: 5)
+        }
+        .shadow(color: .black.opacity(0.18), radius: 8, y: 6)
+    }
+}
+
+private struct PairingPocket: View {
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 18).fill(RemoteInstrument.darkInsert)
+            RoundedRectangle(cornerRadius: 14).fill(RemoteInstrument.pearl).padding(4)
+            VStack(spacing: 12) {
+                Capsule().fill(RemoteInstrument.darkInsert).frame(width: 23, height: 5)
+                RemoteBeaconMark(size: 40)
+                Image(systemName: "link")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 22, height: 22)
+                    .background(RemoteInstrument.beaconFill, in: Circle())
+            }
+        }
+        .frame(width: 78, height: 130)
+        .overlay { RoundedRectangle(cornerRadius: 18).strokeBorder(RemoteInstrument.housingRim.opacity(0.4), lineWidth: 0.75) }
+        .shadow(color: .black.opacity(0.22), radius: 8, y: 6)
+    }
+}
+
+private struct PairingSetupStep: View {
+    let number: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(number).font(.caption.weight(.semibold))
+                .foregroundStyle(BeetTheme.accentBright)
+                .frame(width: 28, height: 28)
+                .background(RemoteInstrument.recess, in: Circle())
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.subheadline.weight(.semibold))
+                Text(detail).font(.caption).foregroundStyle(RemoteInstrument.secondaryInk)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -193,7 +228,7 @@ struct PairingActions: View {
                 .padding(.vertical, 2)
             }
             VStack(alignment: .leading, spacing: 12) {
-                VampMicroLabel(title: "PAIR WITH YOUR MAC")
+                Text("Connect your Mac").font(.headline).accessibilityAddTraits(.isHeader)
             Button(action: onScan) {
                 HStack(spacing: 12) {
                     Image(systemName: "qrcode.viewfinder").font(.title2)
@@ -201,7 +236,7 @@ struct PairingActions: View {
                         Text("Scan pairing code").font(.headline)
                         Text("Use the code shown on your Mac").font(.caption)
                     }.frame(maxWidth: .infinity, alignment: .leading)
-                    Image(systemName: "arrow.up.right").font(.caption.weight(.semibold))
+                    Image(systemName: "chevron.right").font(.caption.weight(.semibold))
                 }.padding(.vertical, 14)
             }
                 .buttonStyle(RemotePrimaryButtonStyle())
@@ -314,7 +349,7 @@ struct RemoteField: View {
     var focusedField: FocusState<PairingField?>.Binding
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(title.uppercased()).font(.system(.caption2, design: .monospaced, weight: .medium)).tracking(0.8).foregroundStyle(BeetTheme.secondaryText(appearance))
+            Text(title).font(.subheadline.weight(.medium)).foregroundStyle(BeetTheme.secondaryText(appearance))
             TextField(placeholder, text: $text,
                       prompt: Text(placeholder).foregroundStyle(BeetTheme.secondaryText(appearance)))
                 .textContentType(field == .code ? .oneTimeCode : .URL)

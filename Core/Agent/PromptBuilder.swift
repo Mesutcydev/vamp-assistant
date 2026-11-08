@@ -449,6 +449,9 @@ enum PromptBuilder {
             guidance: names.contains("computer_status")
                 ? "Check `computer_status` first. If a required permission is missing, call approval-gated `computer_request_access` with only accessibility or screenRecording and a task-specific reason. Then observe with `computer_ui_tree` and prefer fresh refs for clicks, typing, and scrolling."
                 : "Always observe → act → re-observe; prefer fresh element refs because coordinates and old refs go stale after UI changes.")
+        add("Local audio, video, and speech",
+            tools: ["analyze_media", "generate_speech"],
+            guidance: "Requires a loaded local Omni GGUF model and its matching projector. Use analyze_media for workspace audio transcription/translation, image questions, or video frames plus soundtrack. Use generate_speech for a WAV artifact; report only the returned saved path. Video needs ffmpeg. These tools never upload media to a provider.")
         add("Vision",
             tools: ["describe_image"],
             guidance: "Use for screenshots and visual assets when pixel appearance matters.")
@@ -999,6 +1002,11 @@ enum ToolRouter {
                 "computer_status", "computer_ui_tree", "computer_screenshot",
                 "computer_click", "computer_type", "computer_key", "computer_scroll",
             ])
+        }
+
+        if has(["audio", "video", "speech", "transcribe", "transcription", "speak", "voice", "soundtrack", "omni"]) {
+            recognized = true
+            include(["analyze_media", "generate_speech"])
         }
 
         if has(["design", "image", "photo", "screenshot", "visual"]) {

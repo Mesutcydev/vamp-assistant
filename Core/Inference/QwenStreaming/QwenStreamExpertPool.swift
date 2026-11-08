@@ -5,8 +5,12 @@ import MLXLMCommon
 /// Owned exclusively by the shared GenerationGate. No graph escapes evaluate:
 /// selected bundles remain pinned until the gathered output is evaluated.
 final class QwenStreamExpertPool: @unchecked Sendable {
+    enum Storage: String, Sendable { case stacked, reusableSlots }
     struct Key: Hashable { let layer: Int; let expert: Int }
-    struct Bundle: @unchecked Sendable { let arrays: [String: MLXArray] }
+    struct Bundle: @unchecked Sendable {
+        let arrays: [String: MLXArray]
+        var payloads: [String: Data] = [:]
+    }
     struct Counters: Sendable {
         var hits = 0
         var misses = 0
@@ -27,6 +31,10 @@ final class QwenStreamExpertPool: @unchecked Sendable {
     }
     let capacityBytes: UInt64
     let capacitySlots: Int
+    let storage: Storage
+    private var bank: QwenStreamExpertBank?
+    private var slotByKey: [Key: Int] = [:]
+    private var freeSlots: [Int]
     private let accessTrace: QwenStreamExpertAccessTrace?
     private var routerTrace: QwenStreamRouterTrace?
     private(set) var debugPositionOffset: Int = 0
@@ -48,7 +56,8 @@ final class QwenStreamExpertPool: @unchecked Sendable {
     init(index: QwenStreamSafetensorsIndex, stores: QwenStreamTensorStoreSet,
          bytes: UInt64, slots: Int,
          accessTrace: QwenStreamExpertAccessTrace? = nil,
-         routerTrace: QwenStreamRouterTrace? = nil) throws {
+         routerTrace: QwenStreamRouterTrace? = nil,
+         storage: Storage = .reusableSlots) throws {
         let effective = min(slots, Int(bytes / QwenStreamArtifact.expertBundleBytes))
         guard effective >= QwenStreamArtifact.routingK else {
             throw EngineError.loadFailed("The expert cache cannot hold one token’s eight routed experts.")
@@ -57,6 +66,8 @@ final class QwenStreamExpertPool: @unchecked Sendable {
         self.stores = stores
         self.capacityBytes = bytes
         self.capacitySlots = effective
+        self.storage = storage
+        self.freeSlots = Array((0..<effective).reversed())
         self.accessTrace = accessTrace
         self.routerTrace = routerTrace
     }
@@ -157,12 +168,19 @@ final class QwenStreamExpertPool: @unchecked Sendable {
         let requiredEvictions = max(0, entries.count + missing.count - capacitySlots)
         if requiredEvictions > 0 {
             for _ in 0..<requiredEvictions {
-                guard let victim = lastUse.filter({ !pinned.contains($0.key) })
-                    .min(by: { $0.value < $1.value })?.key else {
+                // Avoid allocating a filtered dictionary on every eviction.
+                let victim = lastUse.lazy.filter { !pinned.contains($0.key) }
+                    .min { a, b in
+                        if a.value != b.value { return a.value < b.value }
+                        if a.key.layer != b.key.layer { return a.key.layer < b.key.layer }
+                        return a.key.expert < b.key.expert
+                    }?.key
+                guard let victim else {
                     throw EngineError.loadFailed("Expert demand exceeds cache capacity.")
                 }
                 entries[victim] = nil
                 lastUse[victim] = nil
+                if let slot = slotByKey.removeValue(forKey: victim) { freeSlots.append(slot) }
                 counters.evictions += 1
             }
         }
@@ -181,13 +199,32 @@ final class QwenStreamExpertPool: @unchecked Sendable {
         }
         notifyDebugLifecycle("expert-reads-complete:\(debugLifecyclePhase)")
         try Task.checkCancellation()
+        if storage == .reusableSlots && bank == nil {
+            let prefix = "language_model.model.layers.\(layer).mlp.switch_mlp."
+            let locations = try Dictionary(uniqueKeysWithValues: Self.parts.map {
+                ($0, try index.location(prefix + $0).row(0))
+            })
+            bank = try QwenStreamExpertBank(slots: capacitySlots, locations: locations)
+        }
         sequence &+= 1
         for key in orderedKeys {
             if entries[key] != nil {
                 counters.hits += 1
                 lastUse[key] = sequence
             } else if let bundle = loaded[key] {
-                entries[key] = bundle
+                if storage == .reusableSlots {
+                    guard let slot = freeSlots.popLast(), let bank else {
+                        throw EngineError.loadFailed("Qwen expert slots are exhausted.")
+                    }
+                    do { try bank.commit(bundle.payloads, to: slot) }
+                    catch { freeSlots.append(slot); throw error }
+                    slotByKey[key] = slot
+                    // Only membership is retained: slot bytes replace the
+                    // per-expert MLX arrays and transient read buffers.
+                    entries[key] = Bundle(arrays: [:])
+                } else {
+                    entries[key] = bundle
+                }
                 lastUse[key] = sequence
                 counters.misses += 1
                 counters.completedExpertBundles += 1
@@ -197,7 +234,10 @@ final class QwenStreamExpertPool: @unchecked Sendable {
             }
         }
         counters.requestedBytes += UInt64(missing.count) * QwenStreamArtifact.expertBundleBytes
-        let localIndices = MLXArray(expertIDs.map { localByKey[Key(layer: layer, expert: $0)]! })
+        let localIndices = MLXArray(expertIDs.map { expert in
+            let key = Key(layer: layer, expert: expert)
+            return storage == .reusableSlots ? UInt32(slotByKey[key]!) : localByKey[key]!
+        })
             .reshaped(1, batchTokens, 8)
         let selected = try orderedKeys.map { key in
             guard let bundle = entries[key] else {
@@ -206,10 +246,15 @@ final class QwenStreamExpertPool: @unchecked Sendable {
             return bundle
         }
         func projection(_ name: String, _ input: MLXArray) -> MLXArray {
-            MLX.gatherQuantizedMM(
-                input, stacked(selected.map { $0.arrays[name + ".weight"]! }),
-                scales: stacked(selected.map { $0.arrays[name + ".scales"]! }),
-                biases: stacked(selected.map { $0.arrays[name + ".biases"]! }),
+            func component(_ suffix: String) -> MLXArray {
+                let part = name + "." + suffix
+                if let bank { return bank.components[part]!.array }
+                return stacked(selected.map { $0.arrays[part]! })
+            }
+            return MLX.gatherQuantizedMM(
+                input, component("weight"),
+                scales: component("scales"),
+                biases: component("biases"),
                 rhsIndices: localIndices, transpose: true, groupSize: 64, bits: 4,
                 mode: .affine, sortedIndices: false)
         }
@@ -224,9 +269,7 @@ final class QwenStreamExpertPool: @unchecked Sendable {
 
     private func load(_ key: Key) async throws -> Bundle {
         let prefix = "language_model.model.layers.\(key.layer).mlp.switch_mlp."
-        let parts = ["gate_proj", "up_proj", "down_proj"].flatMap { projection in
-            ["weight", "scales", "biases"].map { projection + "." + $0 }
-        }
+        let parts = Self.parts
         let locations = try parts.map { try index.location(prefix + $0).row(key.expert) }
         let byteCount = locations.reduce(UInt64(0)) { $0 + $1.byteCount }
         guard byteCount == QwenStreamArtifact.expertBundleBytes else {
@@ -241,6 +284,10 @@ final class QwenStreamExpertPool: @unchecked Sendable {
             return values
         }
         var arrays = [String: MLXArray]()
+        if storage == .reusableSlots {
+            return Bundle(arrays: [:], payloads: Dictionary(uniqueKeysWithValues:
+                parts.enumerated().map { ($0.element, payloads[$0.offset]!) }))
+        }
         for (i, part) in parts.enumerated() {
             arrays[part] = try QwenStreamArrays.make(payloads[i]!, location: locations[i])
         }
@@ -252,6 +299,13 @@ final class QwenStreamExpertPool: @unchecked Sendable {
         precondition(!busy)
         entries.removeAll()
         lastUse.removeAll()
+        slotByKey.removeAll()
+        freeSlots = Array((0..<capacitySlots).reversed())
+        bank = nil
+    }
+
+    private static let parts = ["gate_proj", "up_proj", "down_proj"].flatMap { projection in
+        ["weight", "scales", "biases"].map { projection + "." + $0 }
     }
 
     func debugState() -> DebugState {
@@ -266,14 +320,16 @@ final class QwenStreamExpertPool: @unchecked Sendable {
 
 enum QwenStreamArrays {
     static func make(_ data: Data, location: QwenStreamTensorLocation) throws -> MLXArray {
-        let dtype: DType
+        MLXArray(data, location.shape, dtype: try dtype(location))
+    }
+
+    static func dtype(_ location: QwenStreamTensorLocation) throws -> DType {
         switch location.dtype {
-        case .u32: dtype = .uint32
-        case .bf16: dtype = .bfloat16
-        case .f16: dtype = .float16
-        case .f32: dtype = .float32
+        case .u32: return .uint32
+        case .bf16: return .bfloat16
+        case .f16: return .float16
+        case .f32: return .float32
         default: throw EngineError.loadFailed("Unsupported Qwen tensor dtype.")
         }
-        return MLXArray(data, location.shape, dtype: dtype)
     }
 }

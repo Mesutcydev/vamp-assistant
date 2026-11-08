@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Vamp Assist</string>
+	<string>Vamp Companion</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -32,13 +32,13 @@
 		<true/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>Vamp Assistant scans the one-time pairing QR code shown by your Mac.</string>
+	<string>Vamp Companion scans the one-time pairing QR code shown by your Mac.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Vamp Assistant connects to Vamp Assistant running on your trusted Mac.</string>
+	<string>Vamp Companion connects to Vamp Assistant running on your trusted Mac.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Vamp Assistant can dictate text onto your Mac from the Control keyboard.</string>
+	<string>Vamp Companion can dictate text onto your Mac from the Control keyboard.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Vamp Assistant turns on-device speech into keystrokes on your Mac.</string>
+	<string>Vamp Companion turns on-device speech into keystrokes on your Mac.</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

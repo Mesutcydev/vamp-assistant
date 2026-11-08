@@ -80,7 +80,7 @@ final class RemoteNotificationCenter: NSObject, UNUserNotificationCenterDelegate
         case "approval": title = "Approval needed on \(computerName)"
         case "question": title = "Question from \(computerName)"
         case "plan": title = "Plan ready on \(computerName)"
-        default: title = "Vamp Assistant needs attention"
+        default: title = "Vamp Companion needs attention"
         }
         post(
             id: "session-attention-\(computerID?.uuidString ?? "legacy")-\(detail.id.uuidString)-\(signature)",

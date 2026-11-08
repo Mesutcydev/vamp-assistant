@@ -1058,6 +1058,15 @@ final class GGUFMetadataTests: XCTestCase {
         XCTAssertEqual(metadata?.modelName, "Test Model")
     }
 
+    func testParsesPackedFileTypeIndependentlyOfName() {
+        let data = header([
+            ("general.architecture", .string("qwen35")),
+            ("general.name", .string("Renamed Import")),
+            ("general.file_type", .uint32(143)),
+        ])
+        XCTAssertEqual(GGUFMetadata.parse(data)?.fileType, 143)
+    }
+
     func testSingleContextLengthCandidateResolvesWithoutArchitecture() {
         let data = header([
             ("mystery.context_length", .uint64(4_096)),

@@ -415,6 +415,8 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
     /// The active HTTP relay task. Retaining it makes Stop cancel the request
     /// instead of waiting for llama-server to finish the full response.
     private var generationTask: Task<Void, Never>?
+    private var mediaTask: Task<OmniMediaResult, Error>?
+    private var mediaID: UUID?
     private var generationID: UUID?
     /// Compact task-specific catalog supplied by AgentLoop. llama-server can
     /// apply the model's native tool template instead of relying only on the
@@ -438,17 +440,22 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
     /// adapter without deleting it.
     private let loraScale: Double
     private let preferredRuntime: ManagedInferenceRuntime?
+    private let resolveCompatibilityRuntime: @Sendable (String, String?, Int?) -> ManagedInferenceRuntime?
 
     init(
         experimentalDFlashEnabled: Bool = false,
         experimentalNGramEnabled: Bool = false,
         loraScale: Double = 1.0,
-        preferredRuntime: ManagedInferenceRuntime? = nil
+        preferredRuntime: ManagedInferenceRuntime? = nil,
+        resolveCompatibilityRuntime: @escaping @Sendable (String, String?, Int?) -> ManagedInferenceRuntime? = {
+            ManagedInferenceRuntime.resolveGGUFCompatibility(modelID: $0, architecture: $1, fileType: $2)
+        }
     ) {
         self.experimentalDFlashEnabled = experimentalDFlashEnabled
         self.experimentalNGramEnabled = experimentalNGramEnabled
         self.loraScale = loraScale
         self.preferredRuntime = preferredRuntime
+        self.resolveCompatibilityRuntime = resolveCompatibilityRuntime
     }
 
     var loadedModelID: String? {
@@ -513,14 +520,22 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
             ? Planner.loraFile(named: fileNames, modelID: modelID)
                 .map { directory.appendingPathComponent($0).path }
             : nil
-        let stableBinary = try Self.resolveServerBinary()
-        let updatedRuntime = preferredRuntime ?? ManagedInferenceRuntime.resolve(kind: .llamaMetal, modelID: modelID)
-        let binary = updatedRuntime?.executableURL() ?? stableBinary
-
-        // RAM-honest context sizing: sniff the transformer dims from the GGUF
-        // header and buy as many KV tokens as the budget left over after the
-        // weights affords. Unsniffable headers keep the conservative 32 K cap.
         let sniffed = GGUFMetadata.read(from: URL(fileURLWithPath: modelPath))
+        // Compatibility rules are independent of opt-in acceleration and
+        // apply to imported checkpoints as well as the built-in catalog.
+        let updatedRuntime = preferredRuntime
+            ?? resolveCompatibilityRuntime(modelID, sniffed?.architecture, sniffed?.fileType)
+            ?? ManagedInferenceRuntime.resolve(kind: .llamaMetal, modelID: modelID)
+        let updatedBinary = updatedRuntime?.executableURL()
+        let packedPrism = [141, 142, 143].contains(sniffed?.fileType ?? -1)
+        if packedPrism && updatedBinary == nil {
+            throw GGUFError.serverBinaryMissing("This packed Bonsai model requires the Prism runtime. Run scripts/install-inference-runtimes.py --runtime compatible, then reload it.")
+        }
+        let stableBinary = try? Self.resolveServerBinary()
+        guard let binary = updatedBinary ?? stableBinary else {
+            throw GGUFError.serverBinaryMissing(
+                "llama-server not found. Install a compatible runtime or llama.cpp to run GGUF models.")
+        }
         let candidateDraft = experimentalDFlashEnabled
             ? Planner.dflashDraft(modelID: modelID, metadata: sniffed)
             : nil
@@ -608,9 +623,9 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
                 mmprojPath: mmprojPath,
                 loraPath: loraPath)
         }
-        var usedUpdatedRuntime = binary != stableBinary
-        if attempt == nil, usedUpdatedRuntime {
-            Log.engine.warning("Updated Metal runtime could not load this checkpoint; retrying the existing GGUF runtime")
+        var usedUpdatedRuntime = updatedBinary != nil && binary == updatedBinary
+        if attempt == nil, !packedPrism, usedUpdatedRuntime, let stableBinary, stableBinary != binary {
+            Log.engine.warning("Model-specific runtime could not load this checkpoint; retrying the existing GGUF runtime")
             usedUpdatedRuntime = false
             usedSpeculation = .none
             attempt = try await launchServer(
@@ -648,6 +663,7 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
     }
 
     func unload() async {
+        withLock { mediaTask?.cancel(); mediaTask = nil; mediaID = nil }
         let (child, watchdog, generation) = withLock { () -> (Process?, Process?, Task<Void, Never>?) in
             let p = process
             let j = janitor
@@ -802,9 +818,25 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
             generate: { self.stream(adding: $0, maxTokens: $1, temperature: $2) })
     }
 
+    func processMedia(_ request: OmniMediaRequest) async throws -> OmniMediaResult {
+        let endpoint = withLock { port > 0 && loadedID != nil ? port : nil }
+        guard let endpoint else {
+            throw LocalOmniClient.Failure.unavailable("Load a local Omni GGUF model with its matching vision/audio projector first.")
+        }
+        let client = LocalOmniClient(baseURL: URL(string: "http://127.0.0.1:\(endpoint)")!)
+        let id = UUID()
+        let task = Task { try await client.perform(request) }
+        withLock { mediaTask?.cancel(); mediaTask = task; mediaID = id }
+        defer { withLock { if mediaID == id { mediaTask = nil; mediaID = nil } } }
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: { task.cancel() }
+    }
+
     func cancelGeneration() async {
         let task = withLock { generationTask }
         task?.cancel()
+        withLock { mediaTask?.cancel() }
     }
 
     /// True when the resident server was launched with a multimodal projector
@@ -962,6 +994,10 @@ final class GGUFEngine: LLMEngine, NativeToolConfigurable, @unchecked Sendable {
             mmprojPath: mmprojPath,
             loraPath: loraPath,
             loraScale: loraScale)
+        if let metadata = GGUFMetadata.read(from: URL(fileURLWithPath: modelPath)),
+           metadata.architecture == "lfm3", mmprojPath != nil {
+            child.arguments? += ["--reasoning", "off"]
+        }
         child.environment = ShellRunner.sanitizedEnvironment()
         child.standardOutput = FileHandle.nullDevice
         child.standardError = FileHandle.nullDevice

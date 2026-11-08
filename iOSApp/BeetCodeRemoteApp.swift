@@ -19,7 +19,7 @@ struct BeetCodeRemoteApp: App {
 private struct RemoteRootShell: View {
     let store: RemoteStore
     @AppStorage("remoteAppearanceSetting") private var setting = RemoteAppearanceSetting.dark
-    @AppStorage("remoteAccent") private var accent = AccentPalette.graphite
+    @AppStorage("remoteAccent") private var accent = AccentPalette.beetRed
     @Environment(\.colorScheme) private var systemScheme
     @Environment(\.scenePhase) private var scenePhase
 
@@ -144,7 +144,7 @@ extension EnvironmentValues {
 @Observable
 private final class RemotePaletteState {
     var palette = UserDefaults.standard.string(forKey: "remoteAccent")
-        .flatMap(AccentPalette.init(rawValue:)) ?? .graphite
+        .flatMap(AccentPalette.init(rawValue:)) ?? .beetRed
 }
 
 enum BeetTheme {
@@ -156,12 +156,14 @@ enum BeetTheme {
 
     /// Fill and foreground accents remain distinct for contrast in both themes.
     @MainActor static var accent: Color {
-        RemoteInstrument.adaptive(currentPalette.hexes.accentLight, 0x777777)
+        if currentPalette == .beetRed { return RemoteInstrument.beaconFill }
+        return RemoteInstrument.adaptive(currentPalette.hexes.accentLight, currentPalette.hexes.accentDark)
     }
 
     @MainActor static var accentBright: Color {
-        RemoteInstrument.adaptive(currentPalette.hexes.accentLight,
-            0xD0D0D0)
+        if currentPalette == .beetRed { return RemoteInstrument.beacon }
+        return RemoteInstrument.adaptive(currentPalette.hexes.accentLight,
+            currentPalette == .graphite ? 0xD4D4D5 : currentPalette.hexes.brightDark)
     }
 
     static let wash = Color.white.opacity(0.08)

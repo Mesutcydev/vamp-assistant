@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Unsigned iPhone/iPad IPA with the sideload layout tools expect:
-#   Payload/Vamp Assistant.app/...
+#   Payload/Vamp Companion.app/...
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -9,7 +9,7 @@ WORK="$ROOT/.packaging-beetcode-remote-ios"
 DERIVED="${BEETCODE_IOS_DERIVED_DATA:-$ROOT/.derived}"
 STAGING="$WORK/staging"
 OUTPUT="$ROOT/dist"
-APP="$DERIVED/Build/Products/Release-iphoneos/Vamp Assistant.app"
+APP="$DERIVED/Build/Products/Release-iphoneos/Vamp Companion.app"
 ENTITLEMENTS="$ROOT/iOSApp/BeetCodeRemote.entitlements"
 
 cd "$ROOT"
@@ -26,16 +26,16 @@ fi
 [[ -f "$ENTITLEMENTS" ]] || { echo "Missing entitlements: $ENTITLEMENTS" >&2; exit 1; }
 VERSION="$(plutil -extract CFBundleShortVersionString raw "$APP/Info.plist")"
 BUILD="$(plutil -extract CFBundleVersion raw "$APP/Info.plist")"
-NAME="Vamp-Assistant-iOS-${VERSION}-build-${BUILD}-unsigned.ipa"
+NAME="Vamp-Companion-iOS-${VERSION}-build-${BUILD}-unsigned.ipa"
 IPA="$OUTPUT/$NAME"
 [[ ! -e "$IPA" ]] || { echo "Artifact already exists: $IPA. Choose a new build number." >&2; exit 1; }
 
 find "$STAGING" -depth -delete 2>/dev/null || true
 mkdir -p "$STAGING/Payload"
-ditto --norsrc --noextattr "$APP" "$STAGING/Payload/Vamp Assistant.app"
+ditto --norsrc --noextattr "$APP" "$STAGING/Payload/Vamp Companion.app"
 # Sideload tools look for a .entitlements file; Xcode archives also ship .xcent.
-cp "$ENTITLEMENTS" "$STAGING/Payload/Vamp Assistant.app/BeetCode Remote.entitlements"
-cp "$ENTITLEMENTS" "$STAGING/Payload/Vamp Assistant.app/archived-expanded-entitlements.xcent"
+cp "$ENTITLEMENTS" "$STAGING/Payload/Vamp Companion.app/BeetCode Remote.entitlements"
+cp "$ENTITLEMENTS" "$STAGING/Payload/Vamp Companion.app/archived-expanded-entitlements.xcent"
 find "$STAGING" -name '.DS_Store' -delete
 rm -f "$IPA" "$IPA.sha256"
 (cd "$STAGING" && COPYFILE_DISABLE=1 zip -qryX "$IPA" Payload)
@@ -49,19 +49,19 @@ apps = sorted({n.split("/")[1] for n in names if n.startswith("Payload/") and n.
 top = sorted({n.split("/")[0] for n in names if n.split("/")[0]})
 if top != ["Payload"]:
     raise SystemExit(f"IPA top-level must be Payload/, got {top}")
-if apps != ["Vamp Assistant.app"]:
+if apps != ["Vamp Companion.app"]:
     raise SystemExit(f"expected one Payload app, got {apps}")
 required = {
-    "Payload/Vamp Assistant.app/BeetCode Remote.entitlements",
-    "Payload/Vamp Assistant.app/archived-expanded-entitlements.xcent",
-    "Payload/Vamp Assistant.app/Info.plist",
+    "Payload/Vamp Companion.app/BeetCode Remote.entitlements",
+    "Payload/Vamp Companion.app/archived-expanded-entitlements.xcent",
+    "Payload/Vamp Companion.app/Info.plist",
 }
 missing = sorted(required - set(names))
 if missing:
     raise SystemExit(f"IPA missing {missing}")
-print("ipa-structure=Payload/Vamp Assistant.app + .entitlements")
+print("ipa-structure=Payload/Vamp Companion.app + .entitlements")
 PY
-file "$APP/Vamp Assistant" | grep -q arm64
+file "$APP/Vamp Companion" | grep -q arm64
 [[ "$(plutil -extract CFBundleIdentifier raw "$APP/Info.plist")" == "com.beetcode.remote.ios" ]]
 [[ ! -e "$APP/embedded.mobileprovision" ]]
 [[ ! -d "$APP/_CodeSignature" ]]

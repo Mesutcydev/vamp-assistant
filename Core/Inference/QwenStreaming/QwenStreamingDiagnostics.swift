@@ -13,6 +13,9 @@ public struct QwenStreamingDiagnostics: Sendable, Equatable {
     var poolSlots = 0
     var contextTokens = 0
     var promptTokens = 0
+    var reusedPromptTokens = 0
+    var prefilledPromptTokens = 0
+    var expertStorage = "stacked"
     /// SHA-256 of the rendered token IDs, truncated to a safe diagnostic
     /// identifier. The prompt text itself is never persisted or logged.
     var inputHash: String?
@@ -128,6 +131,7 @@ public struct QwenStreamingDiagnostics: Sendable, Equatable {
         }
         return "Qwen3.5-35B-A3B · 4-bit · K=8 · native SSD streaming\n"
             + "\(promptTokens) prompt / \(generatedTokens) output · stop \(stopReason) · \(decodeCalls) decode calls\n"
+            + "Prompt state: \(reusedPromptTokens) reused / \(prefilledPromptTokens) processed · experts \(expertStorage)\n"
             + "\(load) · \(prompt) · \(timing) · \(ttft)\n"
             + "\(decode) · \(endToEnd) · total \(total)\n"
             + attentionText
@@ -139,7 +143,7 @@ public struct QwenStreamingDiagnostics: Sendable, Equatable {
             + (accessTraceGroups > 0
                 ? "Trace \(accessTraceKeys) keys / \(accessTraceGroups) groups · offline LRU \(simulationText)\n"
                 : "")
-            + "Explicit attention validated against the pinned MLX 0.31.1 Metal K=8 reference (64/64 IDs, zero true router membership failures). Not official Qwen certification or BF16 equivalence. No K reduction, adapters, vision, MTP, or prefix reuse."
+            + "Explicit attention validated against the pinned MLX 0.31.1 Metal K=8 reference (64/64 IDs, zero true router membership failures). Not official Qwen certification or BF16 equivalence. No K reduction, adapters, vision, or MTP. Prompt reuse requires an exact token prefix and complete recurrent state."
     }
 }
 

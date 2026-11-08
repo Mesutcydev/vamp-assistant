@@ -46,7 +46,7 @@ struct AgentTab: View {
                     SettingRow(label: "Command") {
                         TextField("my-agent --acp", text: $settings.customHarnessCommand)
                             .textFieldStyle(.roundedBorder)
-                            .frame(width: 260)
+                            .frame(maxWidth: 260)
                     }
                 }
                 if settings.selectedHarness != nil {
@@ -89,7 +89,7 @@ struct AgentTab: View {
                 SettingRow(label: "Temperature") {
                     HStack(spacing: Spacing.sm) {
                         Slider(value: $settings.temperature, in: 0...1.5, step: 0.05)
-                            .frame(width: 220)
+                            .frame(minWidth: 60, idealWidth: 180, maxWidth: 220)
                             .accessibilityLabel("Temperature")
                             .accessibilityValue(String(format: "%.2f", settings.temperature))
                         // Fixed-width value label so the slider never reflows.
@@ -101,7 +101,7 @@ struct AgentTab: View {
                 }
             }
 
-            ExperimentalInferenceCard()
+
 
             SettingsCard(
                 title: "Memory & Context",
@@ -160,7 +160,7 @@ struct AgentTab: View {
 
 /// Isolated experimental inference surface. It observes live engine status
 /// without widening the invalidation scope of the ordinary generation card.
-private struct ExperimentalInferenceCard: View {
+struct ExperimentalInferenceCard: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var settings = SettingsStore.shared
 
@@ -305,75 +305,11 @@ private struct ExperimentalInferenceCard: View {
 /// for Accessibility just by opening Settings.
 private struct ComputerControlCard: View {
     @ObservedObject private var settings = SettingsStore.shared
-    @State private var accessibilityGranted = false
-    @State private var screenRecordingGranted = false
-    @State private var requestedScreenRecording = false
-
     var body: some View {
-        SettingsCard(
-            title: "Computer control",
-            icon: "desktopcomputer.and.arrow.down",
-            footer: settings.computerControlEnabled
-                ? "Off the coding path by default. Auto mode and Full Access run routine clicks, keys, and scrolls without approval cards once macOS access is granted. Revoke in System Settings → Privacy & Security."
-                : "Off by default. When enabled, the agent can inspect and drive other Mac apps through the approval card."
-        ) {
-            SettingToggle(
-                label: "Allow the agent to control other Mac apps",
-                isOn: $settings.computerControlEnabled)
-            if settings.computerControlEnabled {
-                permissionRow(
-                    label: "Accessibility",
-                    value: "Read app UI trees; post mouse & keyboard events",
-                    granted: accessibilityGranted,
-                    grant: { ComputerPermission.requestAccessibility() })
-                permissionRow(
-                    label: "Screen Recording",
-                    value: requestedScreenRecording && !screenRecordingGranted
-                        ? "Quit and reopen Vamp Assistant to finish"
-                        : "Capture windows for vision models",
-                    granted: screenRecordingGranted,
-                    pending: requestedScreenRecording && !screenRecordingGranted,
-                    grant: {
-                        ComputerPermission.requestScreenRecording()
-                        requestedScreenRecording = true
-                    })
-            }
+        SettingsCard(title: "Computer control", icon: "desktopcomputer.and.arrow.down",
+                     footer: "Mac control follows your agent mode and macOS permissions. Change permission access in System Settings → Privacy & Security.") {
+            SettingToggle(label: "Allow the agent to control other Mac apps", isOn: $settings.computerControlEnabled)
+            if settings.computerControlEnabled { MacPermissionRows() }
         }
-        .onAppear(perform: refresh)
-        .onChange(of: settings.computerControlEnabled) { _, enabled in
-            if enabled { refresh() }
-        }
-        .onReceive(NotificationCenter.default.publisher(
-            for: NSApplication.didBecomeActiveNotification)) { _ in refresh() }
-    }
-
-    private func permissionRow(
-        label: String,
-        value: String,
-        granted: Bool,
-        pending: Bool = false,
-        grant: @escaping () -> Void
-    ) -> some View {
-        SettingRow(label: label, value: value) {
-            HStack(spacing: Spacing.sm) {
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(granted ? Theme.accentBright : (pending ? Theme.warning : Theme.textTertiary))
-                        .frame(width: 7, height: 7)
-                    Text(granted ? "Granted" : (pending ? "Quit and reopen" : "Not granted"))
-                        .font(.callout)
-                        .foregroundStyle(Theme.textSecondary)
-                }
-                if !granted && !pending {
-                    Button("Grant…", action: grant)
-                        .controlSize(.small)
-                }
-            }
-        }
-    }
-
-    private func refresh() {
-        accessibilityGranted = ComputerPermission.accessibilityGranted
-        screenRecordingGranted = ComputerPermission.screenRecordingGranted
     }
 }

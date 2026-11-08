@@ -376,6 +376,12 @@ actor EnginePool {
         return engine.streamReplay(turns, maxTokens: maxTokens, temperature: temperature)
     }
 
+    func processMedia(_ request: OmniMediaRequest) async throws -> OmniMediaResult {
+        guard let engine = activeEngine else { throw EngineError.notLoaded }
+        touch(activeModelID ?? "")
+        return try await engine.processMedia(request)
+    }
+
     func resetActive() async {
         await activeEngine?.reset()
         lastContextPressureLevel = .none

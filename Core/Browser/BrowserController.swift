@@ -57,6 +57,7 @@ final class BrowserController: ObservableObject {
     }
 
     private let session: BrowserSession?
+    var resourceSession: BrowserSession? { session }
     private var storedWebView: WKWebView?
     private var navigationRelay: NavigationRelay?
 
@@ -75,6 +76,8 @@ final class BrowserController: ObservableObject {
         configuration.waitsForConnectivity = true
         return URLSession(configuration: configuration)
     }()
+
+    @Published var navigationDraft = ""
 
     var webView: WKWebView { ensureWebView() }
 
@@ -105,7 +108,7 @@ final class BrowserController: ObservableObject {
     func reveal(openPanel: Bool = true) {
         BrowserPresentation.shared.controller = self
         if openPanel {
-            NotificationCenter.default.post(name: .openBrowserPanel, object: nil)
+            NotificationCenter.default.post(name: .openBrowserPanel, object: self)
         }
     }
 

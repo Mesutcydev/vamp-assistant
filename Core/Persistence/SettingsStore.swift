@@ -52,7 +52,7 @@ enum ExperimentalInferencePreferences {
 }
 
 /// App color appearance. `system` follows macOS; `light`/`dark` force it.
-/// Dark is the default. Kept Foundation-only (no SwiftUI) so the CLI target
+/// New installs follow the system. Kept Foundation-only (no SwiftUI) so the CLI target
 /// can compile this file; the SwiftUI `ColorScheme` mapping lives in the app.
 enum AppAppearance: String, CaseIterable, Codable, Identifiable, Sendable {
     case system
@@ -151,6 +151,17 @@ final class SettingsStore: ObservableObject {
         let persistentSettings = persistentDomainName.flatMap {
             defaults.persistentDomain(forName: $0)
         }
+        // Read explicit stored values, not registration-domain defaults.
+        let visualDefaultsMigration = "workspace.visual-defaults.v1"
+        if appearanceMigrationApplied && !defaults.bool(forKey: visualDefaultsMigration) {
+            if persistentSettings?[DefaultsKeys.appearance] == nil {
+                defaults.set(AppAppearance.dark.rawValue, forKey: DefaultsKeys.appearance)
+            }
+            if persistentSettings?[DefaultsKeys.accentPalette] == nil {
+                defaults.set(AccentPalette.graphite.rawValue, forKey: DefaultsKeys.accentPalette)
+            }
+        }
+        defaults.set(true, forKey: visualDefaultsMigration)
         let storedRemoteSessionLAN =
             persistentSettings?[DefaultsKeys.remoteSessionAllowLAN] as? Bool
         let hadRemoteSessionSetup =
@@ -174,8 +185,8 @@ final class SettingsStore: ObservableObject {
             DefaultsKeys.showReasoning: true,
             DefaultsKeys.planMode: false,
             DefaultsKeys.agentMode: AgentMode.auto.rawValue,
-            DefaultsKeys.appearance: AppAppearance.dark.rawValue,
-            DefaultsKeys.accentPalette: AccentPalette.graphite.rawValue,
+            DefaultsKeys.appearance: AppAppearance.system.rawValue,
+            DefaultsKeys.accentPalette: AccentPalette.beetRed.rawValue,
             DefaultsKeys.textSize: AppTextSize.comfortable.rawValue,
             // The registered default MUST match the getter's fallback: a
             // registered default is returned by string(forKey:) as a VALUE
@@ -254,11 +265,11 @@ final class SettingsStore: ObservableObject {
         }
     }
 
-    /// Color appearance. Defaults to native Dark; `system` follows macOS.
+    /// Color appearance. New installs follow the system; `system` follows macOS.
     var appearance: AppAppearance {
         get {
             let raw = defaults.string(forKey: DefaultsKeys.appearance)
-                ?? AppAppearance.dark.rawValue
+                ?? AppAppearance.system.rawValue
             if raw == "beet" { return .dark }
             return AppAppearance(rawValue: raw) ?? .light
         }
@@ -273,7 +284,7 @@ final class SettingsStore: ObservableObject {
     var accentPalette: AccentPalette {
         get {
             AccentPalette(rawValue: defaults.string(forKey: DefaultsKeys.accentPalette)
-                ?? AccentPalette.graphite.rawValue) ?? .graphite
+                ?? AccentPalette.beetRed.rawValue) ?? .beetRed
         }
         set {
             defaults.set(newValue.rawValue, forKey: DefaultsKeys.accentPalette)

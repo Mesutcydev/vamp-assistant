@@ -78,7 +78,7 @@ final class AgentSessionController: ObservableObject {
     /// default; Plan is also available from the composer without changing
     /// the rest of the session surface.
     @Published var selectedOpenCodeAgentName: String? = "build"
-    private(set) var activeSessionID: UUID?
+    @Published private(set) var activeSessionID: UUID?
 
     private var loop: AgentLoop?
     /// Retained separately from the agent loop so a stop or workspace switch
@@ -913,7 +913,7 @@ final class AgentSessionController: ObservableObject {
             promptSeed?.codexThreadID = nil
         }
         record.codexDynamicToolNames = dynamicToolNames
-        let codexContext = ToolContext(workspace: Workspace(root: workspace))
+        let codexContext = ToolContext(workspace: Workspace(root: workspace), originatingSessionID: sessionID)
         codexContext.linuxContainer = remoteLinuxContainer
         codexContext.browserSession = remoteBrowserSession
         codexDynamicExecutor = ToolExecutor(
@@ -2775,6 +2775,8 @@ final class AgentSessionController: ObservableObject {
         SimDescribeTool(),
         SimScreenshotTool(),
         DescribeImageTool(),
+        AnalyzeMediaTool(),
+        GenerateSpeechTool(),
         SimBuildRunTool(),
         // In-app browser: extraction is auto-approved; navigation/click/
         // type/eval go through the approval card like every other mutation.
@@ -2835,6 +2837,8 @@ final class AgentSessionController: ObservableObject {
         let botControlTools = botRun ? [] : Self.botControlTools
         if chatOnly {
             let statusTools: [any AgentTool] = [
+                AnalyzeMediaTool(),
+                GenerateSpeechTool(),
                 TailscaleStatusTool(),
                 DiskSpaceStatusTool(),
                 MacSystemStatusTool(),
@@ -2860,6 +2864,8 @@ final class AgentSessionController: ObservableObject {
     /// avoiding computer-use, app-scaffolding, build-run orchestration, and
     /// advanced browser schemas in every model prefill.
     static let constrainedLocalTools: [any AgentTool] = [
+        AnalyzeMediaTool(),
+        GenerateSpeechTool(),
         ReadFileTool(),
         WriteFileTool(),
         ListDirectoryTool(),

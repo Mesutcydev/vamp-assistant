@@ -3,8 +3,8 @@ import Foundation
 enum BotRunCommand: Sendable {
     case list(runID: UUID?)
     /// `project` is the caller's workspace; the app decides whether it is a real project.
-    case start(profileID: String, modelID: String?, prompt: String, project: URL)
-    case orchestrate(modelID: String?, prompt: String, project: URL)
+    case start(profileID: String, modelID: String?, prompt: String, project: URL, originatingSessionID: UUID? = nil)
+    case orchestrate(modelID: String?, prompt: String, project: URL, originatingSessionID: UUID? = nil)
     case steer(runID: UUID, message: String)
     case stop(runID: UUID)
     case respond(runID: UUID, action: String, value: String?)
@@ -23,7 +23,7 @@ struct OrchestrateBotsTool: AgentTool {
     func execute(_ call: ParsedToolCall, in context: ToolContext) async throws -> String {
         guard let prompt = call.string("prompt") else { throw ToolError.missingArgument("prompt") }
         return await BotRunToolBridge.shared.perform(
-            .orchestrate(modelID: call.string("modelID"), prompt: prompt, project: context.workspace.root))
+            .orchestrate(modelID: call.string("modelID"), prompt: prompt, project: context.workspace.root, originatingSessionID: context.originatingSessionID))
     }
 }
 
@@ -80,7 +80,7 @@ struct DelegateBotTool: AgentTool {
         guard let prompt = call.string("prompt") else { throw ToolError.missingArgument("prompt") }
         return await BotRunToolBridge.shared.perform(
             .start(profileID: specialist, modelID: call.string("modelID"), prompt: prompt,
-                   project: context.workspace.root))
+                   project: context.workspace.root, originatingSessionID: context.originatingSessionID))
     }
 }
 

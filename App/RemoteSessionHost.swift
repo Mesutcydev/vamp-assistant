@@ -1575,7 +1575,9 @@ final class RemoteSessionHost {
 
         do {
             try await remoteMacUnlockHandler(password)
-            return .response(json(["accepted": .bool(true)], status: 202))
+            return .response(json(["accepted": .bool(true), "unlocked": .bool(true)]))
+        } catch let error as LoginWindowInputService.UnlockError {
+            return .response(json(["error": .string(error.localizedDescription)], status: 423))
         } catch {
             return .response(json([
                 "error": .string("Remote Unlock could not deliver the login keystrokes. Check Accessibility and try again."),

@@ -74,7 +74,26 @@ final class BotRunCoordinator: ObservableObject {
 
     init(store: BotRunStore = .shared) {
         self.store = store
-        Task { await restore() }
+        if !ProcessInfo.processInfo.arguments.contains("--design-preview") { Task { await restore() } }
+    }
+
+    func installDesignPreview(originatingSessionID: UUID?) {
+        guard ProcessInfo.processInfo.arguments.contains("--design-preview") else { return }
+        runs = [("builder", "Builder", BotRunState.running, "Implementing the keyboard fix"),
+                ("reviewer", "Reviewer", BotRunState.needsApproval, "Review changes before applying"),
+                ("researcher", "Researcher", BotRunState.completed, "Accessibility guidance verified")].map { profile, name, state, phase in
+            var run = BotRunRecord.queued(profileID: profile, profileName: name, modelID: "preview", prompt: "Fix and verify the composer on every screen.")
+            run.originatingSessionID = originatingSessionID
+            run.sessionID = UUID()
+            run.state = state
+            run.phase = phase
+            run.latestOutput = state == .completed ? "The composer remains visible, and keyboard dismissal follows the active conversation." : ""
+            run.pendingInteraction = state == .needsApproval ? "Apply the reviewed changes to the project?" : nil
+            run.evidence = .init(phase: state == .completed ? .test : .code,
+                                confidence: state == .completed ? .verified : .running,
+                                required: [.execution], observed: state == .completed ? [.execution] : [])
+            return run
+        }
     }
 
     var activeRuns: [BotRunRecord] { runs.filter { !$0.state.isTerminal } }
@@ -91,8 +110,15 @@ final class BotRunCoordinator: ObservableObject {
     @discardableResult
     func start(
         profileID: String, profileName: String, modelID: String, prompt: String,
-        projectPath: String? = nil
+        projectPath: String? = nil, originatingSessionID: UUID? = nil
     ) -> Result<UUID, StartError> {
+        if ProcessInfo.processInfo.arguments.contains("--design-preview") {
+            var record = BotRunRecord.queued(profileID: profileID, profileName: profileName, modelID: modelID, prompt: prompt)
+            record.originatingSessionID = originatingSessionID
+            record.state = .running; record.phase = "Working"
+            runs.insert(record, at: 0)
+            return .success(record.id)
+        }
         let task = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !task.isEmpty else { return .failure(StartError(message: "Enter a task for this specialist.")) }
         guard !modelID.isEmpty else { return .failure(StartError(message: "Choose a model first.")) }
@@ -105,6 +131,7 @@ final class BotRunCoordinator: ObservableObject {
             modelID: modelID, prompt: task)
         record.evidence = Self.evidenceContract(for: profileID)
         record.projectPath = projectPath
+        record.originatingSessionID = originatingSessionID
         pendingIDs.append(record.id)
         record.queuePosition = pendingIDs.count
         runs.insert(record, at: 0)
@@ -116,7 +143,7 @@ final class BotRunCoordinator: ObservableObject {
     }
 
     @discardableResult
-    func orchestrate(prompt: String, modelID: String, projectPath: String? = nil) -> Result<UUID, StartError> {
+    func orchestrate(prompt: String, modelID: String, projectPath: String? = nil, originatingSessionID: UUID? = nil) -> Result<UUID, StartError> {
         let task = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !task.isEmpty else { return .failure(StartError(message: "Enter a workflow objective.")) }
         guard !modelID.isEmpty else { return .failure(StartError(message: "Choose a model first.")) }
@@ -134,6 +161,7 @@ final class BotRunCoordinator: ObservableObject {
                 modelID: modelID, prompt: node.prompt)
             record.workflowID = plan.id
             record.projectPath = projectPath
+            record.originatingSessionID = originatingSessionID
             record.evidence = BotRunEvidence(
                 phase: node.phase, confidence: .notRun,
                 required: node.requiredEvidence, observed: [])
@@ -161,6 +189,10 @@ final class BotRunCoordinator: ObservableObject {
     }
 
     func stop(runID: UUID) -> Bool {
+        if ProcessInfo.processInfo.arguments.contains("--design-preview") {
+            update(runID) { $0.state = .stopped; $0.phase = "Stopped"; $0.pendingInteraction = nil }
+            return true
+        }
         guard let run = record(runID), !run.state.isTerminal else { return false }
         pendingIDs.removeAll { $0 == runID }
         update(runID) { $0.phase = "Cancelling"; $0.updatedAt = Date() }
@@ -209,6 +241,10 @@ final class BotRunCoordinator: ObservableObject {
     /// UI callers await actual runtime acceptance before clearing their draft.
     func deliverCommand(runID: UUID, kind: BotRunCommandRecord.Kind,
                         payload: String? = nil) async -> Bool {
+        if ProcessInfo.processInfo.arguments.contains("--design-preview") {
+            update(runID) { $0.state = .running; $0.phase = "Working"; $0.pendingInteraction = nil }
+            return true
+        }
         guard !deliveringCommands.contains(runID), let run = record(runID) else { return false }
         let text = payload?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         switch kind {
@@ -258,6 +294,10 @@ final class BotRunCoordinator: ObservableObject {
     }
 
     func resume(runID: UUID) -> Bool {
+        if ProcessInfo.processInfo.arguments.contains("--design-preview") {
+            update(runID) { $0.state = .running; $0.phase = "Working" }
+            return true
+        }
         guard let run = record(runID), run.state == .recoverable || run.state == .interrupted else {
             return false
         }
@@ -531,7 +571,7 @@ final class BotRunCoordinator: ObservableObject {
         refreshQueuePositions()
     }
 
-    private func record(_ id: UUID) -> BotRunRecord? { runs.first { $0.id == id } }
+    func record(_ id: UUID) -> BotRunRecord? { runs.first { $0.id == id } }
 
     private func update(_ id: UUID, mutation: (inout BotRunRecord) -> Void) {
         guard let index = runs.firstIndex(where: { $0.id == id }) else { return }
@@ -660,6 +700,7 @@ final class BotRunCoordinator: ObservableObject {
     /// any of which could land after a newer one and walk run state backwards on disk. Chaining
     /// each write behind the previous one costs nothing and makes the last writer the newest.
     private func persist() {
+        guard !ProcessInfo.processInfo.arguments.contains("--design-preview") else { return }
         let snapshot = runs
         let previous = persistTask
         persistTask = Task { [store] in

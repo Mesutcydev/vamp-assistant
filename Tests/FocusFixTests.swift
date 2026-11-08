@@ -99,8 +99,11 @@ final class AppearanceConvergenceTests: XCTestCase {
         let dark = components(.darkAqua)
         XCTAssertGreaterThan(light.redComponent, 0.8)
         XCTAssertLessThan(dark.redComponent, 0.2)
-        XCTAssertEqual(dark.redComponent, dark.greenComponent, accuracy: 0.005)
-        XCTAssertEqual(dark.greenComponent, dark.blueComponent, accuracy: 0.005)
+        XCTAssertEqual(light.redComponent, 246.0 / 255, accuracy: 0.005)
+        XCTAssertEqual(light.greenComponent, 247.0 / 255, accuracy: 0.005)
+        XCTAssertEqual(dark.redComponent, 25.0 / 255, accuracy: 0.005)
+        XCTAssertEqual(dark.greenComponent, 25.0 / 255, accuracy: 0.005)
+        XCTAssertEqual(dark.blueComponent, 25.0 / 255, accuracy: 0.005)
     }
 }
 

@@ -1,6 +1,24 @@
-# Vamp Assistant iOS task list
+# Vamp Companion iOS task list
 
-## Release — paused by user; UI reset takes priority
+## TestFlight — resumed by user on 2026-10-13
+
+The iPhone/iPad client is now Vamp Companion. The user requested an App Store
+Connect record and a TestFlight upload after the reference-led design revision
+and restoration of the original composer.
+
+- [x] Rename the iOS product, settings, accessibility labels and permission copy.
+- [x] Create Vamp Companion, English (UK), SKU `vamp-companion-ios`, with Limited Access.
+- [x] Register `com.beetcode.remote.ios` and create its App Store distribution profile.
+- [x] Archive and export signed version 0.10.54, build 134, for iPhone and iPad.
+- [x] Validate the signature, distribution entitlements, architecture and privacy manifest.
+- [x] Verify the icon is opaque with identical decoded pixels.
+- [x] Run 47 selected regression/render checks and three composer UI checks.
+- [x] Upload build 134 to App Store Connect (app ID `6822249541`).
+- [x] Confirm Apple processing (`VALID`, ready for internal beta testing) and save the release receipt.
+
+Release details: [IOS-TESTFLIGHT-2026-10-13.md](IOS-TESTFLIGHT-2026-10-13.md).
+
+## Earlier sideload release — historical pause
 
 - [x] Fix filename double encoding in shared-file downloads.
 - [x] Guard Stop, queue cancellation and checkpoint undo against stale Mac connection completions.
@@ -28,4 +46,7 @@ Full brief: IOS-HARD-RESET-DESIGN-BRIEF.md. Supersedes the earlier chat-only bri
 
 Color: neutral grayscale Dark surfaces; latest brief permits tiny semantic LEDs and orange hardware markers. No green-tinted surfaces.
 
-Release state: build 92 was published before the stop request. Website deployment failed the apps.json freshness check and the public page still links the older build. Do not resume publication during this UI reset.
+Historical release state: build 92 was published before the earlier stop request.
+Website deployment failed the apps.json freshness check and the public page still
+linked the older build. The 2026-10-13 request above resumes App Store Connect and
+TestFlight work after the UI revision.

@@ -121,7 +121,7 @@ struct QwenStreamArrayLayout: Codable, Sendable, Equatable {
         // MLX's public Swift API exposes strides but not a view byte offset.
         self.byteOffset = nil
         self.viewStatus = isContiguous ? "contiguous-storage" : "strided-view"
-        self.device = Device.defaultDevice().deviceType?.rawValue ?? "unavailable"
+        self.device = Device.defaultDevice().deviceType.rawValue
         self.stream = StreamOrDevice.default.description
         self.rawSHA256 = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
     }

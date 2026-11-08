@@ -1,145 +1,95 @@
 import AppKit
 import SwiftUI
 
-// MARK: - Native window shell
-//
-// The window is a standard macOS three-column app: sidebar (destinations +
-// conversations), detail (transcript + composer), inspector (status and the
-// per-model controls). Everything here is a system control — the frame rails,
-// the painted status lamps, and the vertical FIXED fader they replaced were
-// custom drawings of things AppKit already provides.
-
-/// The sidebar's fixed destinations, above the conversation list.
-enum ShellDestination: String, Hashable, CaseIterable, Identifiable {
-    case conversations, bots, devices
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .conversations: "Conversations"
-        case .bots: "Bots"
-        case .devices: "Devices"
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .conversations: "bubble.left.and.bubble.right"
-        case .bots: "person.2"
-        case .devices: "iphone"
-        }
+enum ShellDestination: Hashable, Identifiable {
+    case conversations, devices, settings(SettingsView.Tab)
+    var id: String {
+        switch self { case .conversations: "chats"; case .devices: "devices"; case .settings: "settings" }
     }
 }
 
-/// The window's leading column: the fixed destinations, then the existing
-/// conversation library. The library view already owns session loading,
-/// selection-to-restore, rename/delete, import, and pinning — it is mounted
-/// here rather than reimplemented.
 struct ShellSidebar: View {
     @Binding var destination: ShellDestination
     @Binding var historySearch: String
+    var searchFocusRevision: Int
     @Binding var showRemoteAccess: Bool
     var onSettings: () -> Void
     var onOpenInNewWindow: (UUID) -> Void
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
-            destinations
-            SidebarDivider(inset: SidebarMetrics.inset)
-            if destination == .conversations {
-                SidebarView(showRemoteAccess: $showRemoteAccess,
-                            onClose: {},
-                            historySearch: $historySearch,
-                            onOpenInNewWindow: onOpenInNewWindow)
-            } else {
+            HStack(spacing: 10) {
+                Image(systemName: "sparkles").font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(Theme.accentText)
+                Text("Vamp Assistant").font(.system(size: 14, weight: .semibold))
                 Spacer(minLength: 0)
             }
-        }
-        // One plane for the whole column, flush with the window's leading,
-        // top and bottom edges — the library below is a region of it, not a
-        // panel of its own.
-        .sidebarSurface()
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            SidebarNavRow(title: "Settings", systemImage: "gearshape", action: onSettings)
-                .padding(.bottom, SidebarMetrics.navRowsBottomInset)
-        }
-    }
-
-    /// The fixed destinations. Rows are drawn on the column's own surface
-    /// instead of by a nested sidebar `List`: the system's selection slab put a
-    /// second grey panel inside the column, and its rows did not share the
-    /// workspace row's text axis.
-    private var destinations: some View {
-        VStack(spacing: SidebarMetrics.navRowSpacing) {
-            ForEach(ShellDestination.allCases) { item in
-                SidebarNavRow(title: item.title,
-                              systemImage: item.symbol,
-                              isSelected: destination == item,
-                              isTopRow: item == .conversations) {
-                    destination = item
-                }
+            .padding(.horizontal, 18).frame(height: 48)
+            VStack(spacing: 4) {
+                WorkspaceNavigationRow(title: "Chats", symbol: "bubble.left.and.bubble.right",
+                    selected: destination == .conversations) { destination = .conversations }
+                WorkspaceNavigationRow(title: "Devices", symbol: "iphone",
+                    selected: destination == .devices) { destination = .devices }
+            }.padding(.horizontal, 8)
+            Divider().padding(12)
+            switch destination {
+            case .conversations:
+                VampSearchField(placeholder: "Search chats", text: $historySearch,
+                                focus: $searchFocused, identifier: "conversation-search")
+                    .padding(.horizontal, 12).padding(.bottom, 8)
+                SidebarView(showRemoteAccess: $showRemoteAccess, onClose: {},
+                    historySearch: $historySearch, onOpenInNewWindow: onOpenInNewWindow)
+            case .devices:
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Continue anywhere").font(.system(size: 12, weight: .semibold))
+                    Text("Pair your phone or tablet to access this Mac’s conversations and tools.")
+                        .font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+                }.padding(.horizontal, 18)
+                Spacer(minLength: 0)
+            case .settings(let current):
+                VStack(spacing: 4) {
+                    ForEach(SettingsView.Tab.navigationTabs) { tab in
+                        WorkspaceNavigationRow(title: tab.rawValue, symbol: tab.icon,
+                            selected: current == tab) { destination = .settings(tab) }
+                    }
+                }.padding(.horizontal, 8)
+                Spacer(minLength: 0)
             }
+            WorkspaceNavigationRow(title: "Settings", symbol: "gearshape",
+                selected: isSettings) { onSettings() }
+                .padding(8)
         }
-        .padding(.top, SidebarMetrics.navRowsTopInset)
-        .padding(.bottom, SidebarMetrics.navRowsBottomInset)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Destinations")
+        .background(Theme.navigationSurface)
+        .foregroundStyle(Theme.textPrimary)
+        .onChange(of: searchFocusRevision) { _, _ in searchFocused = true }
     }
+    private var isSettings: Bool { if case .settings = destination { true } else { false } }
 }
 
-// MARK: - Toolbar search
-
-/// A real `NSSearchField` in the toolbar's centre. SwiftUI's `.searchable`
-/// puts its field wherever the platform chooses; this app needs it centred and
-/// sized like Safari's, so the native control is hosted directly — still the
-/// one toolbar owner, still AppKit's rendering, focus ring, and cancel button.
-struct ToolbarSearchField: NSViewRepresentable {
-    @Binding var text: String
-    var placeholder: String
-    /// Return in the field. Never submits a prompt — this field only navigates.
-    var onCommit: () -> Void = {}
-
-    func makeNSView(context: Context) -> NSSearchField {
-        let field = NSSearchField()
-        field.placeholderString = placeholder
-        field.delegate = context.coordinator
-        field.target = context.coordinator
-        field.action = #selector(Coordinator.commit(_:))
-        field.sendsWholeSearchString = false
-        field.sendsSearchStringImmediately = true
-        field.focusRingType = .default
-        // Low hugging is deliberate: the field shares its toolbar item with a
-        // transparent centring spacer, and the field must not stretch into it.
-        // A width constraint here loses to the toolbar's own required sizing
-        // (measured), so the width is held by the item instead — see
-        // `pinSearchFieldWidth()`.
-        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        return field
-    }
-
-    func updateNSView(_ field: NSSearchField, context: Context) {
-        context.coordinator.parent = self
-        if field.stringValue != text { field.stringValue = text }
-        field.placeholderString = placeholder
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    final class Coordinator: NSObject, NSSearchFieldDelegate {
-        var parent: ToolbarSearchField
-
-        init(_ parent: ToolbarSearchField) { self.parent = parent }
-
-        func controlTextDidChange(_ notification: Notification) {
-            guard let field = notification.object as? NSSearchField else { return }
-            parent.text = field.stringValue
+struct WorkspaceNavigationRow: View {
+    let title: String
+    let symbol: String
+    var selected = false
+    let action: () -> Void
+    @State private var hovering = false
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: symbol).font(.system(size: 14)).frame(width: 20)
+                    .foregroundStyle(selected ? Theme.accentText : Theme.textSecondary)
+                Text(title).font(.system(size: 13, weight: selected ? .semibold : .regular))
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10).frame(minHeight: 34)
+            .contentShape(Rectangle())
+            .background(selected ? Theme.accentSoft : hovering ? Theme.navigationRowHover : .clear,
+                        in: RoundedRectangle(cornerRadius: 6))
         }
-
-        @objc func commit(_ sender: NSSearchField) {
-            parent.text = sender.stringValue
-            parent.onCommit()
-        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 

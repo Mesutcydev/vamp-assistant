@@ -270,6 +270,8 @@ public final class MLXEngine: LLMEngine, @unchecked Sendable {
                                     continuation.yield(wire)
                                     wireOutput += wire
                                     emitted += 1
+                                case .rejectedToolCall(let rejection):
+                                    throw ToolError.invalidArguments("Model produced a rejected tool call: \(rejection.reason)")
                                 case .info(let info):
                                     completionInfo = info
                                 }
@@ -607,8 +609,8 @@ private final class UnifiedTiedQwen35TextModel: Module, LLMModel {
         base(inputs, cache: cache)
     }
 
-    func newCache(parameters: GenerateParameters?) -> [KVCache] {
-        base.newCache(parameters: parameters)
+    func newCache(parameters: GenerateParameters?) throws -> [KVCache] {
+        try base.newCache(parameters: parameters)
     }
 
     var loraLayers: [Module] { base.loraLayers }

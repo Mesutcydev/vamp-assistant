@@ -9,6 +9,7 @@ SIGNATURE="$(codesign -dvv "$APP" 2>&1)"
   echo "Public distribution requires a Developer ID Application signature." >&2; exit 1;
 }
 [[ "$SIGNATURE" == *"runtime"* ]] || { echo "Hardened runtime is missing." >&2; exit 1; }
+[[ "$SIGNATURE" == *"Timestamp="* ]] || { echo "A secure signing timestamp is missing." >&2; exit 1; }
 ENTITLEMENTS="$(codesign -d --entitlements - --xml "$APP" 2>/dev/null)"
 if [[ -n "$ENTITLEMENTS" ]] && [[ "$(printf '%s' "$ENTITLEMENTS" | plutil -extract com.apple.security.get-task-allow raw -o - - 2>/dev/null || true)" == "true" ]]; then
   echo "Public distribution cannot allow debugger attachment." >&2; exit 1

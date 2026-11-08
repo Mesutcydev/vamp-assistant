@@ -4,6 +4,7 @@ import SwiftUI
 struct KnownProviderRow: View {
     let provider: KnownRemoteProvider
     var showsIdentity: Bool = true
+    var onValidated: (() -> Void)? = nil
     @ObservedObject private var keyStore = APIKeyStore.shared
     @State private var keyDraft = ""
     @State private var modelDraft = ""
@@ -219,6 +220,7 @@ struct KnownProviderRow: View {
                 let answer = try await RemoteLLMClient.testConnection(
                     endpoint: provider.endpoint(model: selectedModel), apiKey: key)
                 state = .success("Connected — \(answer)")
+                onValidated?()
                 persistModel()
             } catch {
                 state = .failure((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)

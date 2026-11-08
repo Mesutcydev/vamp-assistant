@@ -26,7 +26,7 @@ struct RemoteAppVersionFooter: View {
     )
     .font(.caption.monospacedDigit())
     .foregroundStyle(BeetTheme.secondaryText(appearance))
-    .accessibilityLabel("Vamp Assistant version \(version), build \(build)")
+    .accessibilityLabel("Vamp Companion version \(version), build \(build)")
   }
 }
 
@@ -41,7 +41,7 @@ struct RemoteSettingsSheet: View {
   @Environment(\.remoteAppearance) private var appearance
   @AppStorage("remoteAppearanceSetting") private var appearanceSetting = RemoteAppearanceSetting
     .dark
-  @AppStorage("remoteAccent") private var accent = AccentPalette.graphite
+  @AppStorage("remoteAccent") private var accent = AccentPalette.beetRed
   @State private var showForgetMac = false
   @State private var showOfflineForget = false
   @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -125,7 +125,7 @@ struct RemoteSettingsSheet: View {
 
           RemoteConsoleSection(index: "04", title: "About") {
             VStack(spacing: 0) {
-              RemoteSettingValue(title: "Product", value: "Vamp Assistant")
+              RemoteSettingValue(title: "Product", value: "Vamp Companion")
               RemoteSettingValue(title: "Platform", value: "iPhone and iPad")
               RemoteSettingValue(title: "Version", value: RemoteAppVersion.current.version)
               RemoteSettingValue(title: "Build", value: RemoteAppVersion.current.build)
@@ -178,7 +178,7 @@ struct RemoteSettingsSheet: View {
         Button("Cancel", role: .cancel) {}
       } message: {
         Text(
-          "Vamp Assistant couldn't reach this Mac to revoke the token. You can still forget it on this device; revoke it from the Mac's Remote settings to invalidate it there."
+          "Vamp Companion couldn't reach this Mac to revoke the token. You can still forget it on this device; revoke it from the Mac's Remote settings to invalidate it there."
         )
       }
       .alert(

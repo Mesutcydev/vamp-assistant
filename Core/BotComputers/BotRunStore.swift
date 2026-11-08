@@ -197,6 +197,8 @@ struct BotRunRecord: Codable, Identifiable, Equatable, Sendable {
     var phase: String
     var queuePosition: Int?
     var sessionID: UUID?
+    /// The requesting conversation; sessionID remains the worker’s own session.
+    var originatingSessionID: UUID? = nil
     var latestOutput: String
     var pendingInteraction: String?
     var errorMessage: String?

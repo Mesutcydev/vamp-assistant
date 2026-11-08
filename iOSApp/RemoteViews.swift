@@ -74,10 +74,10 @@ extension View {
     }
 
     func remoteRecess(focused: Bool = false) -> some View {
-        background(RemoteInstrument.recess, in: RoundedRectangle(cornerRadius: 8))
+        background(RemoteInstrument.recess, in: RoundedRectangle(cornerRadius: 10))
             .overlay {
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(RemoteInstrument.seam, lineWidth: 0.75)
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(focused ? BeetTheme.accentBright : RemoteInstrument.seam.opacity(0.65), lineWidth: 0.75)
                     .allowsHitTesting(false)
             }
             .overlay(alignment: .leading) {
@@ -135,48 +135,52 @@ enum RemoteInstrument {
                            blue: CGFloat(value & 255) / 255, alpha: 1)
         })
     }
-    // Light mode uses a neutral pearl family: a white reading plane with a
-    // restrained cool-rose shift through the chassis. It stays luminous
-    // without reading as beige metal or flat office gray.
-    static let canvas = adaptive(0xF9F8F7, 0x0E0E0E)
-    static let reading = adaptive(0xFFFFFF, 0x141414)
-    static let panel = adaptive(0xF3F1F2, 0x292929)
-    static let header = adaptive(0xF8F7F8, 0x1B1B1B)
-    static let navigation = adaptive(0xEEECEF, 0x232323)
-    static let ink = adaptive(0x202022, 0xF0EFEC)
-    static let secondaryInk = adaptive(0x5F5D61, 0xB7B5B1)
-    static let pearlTop = adaptive(0xFFFDFE, 0x383838)
-    static let pearlMid = adaptive(0xF5F1F4, 0x323232)
-    static let pearlLow = adaptive(0xE7E6EA, 0x292929)
-    static let recess = adaptive(0xECE9ED, 0x202020)
-    static let darkInsert = adaptive(0x232226, 0x090909)
-    static let seam = adaptive(0xB2ADB5, 0x444444)
+    // Graphite, warm white and Vamp red follow the supplied identity reference.
+    static let canvas = adaptive(0xF4F3F1, 0x131416)
+    static let reading = adaptive(0xFFFFFF, 0x1D1F22)
+    static let panel = adaptive(0xFFFFFF, 0x24262A)
+    static let header = adaptive(0xF4F3F1, 0x131416)
+    static let navigation = adaptive(0xE7E6E3, 0x24262A)
+    static let ink = adaptive(0x202124, 0xF4F4F2)
+    static let secondaryInk = adaptive(0x626369, 0xB5B5BA)
+    static let pearlTop = adaptive(0xFFFFFF, 0x3C3E43)
+    static let pearlMid = adaptive(0xEAE9E6, 0x2C2E33)
+    static let pearlLow = adaptive(0xD4D3D0, 0x202226)
+    static let recess = adaptive(0xE8E7E4, 0x222428)
+    static let darkInsert = adaptive(0x202124, 0x0D0E10)
+    static let seam = adaptive(0xBABAB8, 0x45474C)
+    static let beacon = adaptive(0xAD2030, 0xFF7B88)
+    static let beaconFill = adaptive(0xBD2939, 0xBD2939)
+    static let signalMint = Color(red: 0.65, green: 0.94, blue: 0.74)
+    static let console = LinearGradient(colors: [Color(red: 0.19, green: 0.20, blue: 0.22),
+                                                  Color(red: 0.06, green: 0.065, blue: 0.075)],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing)
     static let orange = adaptive(0xC6530A, 0xE9954B)
     static let green = adaptive(0x287C43, 0x79AF89)
     static let danger = adaptive(0xA73730, 0xE58E87)
     // Physical instrument control surfaces. The housing is one machined
     // enclosure; the keys sit inside it, one tonal step brighter so the
     // enclosure edge reads. All three stay legible in both appearances.
-    static let housing = adaptive(0xE2DEE4, 0x292929)
-    static let housingRim = adaptive(0xFFFFFF, 0x4A4A4A)
-    static let housingFoot = adaptive(0xA7A1AA, 0x1A1A1A)
-    static let keyFace = adaptive(0xFFFDFE, 0x393939)
-    static let keyFacePressed = adaptive(0xE8E4EA, 0x222222)
-    static let keyTopHighlight = adaptive(0xFFFFFF, 0x515151)
-    static let keyBottomShadow = adaptive(0xAAA4AC, 0x0C0C0C)
+    static let housing = adaptive(0xDAD9D6, 0x282A2E)
+    static let housingRim = adaptive(0xFFFFFF, 0x62656B)
+    static let housingFoot = adaptive(0x9A9997, 0x111214)
+    static let keyFace = adaptive(0xF7F6F3, 0x393B40)
+    static let keyFacePressed = adaptive(0xDCDAD7, 0x23252A)
+    static let keyTopHighlight = adaptive(0xFFFFFF, 0x66696E)
+    static let keyBottomShadow = adaptive(0x969693, 0x090A0C)
     static let keySeam = adaptive(0x7D7880, 0x0E0E0E)
     static let keyInsetShadow = adaptive(0x938D96, 0x000000)
     /// The single hairline that defines a chassis perimeter. One edge, no rails.
-    static let chassisEdge = adaptive(0xB7B1BA, 0x393939)
+    static let chassisEdge = adaptive(0xBABAB8, 0x45474C)
     static let pearl = LinearGradient(colors: [pearlTop, pearlMid, pearlLow], startPoint: .top, endPoint: .bottom)
     static let edge = LinearGradient(colors: [adaptive(0xFFFFFF, 0x595959), seam], startPoint: .top, endPoint: .bottom)
-    static let panelRadius: CGFloat = 9
+    static let panelRadius: CGFloat = 14
     static let controlRadius: CGFloat = 7
     static let hairline: CGFloat = 0.75
     static let controlHeight: CGFloat = 44
     static let contentWidth: CGFloat = 740
     static let composerWidth: CGFloat = 800
-    static let motion = Animation.spring(response: 0.28, dampingFraction: 1)
+    static let motion = Animation.spring(response: 0.26, dampingFraction: 0.9)
     enum Space {
         static let small: CGFloat = 8
         static let inset: CGFloat = 12
@@ -184,7 +188,7 @@ enum RemoteInstrument {
         static let section: CGFloat = 20
     }
     enum TypeStyle {
-        static let section = Font.caption2.monospaced().weight(.semibold)
+        static let section = Font.caption.weight(.semibold)
         static let title = Font.title2.weight(.semibold)
         static let metadata = Font.caption.monospaced()
         static let utility = Font.subheadline
@@ -196,6 +200,57 @@ struct RemoteBackdrop: View {
         RemoteInstrument.canvas
             .ignoresSafeArea()
             .accessibilityHidden(true)
+    }
+}
+
+/// The dotted beacon from the installed app icon, drawn natively at any size.
+struct RemoteBeaconMark: View {
+    var ink: Color = RemoteInstrument.ink
+    var size: CGFloat = 28
+    var isActive = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+
+    private static let rows: [(Int, [Int])] = [
+        (1, [4, 5, 6]), (2, Array(3...7)), (3, Array(2...8)),
+        (4, Array(1...9)), (5, [2, 5, 8]), (6, [2, 5, 8]),
+        (7, [2, 5, 8]), (8, Array(1...9)), (9, Array(0...10))
+    ]
+
+    var body: some View {
+        Canvas { context, bounds in
+            let step = bounds.width / 11
+            let diameter = step * 0.64
+            for (row, columns) in Self.rows {
+                for column in columns {
+                    let center = CGPoint(x: (CGFloat(column) + 0.5) * step, y: (CGFloat(row) + 0.6) * step)
+                    context.fill(Path(ellipseIn: CGRect(x: center.x - diameter / 2, y: center.y - diameter / 2,
+                                                        width: diameter, height: diameter)), with: .color(ink))
+                }
+            }
+        }
+        .overlay(alignment: .top) {
+            Image(systemName: "circle.fill").resizable().foregroundStyle(RemoteInstrument.beacon)
+                .frame(width: size * 0.074, height: size * 0.074)
+                .symbolEffect(.pulse, options: .repeating,
+                              isActive: isActive && !reduceMotion && scenePhase == .active)
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
+struct RemoteWordmark: View {
+    var body: some View {
+        HStack(spacing: 7) {
+            RemoteBeaconMark(size: 22)
+            Text("VAMP")
+                .font(.system(.headline, design: .rounded).weight(.heavy))
+                .tracking(0.7)
+        }
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Vamp Companion")
     }
 }
 
@@ -258,16 +313,15 @@ struct RemoteConsoleSection<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Text(index).foregroundStyle(RemoteInstrument.secondaryInk)
-                Text("/ " + title.uppercased()).foregroundStyle(RemoteInstrument.secondaryInk)
-            }
-            .font(.caption2.monospaced().weight(.medium)).tracking(1.5)
-            .accessibilityAddTraits(.isHeader)
-            VampHairline()
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(RemoteInstrument.ink)
+                .accessibilityAddTraits(.isHeader)
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(RemoteInstrument.Space.page)
+        .remoteFaceplate()
     }
 }
 
@@ -281,7 +335,7 @@ struct RemoteConfigurationRow<Value: View>: View {
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
             : AnyLayout(HStackLayout(alignment: .center, spacing: 16))
         layout {
-            Text(title.uppercased()).font(.caption.monospaced())
+            Text(title).font(.subheadline)
                 .foregroundStyle(RemoteInstrument.secondaryInk)
             if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 8) }
             value.font(.body.weight(.medium)).foregroundStyle(RemoteInstrument.ink)
@@ -396,9 +450,9 @@ struct RemoteInstrumentSegments<Selection: Hashable>: View {
     var body: some View {
         InstrumentKeyBank(
             selection: $selection,
-            titles: options.map { $0.title.uppercased() },
+            titles: options.map(\.title),
             values: options.map(\.value),
-            isMono: true,
+            isMono: false,
             vertical: dynamicTypeSize.isAccessibilitySize)
     }
 }
@@ -558,7 +612,8 @@ struct RemoteKeySurface: ViewModifier {
 
     private var engaged: Bool { isSelected || (isPressed && isEnabled) }
     private var face: Color {
-        if prominent || isSelected { return RemoteInstrument.darkInsert }
+        if prominent { return isEnabled ? BeetTheme.accent : RemoteInstrument.keyFacePressed }
+        if isSelected { return RemoteInstrument.darkInsert }
         return engaged ? RemoteInstrument.keyFacePressed : RemoteInstrument.keyFace
     }
 
@@ -566,7 +621,7 @@ struct RemoteKeySurface: ViewModifier {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         content
             .background {
-                shape.fill(face)
+                shape.fill(LinearGradient(colors: [face, face.opacity(0.88)], startPoint: .top, endPoint: .bottom))
                     .overlay {
                         shape.strokeBorder(RemoteInstrument.keySeam.opacity(contrast == .increased ? 0.85 : 0.28),
                                            lineWidth: contrast == .increased ? 1.5 : 0.5)
@@ -764,7 +819,7 @@ struct InstrumentAccentBank<Selection: Hashable>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 44), spacing: 4)], spacing: 4) {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(minimum: 44), spacing: 6), count: 4), spacing: 6) {
             ForEach(Array(palettes.enumerated()), id: \.element) { index, palette in
                 let isOn = palette == selection
                 Button {
@@ -772,13 +827,7 @@ struct InstrumentAccentBank<Selection: Hashable>: View {
                     selection = palette
                 } label: {
                     InstrumentKeyShell(isOn: isOn, size: size, reduceMotion: reduceMotion) {
-                        ZStack(alignment: .topLeading) {
-                            Color.clear
-                            Text(String(format: "%02d", index + 1))
-                                .font(.system(size: 8, weight: .medium, design: .monospaced))
-                                .foregroundStyle(RemoteInstrument.secondaryInk)
-                                .padding(.top, 5)
-                                .padding(.leading, 6)
+                        ZStack {
                             VStack(spacing: 0) {
                                 Circle()
                                     .fill(colors[index])

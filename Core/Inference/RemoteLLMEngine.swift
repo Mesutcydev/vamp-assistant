@@ -278,6 +278,14 @@ final class EngineRouter: LLMEngine, NativeToolConfigurable, @unchecked Sendable
         (local as? any NativeToolConfigurable)?.configureNativeTools(tools)
     }
 
+    func processMedia(_ request: OmniMediaRequest) async throws -> OmniMediaResult {
+        guard withLock({ currentRemote == nil }) else {
+            throw LocalOmniClient.Failure.unavailable("Media tools require a local Omni model; files are not sent to API providers.")
+        }
+        if let pool { return try await pool.processMedia(request) }
+        return try await local.processMedia(request)
+    }
+
     func useLocal() {
         withLock {
             currentRemote = nil

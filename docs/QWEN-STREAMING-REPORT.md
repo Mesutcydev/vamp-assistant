@@ -1,6 +1,6 @@
 # Qwen3.5 SSD streaming implementation report
 
-**CORRECTNESS BASELINE VALIDATED — EXPLICIT ATTENTION PATH MATCHES INDEPENDENT REFERENCE.** Q2.16 established the independent 64-token K=8 explicit baseline and Q2.17 closed the app lifecycle gates. This qualification applies only to the developer-only `referenceCompatibleExplicit` strategy. The user-facing fused production path remains experimental/unvalidated; no default, pool, or performance change was made.
+**Current implementation, 2026-09-28:** the validated explicit attention path is the production default. Exact prefill-state reuse and reusable expert slots are implemented; the measured 2 GiB configuration is the default after the controlled 3 GiB comparison. See [current implementation, qualification, and measurements](QWEN-STREAMING-OPTIMIZATIONS-2026-09-28.md). The report below retains the chronological evidence, including rejected intermediate candidates.
 
 ## 1. Workspace and integration
 

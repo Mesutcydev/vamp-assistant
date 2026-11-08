@@ -70,14 +70,12 @@ struct SessionListView: View {
         ZStack {
             RemoteBackdrop()
             VStack(spacing: 0) {
-                SessionControlHeader(
-                    store: store,
-                    search: $search,
-                    onBots: { showBotRuns = true },
-                    onControl: { showControl = true },
-                    onChooseComputer: { showComputers = true })
+                SessionControlHeader(store: store, search: $search)
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
+                    LazyVStack(alignment: .leading, spacing: 18) {
+                        SessionQuickActions(onBots: { showBotRuns = true },
+                            onControl: { showControl = true },
+                            onChooseComputer: { showComputers = true })
                         if visible.isEmpty {
                             RemoteEmptySessions(isSearching: !search.isEmpty, isConnected: store.isConnected,
                                 onStart: { startBotID = ""; showStartSession = true },
@@ -100,6 +98,9 @@ struct SessionListView: View {
         .toolbarBackground(BeetTheme.background(appearance).opacity(0.94), for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    RemoteWordmark()
+                }.vampUtilityAction()
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button(action: {
                         startBotID = ""
@@ -170,115 +171,170 @@ struct SessionListView: View {
     }
 }
 
-// MARK: - Bots
-
-/// A small non-blocking notice. Background failures and the disconnected state
-/// used to be invisible here — the screen just rendered a full form where every
-/// control was dead and nothing said why.
+/// Connection and search stay visible while the conversation library scrolls.
 struct SessionControlHeader: View {
-    @Bindable var store: RemoteStore
+    let store: RemoteStore
     @Binding var search: String
-    var onBots: (() -> Void)? = nil
-    var onControl: (() -> Void)? = nil
-    var onChooseComputer: (() -> Void)? = nil
-    @Environment(\.remoteAppearance) private var appearance
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Text("VAMP / REMOTE")
-                    .font(.system(.caption2, design: .monospaced))
-                    .tracking(2)
-                Spacer()
-                RemoteSignal(color: store.isConnected ? RemoteInstrument.green : RemoteInstrument.orange,
-                             isActive: store.isConnecting || store.isRefreshing)
-            }
-            .foregroundStyle(BeetTheme.secondaryText(appearance))
-            let clusterLayout = horizontalSizeClass == .regular && !dynamicTypeSize.isAccessibilitySize
-                ? AnyLayout(HStackLayout(alignment: .center, spacing: 16))
-                : AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
-            clusterLayout {
-            VStack(alignment: .leading, spacing: 8) {
-            let headerLayout = dynamicTypeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-                : AnyLayout(HStackLayout(alignment: .firstTextBaseline))
-            headerLayout {
-                Text("Vamp Assistant")
-                    .font(RemoteInstrument.TypeStyle.title)
-                    .fontDesign(.default)
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
-                    .accessibilityAddTraits(.isHeader)
-                if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 12) }
-                Text(store.connectionLabel == "Connected" ? "Mac connected" : store.connectionLabel)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(store.isConnected ? RemoteInstrument.green : BeetTheme.secondaryText(appearance))
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
-            }
-            Button {
-                if !store.isConnected { Task { await store.connectSaved() } }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "desktopcomputer")
-                        .foregroundStyle(store.isConnected ? RemoteInstrument.green : RemoteInstrument.secondaryInk)
-                    Text(store.connectionSubtitle)
-                        .font(.caption)
-                        .foregroundStyle(BeetTheme.secondaryText(appearance))
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
-                    Spacer(minLength: 0)
-                    if !store.isConnected {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.caption.weight(.semibold))
-                    }
-                }
-            }
-            .buttonStyle(.plain)
-            .disabled(store.isConnected)
-            .accessibilityLabel(store.isConnected ? "Mac connected. \(store.connectionSubtitle)" : "\(store.connectionLabel). \(store.connectionSubtitle). Retry connection")
-            }
-            let headerActions: [InstrumentAction] = [
-                onBots.map {
-                    InstrumentAction(id: "bots", title: "Bots", symbol: "person.3",
-                                     index: "01", action: $0)
-                },
-                onControl.map {
-                    InstrumentAction(id: "control", title: "Control Mac", symbol: "display",
-                                     index: "02",
-                                     secondary: store.isConnecting ? "CONNECTING" :
-                                         (store.isConnected ? store.connectionSubtitle : "RECONNECT"),
-                                     ledColor: store.isConnected
-                                         ? RemoteInstrument.green
-                                         : (store.isConnecting ? RemoteInstrument.orange : RemoteInstrument.secondaryInk),
-                                     ledActive: store.isConnecting || store.isRefreshing,
-                                     action: $0)
-                },
-                onChooseComputer.map {
-                    InstrumentAction(id: "choose", title: "Computer",
-                                     symbol: "desktopcomputer.and.macbook",
-                                     index: "03",
-                                     secondary: store.activeComputerName,
-                                     action: $0)
-                }
-            ].compactMap { $0 }
-            if !headerActions.isEmpty {
-                InstrumentActionBank(actions: headerActions,
-                                     vertical: dynamicTypeSize.isAccessibilitySize)
-            }
-            }
+        VStack(alignment: .leading, spacing: 16) {
+            SessionLibraryHeading()
+            SessionConnectionCard(
+                name: store.activeComputerName,
+                subtitle: store.connectionSubtitle,
+                status: store.connectionLabel,
+                isConnected: store.isConnected,
+                isWorking: store.isConnecting || store.isRefreshing,
+                hasActiveTask: store.sessions.contains(where: \.isRunning),
+                onReconnect: { Task { await store.connectSaved() } })
             SearchField(text: $search)
         }
-        .frame(maxWidth: 720)
-        .frame(maxWidth: .infinity)
         .padding(.horizontal, 16)
         .padding(.top, 8)
-        .padding(.bottom, 10)
-        .background(BeetTheme.readingSurface(appearance))
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(BeetTheme.line(appearance)).frame(height: 0.75)
+        .padding(.bottom, 16)
+        .frame(maxWidth: RemoteInstrument.contentWidth)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct SessionLibraryHeading: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Conversations")
+                .font(.largeTitle.weight(.bold))
+                .tracking(-0.8)
+                .accessibilityAddTraits(.isHeader)
+            Text("Pick up where you left off.")
+                .font(.subheadline)
+                .foregroundStyle(RemoteInstrument.secondaryInk)
         }
     }
+}
 
+private struct SessionConnectionCard: View {
+    let name: String
+    let subtitle: String
+    let status: String
+    let isConnected: Bool
+    let isWorking: Bool
+    let hasActiveTask: Bool
+    let onReconnect: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+
+    var body: some View {
+        Button(action: onReconnect) {
+            HStack(spacing: 14) {
+                ZStack(alignment: .bottomTrailing) {
+                    Image(systemName: "desktopcomputer")
+                        .font(.system(size: 25, weight: .light))
+                        .foregroundStyle(Color(red: 0.96, green: 0.96, blue: 0.95))
+                        .frame(width: 52, height: 52)
+                        .background(.black.opacity(0.24), in: RoundedRectangle(cornerRadius: 12))
+                    Circle().fill(isConnected ? RemoteInstrument.signalMint : RemoteInstrument.beacon)
+                        .frame(width: 6, height: 6).padding(7)
+                }
+                .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(name).font(.headline).foregroundStyle(.white)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                    HStack(spacing: 6) {
+                        RemoteSignal(color: isConnected ? RemoteInstrument.signalMint : RemoteInstrument.beacon,
+                                     isActive: isWorking || (isConnected && hasActiveTask))
+                        Text(isConnected ? subtitle : (isWorking ? status : subtitle))
+                            .font(.caption)
+                            .foregroundStyle(Color(red: 0.73, green: 0.73, blue: 0.75))
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: isConnected ? "waveform" : "arrow.clockwise")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(isConnected ? RemoteInstrument.signalMint : .white)
+                    .symbolEffect(.pulse, options: .repeating,
+                                  isActive: (isWorking || (isConnected && hasActiveTask)) && !reduceMotion && scenePhase == .active)
+                    .frame(width: 36, height: 36)
+                    .background(.white.opacity(0.08), in: Circle())
+                    .accessibilityHidden(true)
+            }
+            .padding(14)
+            .frame(minHeight: 80)
+            .background(RemoteInstrument.console, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(.white.opacity(0.15), lineWidth: 0.75)
+                    .allowsHitTesting(false)
+            }
+            .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
+        }
+        .buttonStyle(SessionConsoleButtonStyle())
+        .disabled(isConnected || isWorking)
+        .accessibilityLabel(isConnected ? "Mac connected. \(name). \(subtitle)" : "\(status). \(name). \(subtitle). Retry connection")
+    }
+}
+
+private struct SessionConsoleButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.99 : 1)
+            .brightness(configuration.isPressed ? 0.025 : 0)
+            .animation(reduceMotion ? nil : RemoteInstrument.motion, value: configuration.isPressed)
+    }
+}
+
+private struct SessionQuickActions: View {
+    let onBots: () -> Void
+    let onControl: () -> Void
+    let onChooseComputer: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        let vertical = dynamicTypeSize.isAccessibilitySize
+        let layout = vertical ? AnyLayout(VStackLayout(spacing: 0)) : AnyLayout(HStackLayout(spacing: 0))
+        layout {
+            SessionQuickAction(title: "Bots", symbol: "person.3", action: onBots)
+            VampHairline(vertical: !vertical)
+            SessionQuickAction(title: "Control Mac", symbol: "display", action: onControl)
+            VampHairline(vertical: !vertical)
+            SessionQuickAction(title: "Computer", symbol: "desktopcomputer.and.macbook", action: onChooseComputer)
+        }
+        .frame(height: vertical ? nil : 64)
+        .padding(4)
+        .background(RemoteInstrument.pearl, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(RemoteInstrument.chassisEdge, lineWidth: 0.75)
+                .allowsHitTesting(false)
+        }
+        .shadow(color: RemoteInstrument.housingFoot.opacity(0.3), radius: 0, y: 1)
+    }
+}
+
+private struct SessionQuickAction: View {
+    let title: String
+    let symbol: String
+    let action: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        Button(action: action) {
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(HStackLayout(spacing: 12)) : AnyLayout(VStackLayout(spacing: 7))
+            layout {
+                Image(systemName: symbol).font(.system(size: 22, weight: .light))
+                    .foregroundStyle(BeetTheme.accentBright).accessibilityHidden(true)
+                Text(title).font(.caption.weight(.semibold))
+                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, minHeight: 64)
+            .padding(.horizontal, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RemotePressButtonStyle())
+        .accessibilityLabel(title)
+    }
 }
 
 struct SessionSectionHeader: View {
@@ -287,15 +343,14 @@ struct SessionSectionHeader: View {
 
     var body: some View {
         HStack {
-            Text("SESSIONS")
-                .font(.system(.caption2, design: .monospaced, weight: .medium))
-                .tracking(1.1)
+            Text("Recent conversations")
+                .font(.subheadline.weight(.semibold))
             Spacer()
             Text("\(count)")
                 .font(.caption2.monospacedDigit().weight(.semibold))
         }
         .foregroundStyle(BeetTheme.secondaryText(appearance))
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 2)
     }
 }
 
@@ -322,7 +377,7 @@ struct SessionGroup: View {
                     .background(selectedSessionID == session.id ? RemoteInstrument.recess : .clear)
                     .overlay(alignment: .leading) {
                         RoundedRectangle(cornerRadius: 1)
-                            .fill(RemoteInstrument.orange)
+                            .fill(BeetTheme.accentBright)
                             .frame(width: 3)
                             .padding(.vertical, 10)
                             .opacity(selectedSessionID == session.id ? 1 : 0)
@@ -341,6 +396,13 @@ struct SessionGroup: View {
                         }
                     }
             }
+        }
+        .background(RemoteInstrument.reading, in: RoundedRectangle(cornerRadius: RemoteInstrument.panelRadius))
+        .clipShape(RoundedRectangle(cornerRadius: RemoteInstrument.panelRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: RemoteInstrument.panelRadius)
+                .strokeBorder(RemoteInstrument.seam.opacity(0.5), lineWidth: 0.75)
+                .allowsHitTesting(false)
         }
         .confirmationDialog(
             "Delete this chat?",
@@ -429,7 +491,7 @@ struct RemoteReasoningSelector: View {
 struct SearchField: View {
     @Environment(\.remoteAppearance) private var appearance
     @Binding var text: String
-    var placeholder = "Search sessions"
+    var placeholder = "Search conversations"
     var body: some View {
         HStack(spacing: 9) { Image(systemName: "magnifyingglass").foregroundStyle(BeetTheme.secondaryText(appearance)).accessibilityHidden(true); TextField(placeholder, text: $text, prompt: Text(placeholder).foregroundStyle(RemoteInstrument.secondaryInk)).textInputAutocapitalization(.never); if !text.isEmpty { Button { text = "" } label: { Image(systemName: "xmark.circle.fill").frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Clear search").buttonStyle(.plain).foregroundStyle(BeetTheme.secondaryText(appearance)) } }
             .padding(.horizontal, 13).frame(minHeight: 44)
@@ -440,18 +502,23 @@ struct SearchField: View {
 struct SessionRow: View {
     let session: RemoteSessionSummary
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Circle()
-                .fill(session.isRunning ? RemoteInstrument.green : .clear)
-                .frame(width: 6, height: 6)
-                .padding(.top, 8)
+            Image(systemName: session.isRunning ? "waveform" : "bubble.left")
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(session.isRunning ? RemoteInstrument.green : BeetTheme.accentBright)
+                .symbolEffect(.variableColor, options: .repeating,
+                              isActive: session.isRunning && !reduceMotion && scenePhase == .active)
+                .frame(width: 38, height: 38)
+                .background(BeetTheme.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text(session.title).font(.body.weight(.medium))
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                    Text(session.title).font(.body.weight(.semibold))
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if !dynamicTypeSize.isAccessibilitySize {
@@ -462,19 +529,19 @@ struct SessionRow: View {
                     ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
                     : AnyLayout(HStackLayout(spacing: 6))
                 layout {
-                    Text(session.workspace.isEmpty ? "CHAT" : session.workspace)
+                    Text(session.workspace.isEmpty ? "Chat" : session.workspace)
                         .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                     Text("\(session.messageCount) messages")
                     if session.isRunning { Text(session.phase).foregroundStyle(RemoteInstrument.green) }
                 }
-                .font(.caption.monospaced())
+                .font(.caption)
                 .foregroundStyle(RemoteInstrument.secondaryInk)
                 if dynamicTypeSize.isAccessibilitySize { SessionTimestamp(updatedAt: session.updatedAt) }
             }
         }
         .foregroundStyle(RemoteInstrument.ink)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 16)
         .frame(minHeight: 72, alignment: .leading)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)

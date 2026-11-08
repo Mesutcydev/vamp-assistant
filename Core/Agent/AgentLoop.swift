@@ -206,7 +206,7 @@ actor AgentLoop {
                 allTools.append(MemoryDeleteTool())
             }
         }
-        let context = ToolContext(workspace: workspace)
+        let context = ToolContext(workspace: workspace, originatingSessionID: sessionID)
         context.linuxContainer = linuxContainer
         context.browserSession = browserSession
         context.memory = memory

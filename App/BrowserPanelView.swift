@@ -5,113 +5,67 @@ import WebKit
 /// Docked panel hosting the agent-controlled browser. Mac Chat/Code share one
 /// WebView; a specialist bot session hosts that bot's isolated WebView instead.
 struct BrowserPanelView: View {
-    var onClose: () -> Void
+    var onClose: (() -> Void)? = nil
+    var controller: BrowserController? = nil
 
     @EnvironmentObject private var appState: AppState
-    @ObservedObject private var presentation = BrowserPresentation.shared
 
     var body: some View {
         BrowserPanelChrome(
             onClose: onClose,
-            controller: presentation.controller,
+            controller: controller ?? BrowserController.shared,
             computers: appState.botComputers.computers)
     }
 }
 
 private struct BrowserPanelChrome: View {
-    var onClose: () -> Void
+    @Environment(\.workspaceWindowID) private var workspaceWindowID
+    var onClose: (() -> Void)?
 
     @ObservedObject var controller: BrowserController
     let computers: [BotComputerRecord]
-    @State private var urlDraft = ""
+    @State private var paneWidth: CGFloat = 320
     @FocusState private var urlFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
-            // Chrome row: back/forward/reload + URL field + close.
-            HStack(spacing: 6) {
-                Button { controller.back() } label: {
-                    Image(systemName: "chevron.left")
-                }
-                .help("Back")
-                .accessibilityLabel("Back")
-                .disabled(!controller.webView.canGoBack)
-
-                Button { controller.forward() } label: {
-                    Image(systemName: "chevron.right")
-                }
-                .help("Forward")
-                .accessibilityLabel("Forward")
-                .disabled(!controller.webView.canGoForward)
-
-                Button {
-                    if controller.isLoading { controller.stop() }
-                    else { controller.reload() }
-                } label: {
-                    if controller.isLoading {
-                        Image(systemName: "xmark")
-                    } else {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                }
-                .help(controller.isLoading ? "Stop" : "Reload")
-                .accessibilityLabel(controller.isLoading ? "Stop loading" : "Reload page")
-
-                InstrumentMenu(menuWidth: 240) {
-                    Label(controller.ownerLabel.isEmpty ? "Assistant" : controller.ownerLabel,
-                          systemImage: "person.crop.circle.badge.checkmark")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Theme.textSecondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Theme.surfaceInset, in: Capsule())
-                } options: {
-                    InstrumentMenuRow(title: "Vamp Assistant", systemImage: "sparkles") {
-                        BrowserController.shared.reveal(openPanel: false)
-                    }
-                    ForEach(computers) { computer in
-                        InstrumentMenuRow(title: computer.name, systemImage: "person.crop.circle") {
-                            BrowserController.controller(
-                                for: BrowserSession(id: computer.id, name: computer.name))
-                                .reveal(openPanel: false)
-                        }
-                    }
-                }
-                .fixedSize()
-                .help("Choose the Assistant or a bot's private browser")
-
-                TextField("Enter a URL or let the agent open one…", text: $urlDraft)
-                    .vampField()
-                    .font(.callout.monospaced())
-                    .autocorrectionDisabled()
-                    .focused($urlFocused)
-                    .layoutPriority(1)
-                    .onSubmit {
-                        let target = urlDraft.trimmingCharacters(in: .whitespaces)
-                        if !target.isEmpty {
-                            do {
-                                _ = try controller.open(target)
-                                urlFocused = false
-                            } catch {
-                                controller.lastError = error.localizedDescription
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    Button { controller.back() } label: { Image(systemName: "chevron.left").frame(width: 24, height: 24) }
+                        .disabled(!controller.webView.canGoBack).accessibilityLabel("Back")
+                    Button { controller.forward() } label: { Image(systemName: "chevron.right").frame(width: 24, height: 24) }
+                        .disabled(!controller.webView.canGoForward).accessibilityLabel("Forward")
+                    Button { if controller.isLoading { controller.stop() } else { controller.reload() } } label: {
+                        Image(systemName: controller.isLoading ? "xmark" : "arrow.clockwise").frame(width: 24, height: 24)
+                    }.accessibilityLabel(controller.isLoading ? "Stop loading" : "Reload page")
+                    Menu {
+                        Button("Vamp Assistant") { NotificationCenter.default.postWorkspace(name: .openWorkspacePanel, object: WorkspacePanel.browser, windowID: workspaceWindowID) }
+                        ForEach(computers) { computer in
+                            Button(computer.name) {
+                                NotificationCenter.default.postWorkspace(name: .openWorkspacePanel,
+                                    object: WorkspacePanel.specialistBrowser(computer.id), windowID: workspaceWindowID)
                             }
                         }
+                    } label: { Text(controller.ownerLabel.isEmpty ? "Assistant" : controller.ownerLabel).lineLimit(1) }
+                    .menuStyle(.borderlessButton).frame(maxWidth: 150)
+                    Spacer(minLength: 4)
+                    Button {
+                        if let url = controller.currentURL ?? controller.webView.url { NSWorkspace.shared.open(url) }
+                    } label: { Image(systemName: "safari").frame(width: 24, height: 24) }
+                    .disabled((controller.currentURL ?? controller.webView.url) == nil)
+                    .accessibilityLabel("Open in Safari")
+                    if let onClose { PanelCloseButton(action: onClose) }
+                }.buttonStyle(.borderless)
+                TextField("Enter a URL…", text: $controller.navigationDraft)
+                    .accessibilityIdentifier("browser-url")
+                    .vampField().font(.system(size: 13)).autocorrectionDisabled().focused($urlFocused)
+                    .onSubmit {
+                        let target = controller.navigationDraft.trimmingCharacters(in: .whitespaces)
+                        guard !target.isEmpty else { return }
+                        do { _ = try controller.open(target); urlFocused = false }
+                        catch { controller.lastError = error.localizedDescription }
                     }
-
-                Button {
-                    if let url = controller.currentURL ?? controller.webView.url {
-                        NSWorkspace.shared.open(url)
-                    }
-                } label: {
-                    Image(systemName: "safari")
-                }
-                .help("Open in Safari")
-                .accessibilityLabel("Open in Safari")
-                .disabled((controller.currentURL ?? controller.webView.url) == nil)
-
-                PanelCloseButton(action: onClose)
-            }
-            .padding(10)
+            }.padding(12).background(Theme.surface)
 
             Divider()
 
@@ -165,11 +119,11 @@ private struct BrowserPanelChrome: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
         }
-        .lfGlass()
-        .onAppear { syncURLDraft() }
+        .background(Theme.surface)
+        .onAppear { if controller.navigationDraft.isEmpty { syncURLDraft() } }
         .onChange(of: controller.currentURL) { _, newValue in
             if !urlFocused, let newValue {
-                urlDraft = newValue.absoluteString
+                controller.navigationDraft = newValue.absoluteString
             }
         }
         .onChange(of: controller.ownerLabel) { _, _ in
@@ -180,14 +134,14 @@ private struct BrowserPanelChrome: View {
     private var statusCaption: String {
         if controller.lastAgentAction != nil { return "Agent is controlling this page" }
         if !controller.ownerLabel.isEmpty { return "\(controller.ownerLabel)'s browser" }
-        return "browser_* tools"
+        return "Ready"
     }
 
     private func syncURLDraft() {
         if let current = controller.currentURL {
-            urlDraft = current.absoluteString
+            controller.navigationDraft = current.absoluteString
         } else {
-            urlDraft = ""
+            controller.navigationDraft = ""
         }
     }
 }

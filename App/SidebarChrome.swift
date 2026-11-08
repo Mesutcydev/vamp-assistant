@@ -11,8 +11,8 @@ import SwiftUI
 enum SidebarMetrics {
     /// Default expanded width for the conversation library. Users who
     /// resized it keep their saved width; new installs start here.
-    static let width: CGFloat = 272
-    static let minWidth: CGFloat = 248
+    static let width: CGFloat = 240
+    static let minWidth: CGFloat = 200
     static let maxWidth: CGFloat = 320
     /// The permanent left navigation rail. Narrow by design: it is the width
     /// its controls need, so the drawer and the canvas keep everything else.
@@ -145,23 +145,8 @@ private struct SidebarGlassSurface: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
 
     func body(content: Content) -> some View {
-        content
-            .background {
-                ZStack {
-                    if !reduceTransparency && contrast != .increased {
-                        Rectangle().fill(.regularMaterial)
-                    }
-                    LinearGradient(
-                        colors: [Theme.navigationTop.opacity(reduceTransparency ? 1 : 0.72),
-                                 Theme.navigationBottom.opacity(reduceTransparency ? 1 : 0.78)],
-                        startPoint: .top, endPoint: .bottom)
-                    LinearGradient(
-                        colors: [Color.white.opacity(colorScheme == .dark ? 0.08 : 0.58),
-                                 Color.clear, Color.clear],
-                        startPoint: .topLeading, endPoint: .bottomTrailing)
-                }
-                .ignoresSafeArea(.container, edges: [.top, .leading, .bottom])
-            }
+        content.background(Theme.navigationSurface)
+
     }
 }
 

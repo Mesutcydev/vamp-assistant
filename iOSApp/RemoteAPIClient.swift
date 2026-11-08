@@ -263,12 +263,32 @@ struct RemoteAPIClient {
         try await controlRequest("api/control/input", body: ["commands": commands])
     }
 
-    func unlockMac(password: String) async throws -> RemoteAcceptedResponse {
-        try await request(
+    func unlockMac(
+        password: String,
+        sleep: (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    ) async throws -> RemoteMacControlStatus {
+        // The host paces up to 256 characters, then waits for loginwindow.
+        // Eight seconds can expire before it has even reached Return.
+        let response: RemoteAcceptedResponse = try await request(
             "api/control/unlock",
             method: "POST",
             body: ["password": password],
-            timeout: 8)
+            timeout: 30)
+        guard response.accepted else {
+            throw RemoteClientError.server("The Mac did not accept the unlock request. Try again.")
+        }
+
+        // Older hosts acknowledge only the keystrokes. Like Vamp Stream,
+        // refresh status explicitly so completion is based on the Mac, not
+        // on an HTTP acknowledgement or the video stream's polling task.
+        for attempt in 0..<12 {
+            try Task.checkCancellation()
+            let status: RemoteMacControlStatus = try await request("api/control", timeout: 3)
+            if status.locked == false { return status }
+            if attempt < 11 { try await sleep(.milliseconds(500)) }
+        }
+        throw RemoteClientError.server(
+            "The Mac is still locked. Check the login password and the keyboard layout on the Mac, then try again.")
     }
 
     private func controlRequest(_ path: String, body: [String: Any]) async throws -> RemoteAcceptedResponse {

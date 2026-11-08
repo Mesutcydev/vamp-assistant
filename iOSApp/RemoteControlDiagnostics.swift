@@ -116,7 +116,7 @@ final class RemoteControlDiagnostics: ObservableObject {
 
     var exportText: String {
         var lines: [String] = [
-            "Vamp Assistant Remote Control Diagnostics",
+            "Vamp Companion Remote Control Diagnostics",
             "phase=\(phase)",
             "streamBytes=\(streamBytes) frames=\(framesReceived) keyframes=\(keyframesReceived)",
             "decoded=\(framesDecoded) decodeErrors=\(decodeErrors)",

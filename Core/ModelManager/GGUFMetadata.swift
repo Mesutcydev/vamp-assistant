@@ -7,6 +7,8 @@ import Foundation
 /// instead of a crash.
 public struct GGUFMetadata: Sendable, Equatable {
     public var architecture: String?
+    /// general.file_type identifies Prism packed formats independently of the model name.
+    public var fileType: Int?
     public var contextLength: Int?
     public var modelName: String?
     /// Transformer dimensions, needed to size the KV cache
@@ -27,8 +29,9 @@ public struct GGUFMetadata: Sendable, Equatable {
     public init(architecture: String? = nil, contextLength: Int? = nil, modelName: String? = nil,
                 blockCount: Int? = nil, embeddingLength: Int? = nil,
                 attentionHeadCount: Int? = nil, attentionHeadCountKV: Int? = nil,
-                mtpPredictLayers: Int? = nil) {
+                mtpPredictLayers: Int? = nil, fileType: Int? = nil) {
         self.architecture = architecture
+        self.fileType = fileType
         self.contextLength = contextLength
         self.modelName = modelName
         self.blockCount = blockCount
@@ -80,6 +83,7 @@ public struct GGUFMetadata: Sendable, Equatable {
                 if key == "general.architecture" { metadata.architecture = value }
                 else if key == "general.name" { metadata.modelName = value }
             case .int(let value):
+                if key == "general.file_type" { metadata.fileType = value }
                 for suffix in suffixes where key.hasSuffix(suffix) {
                     candidates[suffix, default: [:]][key] = value
                 }
